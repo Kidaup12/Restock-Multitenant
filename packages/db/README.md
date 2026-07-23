@@ -41,5 +41,6 @@ New tenant table checklist (enforced by the coverage test in CI):
 3. Extend the two-tenant seed fixture; the isolation suite picks the model up
    automatically from the Prisma DMMF.
 
-Production roles are pre-created by ops (see `prisma/sql/prod-roles.sql` once it
-lands) — the role-bootstrap migration's guards then skip creation.
+Production roles are pre-created by ops (`prisma/sql/prod-roles.sql`, run once
+as `postgres` before the first `migrate deploy`) — the role-bootstrap
+migration's guards then skip creation.
