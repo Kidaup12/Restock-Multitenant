@@ -42,6 +42,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prismaService.tenant.deleteMany({ where: { id: { in: [seeded.a.id, seeded.b.id] } } });
+  // Fixture auth users are global — the tenant cascade doesn't reach them.
+  await prismaService.user.deleteMany({ where: { id: { startsWith: "iso-user-" } } });
   await prismaService.$disconnect();
 });
 

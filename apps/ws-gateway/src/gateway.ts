@@ -22,6 +22,8 @@ export interface GatewayOptions {
   subscriber: PatternSubscriber;
   /** Ping cadence; a socket that misses one full interval is terminated. */
   heartbeatIntervalMs?: number;
+  /** An authorizer that hasn't answered by this deadline counts as a rejection. */
+  authorizeTimeoutMs?: number;
 }
 
 export interface Gateway {
@@ -30,13 +32,50 @@ export interface Gateway {
   close(): Promise<void>;
 }
 
+/* Better Auth's session cookie, plus its https-only prefixed variant. */
+const SESSION_COOKIES = ["better-auth.session_token", "__Secure-better-auth.session_token"];
+
+function cookieValue(header: string | undefined, names: string[]): string {
+  for (const part of header?.split(";") ?? []) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    if (names.includes(part.slice(0, eq).trim())) {
+      const value = part.slice(eq + 1).trim();
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return value;
+      }
+    }
+  }
+  return "";
+}
+
 function tokenFrom(req: IncomingMessage): string {
   const url = new URL(req.url ?? "/", "ws://gateway");
   const query = url.searchParams.get("token");
   if (query) return query;
   const header = req.headers.authorization;
   if (header?.startsWith("Bearer ")) return header.slice("Bearer ".length);
-  return "";
+  // Browser clients can't attach headers to a WebSocket, but same-site
+  // connections carry cookies — accept the session cookie directly.
+  return cookieValue(req.headers.cookie, SESSION_COOKIES);
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      }
+    );
+  });
 }
 
 /**
@@ -47,7 +86,12 @@ function tokenFrom(req: IncomingMessage): string {
  * service exists to prevent.
  */
 export async function startGateway(options: GatewayOptions): Promise<Gateway> {
-  const { authorize, subscriber, heartbeatIntervalMs = 30_000 } = options;
+  const {
+    authorize,
+    subscriber,
+    heartbeatIntervalMs = 30_000,
+    authorizeTimeoutMs = 5_000,
+  } = options;
 
   const byTenant = new Map<string, Set<WebSocket>>();
   const sockets = new Map<WebSocket, { tenantId: string; isAlive: boolean }>();
@@ -73,12 +117,8 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> {
 
   wss.on("connection", (ws, req) => {
     void (async () => {
-      let principal: Awaited<ReturnType<AuthorizeSocket>> = null;
-      try {
-        principal = await authorize(tokenFrom(req));
-      } catch {
-        // authorizer failure → treat as unauthorized
-      }
+      // withTimeout also absorbs authorizer failures → treated as unauthorized.
+      const principal = await withTimeout(authorize(tokenFrom(req)), authorizeTimeoutMs);
       if (!principal) {
         ws.close(4401, "unauthorized");
         return;

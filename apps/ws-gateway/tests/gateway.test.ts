@@ -27,9 +27,15 @@ interface Client {
   closed: Promise<{ code: number; reason: string }>;
 }
 
-function connect(port: number, token: string, opts?: { autoPong?: boolean }): Client {
-  const ws = new WebSocket(`ws://127.0.0.1:${port}/?token=${encodeURIComponent(token)}`, {
+function connect(
+  port: number,
+  token: string,
+  opts?: { autoPong?: boolean; headers?: Record<string, string> }
+): Client {
+  const query = token ? `?token=${encodeURIComponent(token)}` : "";
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/${query}`, {
     autoPong: opts?.autoPong ?? true,
+    headers: opts?.headers,
   });
   const messages: string[] = [];
   ws.on("message", (data) => messages.push(data.toString()));
@@ -70,7 +76,11 @@ describe("ws-gateway", () => {
     return gateway;
   };
 
-  const open = async (port: number, token: string, opts?: { autoPong?: boolean }) => {
+  const open = async (
+    port: number,
+    token: string,
+    opts?: { autoPong?: boolean; headers?: Record<string, string> }
+  ) => {
     const client = connect(port, token, opts);
     clients.push(client);
     await new Promise<void>((resolve, reject) => {
@@ -99,6 +109,40 @@ describe("ws-gateway", () => {
     const noToken = connect(port, "");
     clients.push(noToken);
     expect((await noToken.closed).code).toBe(4401);
+  });
+
+  it("accepts the token from the Authorization header", async () => {
+    const sub = new FakeSubscriber();
+    const { port } = await start(sub);
+    const a = await open(port, "", {
+      headers: { authorization: `Bearer ${SECRET}:tenant-a` },
+    });
+    sub.emit(tenantChannel("tenant-a"), encodeEnvelope(progressEvent("tenant-a")));
+    await waitFor(() => a.messages.length === 1);
+  });
+
+  it("accepts the token from the session cookie", async () => {
+    const sub = new FakeSubscriber();
+    const { port } = await start(sub);
+    const a = await open(port, "", {
+      headers: {
+        cookie: `theme=dark; better-auth.session_token=${encodeURIComponent(`${SECRET}:tenant-a`)}`,
+      },
+    });
+    sub.emit(tenantChannel("tenant-a"), encodeEnvelope(progressEvent("tenant-a")));
+    await waitFor(() => a.messages.length === 1);
+  });
+
+  it("treats an authorizer that never answers as unauthorized after the timeout", async () => {
+    gateway = await startGateway({
+      port: 0,
+      subscriber: new FakeSubscriber(),
+      authorize: () => new Promise(() => {}),
+      authorizeTimeoutMs: 50,
+    });
+    const hung = connect(gateway.port, `${SECRET}:tenant-a`);
+    clients.push(hung);
+    expect(await hung.closed).toEqual({ code: 4401, reason: "unauthorized" });
   });
 
   it("delivers a tenant's events to its bound sockets", async () => {

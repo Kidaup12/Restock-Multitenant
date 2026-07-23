@@ -16,11 +16,19 @@ export const SLUG_B = "iso-test-b";
 type Builder = (tenantId: string, key: string) => Record<string, unknown>;
 
 export const builders: Record<string, Builder> = {
+  // Membership now FKs to the auth User table, so the builder creates its user
+  // (global table, no RLS — the membership row is still the WITH CHECK target).
   Membership: (tenantId, key) => ({
-    tenantId,
-    userId: `00000000-0000-4000-8000-${key.padStart(12, "0")}`,
     role: "OWNER",
     displayName: `member-${key}`,
+    tenant: { connect: { id: tenantId } },
+    user: {
+      create: {
+        id: `iso-user-${key}`,
+        name: `member-${key}`,
+        email: `member-${key}@iso-test.example`,
+      },
+    },
   }),
   TenantConfig: (tenantId) => ({
     tenantId,
@@ -203,6 +211,8 @@ export type SeededTenants = { a: { id: string; slug: string }; b: { id: string; 
 /** Drop and recreate both fixture tenants plus one row of every scoped model. */
 export async function seedTwoTenants(): Promise<SeededTenants> {
   await prismaService.tenant.deleteMany({ where: { slug: { in: [SLUG_A, SLUG_B] } } });
+  // Fixture auth users survive the tenant cascade (User is global) — clear them too.
+  await prismaService.user.deleteMany({ where: { id: { startsWith: "iso-user-" } } });
   const a = await prismaService.tenant.create({ data: { name: "Iso Test A", slug: SLUG_A } });
   const b = await prismaService.tenant.create({ data: { name: "Iso Test B", slug: SLUG_B } });
 
