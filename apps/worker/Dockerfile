@@ -15,12 +15,14 @@ WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY apps/worker/package.json apps/worker/
 COPY packages/db/package.json packages/db/
+COPY packages/observability/package.json packages/observability/
 COPY packages/queue/package.json packages/queue/
 COPY packages/realtime/package.json packages/realtime/
 COPY packages/shopify/package.json packages/shopify/
 RUN npm ci -w @wezesha/worker
 
 COPY packages/db/ packages/db/
+COPY packages/observability/ packages/observability/
 COPY packages/queue/ packages/queue/
 COPY packages/realtime/ packages/realtime/
 COPY packages/shopify/ packages/shopify/

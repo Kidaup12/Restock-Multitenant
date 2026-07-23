@@ -25,6 +25,12 @@ it embeds a password).
 | `SHOPIFY_APP_URL` | `apps/web/lib/shopify/env.ts`; `apps/worker/src/shopify-sync.ts` | web (OAuth redirect URI); worker (webhook registration) | Vercel; Railway | url (config) | `http://localhost:3000` (OAuth/webhooks need a public tunnel locally) |
 | `TOKEN_ENCRYPTION_KEY` | `packages/shopify/src/crypto.ts` (via web callback + worker sync) | web, worker | Vercel; Railway — SAME value on both | secret | unset (token store/read throws) |
 | `EMAIL_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` in environments that should send scheduled email) | config | unset (no cron schedules registered — dev/CI stay quiet) |
+| `OPS_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` in environments that should run the daily plan-limit check) | config | unset (no ops schedules registered — dev/CI stay quiet) |
+| `SENTRY_DSN` | `packages/observability/src/index.ts` (via each service's init) | web (`apps/web/instrumentation.ts`) | Vercel | secret | unset (error tracking disabled — complete no-op) |
+| `SENTRY_DSN` | same | worker (`apps/worker/src/index.ts`) | Railway | secret | unset (no-op) |
+| `SENTRY_DSN` | same | ws-gateway (`apps/ws-gateway/src/index.ts`) | Railway | secret | unset (no-op) |
+| `SENTRY_ENVIRONMENT` | `packages/observability/src/index.ts` | web, worker, ws-gateway | Vercel; Railway (e.g. `production` / `preview`) | config | unset (falls back to `NODE_ENV`) |
+| `SENTRY_RELEASE` | `packages/observability/src/index.ts` | web, worker, ws-gateway | optional — set by the deploy pipeline if release tagging is wanted | config | unset |
 
 Notes:
 
@@ -46,6 +52,18 @@ Notes:
 - **Shopify app credentials** come from the app entry in the Shopify Dev Dashboard.
   The app's redirect URL allow-list must contain `<SHOPIFY_APP_URL>/api/shopify/callback`
   per environment.
+- **`SENTRY_DSN` is one variable, three projects.** Each service inits the tracker
+  with its own `service` tag, so one shared DSN works — but separate Sentry projects
+  per service (three DSNs) keep alert routing cleaner. Either way, no DSN = tracking
+  is a complete no-op (the SDK is not even loaded); nothing else changes. When DSNs
+  arrive, set them and redeploy — no code change needed (M9 acceptance closes then).
+- **`/api/health` (web) also reads `REDIS_URL`** to report the worker's heartbeat
+  key (`ops:worker:heartbeat`); with no `REDIS_URL` the endpoint still works and
+  reports `worker: null` (unknown).
+- **Admin-adjacent ops routes** (`/api/ops/export`, `/api/ops/delete`) read no new
+  env: they are session-guarded (OWNER + manage_settings) and resolve the tenant
+  from the membership. The delete route stays test-tenants-only until the owner
+  signs off (see the loud comment in the route and the production-safety rule).
 
 ## The three-URL database model (Supabase)
 
@@ -94,6 +112,7 @@ Supabase specifics that are easy to get wrong:
 | `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` | prod app | dev app — never the prod app | dev app |
 | `SHOPIFY_APP_URL` | prod origin | preview origin | tunnel origin |
 | `TOKEN_ENCRYPTION_KEY` | prod key (= worker's) | preview key (= staging worker's) | local key |
+| `SENTRY_DSN` | prod DSN (when provisioned) | preview DSN or unset | unset |
 | AUTH vars (below) | prod values | preview values | local |
 
 `develop` deploys as Preview (Production Branch is `main`), so Preview values are what
@@ -106,6 +125,7 @@ previews must never hold prod credentials.
   private-network variant if available so traffic stays inside the project)
 - `WS_DEV_TOKEN` = generated secret (vault)
 - `PORT` — do not set; Railway injects it and the app reads it
+- `SENTRY_DSN` — when provisioned; unset keeps tracking a no-op
 
 **Railway (worker)** — service variables:
 
@@ -113,6 +133,8 @@ previews must never hold prod credentials.
 - `DATABASE_URL`, `SERVICE_DATABASE_URL` — same DB values as web for the environment
 - `TOKEN_ENCRYPTION_KEY` — same value as web for the environment
 - `SHOPIFY_APP_URL` — the web origin for the environment (webhook registration)
+- `EMAIL_CRONS` / `OPS_CRONS` — `1` in environments that should run the schedules
+- `SENTRY_DSN` — when provisioned; unset keeps tracking a no-op
 
 **CI** (`.github/workflows/ci.yml`, db job) — already wired to the throwaway Postgres
 service container with dev-only credentials; nothing to provision.

@@ -12,20 +12,17 @@ Environment variables are catalogued in `deploy/ENVIRONMENT.md` — this file on
 
 ## 0. Decisions baked into this setup
 
-- **Services are compiled, not tsx-run.** `npm run build` in `apps/ws-gateway` and
-  `apps/worker` bundles `src/index.ts` with esbuild into a single self-contained
-  `dist/index.cjs`; the Docker runner stage is bare `node:22-alpine` + that file, no
-  `node_modules`, running as the non-root `node` user. Why not the alternatives:
-  plain `tsc` can't emit a runnable build here because `@wezesha/realtime` exports
-  raw TypeScript source (`"." : "./src/index.ts"`) — compiled JS would still import
-  a `.ts` file at runtime; running tsx in prod works but ships the whole TS
-  toolchain and node_modules into the image for a slower, fatter, less inspectable
-  deploy. The bundle keeps dev ergonomics (tsx + live workspace source) and prod
-  hygiene (one artifact). esbuild does not typecheck — CI's `services-typecheck`
-  job holds that line.
-- **Bundle externals** (resolved at runtime via try/require with pure-JS fallback,
-  absent from the runner image by design): `bufferutil`, `utf-8-validate` (ws) for
-  the gateway; `msgpackr-extract` (bullmq → msgpackr) for the worker.
+- **Services run via tsx with node_modules, not as esbuild bundles.** Both service
+  images (`apps/worker/Dockerfile`, `apps/ws-gateway/Dockerfile`) install the pruned
+  workspace subtree (`npm ci -w <service>`), generate the Prisma client, and run
+  `src/index.ts` with tsx as the non-root `node` user. The original plan (bundle
+  `src/index.ts` into one `dist/index.cjs`, ship no node_modules) died when both
+  services gained `@wezesha/db`: the Prisma query engine is a native binary resolved
+  relative to the generated client directory, which a single-file bundle cannot
+  carry. The gateway's `npm run build` esbuild script remains for local
+  experiments, but the images do not use it. tsx is a production dependency of both
+  services; esbuild/tsx do not typecheck — CI's `services-typecheck` job holds that
+  line.
 - **Docker build context is the repo root** (both Dockerfiles start
   `docker build -f apps/<svc>/Dockerfile .`) so the lockfile and workspace graph are
   visible; `npm ci -w <service>` prunes the install to that service's subtree.
@@ -260,6 +257,49 @@ receives nothing during a smoke run:
 npx wscat -c "wss://<gateway-domain>/?token=<WS_DEV_TOKEN>:other-tenant"
 ```
 
+## Uptime monitoring (external pingers)
+
+The contract's line: the app going down triggers an alert within minutes. Three
+services, three signals — all watchable by a plain HTTP pinger with zero deploy
+changes:
+
+| Service | Probe | Healthy looks like |
+|---|---|---|
+| web | `GET https://<vercel-domain>/api/health` | HTTP 200, body `{"ok":true,"db":true,...}` (503 when the DB check fails — the pinger alarms on that too) |
+| ws-gateway | `GET https://<gateway-domain>/healthz` | HTTP 200, body `{uptime, connections}` |
+| worker | no port — watched THROUGH web `/api/health` | `"worker":true` in the same body |
+
+How the worker signal works: the worker refreshes the Redis key
+`ops:worker:heartbeat` every 30s with a 90s TTL (`apps/worker/src/heartbeat.ts`);
+`/api/health` reports the key's presence as `worker` (`true` = beating, `false` =
+key gone → worker dead or hung, `null` = Redis itself unreachable — a separate
+problem the same probe surfaces).
+
+**UptimeRobot setup (free tier, ~10 minutes, owner action):**
+
+1. Create the account; add an alert contact (email at minimum; Slack webhook if
+   the workspace has one).
+2. **Web + DB:** Add New Monitor → type HTTP(s) → URL
+   `https://<vercel-domain>/api/health` → interval 5 min. A 503 (db down) or
+   timeout (app down) alerts.
+3. **Worker:** Add New Monitor → type **Keyword** → same URL → keyword
+   `"worker":true` → alert when keyword **not exists** → interval 5 min. This
+   fires when the heartbeat key vanishes even though web itself is fine.
+4. **Gateway:** Add New Monitor → type HTTP(s) → URL
+   `https://<gateway-domain>/healthz` → interval 5 min.
+5. Send a test alert; confirm it reaches a human.
+
+**Upptime alternative** (GitHub-native, no third-party account): create a repo
+from the `upptime/upptime` template and list the three URLs in `.upptimerc.yml`
+(`sites:` entries; for the worker signal use the same `/api/health` URL with
+`__dangerous__body_down_if_text_missing: '"worker":true'`). GitHub Actions pings
+on a ~5-minute schedule and opens an issue on failure. Choose one system, not
+both — two alerting stacks means both get ignored.
+
+To verify the wiring end-to-end after setup: stop the worker service in Railway
+for ~3 minutes (heartbeat TTL 90s + one probe interval) and confirm the keyword
+monitor alarms, then restart it.
+
 ## 7. Rollback
 
 - **Vercel:** Deployments → previous good deployment → **Promote to Production**
@@ -287,31 +327,69 @@ npx wscat -c "wss://<gateway-domain>/?token=<WS_DEV_TOKEN>:other-tenant"
 Also decide and record: who owns the vault entries, and where the restore drill log
 lives.
 
-**Restore procedure — REQUIRED M10 exercise, placeholder until then:**
+**Restore paths — know both, drill the second:**
 
-> A backup that has never been restored is a hope, not a backup. Before M10 sign-off,
-> run a full drill and replace this placeholder with the measured results:
->
-> 1. PITR-restore prod to a **new scratch Supabase project** at a timestamp minutes in
->    the past (never in-place).
-> 2. Run the RLS census (section 3.3) against the restored copy — restores must come
->    back with policies intact.
-> 3. Row-count spot checks per tenant table against prod at the same timestamp.
-> 4. Point a local app instance at the restored copy; verify login + one read path
->    per module.
-> 5. Record: time to restore, data window lost, every manual step that surprised you.
-> 6. Tear the scratch project down.
->
-> Until this drill has been run once, treat restore as **unverified**.
+- **PITR (real-incident path).** Supabase PITR restores **in place** on the same
+  project: Console → Project → Database → Backups → Point in Time → pick the
+  timestamp → Restore. In-place means it overwrites the live database — this is
+  the tool for an actual incident, never for a drill against prod.
+- **Dump-and-restore to a scratch project (the drill, and the fallback when PITR
+  can't help).** Proves the data is recoverable end-to-end without touching prod.
+
+**Restore drill — REQUIRED M10 exercise, executable once the Supabase account
+exists. Until it has been run once, treat restore as UNVERIFIED.**
+
+1. Record the start time. Create a scratch project: Console → New project →
+   `wezesha-restore-drill`, any strong password (vault not required — it dies with
+   the drill), same region as prod.
+2. Create the roles on the scratch project FIRST (SQL Editor → contents of
+   `packages/db/prisma/sql/prod-roles.sql`, drill-only passwords). The dump
+   carries grants and RLS policies that reference `wezesha_app` /
+   `wezesha_service`; restoring before the roles exist fails half-way.
+3. Dump prod through the direct connection (read-only against prod):
+   ```sh
+   pg_dump -d '<prod direct owner url>' -Fc -f drill.dump
+   ```
+4. Restore into the scratch project's direct connection:
+   ```sh
+   pg_restore --no-owner -d '<scratch direct owner url>' drill.dump
+   ```
+5. Run the RLS census (section 3.3 queries) against the scratch project — a
+   restore that comes back without `rowsecurity = t` + a two-sided
+   `tenant_isolation` policy on every tenant table is a leak, not a recovery.
+   Also spot-check fail-closed: `SELECT count(*) FROM "Product";` as
+   `wezesha_app` with no GUC must return 0.
+6. Row-count spot checks vs prod, same moment, per big table
+   (`Product`, `SalesHistory`, `Order`, `PurchaseOrder`, `Notification`):
+   ```sh
+   psql '<url>' -c 'SELECT count(*) FROM "SalesHistory";'
+   ```
+7. Point a local web instance at the scratch project (swap the three DB URLs in
+   env) and verify: login works, /today renders, one read path per module
+   (stock, plan, orders), and `/api/health` reports `db: true`.
+8. Record in the drill log: wall-clock time to restored-and-verified, dump size,
+   data window lost (dump timestamp vs incident timestamp — for PITR this is
+   near-zero, for dump-based it is up to a day), every step that surprised you.
+9. Tear the scratch project down (Console → Project Settings → Delete project).
+
+Drill log (fill in when run): date ______ · operator ______ · time-to-restore
+______ · dump size ______ · surprises ______
 
 ## 9. Follow-ups (known, deliberate deferrals)
 
 - **Gateway `/healthz`:** done — the gateway serves `GET /healthz` (200,
   `{uptime, connections}`) on its ws port and the Dockerfile HEALTHCHECK probes it.
   Remaining owner step: point the Railway health check at `/healthz` (step 4).
-- **Worker DB access:** real source syncs will add `SERVICE_DATABASE_URL` to the
-  worker service; update `deploy/ENVIRONMENT.md` when that lands.
-- **Restore drill:** section 8's placeholder is a required M10 exercise.
+- **Worker DB access:** done — the sync writes through the service client;
+  `deploy/ENVIRONMENT.md` lists the worker's DB URLs.
+- **Uptime monitors:** the endpoints and heartbeat ship with the repo; creating
+  the UptimeRobot/Upptime monitors (section "Uptime monitoring") is an owner
+  action — do it right after the first deploy.
+- **Error tracking DSNs:** all three services init the tracker only when
+  `SENTRY_DSN` is set. Creating the Sentry org/projects and setting the DSNs is
+  an owner action; no code change needed when they arrive.
+- **Restore drill:** section 8's drill is a required M10 exercise — run it once
+  the Supabase project exists and fill in the drill log.
 
 ## 10. Owner-only actions (cannot be prepared in the repo)
 
@@ -325,3 +403,7 @@ Everything above assumes these accounts/switches, which only the account owner c
 4. GitHub: no new secrets needed for CI today (the db job uses a service container);
    Railway/Vercel connect via their own GitHub apps.
 5. Vault: store owner DB password, two role passwords, three URLs, `WS_DEV_TOKEN`.
+6. Sentry (or compatible): create the org + project(s), copy the DSN(s), set
+   `SENTRY_DSN` on Vercel and both Railway services.
+7. UptimeRobot or Upptime: create the monitors per the "Uptime monitoring"
+   section and confirm a test alert reaches a human.

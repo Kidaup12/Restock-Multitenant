@@ -1,4 +1,5 @@
 import { Redis } from "ioredis";
+import { captureError, flushObservability, initObservability } from "@wezesha/observability";
 import {
   devAuthorizeSocket,
   prismaSessionStore,
@@ -14,10 +15,23 @@ import { startGateway } from "./gateway";
  *   SERVICE_DATABASE_URL  — session/membership lookups (via @wezesha/db)
  *   WS_DEV_TOKEN          — non-production only: also accept the dev stub's
  *                           `{secret}:{tenantId}` tokens alongside real sessions
+ *   SENTRY_DSN            — error tracking; unset = tracking disabled (no-op)
  */
 async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 8081);
   const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6380";
+
+  await initObservability("ws-gateway");
+  // A crashed gateway drops every live socket — report before exiting so the
+  // tracker sees why. Exit stays non-zero; the platform restart policy is
+  // still the supervisor.
+  const fatal = (origin: string) => (err: unknown) => {
+    console.error(`ws-gateway: ${origin}`, err);
+    captureError(err, { origin });
+    void flushObservability(2000).finally(() => process.exit(1));
+  };
+  process.on("uncaughtException", fatal("uncaughtException"));
+  process.on("unhandledRejection", fatal("unhandledRejection"));
 
   const sessionAuth = sessionAuthorizeSocket(prismaSessionStore());
   const devSecret =

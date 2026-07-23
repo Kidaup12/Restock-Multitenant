@@ -81,7 +81,7 @@ jobs:
         run: npm run -w web build
 
   services-typecheck:
-    name: services — typecheck realtime, forecast, ws-gateway, worker
+    name: services — typecheck packages, ws-gateway, worker
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -107,6 +107,12 @@ jobs:
 
       - name: Typecheck @wezesha/shopify
         run: npm run -w @wezesha/shopify typecheck
+
+      - name: Typecheck @wezesha/observability
+        run: npm run -w @wezesha/observability typecheck
+
+      - name: Tests @wezesha/observability (mocked transport — no infra)
+        run: npm run -w @wezesha/observability test
 
       - name: Typecheck @wezesha/ws-gateway
         run: npm run -w @wezesha/ws-gateway typecheck
