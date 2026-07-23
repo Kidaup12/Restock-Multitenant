@@ -11,7 +11,12 @@ import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/auth/password-input";
 import { PasswordStrength } from "@/components/auth/password-strength";
 
-export function SignupForm() {
+export function SignupForm({
+  redirectTo,
+}: {
+  /* Post-signup destination (sanitized server-side); e.g. an invite page. */
+  redirectTo?: string | null;
+}) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -44,7 +49,7 @@ export function SignupForm() {
       setError(signUpError.message ?? "Sign up failed. Please try again.");
       return;
     }
-    router.push("/today");
+    router.push(redirectTo ?? "/today");
   }
 
   return (
@@ -121,7 +126,11 @@ export function SignupForm() {
       <p className="mt-6 text-center text-sm text-ink-muted">
         Already have an account?{" "}
         <Link
-          href="/login"
+          href={
+            redirectTo
+              ? `/login?redirect=${encodeURIComponent(redirectTo)}`
+              : "/login"
+          }
           className="font-medium text-accent-ink hover:underline"
         >
           Sign in

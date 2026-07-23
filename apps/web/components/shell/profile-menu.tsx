@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { authClient } from "@/lib/auth-client";
 import { useInstallPrompt } from "@/lib/use-install-prompt";
+import { useTour } from "@/components/tour/tour-provider";
 import {
   DownloadIcon,
   GearIcon,
   LogOutIcon,
+  PlayCircleIcon,
   UserIcon,
 } from "@/components/icons";
 
@@ -33,6 +35,7 @@ export function ProfileMenu({ name, email, roleLabel }: ProfileMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const { canInstall, promptInstall } = useInstallPrompt();
+  const tour = useTour();
 
   const initial = (name.trim() || email).charAt(0).toUpperCase();
 
@@ -96,6 +99,7 @@ export function ProfileMenu({ name, email, roleLabel }: ProfileMenuProps) {
         aria-label="Account menu"
         aria-haspopup="menu"
         aria-expanded={open}
+        data-tour="profile-menu"
         className={cn(
           "grid size-9 place-items-center rounded-full bg-accent font-display text-sm font-bold text-on-accent transition-shadow",
           "outline-accent hover:shadow-glow focus-visible:outline-2 focus-visible:outline-offset-2",
@@ -140,6 +144,20 @@ export function ProfileMenu({ name, email, roleLabel }: ProfileMenuProps) {
               <GearIcon />
               Settings
             </button>
+            {tour.available && (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  tour.start();
+                }}
+                className={itemClass}
+              >
+                <PlayCircleIcon />
+                Start interactive tour
+              </button>
+            )}
           </div>
 
           {canInstall && (

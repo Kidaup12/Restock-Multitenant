@@ -288,3 +288,51 @@ export function MailIcon(props: IconProps) {
     </Icon>
   );
 }
+
+export function ChevronsUpDownIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m8 9.5 4-4 4 4" />
+      <path d="m8 14.5 4 4 4-4" />
+    </Icon>
+  );
+}
+
+export function UsersIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="9" cy="8" r="3.5" />
+      <path d="M2.5 20c0-3.3 2.9-5.3 6.5-5.3s6.5 2 6.5 5.3" />
+      <path d="M15.5 4.9a3.5 3.5 0 0 1 0 6.2" />
+      <path d="M18 15.2c2.1.8 3.5 2.4 3.5 4.8" />
+    </Icon>
+  );
+}
+
+export function XIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="m6 6 12 12M18 6 6 18" />
+    </Icon>
+  );
+}
+
+export function TrashIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 6.5h16" />
+      <path d="M9 6.5V4.8A1.8 1.8 0 0 1 10.8 3h2.4A1.8 1.8 0 0 1 15 4.8v1.7" />
+      <path d="M6.5 6.5 7.4 20a1.9 1.9 0 0 0 1.9 1.7h5.4a1.9 1.9 0 0 0 1.9-1.7l.9-13.5" />
+      <path d="M10 10.5v6M14 10.5v6" />
+    </Icon>
+  );
+}
+
+export function PlayCircleIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m10 8.5 5 3.5-5 3.5Z" />
+    </Icon>
+  );
+}
