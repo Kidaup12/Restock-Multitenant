@@ -1,0 +1,53 @@
+# Full local prototype topology — the pre-prod rehearsal. Overrides the base
+# compose (db + redis) with the three app services built from their Dockerfiles,
+# networked by service name exactly as the prod split will be.
+#
+#   cp .env.staging.example .env.staging     # adjust host ports if taken
+#   docker compose --env-file .env.staging \
+#     -f docker-compose.yml -f docker-compose.staging.yml up -d --build
+#
+# Kept separate from docker-compose.yml on purpose: the base file stays the
+# lightweight dev-infra stack (`docker compose up -d db redis`), and staging is
+# an explicit opt-in. Host ports are env-overridable because local machines
+# often have the defaults taken.
+
+services:
+  db:
+    ports: !override
+      - "${DB_PORT:-5434}:5432"
+
+  redis:
+    ports: !override
+      - "${REDIS_PORT:-6380}:6379"
+
+  ws-gateway:
+    build:
+      context: .
+      dockerfile: apps/ws-gateway/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379
+      WS_DEV_TOKEN: ${WS_DEV_TOKEN:-staging-dev-token}
+    ports:
+      - "${WS_GATEWAY_PORT:-8081}:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - ws-gateway

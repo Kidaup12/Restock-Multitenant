@@ -52,3 +52,53 @@ jobs:
 
       - name: Tests (RLS isolation + coverage census, as wezesha_app)
         run: npm run -w @wezesha/db test
+
+  web-build:
+    name: web — next build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build (apps/web)
+        run: npm run -w web build
+
+  services-typecheck:
+    name: services — typecheck realtime, ws-gateway, worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck @wezesha/realtime
+        run: npm run -w @wezesha/realtime typecheck
+
+      - name: Typecheck @wezesha/ws-gateway
+        run: npm run -w @wezesha/ws-gateway typecheck
+
+      - name: Typecheck @wezesha/worker
+        run: npm run -w @wezesha/worker typecheck
+
+  docker-build:
+    name: docker — service images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build ws-gateway image
+        run: docker build -f apps/ws-gateway/Dockerfile -t wezesha-ws-gateway:ci .
+
+      - name: Build worker image
+        run: docker build -f apps/worker/Dockerfile -t wezesha-worker:ci .

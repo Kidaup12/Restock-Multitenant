@@ -1,0 +1,13 @@
+# Keep the docker build context lean — builds run from the repo root so the
+# lockfile + workspace graph are visible.
+node_modules
+**/node_modules
+**/dist
+**/.next
+**/generated
+.git
+.github
+.env
+.env.*
+*.md
+docker-compose.yml
