@@ -6,6 +6,7 @@ import { hasPermission } from "@/lib/auth/permissions";
 import {
   createOrdersForPredictions,
   getBuyList,
+  redactBudgetSplit,
   splitByBudget,
   type BudgetSplit,
   type CreateOrdersResult,
@@ -55,8 +56,11 @@ export async function planBudget(input: {
   const budget = Number(input.budgetKes);
   if (!Number.isFinite(budget) || budget < 0) return err("Enter a budget in KES.");
 
-  const buyList = await getBuyList(membership.tenantId);
+  // The allocator needs real costs, so the fetch is unredacted; what leaves
+  // the server is redacted to the caller's own cost visibility.
+  const buyList = await getBuyList(membership.tenantId, { canViewCosts: true });
   if (!buyList) return err("Run a forecast first — there's nothing to plan yet.");
 
-  return { ok: true, data: splitByBudget(buyList.rows, budget) };
+  const split = splitByBudget(buyList.rows, budget);
+  return { ok: true, data: redactBudgetSplit(split, hasPermission(membership, "view_costs")) };
 }

@@ -34,7 +34,7 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
   });
 
   it("getTodayMetrics matches independently computed sums", async () => {
-    const metrics = await getTodayMetrics(seeded.tenantId);
+    const metrics = await getTodayMetrics(seeded.tenantId, { canViewCosts: true });
 
     const since30 = new Date(Date.now() - 30 * DAY_MS);
     const expected = await prismaService.salesHistory.aggregate({
@@ -69,7 +69,7 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
   it("getSalesSeries returns ascending per-day totals that sum to the 30d revenue", async () => {
     const [series, metrics] = await Promise.all([
       getSalesSeries(seeded.tenantId, 30),
-      getTodayMetrics(seeded.tenantId),
+      getTodayMetrics(seeded.tenantId, { canViewCosts: true }),
     ]);
     expect(series.length).toBeGreaterThanOrEqual(25);
     expect(series.length).toBeLessThanOrEqual(30);
@@ -108,7 +108,7 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
   });
 
   it("getStockCatalogue reflects InventoryLevel sums and pre-forecast nulls", async () => {
-    const rows = await getStockCatalogue(seeded.tenantId);
+    const rows = await getStockCatalogue(seeded.tenantId, { canViewCosts: true });
     expect(rows).toHaveLength(seeded.productCount);
 
     const levels = await prismaService.inventoryLevel.groupBy({
@@ -119,7 +119,7 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
     const onHand = new Map(levels.map((l) => [l.productId, l._sum.onHand ?? 0]));
     for (const row of rows) {
       expect(row.onHandUnits).toBe(onHand.get(row.productId) ?? 0);
-      expect(row.stockValueKes).toBeCloseTo(row.onHandUnits * row.costKes, 5);
+      expect(row.stockValueKes).toBeCloseTo(row.onHandUnits * row.costKes!, 5);
       // Fresh seed wipes predictions — cover is unknown until a forecast runs.
       expect(row.daysCover).toBeNull();
     }
@@ -130,8 +130,8 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
 
   it("getStockByLocation reconciles with the catalogue totals", async () => {
     const [locations, catalogue] = await Promise.all([
-      getStockByLocation(seeded.tenantId),
-      getStockCatalogue(seeded.tenantId),
+      getStockByLocation(seeded.tenantId, { canViewCosts: true }),
+      getStockCatalogue(seeded.tenantId, { canViewCosts: true }),
     ]);
     expect(locations).toHaveLength(2);
     expect(locations[0]!.isPrimary).toBe(true);
@@ -151,13 +151,13 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
       data: { name: "Empty Probe", slug: "screens-data-empty-probe" },
     });
     try {
-      const metrics = await getTodayMetrics(empty.id);
+      const metrics = await getTodayMetrics(empty.id, { canViewCosts: true });
       expect(metrics.revenue30dKes).toBe(0);
       expect(metrics.trackedProducts).toBe(0);
       expect(metrics.deadStock.costKes).toBe(0);
-      expect(await getStockCatalogue(empty.id)).toHaveLength(0);
+      expect(await getStockCatalogue(empty.id, { canViewCosts: true })).toHaveLength(0);
       expect(await getSalesSeries(empty.id, 30)).toHaveLength(0);
-      expect(await getReorderNeeded(empty.id)).toBeNull();
+      expect(await getReorderNeeded(empty.id, { canViewCosts: true })).toBeNull();
     } finally {
       await prismaService.tenant.delete({ where: { id: empty.id } });
     }

@@ -22,7 +22,10 @@ async function PlanContent({
   tenantId: string;
   canViewCosts: boolean;
 }) {
-  const buyList = await getBuyList(tenantId);
+  // canViewCosts flows into the query: PlanView is a client component, so the
+  // rows serialize to the browser — costs come back null for a money-blind
+  // member and the figures never reach the payload.
+  const buyList = await getBuyList(tenantId, { canViewCosts });
 
   if (!buyList) {
     return (

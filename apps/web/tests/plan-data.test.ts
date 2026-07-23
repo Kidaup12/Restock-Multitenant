@@ -41,7 +41,7 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
   });
 
   it("builds the buy list from the latest run with real costs and ordering", async () => {
-    const buyList = await getBuyList(seeded.tenantId);
+    const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     expect(buyList).not.toBeNull();
     expect(buyList!.totalPredicted).toBe(seeded.productCount);
 
@@ -72,7 +72,7 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       );
     }
     expect(buyList!.totalCostKes).toBeCloseTo(
-      buyList!.rows.reduce((sum, r) => sum + r.lineTotalKes, 0),
+      buyList!.rows.reduce((sum, r) => sum + r.lineTotalKes!, 0),
       5
     );
 
@@ -99,7 +99,7 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
   });
 
   it("tiers every row by its last safe day to order (stockout minus lead)", async () => {
-    const buyList = await getBuyList(seeded.tenantId);
+    const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     const products = await prismaService.product.findMany({
       where: { tenantId: seeded.tenantId },
       include: { supplier: true },
@@ -122,7 +122,7 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
   });
 
   it("gives every row a qty breakdown that lands on the shown number", async () => {
-    const buyList = await getBuyList(seeded.tenantId);
+    const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     for (const row of buyList!.rows) {
       // The derived identity line always exists and always names the shown qty.
       expect(row.qtySummary).toContain(`+ ${row.recommendedQty} ordered`);
@@ -144,26 +144,26 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
   });
 
   it("splits the list against a budget: sums reconcile, criticals never wait", async () => {
-    const buyList = await getBuyList(seeded.tenantId);
+    const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     const rows = buyList!.rows;
 
     // Everything seeded has sane unit economics, so nothing lands in checkCost.
-    const full = splitByBudget(rows, buyList!.totalCostKes);
+    const full = splitByBudget(rows, buyList!.totalCostKes!);
     expect(full.checkCost).toHaveLength(0);
     expect(full.deferred).toHaveLength(0);
     expect(full.funded).toHaveLength(rows.length);
-    expect(full.fundedCostKes).toBeCloseTo(buyList!.totalCostKes, 5);
+    expect(full.fundedCostKes).toBeCloseTo(buyList!.totalCostKes!, 5);
     expect(full.leftoverKes).toBeCloseTo(0, 5);
 
-    const half = splitByBudget(rows, buyList!.totalCostKes / 2);
+    const half = splitByBudget(rows, buyList!.totalCostKes! / 2);
     expect(half.funded.length + half.deferred.length).toBe(rows.length);
-    expect(half.fundedCostKes + half.deferredCostKes).toBeCloseTo(buyList!.totalCostKes, 5);
+    expect(half.fundedCostKes! + half.deferredCostKes!).toBeCloseTo(buyList!.totalCostKes!, 5);
     expect(half.fundedCostKes).toBeCloseTo(
-      half.funded.reduce((sum, r) => sum + r.lineTotalKes, 0),
+      half.funded.reduce((sum, r) => sum + r.lineTotalKes!, 0),
       5
     );
     expect(half.deferredAtRiskKes).toBeCloseTo(
-      half.deferred.reduce((sum, r) => sum + r.atRiskKes, 0),
+      half.deferred.reduce((sum, r) => sum + r.atRiskKes!, 0),
       5
     );
     // No overlap between the splits.
@@ -181,13 +181,13 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       new Set(criticals.map((r) => r.predictionId))
     );
     expect(zero.overBudgetKes).toBeCloseTo(
-      criticals.reduce((sum, r) => sum + r.lineTotalKes, 0),
+      criticals.reduce((sum, r) => sum + r.lineTotalKes!, 0),
       5
     );
   });
 
   it("creates pending Orders for ticked predictions and updates on re-add", async () => {
-    const buyList = await getBuyList(seeded.tenantId);
+    const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     const ids = buyList!.rows.slice(0, 3).map((r) => r.predictionId);
 
     const first = await createOrdersForPredictions(seeded.tenantId, [...ids, "nonexistent-id"]);
@@ -220,7 +220,7 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       data: { name: "Plan Probe", slug: "plan-data-probe" },
     });
     try {
-      expect(await getBuyList(probe.id)).toBeNull();
+      expect(await getBuyList(probe.id, { canViewCosts: true })).toBeNull();
 
       // The victim tenant's prediction ids are invisible under the probe's scope.
       const victimIds = (

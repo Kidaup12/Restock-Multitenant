@@ -1,6 +1,6 @@
 import { BoxIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -12,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { getStockCatalogue, type CatalogueRow } from "@/lib/data/stock";
+import { CatalogueExportBar } from "./catalogue-export";
 
 /** Shelf status from on-hand + forecast cover. Cover is null before the first
  *  forecast run — those rows read "No forecast" rather than guessing. */
@@ -31,7 +32,9 @@ export async function CatalogueTable({
   tenantId: string;
   canViewCosts?: boolean;
 }) {
-  const rows = await getStockCatalogue(tenantId);
+  // canViewCosts flows into the query: unit costs and stock values come back
+  // null for a money-blind member, so the figures never reach the payload.
+  const rows = await getStockCatalogue(tenantId, { canViewCosts });
 
   if (rows.length === 0) {
     return (
@@ -43,8 +46,24 @@ export async function CatalogueTable({
     );
   }
 
+  // The export mirrors the table: same rows, plus the status label it shows.
+  const exportRows = rows.map((row) => ({
+    title: row.title,
+    sku: row.sku,
+    onHandUnits: row.onHandUnits,
+    daysCover: row.onHandUnits <= 0 ? null : row.daysCover,
+    status: status(row).label,
+    costKes: row.costKes,
+    stockValueKes: row.stockValueKes,
+  }));
+
   return (
     <Card>
+      <CardHeader
+        title="Catalogue"
+        subtitle={`${rows.length} products`}
+        action={<CatalogueExportBar rows={exportRows} canViewCosts={canViewCosts} />}
+      />
       <CardContent className="p-0 py-2">
         <Table>
           <TableHeader>
