@@ -24,6 +24,7 @@ it embeds a password).
 | `SHOPIFY_API_SECRET` | `apps/web/lib/shopify/env.ts`; `apps/web/app/api/webhooks/shopify/route.ts` | web | Vercel | secret | unset |
 | `SHOPIFY_APP_URL` | `apps/web/lib/shopify/env.ts`; `apps/worker/src/shopify-sync.ts` | web (OAuth redirect URI); worker (webhook registration) | Vercel; Railway | url (config) | `http://localhost:3000` (OAuth/webhooks need a public tunnel locally) |
 | `TOKEN_ENCRYPTION_KEY` | `packages/shopify/src/crypto.ts` (via web callback + worker sync) | web, worker | Vercel; Railway — SAME value on both | secret | unset (token store/read throws) |
+| `EMAIL_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` in environments that should send scheduled email) | config | unset (no cron schedules registered — dev/CI stay quiet) |
 
 Notes:
 

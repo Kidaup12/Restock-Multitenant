@@ -34,10 +34,10 @@ Environment variables are catalogued in `deploy/ENVIRONMENT.md` — this file on
   Railway service points at the same repo with its own **Config File Path** (step 4).
   Root Directory stays the repo root — do not set it per service, or the Docker build
   context loses the workspace graph.
-- **No Railway health check for the gateway.** Railway's health checks are HTTP-only
-  and the gateway speaks only WebSocket. The Dockerfile HEALTHCHECK (TCP on the ws
-  port) covers docker-level supervision; Railway's restart policy covers crashes.
-  Adding a plain HTTP `/healthz` to the gateway is a sensible follow-up.
+- **Gateway health check is `GET /healthz`** on the ws port (200 with
+  `{uptime, connections}`). The Dockerfile HEALTHCHECK probes it for docker-level
+  supervision; set Railway's HTTP health check path to `/healthz` for the gateway
+  service.
 
 ## Local staging rehearsal (before deploy day)
 
@@ -306,10 +306,9 @@ lives.
 
 ## 9. Follow-ups (known, deliberate deferrals)
 
-- **Gateway `/healthz`:** the Dockerfile HEALTHCHECK is a TCP check on the ws port
-  because the gateway currently exposes no HTTP endpoint and its source is being
-  reworked on the auth-seam branch — add a plain HTTP `/healthz` there, then switch
-  the HEALTHCHECK and enable a Railway health check against it.
+- **Gateway `/healthz`:** done — the gateway serves `GET /healthz` (200,
+  `{uptime, connections}`) on its ws port and the Dockerfile HEALTHCHECK probes it.
+  Remaining owner step: point the Railway health check at `/healthz` (step 4).
 - **Worker DB access:** real source syncs will add `SERVICE_DATABASE_URL` to the
   worker service; update `deploy/ENVIRONMENT.md` when that lands.
 - **Restore drill:** section 8's placeholder is a required M10 exercise.

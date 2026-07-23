@@ -23,8 +23,10 @@ async function main(): Promise<void> {
   const devSecret =
     process.env.NODE_ENV === "production" ? undefined : process.env.WS_DEV_TOKEN;
   const devAuth = devSecret ? devAuthorizeSocket(devSecret) : null;
+  // Dev tokens carry their tenant inline; only session auth consults the
+  // connection's requested workspace.
   const authorize: AuthorizeSocket = devAuth
-    ? async (token) => (await devAuth(token)) ?? sessionAuth(token)
+    ? async (token, workspace) => (await devAuth(token)) ?? sessionAuth(token, workspace)
     : sessionAuth;
 
   const subscriber = new Redis(redisUrl);

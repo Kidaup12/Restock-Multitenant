@@ -7,12 +7,16 @@ export interface SocketPrincipal {
 /**
  * The auth seam. The gateway calls this with the raw credential from the
  * connection (query `?token=`, `Authorization: Bearer`, or the Better Auth
- * session cookie); a non-null result binds the socket to exactly that tenant,
- * null closes it with 4401. Swapping auth integrations means replacing only
- * the function wired in `index.ts` — the gateway itself depends on nothing but
- * this signature.
+ * session cookie) plus the tenant the client asked for (query `?workspace=`,
+ * null when absent); a non-null result binds the socket to exactly that
+ * tenant, null closes it with 4401. Swapping auth integrations means replacing
+ * only the function wired in `index.ts` — the gateway itself depends on
+ * nothing but this signature.
  */
-export type AuthorizeSocket = (token: string) => Promise<SocketPrincipal | null>;
+export type AuthorizeSocket = (
+  token: string,
+  requestedTenantId?: string | null
+) => Promise<SocketPrincipal | null>;
 
 function safeEqual(a: string, b: string): boolean {
   const ab = Buffer.from(a);
@@ -47,14 +51,24 @@ export interface SessionStore {
 }
 
 /**
- * Picks the socket's tenant from the user's memberships (earliest first).
- * The default takes the first — the single-workspace assumption. Workspace
- * selection later means passing a different picker, e.g. one that reads a
- * requested workspace off the connection and validates it against this list.
+ * Picks the socket's tenant from the user's memberships (earliest first) and
+ * the workspace the connection asked for (null when it didn't). The default
+ * honors the request only when it names a membership the user actually holds —
+ * a forged or stale workspace id fails closed (null → 4401), never falls back
+ * to another tenant's channel. With no request it keeps the original
+ * first-membership behavior, so token-only clients still connect.
  */
-export type SelectTenantId = (tenantIds: string[]) => string | null;
+export type SelectTenantId = (
+  tenantIds: string[],
+  requestedTenantId: string | null
+) => string | null;
 
-const firstTenant: SelectTenantId = (tenantIds) => tenantIds[0] ?? null;
+const requestedOrFirst: SelectTenantId = (tenantIds, requestedTenantId) => {
+  if (requestedTenantId) {
+    return tenantIds.includes(requestedTenantId) ? requestedTenantId : null;
+  }
+  return tenantIds[0] ?? null;
+};
 
 /**
  * Real session auth: validates the credential against the Better Auth session
@@ -64,14 +78,17 @@ const firstTenant: SelectTenantId = (tenantIds) => tenantIds[0] ?? null;
  */
 export function sessionAuthorizeSocket(
   store: SessionStore,
-  selectTenantId: SelectTenantId = firstTenant
+  selectTenantId: SelectTenantId = requestedOrFirst
 ): AuthorizeSocket {
-  return async (token) => {
+  return async (token, requestedTenantId = null) => {
     const raw = token.split(".")[0] ?? "";
     if (!raw) return null;
     const session = await store.sessionByToken(raw);
     if (!session || session.expiresAt.getTime() <= Date.now()) return null;
-    const tenantId = selectTenantId(await store.membershipTenantIds(session.userId));
+    const tenantId = selectTenantId(
+      await store.membershipTenantIds(session.userId),
+      requestedTenantId
+    );
     return tenantId ? { tenantId } : null;
   };
 }

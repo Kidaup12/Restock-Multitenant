@@ -91,4 +91,14 @@ describe.skipIf(!runnable)("sessionAuthorizeSocket (db-backed)", () => {
     await expect(authorize(IDS.expiredToken)).resolves.toBeNull();
     await expect(authorize("wsgw-test-no-such-token")).resolves.toBeNull();
   });
+
+  it("binds to a requested workspace the user belongs to", async () => {
+    await expect(authorize(IDS.liveToken, IDS.tenantB)).resolves.toEqual({
+      tenantId: IDS.tenantB,
+    });
+  });
+
+  it("rejects a requested workspace the user is not a member of", async () => {
+    await expect(authorize(IDS.liveToken, "wsgw-test-not-mine")).resolves.toBeNull();
+  });
 });
