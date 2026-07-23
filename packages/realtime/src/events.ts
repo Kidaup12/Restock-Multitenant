@@ -24,6 +24,13 @@ export interface RealtimeEventMap {
 
 export type RealtimeEventType = keyof RealtimeEventMap;
 
+/** The envelope for one specific event type — what a per-type subscriber receives. */
+export type RealtimeEnvelopeOf<K extends RealtimeEventType> = {
+  type: K;
+  ts: number;
+  data: RealtimeEventMap[K];
+};
+
 /** Discriminated union of every publishable event (envelope minus `ts`). */
 export type RealtimeEvent = {
   [K in RealtimeEventType]: { type: K; data: RealtimeEventMap[K] };
@@ -65,6 +72,9 @@ const validators: {
   "pos.ingested": (d) => isStr(d.tenantId) && isNum(d.salesIngested) && isNum(d.linesUnmatched),
   "notification.new": (d) => isStr(d.tenantId) && isStr(d.kind) && isStr(d.title),
 };
+
+/** Every event type as runtime data, for consumers that fan out per type. */
+export const REALTIME_EVENT_TYPES = Object.keys(validators) as readonly RealtimeEventType[];
 
 export function makeEnvelope(event: RealtimeEvent): RealtimeEnvelope {
   return { ...event, ts: Date.now() };
