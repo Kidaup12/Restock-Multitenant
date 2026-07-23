@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { activeMembership, getSession } from "@/lib/auth";
 import { clampLimit, getUnreadCount, listNotifications } from "@/lib/notifications/data";
+import { withCapture } from "@/lib/observability/wrap";
 
 /**
  * The bell's feed: newest-first page of the active workspace's notifications
@@ -10,7 +11,7 @@ import { clampLimit, getUnreadCount, listNotifications } from "@/lib/notificatio
  * Query: ?cursor=<id> (from a prior page's nextCursor) &limit=<1..50>.
  * Response: { notifications, nextCursor, unread }.
  */
-export async function GET(request: Request) {
+export const GET = withCapture(async (request: Request) => {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -34,4 +35,4 @@ export async function GET(request: Request) {
     nextCursor: page.nextCursor,
     unread,
   });
-}
+});

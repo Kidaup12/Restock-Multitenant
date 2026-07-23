@@ -4,6 +4,7 @@ import {
   markAllNotificationsRead,
   markNotificationsRead,
 } from "@/lib/notifications/data";
+import { withCapture } from "@/lib/observability/wrap";
 
 /** Ids arrive from the client's own feed page — bound the batch anyway. */
 const MAX_IDS = 100;
@@ -14,7 +15,7 @@ const MAX_IDS = 100;
  * the RLS-scoped client, so a forged id is a no-op, not an error.
  * Response: { updated }.
  */
-export async function POST(request: Request) {
+export const POST = withCapture(async (request: Request) => {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -45,4 +46,4 @@ export async function POST(request: Request) {
     return NextResponse.json({ updated });
   }
   return NextResponse.json({ error: "invalid body" }, { status: 400 });
-}
+});
