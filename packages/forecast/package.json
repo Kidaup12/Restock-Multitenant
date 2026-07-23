@@ -1,0 +1,18 @@
+{
+  "name": "@wezesha/forecast",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pure forecast + reorder engine: demand rates, two-layer forecast, safety stock, calibrated ordering. No database, no network.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}
