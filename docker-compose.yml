@@ -1,5 +1,7 @@
-# Local dev database. Host port 5434 (5432/5433 are taken by other local stacks).
-#   docker compose up -d db
+# Local dev services. Host ports 5434/6380 (default ports are taken by other
+# local stacks).
+#   docker compose up -d db       # postgres
+#   docker compose up -d redis    # pub/sub + queues
 services:
   db:
     image: postgres:16.4-alpine
@@ -17,5 +19,19 @@ services:
     volumes:
       - dbdata:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redisdata:/data
+
 volumes:
   dbdata:
+  redisdata:
