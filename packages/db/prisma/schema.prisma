@@ -93,6 +93,12 @@ model Tenant {
   // Seed for PO numbering: new POs continue from max(existing PO-####, this), so
   // Wezesha's numbers carry on from QuickBooks' latest (set once to QB's current max).
   poNumberFloor Int      @default(0)
+  // Billing plan key ("starter" | "growth" | "scale"). null = starter. Tiers and
+  // their usage limits are code-defined in src/limits.ts, not a table.
+  plan          String?
+  // Per-tenant limit overrides: { maxProducts?, maxMembers?, maxOrders30d? }.
+  // null = the plan's code defaults; a set key overrides just that limit.
+  planLimits    Json?
   createdAt     DateTime @default(now())
 
   memberships           Membership[]
@@ -172,6 +178,10 @@ model TenantConfig {
   methodA String?
   methodB String?
   methodC String?
+
+  // When this tenant first went over any plan limit (grace window anchor).
+  // Cleared when usage drops back under; null = within limits.
+  limitsExceededAt DateTime?
 
   updatedAt DateTime @updatedAt
 
@@ -473,6 +483,9 @@ model Prediction {
   signals           String
   forecastRunId     String  @default(cuid())
   regime            String?
+  // Per-driver forecast breakdown parts; the forecast run persists these (write
+  // lands with the forecast-hardening branch).
+  explainParts      Json?
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
