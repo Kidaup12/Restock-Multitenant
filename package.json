@@ -1,0 +1,7 @@
+{
+  "name": "wezesha-restock-multitenant",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ]
+}
