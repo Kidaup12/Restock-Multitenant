@@ -21,7 +21,8 @@ export function StatTile({
   className,
 }: {
   label: string;
-  value: string;
+  /* String, or an element like <CostValue> when the figure is gated. */
+  value: React.ReactNode;
   delta?: StatDelta;
   icon?: React.ReactNode;
   className?: string;
