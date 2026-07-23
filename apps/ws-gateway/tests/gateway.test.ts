@@ -30,9 +30,12 @@ interface Client {
 function connect(
   port: number,
   token: string,
-  opts?: { autoPong?: boolean; headers?: Record<string, string> }
+  opts?: { autoPong?: boolean; headers?: Record<string, string>; workspace?: string }
 ): Client {
-  const query = token ? `?token=${encodeURIComponent(token)}` : "";
+  const params = new URLSearchParams();
+  if (token) params.set("token", token);
+  if (opts?.workspace) params.set("workspace", opts.workspace);
+  const query = params.size > 0 ? `?${params.toString()}` : "";
   const ws = new WebSocket(`ws://127.0.0.1:${port}/${query}`, {
     autoPong: opts?.autoPong ?? true,
     headers: opts?.headers,
@@ -79,7 +82,7 @@ describe("ws-gateway", () => {
   const open = async (
     port: number,
     token: string,
-    opts?: { autoPong?: boolean; headers?: Record<string, string> }
+    opts?: { autoPong?: boolean; headers?: Record<string, string>; workspace?: string }
   ) => {
     const client = connect(port, token, opts);
     clients.push(client);
@@ -216,5 +219,61 @@ describe("ws-gateway", () => {
     await gateway!.close();
     gateway = undefined;
     expect((await a.closed).code).toBe(1001);
+  });
+
+  it("passes the workspace request to the authorizer and fails closed on refusal", async () => {
+    const sub = new FakeSubscriber();
+    const seen: Array<string | null> = [];
+    gateway = await startGateway({
+      port: 0,
+      subscriber: sub,
+      authorize: async (_token, workspace) => {
+        seen.push(workspace ?? null);
+        return workspace === "tenant-b" ? { tenantId: "tenant-b" } : null;
+      },
+    });
+
+    const b = await open(gateway.port, "any-token", { workspace: "tenant-b" });
+    sub.emit(tenantChannel("tenant-b"), encodeEnvelope(progressEvent("tenant-b")));
+    await waitFor(() => b.messages.length === 1);
+    expect(decodeEnvelope(b.messages[0]!)?.data.tenantId).toBe("tenant-b");
+
+    const refused = connect(gateway.port, "any-token", { workspace: "tenant-c" });
+    clients.push(refused);
+    expect((await refused.closed).code).toBe(4401);
+
+    const absent = connect(gateway.port, "any-token");
+    clients.push(absent);
+    expect((await absent.closed).code).toBe(4401);
+
+    expect(seen).toEqual(["tenant-b", "tenant-c", null]);
+  });
+
+  it("serves GET /healthz with uptime and the live connection count", async () => {
+    const { port } = await start(new FakeSubscriber());
+    const healthz = `http://127.0.0.1:${port}/healthz`;
+
+    const idle = await fetch(healthz);
+    expect(idle.status).toBe(200);
+    const idleBody = (await idle.json()) as { uptime: number; connections: number };
+    expect(idleBody.uptime).toBeGreaterThan(0);
+    expect(idleBody.connections).toBe(0);
+
+    await open(port, `${SECRET}:tenant-a`);
+    // Binding happens after the async authorize resolves — poll until counted.
+    let connections = 0;
+    const deadline = Date.now() + 5000;
+    while (connections !== 1 && Date.now() < deadline) {
+      const body = (await (await fetch(healthz)).json()) as { connections: number };
+      connections = body.connections;
+      if (connections !== 1) await sleep(25);
+    }
+    expect(connections).toBe(1);
+  });
+
+  it("answers 404 for any other HTTP path", async () => {
+    const { port } = await start(new FakeSubscriber());
+    const res = await fetch(`http://127.0.0.1:${port}/nope`);
+    expect(res.status).toBe(404);
   });
 });

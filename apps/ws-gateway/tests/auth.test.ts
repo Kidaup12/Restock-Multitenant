@@ -83,4 +83,33 @@ describe("sessionAuthorizeSocket", () => {
     const reject = sessionAuthorizeSocket(store(), () => null);
     await expect(reject("valid-token")).resolves.toBeNull();
   });
+
+  it("binds to the requested workspace when the user is a member of it", async () => {
+    const authorize = sessionAuthorizeSocket(store());
+    await expect(authorize("valid-token", "tenant-b")).resolves.toEqual({
+      tenantId: "tenant-b",
+    });
+  });
+
+  it("rejects a requested workspace outside the user's memberships", async () => {
+    const authorize = sessionAuthorizeSocket(store());
+    // Fail closed: no silent fallback to a tenant the client didn't ask for.
+    await expect(authorize("valid-token", "tenant-c")).resolves.toBeNull();
+  });
+
+  it("keeps first-membership behavior when no workspace is requested", async () => {
+    const authorize = sessionAuthorizeSocket(store());
+    await expect(authorize("valid-token", null)).resolves.toEqual({ tenantId: "tenant-a" });
+  });
+
+  it("passes the requested workspace through to a custom selector", async () => {
+    const seen: Array<string | null> = [];
+    const authorize = sessionAuthorizeSocket(store(), (tenantIds, requested) => {
+      seen.push(requested);
+      return tenantIds[0] ?? null;
+    });
+    await authorize("valid-token", "tenant-b");
+    await authorize("valid-token");
+    expect(seen).toEqual(["tenant-b", null]);
+  });
 });

@@ -31,10 +31,11 @@ USER node
 # Railway injects PORT; the app defaults to 8081 when unset.
 EXPOSE 8081
 
-# TCP liveness on the ws port (busybox nc). Shell form so ${PORT} resolves.
-# Railway ignores Docker HEALTHCHECK (its own health checks are HTTP-only);
-# this covers local compose and any host that honors it.
+# HTTP liveness via the gateway's /healthz (busybox wget). Shell form so
+# ${PORT} resolves. Railway ignores Docker HEALTHCHECK — point its own HTTP
+# health check at /healthz; this covers local compose and any host that
+# honors it.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD nc -z 127.0.0.1 "${PORT:-8081}" || exit 1
+  CMD wget -q -O /dev/null "http://127.0.0.1:${PORT:-8081}/healthz" || exit 1
 
 CMD ["node", "--enable-source-maps", "index.cjs"]

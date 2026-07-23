@@ -1,4 +1,4 @@
-import type { IncomingMessage } from "node:http";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
 import { TENANT_CHANNEL_PATTERN, decodeEnvelope, tenantIdFromChannel } from "@wezesha/realtime";
 import type { AuthorizeSocket } from "./auth";
@@ -62,6 +62,13 @@ function tokenFrom(req: IncomingMessage): string {
   return cookieValue(req.headers.cookie, SESSION_COOKIES);
 }
 
+/** The workspace (tenant id) the client wants this socket bound to; null when
+ *  it didn't say. The authorizer decides whether the request is honored. */
+function workspaceFrom(req: IncomingMessage): string | null {
+  const url = new URL(req.url ?? "/", "ws://gateway");
+  return url.searchParams.get("workspace") || null;
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => resolve(null), ms);
@@ -96,10 +103,25 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> {
   const byTenant = new Map<string, Set<WebSocket>>();
   const sockets = new Map<WebSocket, { tenantId: string; isAlive: boolean }>();
 
-  const wss = new WebSocketServer({ port: options.port });
+  // Own the HTTP server (instead of letting ws create one) so the same port
+  // answers a plain-HTTP liveness probe alongside the WebSocket upgrades.
+  const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+    const path = new URL(req.url ?? "/", "http://gateway").pathname;
+    if (req.method === "GET" && path === "/healthz") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ uptime: process.uptime(), connections: sockets.size }));
+      return;
+    }
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "not found" }));
+  });
+  const wss = new WebSocketServer({ server });
   await new Promise<void>((resolve, reject) => {
-    wss.once("listening", resolve);
-    wss.once("error", reject);
+    server.once("error", reject);
+    server.listen(options.port, () => {
+      server.removeListener("error", reject);
+      resolve();
+    });
   });
 
   subscriber.on("pmessage", (_pattern, channel, message) => {
@@ -118,7 +140,10 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> {
   wss.on("connection", (ws, req) => {
     void (async () => {
       // withTimeout also absorbs authorizer failures → treated as unauthorized.
-      const principal = await withTimeout(authorize(tokenFrom(req)), authorizeTimeoutMs);
+      const principal = await withTimeout(
+        authorize(tokenFrom(req), workspaceFrom(req)),
+        authorizeTimeoutMs
+      );
       if (!principal) {
         ws.close(4401, "unauthorized");
         return;
@@ -154,7 +179,7 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> {
     }
   }, heartbeatIntervalMs);
 
-  const address = wss.address();
+  const address = server.address();
   const port = typeof address === "object" && address !== null ? address.port : options.port;
 
   return {
@@ -163,7 +188,16 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> {
       clearInterval(heartbeat);
       for (const ws of wss.clients) ws.close(1001, "server shutting down");
       return new Promise<void>((resolve, reject) => {
-        wss.close((err) => (err ? reject(err) : resolve()));
+        // wss.close does not close a caller-provided HTTP server — chain it.
+        wss.close((wsErr) => {
+          server.close((httpErr) => {
+            const err = wsErr ?? httpErr;
+            if (err) reject(err);
+            else resolve();
+          });
+          // Sever lingering keep-alive probe connections so close() can finish.
+          server.closeAllConnections();
+        });
       });
     },
   };

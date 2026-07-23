@@ -39,17 +39,19 @@ export default async function SalesPage() {
     <div className="space-y-6">
       <PageHeader title="Sales data" description="What sold, when, across every channel" />
 
-      <Suspense
-        fallback={
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <SkeletonStatTile />
-            <SkeletonStatTile />
-            <SkeletonStatTile />
-          </div>
-        }
-      >
-        <SalesHeadline tenantId={tenantId} />
-      </Suspense>
+      <div data-tour="sales-overview">
+        <Suspense
+          fallback={
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <SkeletonStatTile />
+              <SkeletonStatTile />
+              <SkeletonStatTile />
+            </div>
+          }
+        >
+          <SalesHeadline tenantId={tenantId} />
+        </Suspense>
+      </div>
 
       <Suspense
         fallback={

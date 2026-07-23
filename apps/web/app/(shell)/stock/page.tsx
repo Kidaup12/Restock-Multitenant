@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { activeMembership, requireSession } from "@/lib/auth";
+import { hasPermission } from "@/lib/auth/permissions";
 import { cn } from "@/lib/cn";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -29,7 +30,10 @@ function ViewTabs({ view }: { view: "products" | "locations" }) {
     </Link>
   );
   return (
-    <div className="flex items-center gap-1 rounded-lg border border-edge bg-surface p-1">
+    <div
+      className="flex items-center gap-1 rounded-lg border border-edge bg-surface p-1"
+      data-tour="stock-tabs"
+    >
       {tab("/stock", "By product", view === "products")}
       {tab("/stock?view=locations", "By location", view === "locations")}
     </div>
@@ -58,8 +62,8 @@ export default async function StockPage({
   }
 
   const tenantId = membership.tenantId;
-  // The money-blind gate (role-based cost visibility) plugs in here.
-  const canViewCosts = true;
+  // Money-blind gate: MEMBERs (without view_costs) see no KES cost figures.
+  const canViewCosts = hasPermission(membership, "view_costs");
 
   return (
     <div className="space-y-6">

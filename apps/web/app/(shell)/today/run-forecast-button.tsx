@@ -26,7 +26,7 @@ export function RunForecastButton() {
   }
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" data-tour="today-run-forecast">
       {failed && <span className="text-xs text-negative">Run failed — try again</span>}
       <Button loading={running} onClick={run}>
         Run forecast
