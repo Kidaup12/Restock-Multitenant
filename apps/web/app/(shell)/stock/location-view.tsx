@@ -27,7 +27,9 @@ export async function LocationView({
   tenantId: string;
   canViewCosts?: boolean;
 }) {
-  const locations = await getStockByLocation(tenantId);
+  // canViewCosts flows into the query: per-line and per-location values come
+  // back null for a money-blind member, so the figures never reach the payload.
+  const locations = await getStockByLocation(tenantId, { canViewCosts });
 
   if (locations.length === 0) {
     return (

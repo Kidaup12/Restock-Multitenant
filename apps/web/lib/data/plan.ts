@@ -16,6 +16,13 @@ import {
  *
  * `splitByBudget` is pure (rows in, split out) so tests can drive it directly
  * against engine output.
+ *
+ * Cost fields are redacted here, not at render: `getBuyList` takes an explicit
+ * `canViewCosts` and nulls unit costs, line totals, and at-risk figures when it
+ * is false, so a money-blind member's payload never carries the numbers. The
+ * budget allocator still needs the real costs — actions run it on an
+ * unredacted list server-side, then pass the split through `redactBudgetSplit`
+ * before it leaves the server.
  */
 
 const URGENCY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -44,9 +51,11 @@ export type BuyListRow = {
   urgency: string;
   tier: BuyTier;
   recommendedQty: number;
-  unitCostKes: number;
-  /** recommendedQty x unit cost — what this line costs to order. */
-  lineTotalKes: number;
+  /** Null when the caller can't view costs. */
+  unitCostKes: number | null;
+  /** recommendedQty x unit cost — what this line costs to order. Null when the
+   *  caller can't view costs. */
+  lineTotalKes: number | null;
   priceKes: number;
   /** The engine's own explanation of the recommendation. */
   reasoning: string;
@@ -62,8 +71,10 @@ export type BuyListRow = {
   qtySummary: string;
   /** "ok", or why the budget planner can't reason about this row's economics. */
   plannable: PlannableReason;
-  /** Revenue the forecast expects to miss over the next 30 days if this item is left to stock out. */
-  atRiskKes: number;
+  /** Revenue the forecast expects to miss over the next 30 days if this item is
+   *  left to stock out. Gated with the cost figures: null when the caller
+   *  can't view costs (the screens mask it behind the same permission). */
+  atRiskKes: number | null;
 };
 
 export type BuyList = {
@@ -73,9 +84,23 @@ export type BuyList = {
   rows: BuyListRow[];
   /** Total products covered by the run (for the "n of m" subtitle). */
   totalPredicted: number;
-  /** Cost of ordering the whole list. */
-  totalCostKes: number;
+  /** Cost of ordering the whole list. Null when the caller can't view costs. */
+  totalCostKes: number | null;
 };
+
+/** A row before redaction — what the allocator and totals arithmetic run on. */
+type FullBuyListRow = BuyListRow & {
+  unitCostKes: number;
+  lineTotalKes: number;
+  atRiskKes: number;
+};
+
+const redactRow = (r: BuyListRow): BuyListRow => ({
+  ...r,
+  unitCostKes: null,
+  lineTotalKes: null,
+  atRiskKes: null,
+});
 
 function tierFor(urgency: string, daysLeftToOrder: number): BuyTier {
   if (urgency === "critical" || daysLeftToOrder <= 0) return "order_today";
@@ -83,8 +108,13 @@ function tierFor(urgency: string, daysLeftToOrder: number): BuyTier {
   return "can_wait";
 }
 
-/** The latest run's buy list, or null when no forecast has run yet. */
-export async function getBuyList(tenantId: string): Promise<BuyList | null> {
+/** The latest run's buy list, or null when no forecast has run yet. Rows are
+ *  built (and sorted) on full costs, then redacted, so ordering is identical
+ *  whichever way the flag lands. */
+export async function getBuyList(
+  tenantId: string,
+  { canViewCosts }: { canViewCosts: boolean }
+): Promise<BuyList | null> {
   const db = prismaForTenant(tenantId);
   const latest = await db.prediction.findFirst({
     orderBy: { runDate: "desc" },
@@ -123,7 +153,7 @@ export async function getBuyList(tenantId: string): Promise<BuyList | null> {
   const rows = predictions
     .map((p) => ({ ...p, qty: Math.round(p.recommendedQty) }))
     .filter((p) => p.qty > 0)
-    .map((p): BuyListRow => {
+    .map((p): FullBuyListRow => {
       const product = p.product;
       const leadDays = leadDaysFor(product, product.supplier) ?? 0;
       const daysLeftToOrder = p.daysUntilStockout - leadDays;
@@ -162,9 +192,9 @@ export async function getBuyList(tenantId: string): Promise<BuyList | null> {
   return {
     forecastRunId: latest.forecastRunId,
     runDate: latest.runDate,
-    rows,
+    rows: canViewCosts ? rows : rows.map(redactRow),
     totalPredicted: predictions.length,
-    totalCostKes: rows.reduce((sum, r) => sum + r.lineTotalKes, 0),
+    totalCostKes: canViewCosts ? rows.reduce((sum, r) => sum + r.lineTotalKes, 0) : null,
   };
 }
 
@@ -225,32 +255,36 @@ export type BudgetSplit = {
   deferred: BuyListRow[];
   /** Rows the allocator can't reason about (missing/broken cost data) — surfaced, never silently dropped. */
   checkCost: BuyListRow[];
-  fundedCostKes: number;
-  deferredCostKes: number;
+  /** The KES aggregates are null after `redactBudgetSplit` for a money-blind caller. */
+  fundedCostKes: number | null;
+  deferredCostKes: number | null;
   /** Revenue the forecast expects to miss in the next 30 days if the deferred items stay unfunded. */
-  deferredAtRiskKes: number;
+  deferredAtRiskKes: number | null;
   /** Budget still unspent after funding. */
-  leftoverKes: number;
+  leftoverKes: number | null;
   /** Criticals are non-negotiable: a budget below their cost overflows by this much. */
-  overBudgetKes: number;
+  overBudgetKes: number | null;
 };
 
 /**
  * Split the buy list against a cash cap. Priority: urgency first, then the
  * revenue at risk, then how soon the stockout lands — the budget goes where it
  * earns most. Criticals are always funded (overflow is surfaced, not hidden).
+ *
+ * Expects an unredacted list (real costs) — callers acting for a money-blind
+ * member fetch with costs visible, split, then `redactBudgetSplit` the result.
  */
 export function splitByBudget(rows: BuyListRow[], budgetKes: number): BudgetSplit {
   const checkCost = rows.filter((r) => r.plannable !== "ok");
   const scored = rows
-    .filter((r) => r.plannable === "ok" && r.lineTotalKes > 0)
+    .filter((r) => r.plannable === "ok" && (r.lineTotalKes ?? 0) > 0)
     .sort(
       (a, b) =>
         (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
-        b.atRiskKes - a.atRiskKes ||
+        (b.atRiskKes ?? 0) - (a.atRiskKes ?? 0) ||
         a.daysUntilStockout - b.daysUntilStockout
     )
-    .map((row) => ({ row, cost: row.lineTotalKes, urgency: row.urgency }));
+    .map((row) => ({ row, cost: row.lineTotalKes ?? 0, urgency: row.urgency }));
 
   const { selected, deferred, usedKes } = allocateByBudget(scored, budgetKes);
   const deferredRows = deferred.map((s) => s.row);
@@ -261,10 +295,27 @@ export function splitByBudget(rows: BuyListRow[], budgetKes: number): BudgetSpli
     deferred: deferredRows,
     checkCost,
     fundedCostKes: usedKes,
-    deferredCostKes: deferredRows.reduce((sum, r) => sum + r.lineTotalKes, 0),
-    deferredAtRiskKes: deferredRows.reduce((sum, r) => sum + r.atRiskKes, 0),
+    deferredCostKes: deferredRows.reduce((sum, r) => sum + (r.lineTotalKes ?? 0), 0),
+    deferredAtRiskKes: deferredRows.reduce((sum, r) => sum + (r.atRiskKes ?? 0), 0),
     leftoverKes: Math.max(0, budgetKes - usedKes),
     overBudgetKes: Math.max(0, usedKes - budgetKes),
+  };
+}
+
+/** Null out every KES figure in a split for a money-blind caller — the item
+ *  lists and counts survive, the money does not. */
+export function redactBudgetSplit(split: BudgetSplit, canViewCosts: boolean): BudgetSplit {
+  if (canViewCosts) return split;
+  return {
+    ...split,
+    funded: split.funded.map(redactRow),
+    deferred: split.deferred.map(redactRow),
+    checkCost: split.checkCost.map(redactRow),
+    fundedCostKes: null,
+    deferredCostKes: null,
+    deferredAtRiskKes: null,
+    leftoverKes: null,
+    overBudgetKes: null,
   };
 }
 

@@ -4,6 +4,11 @@ import { prismaForTenant } from "@wezesha/db";
  * Today-screen queries. Server-only: every function takes an explicit tenantId
  * and runs on the RLS-enforced tenant client — no query here can read another
  * tenant's rows even if a `where` is wrong.
+ *
+ * Cost fields are redacted here, not at render: every getter takes an explicit
+ * `canViewCosts` and returns null for cost figures when it is false, so a
+ * money-blind member's payload never carries the numbers. Revenue is a sales
+ * figure and stays visible.
  */
 
 const DAY_MS = 86_400_000;
@@ -20,11 +25,15 @@ export type TodayMetrics = {
   trackedProducts: number;
   /** Active products whose InventoryLevel rows sum to zero on-hand. */
   stockedOutProducts: number;
-  /** Stock on the shelf with no sale inside the window: SKU count + cost tied up. */
-  deadStock: { skus: number; costKes: number; windowDays: number };
+  /** Stock on the shelf with no sale inside the window: SKU count + cost tied
+   *  up. Cost is null when the caller can't view costs. */
+  deadStock: { skus: number; costKes: number | null; windowDays: number };
 };
 
-export async function getTodayMetrics(tenantId: string): Promise<TodayMetrics> {
+export async function getTodayMetrics(
+  tenantId: string,
+  { canViewCosts }: { canViewCosts: boolean }
+): Promise<TodayMetrics> {
   const db = prismaForTenant(tenantId);
   const now = Date.now();
   const since30 = new Date(now - 30 * DAY_MS);
@@ -68,7 +77,7 @@ export async function getTodayMetrics(tenantId: string): Promise<TodayMetrics> {
     revenuePrev30dKes: prior._sum.revenueKes ?? 0,
     trackedProducts: products.length,
     stockedOutProducts: stockedOut,
-    deadStock: { skus: deadSkus, costKes: deadCostKes, windowDays },
+    deadStock: { skus: deadSkus, costKes: canViewCosts ? deadCostKes : null, windowDays },
   };
 }
 
@@ -80,8 +89,9 @@ export type ReorderRow = {
   daysUntilStockout: number;
   urgency: string;
   recommendedQty: number;
-  /** recommendedQty x unit cost — what placing this order costs. */
-  orderCostKes: number;
+  /** recommendedQty x unit cost — what placing this order costs. Null when the
+   *  caller can't view costs. */
+  orderCostKes: number | null;
 };
 
 export type ReorderNeeded = {
@@ -98,7 +108,7 @@ const URGENCY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, 
 /** The latest forecast run's reorder list, or null when no run exists yet. */
 export async function getReorderNeeded(
   tenantId: string,
-  limit = 8
+  { canViewCosts, limit = 8 }: { canViewCosts: boolean; limit?: number }
 ): Promise<ReorderNeeded | null> {
   const db = prismaForTenant(tenantId);
   const latest = await db.prediction.findFirst({
@@ -134,7 +144,7 @@ export async function getReorderNeeded(
       daysUntilStockout: p.daysUntilStockout,
       urgency: p.urgency,
       recommendedQty: Math.round(p.recommendedQty),
-      orderCostKes: Math.round(p.recommendedQty) * p.product.costKes,
+      orderCostKes: canViewCosts ? Math.round(p.recommendedQty) * p.product.costKes : null,
     }));
 
   return {

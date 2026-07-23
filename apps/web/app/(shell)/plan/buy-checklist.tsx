@@ -56,8 +56,13 @@ export function BuyChecklist({
   const [pending, startTransition] = useTransition();
 
   const rows = buyList.rows;
+  // Line totals are null for money-blind members; the total masks with them.
   const pickedTotalKes = useMemo(
-    () => rows.reduce((sum, r) => (picked.has(r.predictionId) ? sum + r.lineTotalKes : sum), 0),
+    () =>
+      rows.reduce(
+        (sum, r) => (picked.has(r.predictionId) ? sum + (r.lineTotalKes ?? 0) : sum),
+        0
+      ),
     [rows, picked]
   );
 
@@ -124,7 +129,7 @@ export function BuyChecklist({
             title: "Restock buy list",
             subtitle: `Forecast run ${runDay} · ${rows.length} products`,
             footNote: canViewCosts
-              ? `Full list: KES ${Math.round(buyList.totalCostKes).toLocaleString("en-KE")}`
+              ? `Full list: KES ${Math.round(buyList.totalCostKes ?? 0).toLocaleString("en-KE")}`
               : undefined,
           }}
         />

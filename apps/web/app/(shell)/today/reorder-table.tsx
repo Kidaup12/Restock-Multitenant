@@ -28,7 +28,9 @@ export async function ReorderTable({
   tenantId: string;
   canViewCosts?: boolean;
 }) {
-  const reorder = await getReorderNeeded(tenantId);
+  // canViewCosts flows into the query: order costs come back null for a
+  // money-blind member, so the figures never reach the payload.
+  const reorder = await getReorderNeeded(tenantId, { canViewCosts });
 
   if (!reorder) {
     return (

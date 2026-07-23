@@ -27,7 +27,9 @@ export async function MetricsTiles({
   tenantId: string;
   canViewCosts?: boolean;
 }) {
-  const m = await getTodayMetrics(tenantId);
+  // canViewCosts flows into the query: cost fields come back null for a
+  // money-blind member, so the figures never reach the payload.
+  const m = await getTodayMetrics(tenantId, { canViewCosts });
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

@@ -4,6 +4,11 @@ import { prismaForTenant } from "@wezesha/db";
  * Stock-screen queries. Server-only; explicit tenantId; RLS-enforced tenant
  * client throughout. On-hand always derives from InventoryLevel sums — the
  * Product.currentStock cache is for list surfaces that can tolerate staleness.
+ *
+ * Cost fields are redacted here, not at render: both getters take an explicit
+ * `canViewCosts` and return null for unit costs and stock-value-at-cost when
+ * it is false, so a money-blind member's payload never carries the numbers.
+ * Selling price is a sales figure and stays visible.
  */
 
 export type CatalogueRow = {
@@ -17,12 +22,16 @@ export type CatalogueRow = {
   daysCover: number | null;
   urgency: string | null;
   priceKes: number;
-  costKes: number;
-  /** onHand x unit cost. */
-  stockValueKes: number;
+  /** Null when the caller can't view costs. */
+  costKes: number | null;
+  /** onHand x unit cost. Null when the caller can't view costs. */
+  stockValueKes: number | null;
 };
 
-export async function getStockCatalogue(tenantId: string): Promise<CatalogueRow[]> {
+export async function getStockCatalogue(
+  tenantId: string,
+  { canViewCosts }: { canViewCosts: boolean }
+): Promise<CatalogueRow[]> {
   const db = prismaForTenant(tenantId);
   const [products, levels, latest] = await Promise.all([
     db.product.findMany({
@@ -61,8 +70,8 @@ export async function getStockCatalogue(tenantId: string): Promise<CatalogueRow[
       daysCover: prediction?.daysUntilStockout ?? null,
       urgency: prediction?.urgency ?? null,
       priceKes: p.priceKes,
-      costKes: p.costKes,
-      stockValueKes: units * p.costKes,
+      costKes: canViewCosts ? p.costKes : null,
+      stockValueKes: canViewCosts ? units * p.costKes : null,
     };
   });
 }
@@ -72,7 +81,8 @@ export type LocationLine = {
   sku: string;
   title: string;
   onHand: number;
-  valueKes: number;
+  /** onHand x unit cost. Null when the caller can't view costs. */
+  valueKes: number | null;
 };
 
 export type LocationStock = {
@@ -83,12 +93,16 @@ export type LocationStock = {
   /** SKUs with units at this location. */
   skuCount: number;
   unitsOnHand: number;
-  stockValueKes: number;
+  /** Null when the caller can't view costs. */
+  stockValueKes: number | null;
   /** Per-product levels, largest holdings first. Zero-stock lines excluded. */
   lines: LocationLine[];
 };
 
-export async function getStockByLocation(tenantId: string): Promise<LocationStock[]> {
+export async function getStockByLocation(
+  tenantId: string,
+  { canViewCosts }: { canViewCosts: boolean }
+): Promise<LocationStock[]> {
   const db = prismaForTenant(tenantId);
   const locations = await db.location.findMany({
     orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
@@ -100,15 +114,8 @@ export async function getStockByLocation(tenantId: string): Promise<LocationStoc
   });
 
   return locations.map((location) => {
-    const lines = location.inventoryLevels
+    const held = location.inventoryLevels
       .filter((level) => level.onHand > 0)
-      .map((level) => ({
-        productId: level.product.id,
-        sku: level.product.sku,
-        title: level.product.title,
-        onHand: level.onHand,
-        valueKes: level.onHand * level.product.costKes,
-      }))
       .sort((a, b) => b.onHand - a.onHand);
 
     return {
@@ -116,10 +123,18 @@ export async function getStockByLocation(tenantId: string): Promise<LocationStoc
       name: location.name,
       locationType: location.locationType,
       isPrimary: location.isPrimary,
-      skuCount: lines.length,
-      unitsOnHand: lines.reduce((s, l) => s + l.onHand, 0),
-      stockValueKes: lines.reduce((s, l) => s + l.valueKes, 0),
-      lines,
+      skuCount: held.length,
+      unitsOnHand: held.reduce((s, l) => s + l.onHand, 0),
+      stockValueKes: canViewCosts
+        ? held.reduce((s, l) => s + l.onHand * l.product.costKes, 0)
+        : null,
+      lines: held.map((level) => ({
+        productId: level.product.id,
+        sku: level.product.sku,
+        title: level.product.title,
+        onHand: level.onHand,
+        valueKes: canViewCosts ? level.onHand * level.product.costKes : null,
+      })),
     };
   });
 }

@@ -87,7 +87,7 @@ describe.skipIf(!runnable)("forecast run (seeded local db)", () => {
   });
 
   it("feeds the reorder query: most urgent first, order costs attached", async () => {
-    const reorder = await getReorderNeeded(seeded.tenantId);
+    const reorder = await getReorderNeeded(seeded.tenantId, { canViewCosts: true });
     expect(reorder).not.toBeNull();
     expect(reorder!.totalPredicted).toBe(seeded.productCount);
     expect(reorder!.rows.length).toBeGreaterThan(0);

@@ -146,7 +146,7 @@ export function BudgetPlanner({
               value={String(split.funded.length)}
               delta={{
                 label: canViewCosts
-                  ? `KES ${formatCompact(split.fundedCostKes)} of the budget`
+                  ? `KES ${formatCompact(split.fundedCostKes ?? 0)} of the budget`
                   : "items bought within budget",
                 tone: "neutral",
               }}
@@ -156,7 +156,7 @@ export function BudgetPlanner({
               value={String(split.deferred.length)}
               delta={{
                 label: canViewCosts
-                  ? `KES ${formatCompact(split.deferredCostKes)} to fund fully`
+                  ? `KES ${formatCompact(split.deferredCostKes ?? 0)} to fund fully`
                   : "items held for later",
                 tone: "neutral",
               }}
@@ -167,16 +167,16 @@ export function BudgetPlanner({
               delta={{ label: "next 30 days, if deferrals stock out", tone: "neutral" }}
             />
             <StatTile
-              label={split.overBudgetKes > 0 ? "Over budget" : "Left over"}
+              label={(split.overBudgetKes ?? 0) > 0 ? "Over budget" : "Left over"}
               value={
                 <CostValue
-                  amount={split.overBudgetKes > 0 ? split.overBudgetKes : split.leftoverKes}
+                  amount={(split.overBudgetKes ?? 0) > 0 ? split.overBudgetKes : split.leftoverKes}
                   canViewCosts={canViewCosts}
                   compact
                 />
               }
               delta={
-                split.overBudgetKes > 0
+                (split.overBudgetKes ?? 0) > 0
                   ? { label: "criticals don't wait for budget", tone: "negative" }
                   : { label: "unspent after funding", tone: "positive" }
               }
@@ -274,7 +274,7 @@ function BudgetTable({
             </TableCell>
             {showAtRisk && (
               <TableCell numeric>
-                {row.atRiskKes > 0 ? (
+                {(row.atRiskKes ?? 0) > 0 ? (
                   <CostValue amount={row.atRiskKes} canViewCosts={canViewCosts} className="text-negative" />
                 ) : (
                   "—"
