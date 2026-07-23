@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@wezesha/db": "*",
+    "@wezesha/forecast": "*",
     "@wezesha/queue": "*",
     "@wezesha/realtime": "*",
     "@wezesha/shopify": "*",
