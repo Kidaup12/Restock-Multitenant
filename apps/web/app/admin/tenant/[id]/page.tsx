@@ -79,8 +79,8 @@ export default async function AdminTenantPage({
 
   const db = prismaForTenant(id);
   const [metrics, reorder, connection, cursors, audit] = await Promise.all([
-    getTodayMetrics(id),
-    getReorderNeeded(id, 6),
+    getTodayMetrics(id, { canViewCosts: true }),
+    getReorderNeeded(id, { canViewCosts: true, limit: 6 }),
     db.shopifyConnection.findFirst(),
     db.ingestCursor.findMany({ where: { source: "shopify" } }),
     listAuditEvents({ tenantId: id, limit: 12 }),
@@ -109,7 +109,7 @@ export default async function AdminTenantPage({
           label={`Dead stock · ${metrics.deadStock.windowDays}d`}
           value={String(metrics.deadStock.skus)}
           delta={{
-            label: `${kes.format(metrics.deadStock.costKes)} tied up`,
+            label: `${kes.format(metrics.deadStock.costKes ?? 0)} tied up`,
             tone: metrics.deadStock.skus > 0 ? "negative" : "neutral",
           }}
         />

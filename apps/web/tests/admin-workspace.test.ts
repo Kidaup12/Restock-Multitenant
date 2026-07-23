@@ -60,20 +60,20 @@ describe.skipIf(!runnable)("impersonated summary reads (RLS-scoped)", () => {
   });
 
   it("tenant A's summary carries only A's revenue and catalogue", async () => {
-    const metrics = await today.getTodayMetrics(tenantAId);
+    const metrics = await today.getTodayMetrics(tenantAId, { canViewCosts: true });
     expect(metrics.revenue30dKes).toBe(1111);
     expect(metrics.trackedProducts).toBe(1);
     expect(metrics.stockedOutProducts).toBe(0);
   });
 
   it("tenant B's summary is B's alone — same query, other GUC", async () => {
-    const metrics = await today.getTodayMetrics(tenantBId);
+    const metrics = await today.getTodayMetrics(tenantBId, { canViewCosts: true });
     expect(metrics.revenue30dKes).toBe(2222);
     expect(metrics.trackedProducts).toBe(1);
   });
 
   it("a junk tenant id sees nothing (RLS fail-closed), not everything", async () => {
-    const metrics = await today.getTodayMetrics("no-such-tenant");
+    const metrics = await today.getTodayMetrics("no-such-tenant", { canViewCosts: true });
     expect(metrics.revenue30dKes).toBe(0);
     expect(metrics.trackedProducts).toBe(0);
   });
