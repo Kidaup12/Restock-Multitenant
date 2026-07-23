@@ -9,6 +9,10 @@ coverage/
 # environment — never committed
 .env
 .env.*
+!.env.example
+
+# generated prisma client
+packages/db/generated/
 
 # OS / editor
 .DS_Store

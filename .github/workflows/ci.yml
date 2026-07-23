@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, "feature/**", "fix/**"]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  db:
+    name: db — migrate, RLS isolation, typecheck
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wezesha
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d wezesha"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://wezesha_app:wezesha_app_dev@localhost:5434/wezesha
+      SERVICE_DATABASE_URL: postgresql://wezesha_service:wezesha_service_dev@localhost:5434/wezesha
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5434/wezesha
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run -w @wezesha/db db:generate
+
+      - name: Apply migrations (roles, tables, policies)
+        run: npm run -w @wezesha/db db:migrate:deploy
+
+      - name: Typecheck
+        run: npm run -w @wezesha/db typecheck
+
+      - name: Tests (RLS isolation + coverage census, as wezesha_app)
+        run: npm run -w @wezesha/db test
