@@ -8,3 +8,82 @@ datasource db {
   url       = env("DATABASE_URL") // wezesha_app — RLS enforced
   directUrl = env("DIRECT_URL") // owner role — migrations only
 }
+
+// ── Tenancy core ─────────────────────────────────────────────────────────────
+// Every tenant-owned table carries tenantId and a tenant_isolation RLS policy
+// (appended in its migration). Tenant itself is the one global table so far.
+
+model Tenant {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  timezone  String   @default("Africa/Nairobi")
+  currency  String   @default("KES")
+  source    String   @default("shopify") // "shopify" | "odoo"
+  createdAt DateTime @default(now())
+
+  memberships  Membership[]
+  tenantConfig TenantConfig?
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Membership {
+  id                   String    @id @default(cuid())
+  userId               String // Supabase auth.users UUID — plain String, deliberately no FK
+  tenantId             String
+  role                 Role      @default(OWNER)
+  // Human display name (users are otherwise email-only).
+  displayName          String?
+  // Explicit per-user permission keys. null = inherit the role's preset; a
+  // non-null array (even empty) is an admin override.
+  permissions          Json?
+  // First time this member finished the welcome/guide. null = show first-run extras.
+  welcomedAt           DateTime?
+  // Terms & Conditions consent (server-enforced in the shop layout). Accepted iff
+  // acceptedTermsAt set AND acceptedTermsVersion == current TERMS_VERSION.
+  acceptedTermsAt      DateTime?
+  acceptedTermsVersion String?
+  createdAt            DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+}
+
+model TenantConfig {
+  id       String @id @default(cuid())
+  tenantId String @unique
+
+  // Integrations
+  posFeedUrl  String? // POS feed base URL (e.g. Dellwest)
+  posFeedSlug String? // ingest slug (defaults to tenant slug)
+  alertEmail  String? // where forecast-health / digest alerts go
+  notifyPrefs Json? // { phantomPo, lowStockDigest, syncFailure, weeklySpotCheck: bool }
+
+  // Curated forecast knobs (null = code default)
+  serviceLevelZA   Float? // overrides A z
+  serviceLevelZB   Float? // overrides B z
+  serviceLevelZC   Float? // overrides C z
+  orderCapMultiple Float? // overrides the forecast cap multiple
+
+  // Dead-stock lookback window (days with no sale = dead). null = code default.
+  deadStockWindowDays Int?
+
+  // Per-ABC-class ordering method (null = recommended default):
+  // "stay_in_stock" | "balanced" | "lean_cash".
+  methodA String?
+  methodB String?
+  methodC String?
+
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+}
