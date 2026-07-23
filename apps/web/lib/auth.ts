@@ -1,4 +1,4 @@
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
@@ -55,16 +55,65 @@ export async function requireSession(): Promise<AppSession> {
   return session;
 }
 
+/** Cookie that pins the active workspace (a tenant id). Set only by
+ *  setWorkspaceCookie; always validated against real memberships on read. */
+export const WORKSPACE_COOKIE = "wz-workspace";
+
 /**
- * The user's active workspace: earliest membership, single-workspace
- * assumption for now (a workspace switcher will own this choice). Runs on the
- * service client — membership resolution is the auth bootstrap step that
+ * The user's active workspace: the `wz-workspace` cookie when it names a
+ * workspace the user actually belongs to, otherwise the earliest membership.
+ * Every tenant-scoped page resolves its tenant through this one path. Runs on
+ * the service client — membership resolution is the auth bootstrap step that
  * happens before any tenant scope exists.
  */
 export async function activeMembership(userId: string) {
+  const preferred = (await cookies()).get(WORKSPACE_COOKIE)?.value ?? null;
+  return resolveActiveMembership(userId, preferred);
+}
+
+/** Cookie-free core of activeMembership; what the tests exercise. */
+export async function resolveActiveMembership(
+  userId: string,
+  preferredTenantId: string | null,
+) {
+  if (preferredTenantId) {
+    const preferred = await prismaService.membership.findUnique({
+      where: { userId_tenantId: { userId, tenantId: preferredTenantId } },
+      include: { tenant: true },
+    });
+    if (preferred) return preferred;
+  }
   return prismaService.membership.findFirst({
     where: { userId },
     orderBy: { createdAt: "asc" },
     include: { tenant: true },
   });
+}
+
+/** All the user's memberships for the workspace switcher, earliest first. */
+export async function listMemberships(userId: string) {
+  return prismaService.membership.findMany({
+    where: { userId },
+    orderBy: { createdAt: "asc" },
+    include: { tenant: true },
+  });
+}
+
+/** Point the workspace cookie at a tenant. Callers must have verified the
+ *  user's membership first — the cookie is a preference, not a credential
+ *  (activeMembership re-validates on every read). */
+export async function setWorkspaceCookie(tenantId: string): Promise<void> {
+  (await cookies()).set(WORKSPACE_COOKIE, tenantId, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 365,
+  });
+}
+
+/** Only same-app relative paths are allowed as post-auth redirect targets. */
+export function safeInternalPath(path: string | null | undefined): string | null {
+  if (!path || !path.startsWith("/") || path.startsWith("//")) return null;
+  return path;
 }

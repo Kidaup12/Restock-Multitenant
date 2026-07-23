@@ -9,7 +9,10 @@ const STORAGE_KEY = "wezesha-theme";
  * The active icon is chosen by CSS (dark: variant), so no client state is
  * needed and there is nothing to mismatch on hydration.
  */
-export function ThemeToggle({ className }: { className?: string }) {
+export function ThemeToggle({
+  className,
+  ...rest
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   function toggle() {
     const root = document.documentElement;
     const next = root.dataset.theme === "dark" ? "light" : "dark";
@@ -23,6 +26,7 @@ export function ThemeToggle({ className }: { className?: string }) {
 
   return (
     <button
+      {...rest}
       type="button"
       onClick={toggle}
       aria-label="Toggle theme"

@@ -10,7 +10,12 @@ import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { PasswordInput } from "@/components/auth/password-input";
 
-export function LoginForm() {
+export function LoginForm({
+  redirectTo,
+}: {
+  /* Post-login destination (sanitized server-side); e.g. an invite page. */
+  redirectTo?: string | null;
+}) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -32,7 +37,7 @@ export function LoginForm() {
       setError(signInError.message ?? "Sign in failed. Please try again.");
       return;
     }
-    router.push("/today");
+    router.push(redirectTo ?? "/today");
   }
 
   return (
@@ -118,7 +123,11 @@ export function LoginForm() {
       <p className="mt-6 text-center text-sm text-ink-muted">
         New to Wezesha?{" "}
         <Link
-          href="/signup"
+          href={
+            redirectTo
+              ? `/signup?redirect=${encodeURIComponent(redirectTo)}`
+              : "/signup"
+          }
           className="font-medium text-accent-ink hover:underline"
         >
           Create an account
