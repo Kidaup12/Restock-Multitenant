@@ -235,6 +235,7 @@ model Supplier {
   id              String    @id @default(cuid())
   tenantId        String
   name            String
+  email           String? // where "Email to supplier" sends the PO; null = not captured yet
   country         String?
   currency        String    @default("USD")
   // null = unknown. Deliberately no default: a guessed lead time silently skews
@@ -519,7 +520,12 @@ model SpotCheck {
 model Order {
   id                  String    @id @default(cuid())
   tenantId            String
-  predictionId        String
+  // Provenance link to the forecast row that recommended this buy. Nullable +
+  // SET NULL: a forecast re-run replaces all Prediction rows, and the order
+  // queue / receiving history must survive that — only the link is cleared.
+  predictionId        String?
+  // pending (queued to buy) → ordered (on a created PO) → completed (its PO
+  // lines fully received). cancelled = withdrawn (PO cancelled/deleted).
   status              String    @default("pending")
   shopifyDraftOrderId String?
   approvedAt          DateTime?
@@ -546,7 +552,7 @@ model Order {
   qbDocRef String?
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  prediction    Prediction     @relation(fields: [predictionId], references: [id], onDelete: Cascade)
+  prediction    Prediction?    @relation(fields: [predictionId], references: [id], onDelete: SetNull)
   purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, status])
@@ -560,14 +566,17 @@ model PurchaseOrder {
   supplierId      String?
   vendor          String? // brand label when grouped by brand (suppliers optional)
   poNumber        String
-  // draft | awaiting_qb | confirmed | received | cancelled.
-  // awaiting_qb = generated + "marked ordered" in-app, expected to be entered into QB.
-  // confirmed   = a matching Bill/PO was seen in the QB read-back feed.
+  // Lifecycle: draft | sent | partially_received | received | cancelled.
+  // QB evidence track (unused until the QB read-back feed lands): awaiting_qb =
+  // expected to be entered into QB; confirmed = a matching Bill/PO was seen.
   status          String    @default("draft")
   currency        String    @default("KES")
   subtotalKes     Float     @default(0)
   createdAt       DateTime  @default(now())
   sentAt          DateTime?
+  // ETA promised to the receiving flow: sentAt + supplier lead time when known.
+  // On-time scoring compares receivedAt against this.
+  expectedAt      DateTime?
   // Who created this order (audit). userId = auth User.id; name = display-name/email
   // snapshot at creation so the PO list shows it without a per-row user lookup.
   createdByUserId String?
@@ -610,6 +619,10 @@ model PurchaseOrderLine {
   // The model's recommended qty captured at PO creation (before any manual edit),
   // so we can measure recommended-vs-actual later. Null for hand-built lines.
   recommendedQty  Int?
+  // Line-by-line receiving: cumulative units checked in (partial deliveries
+  // allowed), and when the latest receipt for this line happened.
+  receivedQty     Int       @default(0)
+  receivedAt      DateTime?
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   product       Product       @relation(fields: [productId], references: [id], onDelete: Cascade)

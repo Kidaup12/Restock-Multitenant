@@ -264,14 +264,165 @@ export async function seedDev(): Promise<SeedResult> {
   };
 }
 
+// ── Orders demo (opt-in; NOT part of seedDev) ────────────────────────────────
+// Purchasing history + a live order queue so the Orders screen demos end to
+// end: two delivered POs (one on-time, one late) that give the supplier
+// scorecards real data, and pending queue rows ready to become POs. Kept out
+// of seedDev so suites that assert on its exact counts stay stable; run the
+// script directly (or call this explicitly) to get the full demo state.
+
+/** Whole days ago as a Date (not UTC-midnight — receipt times are moments). */
+function daysAgo(days: number): Date {
+  return new Date(Date.now() - days * 86_400_000);
+}
+
+export type OrdersDemoResult = { historicalPos: number; pendingOrders: number };
+
+export async function seedOrdersDemo(tenantId: string): Promise<OrdersDemoResult> {
+  const suppliers = await prismaService.supplier.findMany({
+    where: { tenantId },
+    orderBy: { createdAt: "asc" },
+    select: { id: true, name: true, leadTimeAvgDays: true },
+  });
+  const products = await prismaService.product.findMany({
+    where: { tenantId },
+    select: { id: true, sku: true, title: true, costKes: true, currentStock: true },
+  });
+  const bySku = new Map(products.map((p) => [p.sku, p]));
+  const supplierByName = new Map(suppliers.map((s) => [s.name, s]));
+
+  // Re-runnable: clear this section's own rows only.
+  await prismaService.purchaseOrder.deleteMany({
+    where: { tenantId, poNumber: { in: ["PO-0001", "PO-0002"] } },
+  });
+  await prismaService.order.deleteMany({ where: { tenantId, status: "pending" } });
+
+  // Deliverable POs need a reachable supplier.
+  for (const s of suppliers) {
+    const email = `orders@${s.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.example`;
+    await prismaService.supplier.update({ where: { id: s.id }, data: { email } });
+  }
+
+  // Delivered history. Receipts are in the past, so stock levels are NOT
+  // touched here — current on-hand already reflects them.
+  const history: {
+    poNumber: string;
+    supplier: string;
+    sentDaysAgo: number;
+    leadActualDays: number; // received sentDaysAgo - leadActualDays days ago
+    lines: { sku: string; quantity: number }[];
+  }[] = [
+    {
+      // 9 days against a 10-day promise — on time, in full.
+      poNumber: "PO-0001",
+      supplier: "Beauty Plus Distributors",
+      sentDaysAgo: 40,
+      leadActualDays: 9,
+      lines: [
+        { sku: "GAR-VCS-30", quantity: 36 },
+        { sku: "NIV-PR-400", quantity: 48 },
+      ],
+    },
+    {
+      // 25 days against a 21-day promise — late, in full.
+      poNumber: "PO-0002",
+      supplier: "Haria Industries",
+      sentDaysAgo: 30,
+      leadActualDays: 25,
+      lines: [
+        { sku: "NL-BJ-250", quantity: 72 },
+        { sku: "MOV-HJ-200", quantity: 48 },
+        { sku: "ARI-MJ-90", quantity: 120 },
+      ],
+    },
+  ];
+
+  let historicalPos = 0;
+  for (const po of history) {
+    const supplier = supplierByName.get(po.supplier);
+    if (!supplier) continue;
+    const sentAt = daysAgo(po.sentDaysAgo);
+    const receivedAt = daysAgo(po.sentDaysAgo - po.leadActualDays);
+    const expectedAt =
+      supplier.leadTimeAvgDays != null
+        ? daysAgo(po.sentDaysAgo - supplier.leadTimeAvgDays)
+        : null;
+    const lines = po.lines
+      .map((l) => ({ ...l, product: bySku.get(l.sku) }))
+      .filter((l) => l.product != null);
+    await prismaService.purchaseOrder.create({
+      data: {
+        tenantId,
+        supplierId: supplier.id,
+        poNumber: po.poNumber,
+        status: "received",
+        subtotalKes: lines.reduce((s, l) => s + l.quantity * l.product!.costKes, 0),
+        createdAt: sentAt,
+        sentAt,
+        expectedAt,
+        receivedAt,
+        createdByName: "Amara Dev",
+        lines: {
+          create: lines.map((l) => ({
+            tenantId,
+            productId: l.product!.id,
+            sku: l.sku,
+            title: l.product!.title,
+            quantity: l.quantity,
+            unitCostKes: l.product!.costKes,
+            lineTotalKes: l.quantity * l.product!.costKes,
+            recommendedQty: l.quantity,
+            receivedQty: l.quantity,
+            receivedAt,
+          })),
+        },
+      },
+    });
+    historicalPos++;
+  }
+
+  // The live queue: what the shop should buy next, across all three suppliers.
+  // MAY-COL-BLK (30 < MOQ 48) demonstrates the MOQ floor at PO creation.
+  const queue: { sku: string; qty: number }[] = [
+    { sku: "GAR-VCS-30", qty: 30 },
+    { sku: "NIV-PR-400", qty: 36 },
+    { sku: "NL-GLY-750", qty: 120 },
+    { sku: "DAR-EMB-3X", qty: 80 },
+    { sku: "ARI-MJ-90", qty: 150 },
+    { sku: "CAN-SHE-340", qty: 60 },
+    { sku: "MAY-COL-BLK", qty: 30 },
+  ];
+  let pendingOrders = 0;
+  for (const item of queue) {
+    const product = bySku.get(item.sku);
+    if (!product) continue;
+    await prismaService.order.create({
+      data: {
+        tenantId,
+        status: "pending",
+        productId: product.id,
+        orderedQty: item.qty,
+        stockAtOrder: product.currentStock,
+      },
+    });
+    pendingOrders++;
+  }
+
+  return { historicalPos, pendingOrders };
+}
+
 const invokedDirectly =
   typeof process.argv[1] === "string" && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (invokedDirectly) {
   seedDev()
-    .then((r) => {
+    .then(async (r) => {
       console.log(
         `seeded tenant ${DEV_TENANT_SLUG} (${r.tenantId}): ${r.productCount} products, ${r.salesRows} sales rows`
+      );
+      const demo = await seedOrdersDemo(r.tenantId);
+      console.log(
+        `orders demo: ${demo.historicalPos} delivered POs, ${demo.pendingOrders} queued orders`
       );
       console.log(`sign in as ${DEV_USER_EMAIL} / ${DEV_USER_PASSWORD}`);
       return prismaService.$disconnect();

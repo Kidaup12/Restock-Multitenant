@@ -8,6 +8,8 @@ export interface EmailMessage {
   to: string;
   subject: string;
   text: string;
+  /** Optional rich body; providers fall back to `text` for plain-text clients. */
+  html?: string;
 }
 
 export async function sendEmail({ to, subject, text }: EmailMessage): Promise<void> {
