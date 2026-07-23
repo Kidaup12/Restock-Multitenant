@@ -1,0 +1,21 @@
+# Local dev database. Host port 5434 (5432/5433 are taken by other local stacks).
+#   docker compose up -d db
+services:
+  db:
+    image: postgres:16.4-alpine
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: wezesha
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d wezesha"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+
+volumes:
+  dbdata:

@@ -1,0 +1,10 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // wezesha_app — RLS enforced
+  directUrl = env("DIRECT_URL") // owner role — migrations only
+}

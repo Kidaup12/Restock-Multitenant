@@ -1,0 +1,27 @@
+{
+  "name": "@wezesha/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prisma schema, migrations, and the tenant-scoped database clients",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0",
+    "dotenv": "^16.6.1",
+    "pg": "^8.22.0",
+    "prisma": "^6.1.0",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}
