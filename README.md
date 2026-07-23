@@ -15,6 +15,10 @@ per-tenant data isolation enforced at the database.
   clients (RLS enforcement)
 - `packages/realtime` — typed realtime event contract and the Redis publish
   helper
+- `packages/queue` — BullMQ sync queue: deterministic job ids + the no-overlap
+  enqueue guard (shared by web and worker)
+- `packages/shopify` — Shopify Admin API core: OAuth + HMAC verification, typed
+  GraphQL client with rate-limit handling, id/sales mappers, token crypto
 - `apps/forecast` — Python forecasting sidecar (planned)
 
 ## Development

@@ -112,6 +112,9 @@ model Tenant {
   orders                Order[]
   purchaseOrders        PurchaseOrder[]
   distributionPlans     DistributionPlan[]
+  shopifyConnection     ShopifyConnection?
+  ingestCursors         IngestCursor[]
+  notifications         Notification[]
 }
 
 enum Role {
@@ -234,7 +237,9 @@ model Supplier {
   name            String
   country         String?
   currency        String    @default("USD")
-  leadTimeAvgDays Int       @default(30)
+  // null = unknown. Deliberately no default: a guessed lead time silently skews
+  // reorder points, so the value stays empty until the owner supplies it.
+  leadTimeAvgDays Int?
   leadTimeStdDays Int       @default(7)
   moq             Int       @default(1)
   notes           String?
@@ -659,6 +664,69 @@ model DistributionPlanLine {
 
   @@index([planId])
   @@index([tenantId])
+}
+
+// ── Integrations (Shopify) ───────────────────────────────────────────────────
+
+// One Shopify store per tenant. The offline OAuth token is stored as
+// AES-256-GCM ciphertext (@wezesha/shopify encrypt()/decrypt(), keyed by
+// TOKEN_ENCRYPTION_KEY) — never plaintext. shopDomain is globally unique: it is
+// the tenant-resolution key for webhooks, which arrive with no session.
+model ShopifyConnection {
+  id            String    @id @default(cuid())
+  tenantId      String    @unique
+  shopDomain    String    @unique // <store>.myshopify.com
+  accessToken   String // AES-256-GCM ciphertext
+  scopes        String // comma-separated granted scopes, as returned by the token exchange
+  installedAt   DateTime  @default(now())
+  uninstalledAt DateTime? // set by app/uninstalled webhook or in-app disconnect; null = live
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// Per-resource sync high-water mark. The worker re-pulls from cursor minus an
+// overlap window, so a crashed run resumes per resource instead of restarting
+// the whole sync.
+model IngestCursor {
+  id        String   @id @default(cuid())
+  tenantId  String
+  source    String // "shopify"
+  resource  String // "products" | "inventory" | "orders"
+  cursor    DateTime
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, source, resource])
+  @@index([tenantId])
+}
+
+// Persisted in-app notifications (the bell). readAt null = unread; the index
+// serves the unread-count/badge query.
+model Notification {
+  id        String    @id @default(cuid())
+  tenantId  String
+  kind      String // "sync_failed" | "shopify_uninstalled" | ...
+  title     String
+  body      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, readAt])
+}
+
+// Webhook dedupe ledger — GLOBAL (allow-listed in the rls-coverage census).
+// Keyed by Shopify's delivery id, which is checked BEFORE the tenant is
+// resolved; rows carry no tenant data. Insert-or-skip on webhookId makes
+// redelivered webhooks no-ops.
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  webhookId   String   @unique // X-Shopify-Webhook-Id
+  topic       String
+  shopDomain  String
+  processedAt DateTime @default(now())
 }
 
 // Append-only accounting/audit ledger. One row per significant mutation (PO

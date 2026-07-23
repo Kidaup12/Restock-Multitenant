@@ -19,7 +19,7 @@
  */
 import { Redis } from "ioredis";
 import WebSocket from "ws";
-import { createSyncQueue, enqueueSyncOnce } from "../../apps/worker/src/queue";
+import { createSyncQueue, enqueueSyncOnce } from "../../packages/queue/src";
 
 const redisUrl = process.env.REDIS_URL;
 const tenantId = process.env.SMOKE_TENANT ?? "smoke-tenant";

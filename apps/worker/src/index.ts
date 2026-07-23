@@ -1,9 +1,13 @@
 import { Redis } from "ioredis";
-import { createSyncWorker } from "./demo-sync";
+import { createSyncWorker } from "./worker";
 
 /**
  * Entrypoint. Env:
- *   REDIS_URL — queues + event publishing (default redis://localhost:6380)
+ *   REDIS_URL             — queues + event publishing (default redis://localhost:6380)
+ *   DATABASE_URL          — RLS-enforced Prisma connection (client construction)
+ *   SERVICE_DATABASE_URL  — BYPASSRLS connection: the sync's writes
+ *   TOKEN_ENCRYPTION_KEY  — decrypts stored Shopify tokens (32 bytes, base64)
+ *   SHOPIFY_APP_URL       — public web origin; registers webhook callbacks when set
  */
 async function main(): Promise<void> {
   const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6380";

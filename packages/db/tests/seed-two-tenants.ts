@@ -204,6 +204,25 @@ export const builders: Record<string, Builder> = {
     entityId: `entity-${key}`,
     action: "created",
   }),
+
+  // Integrations (Shopify)
+  ShopifyConnection: (tenantId, key) => ({
+    tenantId,
+    shopDomain: `${key}.myshopify.com`,
+    accessToken: `ciphertext-${key}`,
+    scopes: "read_products",
+  }),
+  IngestCursor: (tenantId, key) => ({
+    tenantId,
+    source: "shopify",
+    resource: `resource-${key}`,
+    cursor: new Date("2026-01-01T00:00:00Z"),
+  }),
+  Notification: (tenantId, key) => ({
+    tenantId,
+    kind: "sync_failed",
+    title: `notification-${key}`,
+  }),
 };
 
 export type SeededTenants = { a: { id: string; slug: string }; b: { id: string; slug: string } };
@@ -216,14 +235,19 @@ export async function seedTwoTenants(): Promise<SeededTenants> {
   const a = await prismaService.tenant.create({ data: { name: "Iso Test A", slug: SLUG_A } });
   const b = await prismaService.tenant.create({ data: { name: "Iso Test B", slug: SLUG_B } });
 
+  // Per-run-unique key prefix: models without a tenant FK (BacktestRun,
+  // SpotCheck, AuditEvent) survive the tenant-cascade cleanup, so any unique
+  // key built from a bare `a${n}` would collide with a leftover row from an
+  // earlier or concurrent run. The prefix makes every run's keys disjoint.
+  const run = Date.now().toString(36);
   let n = 0;
   for (const [model, build] of Object.entries(builders)) {
     const delegate = (prismaService as unknown as Record<string, { create: (a: { data: unknown }) => Promise<unknown> } | undefined>)[
       model.charAt(0).toLowerCase() + model.slice(1)
     ];
     if (!delegate) throw new Error(`no client delegate for model ${model} — regenerate the client?`);
-    await delegate.create({ data: build(a.id, `a${n}`) });
-    await delegate.create({ data: build(b.id, `b${n}`) });
+    await delegate.create({ data: build(a.id, `${run}a${n}`) });
+    await delegate.create({ data: build(b.id, `${run}b${n}`) });
     n++;
   }
   return { a: { id: a.id, slug: a.slug }, b: { id: b.id, slug: b.slug } };

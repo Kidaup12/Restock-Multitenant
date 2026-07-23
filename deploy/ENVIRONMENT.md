@@ -20,6 +20,10 @@ it embeds a password).
 | `REDIS_URL` | `apps/ws-gateway/src/index.ts`; `apps/worker/src/index.ts` | ws-gateway, worker | Railway (reference to the Redis service, see below) | url (secret) | `redis://localhost:6380` |
 | `WS_DEV_TOKEN` | `apps/ws-gateway/src/index.ts` | ws-gateway | Railway | secret | unset (gateway rejects all connections when unset — fail closed) |
 | `NODE_ENV` | `apps/web/components/sw-register.tsx`; `packages/db/src/client.ts` | web; db consumers | set by Vercel/Next and the Dockerfiles automatically — never set by hand | config | `development` |
+| `SHOPIFY_API_KEY` | `apps/web/lib/shopify/env.ts` | web | Vercel | secret | unset (Shopify flows 500 with a clear message) |
+| `SHOPIFY_API_SECRET` | `apps/web/lib/shopify/env.ts`; `apps/web/app/api/webhooks/shopify/route.ts` | web | Vercel | secret | unset |
+| `SHOPIFY_APP_URL` | `apps/web/lib/shopify/env.ts`; `apps/worker/src/shopify-sync.ts` | web (OAuth redirect URI); worker (webhook registration) | Vercel; Railway | url (config) | `http://localhost:3000` (OAuth/webhooks need a public tunnel locally) |
+| `TOKEN_ENCRYPTION_KEY` | `packages/shopify/src/crypto.ts` (via web callback + worker sync) | web, worker | Vercel; Railway — SAME value on both | secret | unset (token store/read throws) |
 
 Notes:
 
@@ -30,8 +34,17 @@ Notes:
 - **web reads no other env today.** On the current `develop`, `apps/web` does not yet
   import `@wezesha/db`, so the three DB URLs are listed for web as *forthcoming* — set
   them when the web app wires the db package (the auth branch does this).
-- The worker will need `SERVICE_DATABASE_URL` (and possibly `DATABASE_URL`) once real
-  source syncs write to the database; today it only talks to Redis.
+- **web also needs `REDIS_URL`** since the Shopify branch: OAuth callback, sync-now,
+  and webhook routes enqueue worker jobs (`apps/web/lib/shopify/queue.ts`).
+- **worker needs the DB URLs** since the Shopify branch: the sync writes through the
+  service client, so set `SERVICE_DATABASE_URL` + `DATABASE_URL` (client construction)
+  alongside `REDIS_URL`, `TOKEN_ENCRYPTION_KEY`, and `SHOPIFY_APP_URL` on Railway.
+- **`TOKEN_ENCRYPTION_KEY` is one key, two services.** The web callback encrypts the
+  store token; the worker decrypts it per sync. Rotating it invalidates stored
+  connections (stores must reconnect) — treat rotation as an offboarding-grade event.
+- **Shopify app credentials** come from the app entry in the Shopify Dev Dashboard.
+  The app's redirect URL allow-list must contain `<SHOPIFY_APP_URL>/api/shopify/callback`
+  per environment.
 
 ## The three-URL database model (Supabase)
 
@@ -76,6 +89,10 @@ Supabase specifics that are easy to get wrong:
 |---|---|---|---|
 | `DATABASE_URL` | prod value | staging/branch DB value — never prod | local |
 | `SERVICE_DATABASE_URL` | prod value | staging/branch DB value — never prod | local |
+| `REDIS_URL` | prod Redis | staging Redis — never prod | local |
+| `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` | prod app | dev app — never the prod app | dev app |
+| `SHOPIFY_APP_URL` | prod origin | preview origin | tunnel origin |
+| `TOKEN_ENCRYPTION_KEY` | prod key (= worker's) | preview key (= staging worker's) | local key |
 | AUTH vars (below) | prod values | preview values | local |
 
 `develop` deploys as Preview (Production Branch is `main`), so Preview values are what
@@ -92,6 +109,9 @@ previews must never hold prod credentials.
 **Railway (worker)** — service variables:
 
 - `REDIS_URL` = `${{Redis.REDIS_URL}}` (same reference)
+- `DATABASE_URL`, `SERVICE_DATABASE_URL` — same DB values as web for the environment
+- `TOKEN_ENCRYPTION_KEY` — same value as web for the environment
+- `SHOPIFY_APP_URL` — the web origin for the environment (webhook registration)
 
 **CI** (`.github/workflows/ci.yml`, db job) — already wired to the throwaway Postgres
 service container with dev-only credentials; nothing to provision.

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { Worker } from "bullmq";
 import { Redis } from "ioredis";
-import { SYNC_QUEUE, createSyncQueue, enqueueSyncOnce, syncJobId, type SyncJobData, type SyncQueue } from "../src/queue";
+import { SYNC_QUEUE, createSyncQueue, enqueueSyncOnce, syncJobId, type SyncJobData, type SyncQueue } from "../src";
 
 describe("syncJobId", () => {
   it("is deterministic per tenant+source", () => {

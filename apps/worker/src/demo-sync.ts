@@ -1,12 +1,13 @@
-import { Worker, type Job } from "bullmq";
+import type { Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { publishEvent } from "@wezesha/realtime";
-import { SYNC_QUEUE, type SyncJobData } from "./queue";
+import type { SyncJobData } from "@wezesha/queue";
 
 /**
  * Demo sync job: proves the pipeline end to end (queue → worker → Redis
  * pub/sub → gateway → socket) by publishing three progress phases and a done
- * event. Real source syncs replace the loop body, not the wiring.
+ * event. Kept for smoke tests; real sources get their own processors (the
+ * entrypoint dispatches on job.data.source).
  */
 
 const PHASES = ["fetch", "transform", "load"] as const;
@@ -25,20 +26,4 @@ export function createDemoSyncProcessor(publisher: Redis, phaseDelayMs = 150) {
     }
     await publishEvent(publisher, { type: "sync.done", data: { tenantId, source, ok: true } });
   };
-}
-
-export interface SyncWorkerOptions {
-  /** BullMQ worker connection — must have maxRetriesPerRequest: null. */
-  connection: Redis;
-  /** Plain connection for publishing realtime events. */
-  publisher: Redis;
-  phaseDelayMs?: number;
-}
-
-export function createSyncWorker(options: SyncWorkerOptions): Worker<SyncJobData> {
-  return new Worker<SyncJobData>(
-    SYNC_QUEUE,
-    createDemoSyncProcessor(options.publisher, options.phaseDelayMs),
-    { connection: options.connection }
-  );
 }

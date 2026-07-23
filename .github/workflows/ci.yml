@@ -82,11 +82,20 @@ jobs:
 
       - run: npm ci
 
+      - name: Generate Prisma client (worker imports @wezesha/db)
+        run: npm run -w @wezesha/db db:generate
+
       - name: Typecheck @wezesha/realtime
         run: npm run -w @wezesha/realtime typecheck
 
       - name: Typecheck @wezesha/forecast
         run: npm run -w @wezesha/forecast typecheck
+
+      - name: Typecheck @wezesha/queue
+        run: npm run -w @wezesha/queue typecheck
+
+      - name: Typecheck @wezesha/shopify
+        run: npm run -w @wezesha/shopify typecheck
 
       - name: Typecheck @wezesha/ws-gateway
         run: npm run -w @wezesha/ws-gateway typecheck

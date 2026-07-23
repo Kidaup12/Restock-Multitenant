@@ -1,0 +1,22 @@
+{
+  "name": "@wezesha/queue",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BullMQ sync queue: deterministic per-tenant job ids and the no-overlap enqueue guard",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "bullmq": "^5.80.11",
+    "ioredis": "^5.11.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}
