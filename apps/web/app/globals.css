@@ -1,26 +1,200 @@
 @import "tailwindcss";
 
+/* Theme is driven by data-theme on <html>; set before paint by the inline script in the root layout. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+ * Design tokens. Components consume these through the @theme mapping below
+ * (bg-surface, text-ink, border-edge, ...) — never raw color values.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
+
+  /* surfaces */
+  --bg: #fafafa;
+  --sidebar: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f2f2f5;
+
+  /* lines */
+  --edge: #e7e7ec;
+  --edge-strong: #d7d8e0;
+
+  /* text */
+  --ink-strong: #0f1222;
+  --ink: #1c2030;
+  --ink-secondary: #4c5165;
+  --ink-muted: #686d83;
+  --ink-faint: #9599ad;
+
+  /* accent — violet, the single brand accent */
+  --accent: #6d5ce6;
+  --accent-strong: #5b4bd6;
+  --accent-soft: #edeafc;
+  --accent-ink: #5b4bd6;
+  --on-accent: #ffffff;
+
+  /* status */
+  --positive: #166534;
+  --positive-soft: #dcf3e6;
+  --warning: #92400e;
+  --warning-soft: #fdf1d8;
+  --negative: #b91c1c;
+  --negative-soft: #fbeaea;
+
+  /* charts */
+  --track: #e9e6fa;
+
+  /* elevation */
+  --card-shadow: 0 1px 2px rgb(23 20 60 / 0.04), 0 2px 8px rgb(23 20 60 / 0.04);
+  --pop-shadow: 0 4px 16px rgb(23 20 60 / 0.1);
+  --glow: 0 0 #0000;
+
+  /* skeleton shimmer */
+  --shimmer-base: #ececf1;
+  --shimmer-sweep: rgb(28 32 48 / 0.05);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* surfaces — dark desaturated navy, never pure black; sidebar a step darker than the page */
+  --bg: #0c0e17;
+  --sidebar: #0a0b12;
+  --surface: #12141f;
+  --surface-2: #1a1d2b;
+
+  /* lines — faint white */
+  --edge: rgb(255 255 255 / 0.08);
+  --edge-strong: rgb(255 255 255 / 0.14);
+
+  /* text — near-white headings, lavender-grey body, dim labels; numbers bright white */
+  --ink-strong: #ffffff;
+  --ink: #eceef6;
+  --ink-secondary: #a0a3b8;
+  --ink-muted: #8285a0;
+  --ink-faint: #5c5f78;
+
+  /* accent — same violet as light; brighter step reserved for accent-colored text */
+  --accent: #6d5ce6;
+  --accent-strong: #7e6ef0;
+  --accent-soft: rgb(109 92 230 / 0.16);
+  --accent-ink: #a89dff;
+  --on-accent: #ffffff;
+
+  /* status — kept muted */
+  --positive: #45c88b;
+  --positive-soft: rgb(69 200 139 / 0.14);
+  --warning: #d9a13e;
+  --warning-soft: rgb(217 161 62 / 0.15);
+  --negative: #e06c75;
+  --negative-soft: rgb(224 108 117 / 0.14);
+
+  /* charts */
+  --track: #23263a;
+
+  /* elevation — subtle glow on active elements */
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
+  --pop-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
+  --glow: 0 0 18px rgb(109 92 230 / 0.35);
+
+  /* skeleton shimmer */
+  --shimmer-base: #1a1d2b;
+  --shimmer-sweep: rgb(255 255 255 / 0.05);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-page: var(--bg);
+  --color-sidebar: var(--sidebar);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+
+  --color-edge: var(--edge);
+  --color-edge-strong: var(--edge-strong);
+
+  --color-ink-strong: var(--ink-strong);
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-on-accent: var(--on-accent);
+
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-negative: var(--negative);
+  --color-negative-soft: var(--negative-soft);
+
+  --color-track: var(--track);
+  --color-shimmer: var(--shimmer-base);
+
+  --font-display: var(--font-pjs);
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jbmono);
+
+  --shadow-card: var(--card-shadow);
+  --shadow-pop: var(--pop-shadow);
+  --shadow-glow: var(--glow);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@theme {
+  --spacing: 0.25rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Skeleton shimmer — defined once, consumed by every skeleton variant. */
+.skeleton {
+  background-color: var(--shimmer-base);
+  background-image: linear-gradient(
+    100deg,
+    transparent 35%,
+    var(--shimmer-sweep) 50%,
+    transparent 65%
+  );
+  background-size: 250% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+@keyframes skeleton-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    background-image: none;
+    animation: skeleton-pulse 2.4s ease-in-out infinite;
+  }
 }
