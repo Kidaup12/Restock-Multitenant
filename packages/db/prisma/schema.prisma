@@ -9,9 +9,79 @@ datasource db {
   directUrl = env("DIRECT_URL") // owner role — migrations only
 }
 
+// ── Auth (global) ────────────────────────────────────────────────────────────
+// Better Auth's tables. Users are system-scope (a user can belong to several
+// tenants via Membership), so none of these carry tenantId and none get an RLS
+// policy — they are allow-listed as GLOBAL_TABLES in the coverage census.
+// Field set matches Better Auth's Prisma schema; auth reads/writes go through
+// the service client (prismaAuth).
+
+model User {
+  id            String   @id
+  name          String
+  email         String
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions    Session[]
+  accounts    Account[]
+  memberships Membership[]
+
+  @@unique([email])
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([token])
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
 // ── Tenancy core ─────────────────────────────────────────────────────────────
 // Every tenant-owned table carries tenantId and a tenant_isolation RLS policy
-// (appended in its migration). Tenant itself is the one global table so far.
+// (appended in its migration). Tenant and the auth tables are the only globals.
 
 model Tenant {
   id            String   @id @default(cuid())
@@ -52,7 +122,7 @@ enum Role {
 
 model Membership {
   id                   String    @id @default(cuid())
-  userId               String // Supabase auth.users UUID — plain String, deliberately no FK
+  userId               String // local auth User.id
   tenantId             String
   role                 Role      @default(OWNER)
   // Human display name (users are otherwise email-only).
@@ -69,6 +139,7 @@ model Membership {
   createdAt            DateTime  @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, tenantId])
   @@index([tenantId])
@@ -268,7 +339,7 @@ model IgnoreRule {
 model SavedFilter {
   id        String   @id @default(cuid())
   tenantId  String
-  userId    String // Supabase user UUID (no FK — users live in Supabase)
+  userId    String // auth User.id (deliberately no FK — views are cheap per-member state)
   page      String // "products" | "planner" | "orders" | ...
   name      String
   query     Json // the serialized filter state
@@ -492,7 +563,7 @@ model PurchaseOrder {
   subtotalKes     Float     @default(0)
   createdAt       DateTime  @default(now())
   sentAt          DateTime?
-  // Who created this order (audit). userId = Supabase id; name = display-name/email
+  // Who created this order (audit). userId = auth User.id; name = display-name/email
   // snapshot at creation so the PO list shows it without a per-row user lookup.
   createdByUserId String?
   createdByName   String?

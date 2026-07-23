@@ -44,6 +44,11 @@ function makeServiceClient(): PrismaClient {
 }
 export const prismaService = globalForPrisma.prismaService ?? makeServiceClient();
 
+// Auth-system client (Better Auth's Prisma adapter). Auth operations are
+// global/system scope — the auth tables carry no tenantId and users span
+// tenants — so the BYPASSRLS service connection is the correct one.
+export const prismaAuth = prismaService;
+
 if (process.env.NODE_ENV !== "production") {
   globalForPrisma.basePrisma = basePrisma;
   globalForPrisma.prismaService = prismaService;

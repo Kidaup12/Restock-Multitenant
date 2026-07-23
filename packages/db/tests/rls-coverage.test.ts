@@ -8,7 +8,15 @@ import { Client } from "pg";
 
 // Tables that are ALLOWED to have no tenantId column. Additions are a reviewed
 // decision, not a default.
-const GLOBAL_TABLES = ["Tenant", "_prisma_migrations"];
+const GLOBAL_TABLES = [
+  "Tenant",
+  "_prisma_migrations",
+  // Better Auth tables — users span tenants (Membership is the per-tenant link).
+  "User",
+  "Session",
+  "Account",
+  "Verification",
+];
 
 describe("rls coverage census", () => {
   it("every tenantId table has RLS enabled and a two-sided tenant_isolation policy", async () => {
