@@ -1,5 +1,14 @@
 export { prismaAuth, prismaForTenant, prismaForTenantTx, prismaService } from "./client";
 export type { TenantClient } from "./client";
+export {
+  DEFAULT_PLAN,
+  GRACE_DAYS,
+  PLAN_TIERS,
+  computeLimitState,
+  graceLeft,
+  resolvePlanLimits,
+} from "./limits";
+export type { LimitKey, LimitState, LimitUsage, PlanLimits, PlanSource, UsageCounts } from "./limits";
 export { Prisma, Role } from "../generated/client";
 export type { Tenant, Membership, TenantConfig } from "../generated/client";
 export type { User, Session, Account, Verification } from "../generated/client";

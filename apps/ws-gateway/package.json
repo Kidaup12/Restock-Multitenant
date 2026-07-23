@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@wezesha/db": "*",
+    "@wezesha/observability": "*",
     "@wezesha/realtime": "*",
     "ioredis": "^5.11.1",
     "tsx": "^4.23.1",

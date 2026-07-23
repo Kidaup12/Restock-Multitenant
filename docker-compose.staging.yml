@@ -27,10 +27,16 @@ services:
     environment:
       REDIS_URL: redis://redis:6379
       WS_DEV_TOKEN: ${WS_DEV_TOKEN:-staging-dev-token}
+      # Session-backed socket auth reads sessions/memberships via @wezesha/db.
+      DATABASE_URL: postgresql://wezesha_app:wezesha_app_dev@db:5432/wezesha
+      SERVICE_DATABASE_URL: postgresql://wezesha_service:wezesha_service_dev@db:5432/wezesha
+      SENTRY_DSN: ${SENTRY_DSN:-}
     ports:
       - "${WS_GATEWAY_PORT:-8081}:8081"
     depends_on:
       redis:
+        condition: service_healthy
+      db:
         condition: service_healthy
 
   worker:
@@ -44,6 +50,7 @@ services:
       # Dev-only key for the staging rehearsal; real environments use the vault.
       TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
       SHOPIFY_APP_URL: ${SHOPIFY_APP_URL:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     depends_on:
       redis:
         condition: service_healthy
