@@ -15,6 +15,7 @@ import {
   HomeIcon,
 } from "@/components/icons";
 import { NavItem } from "@/components/shell/nav-item";
+import { ProfileMenu } from "@/components/shell/profile-menu";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const sidebarNav = [
@@ -35,10 +36,26 @@ const tabNav = [
   { href: "/more", label: "More", icon: <DotsIcon /> },
 ];
 
-/* Placeholder until workspaces come from the session. */
-const workspace = { name: "Amara Beauty Supplies", location: "Westlands, Nairobi" };
+export type ShellUser = {
+  name: string;
+  email: string;
+};
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+/* null = the user has no membership yet ("No workspace" state). */
+export type ShellWorkspace = {
+  name: string;
+  roleLabel: string;
+} | null;
+
+export function AppShell({
+  user,
+  workspace,
+  children,
+}: {
+  user: ShellUser;
+  workspace: ShellWorkspace;
+  children: React.ReactNode;
+}) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -96,10 +113,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
             <div className="min-w-0 leading-tight">
               <div className="truncate text-sm font-semibold text-ink">
-                {workspace.name}
+                {workspace ? workspace.name : "No workspace"}
               </div>
               <div className="truncate text-xs text-ink-muted">
-                {workspace.location}
+                {workspace ? workspace.roleLabel : "Ask an admin for an invite"}
               </div>
             </div>
           </div>
@@ -116,6 +133,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <BellIcon className="size-4.5" />
               <span className="absolute top-2 right-2 size-1.5 rounded-full bg-negative" />
             </button>
+            <ProfileMenu
+              name={user.name}
+              email={user.email}
+              roleLabel={workspace ? workspace.roleLabel : "No workspace"}
+            />
           </div>
         </header>
 
