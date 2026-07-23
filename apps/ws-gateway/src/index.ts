@@ -1,22 +1,37 @@
 import { Redis } from "ioredis";
-import { devAuthorizeSocket } from "./auth";
+import {
+  devAuthorizeSocket,
+  prismaSessionStore,
+  sessionAuthorizeSocket,
+  type AuthorizeSocket,
+} from "./auth";
 import { startGateway } from "./gateway";
 
 /**
  * Entrypoint. Env:
- *   PORT          — listen port (default 8081)
- *   REDIS_URL     — pub/sub source (default redis://localhost:6380)
- *   WS_DEV_TOKEN  — dev auth shared secret; unset → all connections rejected
+ *   PORT                  — listen port (default 8081)
+ *   REDIS_URL             — pub/sub source (default redis://localhost:6380)
+ *   SERVICE_DATABASE_URL  — session/membership lookups (via @wezesha/db)
+ *   WS_DEV_TOKEN          — non-production only: also accept the dev stub's
+ *                           `{secret}:{tenantId}` tokens alongside real sessions
  */
 async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? 8081);
   const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6380";
 
+  const sessionAuth = sessionAuthorizeSocket(prismaSessionStore());
+  const devSecret =
+    process.env.NODE_ENV === "production" ? undefined : process.env.WS_DEV_TOKEN;
+  const devAuth = devSecret ? devAuthorizeSocket(devSecret) : null;
+  const authorize: AuthorizeSocket = devAuth
+    ? async (token) => (await devAuth(token)) ?? sessionAuth(token)
+    : sessionAuth;
+
   const subscriber = new Redis(redisUrl);
   const gateway = await startGateway({
     port,
     subscriber,
-    authorize: devAuthorizeSocket(process.env.WS_DEV_TOKEN),
+    authorize,
   });
   console.log(`ws-gateway listening on :${gateway.port}`);
 
