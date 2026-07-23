@@ -26,6 +26,176 @@ export const builders: Record<string, Builder> = {
     tenantId,
     alertEmail: "alerts@example.test",
   }),
+
+  // Catalog & inventory. Builders needing parent rows (Product/Location/…) use
+  // nested creates, so the WITH CHECK probe exercises RLS on the parents too.
+  Product: (tenantId, key) => ({
+    tenantId,
+    sku: `sku-${key}`,
+    title: `Product ${key}`,
+  }),
+  Supplier: (tenantId, key) => ({
+    tenantId,
+    name: `supplier-${key}`,
+  }),
+  Location: (tenantId, key) => ({
+    tenantId,
+    name: `location-${key}`,
+  }),
+  InventoryLevel: (tenantId, key) => ({
+    tenantId,
+    location: { create: { tenantId, name: `loc-il-${key}` } },
+    product: { create: { tenantId, sku: `sku-il-${key}`, title: `Product il-${key}` } },
+  }),
+  InventorySnapshot: (tenantId, key) => ({
+    date: new Date("2026-01-01T00:00:00Z"),
+    onHand: 5,
+    tenant: { connect: { id: tenantId } },
+    product: { create: { tenantId, sku: `sku-is-${key}`, title: `Product is-${key}` } },
+  }),
+  WarehouseLocationMap: (tenantId, key) => ({
+    warehouseName: `warehouse-${key}`,
+    tenant: { connect: { id: tenantId } },
+    location: { create: { tenantId, name: `loc-wm-${key}` } },
+  }),
+  IgnoreRule: (tenantId, key) => ({
+    tenantId,
+    kind: "till_sku",
+    value: `junk-${key}`,
+  }),
+  SavedFilter: (tenantId, key) => ({
+    tenantId,
+    userId: `00000000-0000-4000-8000-${key.padStart(12, "0")}`,
+    page: "products",
+    name: `filter-${key}`,
+    query: {},
+  }),
+
+  // Sales & forecasting
+  SalesHistory: (tenantId, key) => ({
+    date: new Date("2026-01-01T00:00:00Z"),
+    quantity: 1,
+    revenueKes: 100,
+    tenant: { connect: { id: tenantId } },
+    product: { create: { tenantId, sku: `sku-sh-${key}`, title: `Product sh-${key}` } },
+  }),
+  PosSale: (tenantId, key) => ({
+    tenantId,
+    externalId: `pos-${key}`,
+    date: new Date("2026-01-01T00:00:00Z"),
+    createdBy: `staff-${key}`,
+  }),
+  PosSaleLine: (tenantId, key) => ({
+    tenantId,
+    sku: `sku-pl-${key}`,
+    productName: `Product pl-${key}`,
+    posSale: {
+      create: {
+        tenantId,
+        externalId: `pos-pl-${key}`,
+        date: new Date("2026-01-01T00:00:00Z"),
+        createdBy: `staff-${key}`,
+      },
+    },
+  }),
+  MonthlyContext: (tenantId, key) => ({
+    tenantId,
+    month: `2026-${key}`,
+  }),
+  Promo: (tenantId) => ({
+    tenantId,
+    startDate: new Date("2026-01-01T00:00:00Z"),
+    endDate: new Date("2026-01-07T00:00:00Z"),
+  }),
+  Prediction: (tenantId, key) => ({
+    layer1Forecast30d: 10,
+    layer1Confidence: 0.5,
+    layer2Adjustment: 0,
+    finalForecast30d: 10,
+    daysUntilStockout: 30,
+    recommendedQty: 5,
+    safetyStock: 2,
+    reorderPoint: 3,
+    confidence: 0.5,
+    reasoning: "seed",
+    urgency: "low",
+    signals: "seed",
+    tenant: { connect: { id: tenantId } },
+    product: { create: { tenantId, sku: `sku-pr-${key}`, title: `Product pr-${key}` } },
+  }),
+  BacktestRun: (tenantId) => ({
+    tenantId,
+    mae: 1,
+    bias: 0,
+    sampleSize: 10,
+  }),
+  SpotCheck: (tenantId, key) => ({
+    tenantId,
+    productId: `spot-product-${key}`,
+    weekKey: `2026-W01-${key}`,
+    systemQty: 5,
+  }),
+
+  // Purchasing & audit
+  Order: (tenantId, key) => ({
+    tenant: { connect: { id: tenantId } },
+    prediction: {
+      create: {
+        layer1Forecast30d: 10,
+        layer1Confidence: 0.5,
+        layer2Adjustment: 0,
+        finalForecast30d: 10,
+        daysUntilStockout: 30,
+        recommendedQty: 5,
+        safetyStock: 2,
+        reorderPoint: 3,
+        confidence: 0.5,
+        reasoning: "seed",
+        urgency: "low",
+        signals: "seed",
+        tenant: { connect: { id: tenantId } },
+        product: { create: { tenantId, sku: `sku-or-${key}`, title: `Product or-${key}` } },
+      },
+    },
+  }),
+  PurchaseOrder: (tenantId, key) => ({
+    tenantId,
+    poNumber: `PO-${key}`,
+  }),
+  PurchaseOrderLine: (tenantId, key) => ({
+    tenantId,
+    sku: `sku-pol-${key}`,
+    title: `Product pol-${key}`,
+    quantity: 1,
+    unitCostKes: 100,
+    lineTotalKes: 100,
+    purchaseOrder: { create: { tenantId, poNumber: `PO-L-${key}` } },
+    product: { create: { tenantId, sku: `sku-pol-${key}`, title: `Product pol-${key}` } },
+  }),
+  DistributionPlan: (tenantId, key) => ({
+    tenant: { connect: { id: tenantId } },
+    fromLocation: { create: { tenantId, name: `loc-dp-${key}` } },
+  }),
+  DistributionPlanLine: (tenantId, key) => ({
+    tenantId,
+    productId: `plan-product-${key}`,
+    sku: `sku-dpl-${key}`,
+    title: `Product dpl-${key}`,
+    qty: 1,
+    plan: {
+      create: {
+        tenant: { connect: { id: tenantId } },
+        fromLocation: { create: { tenantId, name: `loc-dpl-from-${key}` } },
+      },
+    },
+    toLocation: { create: { tenantId, name: `loc-dpl-to-${key}` } },
+  }),
+  AuditEvent: (tenantId, key) => ({
+    tenantId,
+    entity: "PurchaseOrder",
+    entityId: `entity-${key}`,
+    action: "created",
+  }),
 };
 
 export type SeededTenants = { a: { id: string; slug: string }; b: { id: string; slug: string } };

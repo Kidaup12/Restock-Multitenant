@@ -14,16 +14,34 @@ datasource db {
 // (appended in its migration). Tenant itself is the one global table so far.
 
 model Tenant {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  timezone  String   @default("Africa/Nairobi")
-  currency  String   @default("KES")
-  source    String   @default("shopify") // "shopify" | "odoo"
-  createdAt DateTime @default(now())
+  id            String   @id @default(cuid())
+  name          String
+  slug          String   @unique
+  timezone      String   @default("Africa/Nairobi")
+  currency      String   @default("KES")
+  source        String   @default("shopify") // "shopify" | "odoo"
+  // Seed for PO numbering: new POs continue from max(existing PO-####, this), so
+  // Wezesha's numbers carry on from QuickBooks' latest (set once to QB's current max).
+  poNumberFloor Int      @default(0)
+  createdAt     DateTime @default(now())
 
-  memberships  Membership[]
-  tenantConfig TenantConfig?
+  memberships           Membership[]
+  tenantConfig          TenantConfig?
+  products              Product[]
+  suppliers             Supplier[]
+  locations             Location[]
+  inventorySnapshots    InventorySnapshot[]
+  warehouseLocationMaps WarehouseLocationMap[]
+  ignoreRules           IgnoreRule[]
+  savedFilters          SavedFilter[]
+  salesHistory          SalesHistory[]
+  posSales              PosSale[]
+  monthlyContext        MonthlyContext[]
+  promos                Promo[]
+  predictions           Prediction[]
+  orders                Order[]
+  purchaseOrders        PurchaseOrder[]
+  distributionPlans     DistributionPlan[]
 }
 
 enum Role {
@@ -86,4 +104,507 @@ model TenantConfig {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
+}
+
+// ── Catalog & inventory ──────────────────────────────────────────────────────
+
+model Product {
+  id                String    @id @default(cuid())
+  tenantId          String
+  shopifyProductId  String? // nullable: Odoo rows carry externalId+source instead
+  shopifyVariantId  String?
+  externalId        String? // provider record id (Odoo product.product id, etc.)
+  source            String    @default("shopify") // "shopify" | "odoo"
+  sku               String
+  title             String
+  vendor            String?
+  productType       String?
+  priceKes          Float     @default(0)
+  costKes           Float     @default(0)
+  imageUrl          String?
+  currentStock      Float     @default(0)
+  abcCategory       String?
+  dailySalesRate    Float     @default(0)
+  lastSynced        DateTime  @default(now())
+  shopifyCreatedAt  DateTime? // when the SKU was first created in Shopify — product age signal (dead-stock: new vs old dud)
+  supplierId        String?
+  onOrder           Int       @default(0)
+  expectedArrivalAt DateTime?
+  receivedAt        DateTime?
+  leadTimeDays      Int? // per-product lead-time override (days); null → supplier default
+  active            Boolean   @default(true) // false = not in QB (or owner-deactivated) → out of the buy list
+  activeOverride    Boolean   @default(false) // owner pinned active; the QB flagger must never deactivate it
+  qbMatchedAt       DateTime? // last time the QB catalogue feed confirmed this product (null = never)
+  notForSale        Boolean   @default(false) // tester/display/damaged: visible in catalogue, out of sellable stock, cover and the buy list
+  costSource        String? // "manual" (pinned, wins) | "qb" | "shopify"; null = missing → held off the buy list
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier           Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  inventoryLevels    InventoryLevel[]
+  inventorySnapshots InventorySnapshot[]
+  salesHistory       SalesHistory[]
+  predictions        Prediction[]
+  posSaleLines       PosSaleLine[]
+  purchaseOrderLines PurchaseOrderLine[]
+
+  @@unique([tenantId, shopifyProductId])
+  @@unique([tenantId, source, externalId])
+  @@index([tenantId])
+  @@index([tenantId, source])
+  @@index([tenantId, productType])
+  @@index([tenantId, vendor])
+  @@index([tenantId, active])
+  @@index([tenantId, notForSale])
+}
+
+model Supplier {
+  id              String    @id @default(cuid())
+  tenantId        String
+  name            String
+  country         String?
+  currency        String    @default("USD")
+  leadTimeAvgDays Int       @default(30)
+  leadTimeStdDays Int       @default(7)
+  moq             Int       @default(1)
+  notes           String?
+  createdAt       DateTime  @default(now())
+  deletedAt       DateTime? // soft-delete: hidden from lists; product links + history kept
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  products       Product[]
+  purchaseOrders PurchaseOrder[]
+
+  @@index([tenantId])
+}
+
+model Location {
+  id                String  @id @default(cuid())
+  tenantId          String
+  shopifyLocationId String?
+  externalId        String?
+  source            String  @default("shopify")
+  name              String
+  isPrimary         Boolean @default(false)
+  // Owner-set role: "branch" | "warehouse" | "virtual" | "enroute".
+  // null = not yet classified (treated as "branch").
+  locationType      String?
+  // Role provenance: guessed from the name ("assumed") or owner-confirmed
+  // ("confirmed"). null = treated as assumed.
+  roleStatus        String?
+
+  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inventoryLevels       InventoryLevel[]
+  warehouseLocationMaps WarehouseLocationMap[]
+  distributionPlansFrom DistributionPlan[]     @relation("DistFrom")
+  distributionLinesTo   DistributionPlanLine[] @relation("DistTo")
+
+  @@unique([tenantId, shopifyLocationId])
+  @@unique([tenantId, source, externalId])
+  @@index([tenantId])
+}
+
+model InventoryLevel {
+  id         String   @id @default(cuid())
+  tenantId   String
+  locationId String
+  productId  String
+  onHand     Int      @default(0) // on_hand quantity, NOT available
+  updatedAt  DateTime @updatedAt
+
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, productId])
+  @@index([tenantId])
+}
+
+model InventorySnapshot {
+  id        String   @id @default(cuid())
+  tenantId  String
+  productId String
+  date      DateTime // UTC midnight of the snapshot day
+  onHand    Float
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, date])
+  @@index([tenantId, date])
+}
+
+// Per-tenant map: a raw POS warehouse name → a Location, so physical-branch
+// run rate attributes to the right location.
+model WarehouseLocationMap {
+  id            String @id @default(cuid())
+  tenantId      String
+  warehouseName String
+  locationId    String
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, warehouseName])
+  @@index([tenantId])
+}
+
+// Permanent "never ask again" rules: junk till SKUs ("not a product": carrier
+// bags, airtime) and ignored QuickBooks items (services, fees).
+model IgnoreRule {
+  id              String   @id @default(cuid())
+  tenantId        String
+  kind            String // "till_sku" | "qb_item"
+  value           String // the till SKU or QB item id/name being ignored
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, kind, value])
+  @@index([tenantId, kind])
+}
+
+// Saved filters / segments per member per list screen ("saved views";
+// also reusable as planner scopes).
+model SavedFilter {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String // Supabase user UUID (no FK — users live in Supabase)
+  page      String // "products" | "planner" | "orders" | ...
+  name      String
+  query     Json // the serialized filter state
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, userId, page])
+}
+
+// ── Sales & forecasting ──────────────────────────────────────────────────────
+
+model SalesHistory {
+  id         String   @id @default(cuid())
+  tenantId   String
+  productId  String
+  date       DateTime
+  quantity   Float
+  revenueKes Float
+  channel    String   @default("shopify")
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, date, channel])
+  @@index([tenantId, date])
+}
+
+// Raw POS sale (physical shop). Powers run-rate (via SalesHistory channel="pos")
+// and the who-sold/warehouse audit. Online ("SHOPIFY") sales are filtered out
+// upstream — they already arrive via the Shopify sync.
+model PosSale {
+  id            String   @id @default(cuid())
+  tenantId      String
+  externalId    String // POS provider sale id
+  reference     String?
+  date          DateTime
+  createdBy     String // staff name (physical); "SHOPIFY" rows are excluded upstream
+  salesAgent    String?
+  warehouse     String?
+  customer      String?
+  saleStatus    String?
+  paymentStatus String?
+  grandTotal    Float    @default(0)
+  channel       String   @default("physical")
+  createdAt     DateTime @default(now())
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lines  PosSaleLine[]
+
+  @@unique([tenantId, externalId])
+  @@index([tenantId, date])
+}
+
+model PosSaleLine {
+  id          String  @id @default(cuid())
+  posSaleId   String
+  tenantId    String // denormalised for RLS (uniform tenant_isolation policy)
+  sku         String
+  productName String
+  qty         Float   @default(0)
+  price       Float   @default(0)
+  subtotal    Float   @default(0)
+  productId   String? // matched product (by SKU); null = unmatched POS code
+
+  posSale PosSale  @relation(fields: [posSaleId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, productId])
+  @@index([posSaleId])
+}
+
+model MonthlyContext {
+  id                  String   @id @default(cuid())
+  tenantId            String
+  month               String
+  marketingBudget     Float?
+  promotions          String?
+  seasonalExpectation String?
+  cashFlow            String?
+  notes               String?
+  createdAt           DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, month])
+}
+
+model Promo {
+  id          String    @id @default(cuid())
+  tenantId    String
+  startDate   DateTime
+  endDate     DateTime
+  scope       String    @default("all")
+  scopeValue  String?
+  discountPct Float     @default(0)
+  promoType   String    @default("flash")
+  channel     String    @default("all")
+  notes       String?
+  createdAt   DateTime  @default(now())
+  deletedAt   DateTime? // soft-delete: hidden from lists + excluded from forecast promo windows
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, startDate])
+}
+
+model Prediction {
+  id        String   @id @default(cuid())
+  tenantId  String
+  productId String
+  runDate   DateTime @default(now())
+
+  layer1Forecast30d Float
+  layer1Confidence  Float
+  layer2Adjustment  Float
+  finalForecast30d  Float
+  daysUntilStockout Int
+  recommendedQty    Float
+  safetyStock       Float
+  reorderPoint      Float
+  confidence        Float
+  reasoning         String
+  urgency           String
+  signals           String
+  forecastRunId     String  @default(cuid())
+  regime            String?
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  orders  Order[]
+
+  @@index([tenantId, runDate])
+  @@index([productId, runDate])
+  @@index([tenantId, productId, runDate])
+  @@index([tenantId, forecastRunId])
+}
+
+// Stored forecast-accuracy run — the monthly backtest cron writes one row so
+// accuracy is tracked over time and the drop-detector can compare runs.
+// tenantId-only (no relation).
+model BacktestRun {
+  id         String   @id @default(cuid())
+  tenantId   String
+  runDate    DateTime @default(now())
+  mae        Float
+  bias       Float
+  mape       Float?
+  sampleSize Int
+  tag        String? // "holdout" | "walkforward"
+
+  @@index([tenantId, runDate])
+}
+
+// Weekly shelf-vs-system spot-check: the app prompts a count of 5 SKUs to
+// catch drift between physical shelves and the app's on-hand.
+model SpotCheck {
+  id         String    @id @default(cuid())
+  tenantId   String
+  productId  String
+  weekKey    String // ISO week, e.g. "2026-W24" — one set of prompts per week
+  systemQty  Float // on-hand the app believed when prompting
+  countedQty Float? // what the owner physically counted (null until done)
+  createdAt  DateTime  @default(now())
+  countedAt  DateTime?
+
+  @@index([tenantId, weekKey])
+}
+
+// ── Purchasing & audit ───────────────────────────────────────────────────────
+
+model Order {
+  id                  String    @id @default(cuid())
+  tenantId            String
+  predictionId        String
+  status              String    @default("pending")
+  shopifyDraftOrderId String?
+  approvedAt          DateTime?
+  skipReason          String?
+  createdAt           DateTime  @default(now())
+  purchaseOrderId     String?
+
+  // Reorder tracking / memory (status "ordered" → "received"). Manual "Mark as ordered"
+  // records the intent; suppression rides on these fields, NOT Product.onOrder (the nightly
+  // Shopify reconcile authoritatively resets onOrder, which would wipe a manual bump).
+  productId         String?
+  orderedQty        Int?
+  orderedAt         DateTime?
+  expectedArrivalAt DateTime?
+  receivedAt        DateTime?
+  stockAtOrder      Float?
+  sawEnroute        Boolean   @default(false)
+
+  // Provenance: "app" (button/bulk mark-ordered, the default) vs "qb_external" (a
+  // PO/Bill cut directly in QuickBooks, never entered in Wezesha — detected from
+  // the daily QB orders feed via SKU/name match, no app PurchaseOrder exists).
+  // qbDocRef is the QB doc id/number, used to dedupe re-runs of the daily feed.
+  source   String  @default("app")
+  qbDocRef String?
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  prediction    Prediction     @relation(fields: [predictionId], references: [id], onDelete: Cascade)
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status])
+  @@index([tenantId, productId, status])
+  @@index([tenantId, qbDocRef])
+}
+
+model PurchaseOrder {
+  id              String    @id @default(cuid())
+  tenantId        String
+  supplierId      String?
+  vendor          String? // brand label when grouped by brand (suppliers optional)
+  poNumber        String
+  // draft | awaiting_qb | confirmed | received | cancelled.
+  // awaiting_qb = generated + "marked ordered" in-app, expected to be entered into QB.
+  // confirmed   = a matching Bill/PO was seen in the QB read-back feed.
+  status          String    @default("draft")
+  currency        String    @default("KES")
+  subtotalKes     Float     @default(0)
+  createdAt       DateTime  @default(now())
+  sentAt          DateTime?
+  // Who created this order (audit). userId = Supabase id; name = display-name/email
+  // snapshot at creation so the PO list shows it without a per-row user lookup.
+  createdByUserId String?
+  createdByName   String?
+
+  // QB two-stage confirmation (parallel evidence track — never gates Order suppression).
+  qbConfirmedAt  DateTime? // set on first QB read-back match
+  qbDocRef       String? // QB entity id / DocNumber we matched on (audit + dedupe)
+  qbSuggestion   String? // fuzzy lookalike QB doc label (advisory; surfaced in digest/badge, never auto-confirms)
+  needsAttention Boolean   @default(false) // phantom: sent but no QB match after M days
+  receivedAt     DateTime? // rollup convenience — set when all linked Orders received
+
+  // Accounting trail — never hard-delete a financial record. cancel/delete stamp
+  // who + when; soft-deleted POs are filtered from lists but kept in the DB + ledger.
+  cancelledAt     DateTime?
+  cancelledByName String?
+  deletedAt       DateTime?
+  deletedByName   String?
+
+  tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  lines    PurchaseOrderLine[]
+  orders   Order[]
+
+  @@unique([tenantId, poNumber])
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+model PurchaseOrderLine {
+  id              String @id @default(cuid())
+  purchaseOrderId String
+  tenantId        String // denormalised for RLS (uniform tenant_isolation policy)
+  productId       String
+  sku             String
+  title           String
+  quantity        Int
+  unitCostKes     Float
+  lineTotalKes    Float
+  // The model's recommended qty captured at PO creation (before any manual edit),
+  // so we can measure recommended-vs-actual later. Null for hand-built lines.
+  recommendedQty  Int?
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([purchaseOrderId])
+  @@index([tenantId])
+}
+
+// A saved plan to distribute stock from a warehouse to other locations, sized to
+// equalise days-of-cover by each destination's run rate. Plan + CSV only for now
+// (the app is read-only to Shopify); a future "apply" could push inventory moves.
+model DistributionPlan {
+  id             String  @id @default(cuid())
+  tenantId       String
+  name           String?
+  fromLocationId String // warehouse / source location
+  status         String  @default("draft") // draft | final | exported
+  coverDays      Int     @default(14)
+  windowDays     Int     @default(90) // run-rate window used to build it
+  createdByName  String?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  tenant       Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fromLocation Location               @relation("DistFrom", fields: [fromLocationId], references: [id], onDelete: Cascade)
+  lines        DistributionPlanLine[]
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+}
+
+model DistributionPlanLine {
+  id                String @id @default(cuid())
+  planId            String
+  tenantId          String // denormalised for RLS (uniform tenant_isolation policy)
+  productId         String // product id at planning time — deliberately not FK'd; sku/title are snapshots
+  sku               String
+  title             String
+  toLocationId      String
+  qty               Int
+  fromOnHand        Int    @default(0)
+  toOnHand          Int    @default(0)
+  toRunRate         Float  @default(0)
+  toDaysCoverBefore Float?
+  toDaysCoverAfter  Float?
+  status            String @default("planned") // planned | picked | sent
+
+  plan       DistributionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  toLocation Location         @relation("DistTo", fields: [toLocationId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+  @@index([tenantId])
+}
+
+// Append-only accounting/audit ledger. One row per significant mutation (PO
+// created/ordered/cancelled/deleted, cost changed). tenantId-scoped (RLS);
+// writes go through the service client — an audit log the tenant role could
+// filter is not an audit log.
+model AuditEvent {
+  id          String   @id @default(cuid())
+  tenantId    String
+  entity      String // "PurchaseOrder" | "Order" | "Product"
+  entityId    String
+  action      String // created | edited | ordered | cancelled | received | deleted | cost_changed
+  actorUserId String?
+  actorName   String?
+  meta        Json? // snapshot / before-after detail
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, entity, entityId])
 }
