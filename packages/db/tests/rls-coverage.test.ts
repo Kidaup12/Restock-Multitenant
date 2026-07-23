@@ -16,6 +16,9 @@ const GLOBAL_TABLES = [
   "Session",
   "Account",
   "Verification",
+  // Shopify webhook dedupe ledger — keyed by the delivery id (X-Shopify-Webhook-Id),
+  // which is checked before the tenant is even resolved; rows carry no tenant data.
+  "WebhookEvent",
 ];
 
 describe("rls coverage census", () => {

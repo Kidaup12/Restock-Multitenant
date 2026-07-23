@@ -31,3 +31,9 @@ export type {
   DistributionPlanLine,
   AuditEvent,
 } from "../generated/client";
+export type {
+  ShopifyConnection,
+  IngestCursor,
+  Notification,
+  WebhookEvent,
+} from "../generated/client";
