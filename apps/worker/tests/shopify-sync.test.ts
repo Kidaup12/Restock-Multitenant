@@ -258,4 +258,32 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     await handleFailure(job, new Error("transient"), publisher);
     expect(await prismaService.notification.count({ where: { tenantId } })).toBe(before);
   });
+
+  it("final failures email the alert contact once per incident; a successful sync re-arms", async () => {
+    const incident = await import("../src/incident");
+    await prismaService.tenantConfig.create({
+      data: { tenantId, alertEmail: "sync-alerts@example.test" },
+    });
+    await incident.clearIncident(publisher, tenantId, "shopify");
+
+    const sent: Array<{ to: string; subject: string }> = [];
+    const send = async (message: { to: string; subject: string; text: string }) => {
+      sent.push({ to: message.to, subject: message.subject });
+    };
+
+    const boom = new UnrecoverableError("sync blew up");
+    await handleFailure(jobStub(tenantId), boom, publisher, { send });
+    await handleFailure(jobStub(tenantId), boom, publisher, { send });
+    await handleFailure(jobStub(tenantId), boom, publisher, { send });
+    expect(sent).toHaveLength(1); // one incident, one email
+    expect(sent[0]!.to).toBe("sync-alerts@example.test");
+
+    // Recovery: a clean run clears the latch...
+    await processor(jobStub(tenantId));
+    // ...so the next incident emails again.
+    await handleFailure(jobStub(tenantId), boom, publisher, { send });
+    expect(sent).toHaveLength(2);
+
+    await incident.clearIncident(publisher, tenantId, "shopify");
+  });
 });

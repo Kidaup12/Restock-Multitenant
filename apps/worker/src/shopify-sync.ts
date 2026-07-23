@@ -3,6 +3,8 @@ import type { Redis } from "ioredis";
 import { prismaService } from "@wezesha/db";
 import { publishEvent } from "@wezesha/realtime";
 import type { SyncJobData } from "@wezesha/queue";
+import type { SendEmail } from "./email";
+import { clearIncident, sendIncidentAlert } from "./incident";
 import {
   ShopifyAuthError,
   bucketSalesByProductDay,
@@ -275,6 +277,8 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
         type: "sync.done",
         data: { tenantId, source: "shopify", ok: true },
       });
+      // Recovery re-arms the reconnect alert (see incident.ts).
+      await clearIncident(options.publisher, tenantId, "shopify");
     } catch (err) {
       if (err instanceof ShopifyAuthError) {
         // Token revoked / app uninstalled: retrying is pointless.
@@ -287,13 +291,15 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
 
 /**
  * Final-failure hook (wired to the worker's `failed` event): when a sync is out
- * of retries — or failed unrecoverably — persist a Notification for the bell
- * and tell live clients the sync ended. Retry-pending failures stay silent.
+ * of retries — or failed unrecoverably — persist a Notification for the bell,
+ * email the tenant's alert contact (once per incident — see incident.ts), and
+ * tell live clients the sync ended. Retry-pending failures stay silent.
  */
 export async function handleSyncFailure(
   job: Job<SyncJobData> | undefined,
   err: Error,
-  publisher: Redis
+  publisher: Redis,
+  deps: { send?: SendEmail } = {}
 ): Promise<void> {
   if (!job || job.data.source !== "shopify") return;
   const isFinal = err.name === "UnrecoverableError" || job.attemptsMade >= (job.opts.attempts ?? 1);
@@ -323,6 +329,17 @@ export async function handleSyncFailure(
   } catch (persistErr) {
     // A missing tenant (e.g. smoke fixtures) must not crash the worker loop.
     console.error(`worker: could not persist sync-failure notification for ${tenantId}`, persistErr);
+  }
+  try {
+    await sendIncidentAlert({
+      redis: publisher,
+      tenantId,
+      source: "shopify",
+      reason: err.message.slice(0, 300),
+      send: deps.send,
+    });
+  } catch (mailErr) {
+    console.error(`worker: could not send sync-failure alert for ${tenantId}`, mailErr);
   }
   await publishEvent(publisher, {
     type: "sync.done",
