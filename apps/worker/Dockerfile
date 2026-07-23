@@ -1,12 +1,11 @@
 # worker — build from the monorepo root:
 #   docker build -f apps/worker/Dockerfile -t wezesha-worker .
 #
-# Multi-stage: install the workspace subtree, bundle src/index.ts into one
-# self-contained dist/index.cjs (see "build" script), run it on a bare
-# node:22-alpine as a non-root user. The runner ships no node_modules — the
-# bundle carries bullmq/ioredis/@wezesha/realtime; the only external is
-# msgpackr-extract (optional native addon of bullmq's msgpackr), which falls
-# back to pure JS when absent.
+# Multi-stage: install the workspace subtree, generate the Prisma client, run
+# via tsx (already a production dependency) on node:22-alpine as a non-root
+# user. The runner keeps node_modules: the Prisma query engine is a native
+# binary resolved relative to the generated client, which rules out the
+# single-file esbuild bundle the pre-database worker shipped.
 
 FROM node:22-alpine AS build
 WORKDIR /repo
@@ -15,20 +14,29 @@ WORKDIR /repo
 # service needs. npm ci -w prunes install to the service and its workspace deps.
 COPY package.json package-lock.json ./
 COPY apps/worker/package.json apps/worker/
+COPY packages/db/package.json packages/db/
+COPY packages/queue/package.json packages/queue/
 COPY packages/realtime/package.json packages/realtime/
+COPY packages/shopify/package.json packages/shopify/
 RUN npm ci -w @wezesha/worker
 
+COPY packages/db/ packages/db/
+COPY packages/queue/ packages/queue/
 COPY packages/realtime/ packages/realtime/
+COPY packages/shopify/ packages/shopify/
 COPY apps/worker/ apps/worker/
-RUN npm run -w @wezesha/worker build
+
+# Prisma CLI is a devDependency of @wezesha/db (not installed by the pruned
+# ci); run it transiently to generate the client + linux-musl engine.
+RUN npx --yes prisma@^6.1.0 generate --schema packages/db/prisma/schema.prisma
 
 FROM node:22-alpine AS runner
 ENV NODE_ENV=production
-WORKDIR /app
-COPY --from=build --chown=node:node /repo/apps/worker/dist/ ./
+WORKDIR /repo
+COPY --from=build --chown=node:node /repo/ ./
 USER node
 
 # No HEALTHCHECK: the worker listens on nothing — process exit is the failure
 # signal, and the platform restart policy is the supervisor.
 
-CMD ["node", "--enable-source-maps", "index.cjs"]
+CMD ["node_modules/.bin/tsx", "apps/worker/src/index.ts"]

@@ -39,8 +39,15 @@ services:
       dockerfile: apps/worker/Dockerfile
     environment:
       REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://wezesha_app:wezesha_app_dev@db:5432/wezesha
+      SERVICE_DATABASE_URL: postgresql://wezesha_service:wezesha_service_dev@db:5432/wezesha
+      # Dev-only key for the staging rehearsal; real environments use the vault.
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+      SHOPIFY_APP_URL: ${SHOPIFY_APP_URL:-}
     depends_on:
       redis:
+        condition: service_healthy
+      db:
         condition: service_healthy
 
   web:
