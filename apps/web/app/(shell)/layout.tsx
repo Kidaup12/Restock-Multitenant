@@ -1,5 +1,6 @@
 import type { Role } from "@wezesha/db";
 import { activeMembership, listMemberships, requireSession } from "@/lib/auth";
+import { getUnreadCount } from "@/lib/notifications/data";
 import { AppShell } from "@/components/shell/app-shell";
 
 const roleLabels: Record<Role, string> = {
@@ -18,6 +19,9 @@ export default async function ShellLayout({
     activeMembership(session.user.id),
     listMemberships(session.user.id),
   ]);
+  const unreadNotifications = membership
+    ? await getUnreadCount(membership.tenantId)
+    : 0;
 
   return (
     <AppShell
@@ -38,6 +42,7 @@ export default async function ShellLayout({
         roleLabel: roleLabels[m.role],
       }))}
       tourAutoStart={membership !== null && membership.welcomedAt === null}
+      unreadNotifications={unreadNotifications}
     >
       {children}
     </AppShell>

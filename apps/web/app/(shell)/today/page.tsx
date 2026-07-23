@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import { activeMembership, requireSession } from "@/lib/auth";
+import { hasPermission } from "@/lib/auth/permissions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -37,8 +38,8 @@ export default async function TodayPage() {
   }
 
   const tenantId = membership.tenantId;
-  // The money-blind gate (role-based cost visibility) plugs in here.
-  const canViewCosts = true;
+  // Money-blind gate: MEMBERs (without view_costs) see no KES cost figures.
+  const canViewCosts = hasPermission(membership, "view_costs");
 
   return (
     <div className="space-y-6">
@@ -49,18 +50,20 @@ export default async function TodayPage() {
       />
       <RealtimeRefresh />
 
-      <Suspense
-        fallback={
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <SkeletonStatTile />
-            <SkeletonStatTile />
-            <SkeletonStatTile />
-            <SkeletonStatTile />
-          </div>
-        }
-      >
-        <MetricsTiles tenantId={tenantId} canViewCosts={canViewCosts} />
-      </Suspense>
+      <div data-tour="today-metrics">
+        <Suspense
+          fallback={
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <SkeletonStatTile />
+              <SkeletonStatTile />
+              <SkeletonStatTile />
+              <SkeletonStatTile />
+            </div>
+          }
+        >
+          <MetricsTiles tenantId={tenantId} canViewCosts={canViewCosts} />
+        </Suspense>
+      </div>
 
       <Suspense
         fallback={
@@ -72,15 +75,17 @@ export default async function TodayPage() {
         <RevenueTrend tenantId={tenantId} />
       </Suspense>
 
-      <Suspense
-        fallback={
-          <Card className="p-5">
-            <SkeletonTableRows rows={7} />
-          </Card>
-        }
-      >
-        <ReorderTable tenantId={tenantId} canViewCosts={canViewCosts} />
-      </Suspense>
+      <div data-tour="today-reorder">
+        <Suspense
+          fallback={
+            <Card className="p-5">
+              <SkeletonTableRows rows={7} />
+            </Card>
+          }
+        >
+          <ReorderTable tenantId={tenantId} canViewCosts={canViewCosts} />
+        </Suspense>
+      </div>
     </div>
   );
 }

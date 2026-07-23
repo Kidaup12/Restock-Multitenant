@@ -4,7 +4,6 @@ import { useState } from "react";
 import type { Role } from "@wezesha/db";
 import { cn } from "@/lib/cn";
 import {
-  BellIcon,
   BoxIcon,
   BulbIcon,
   CalendarIcon,
@@ -16,6 +15,7 @@ import {
   HomeIcon,
 } from "@/components/icons";
 import { NavItem } from "@/components/shell/nav-item";
+import { NotificationBell } from "@/components/shell/notification-bell";
 import { ProfileMenu } from "@/components/shell/profile-menu";
 import {
   WorkspaceSwitcher,
@@ -60,6 +60,7 @@ export function AppShell({
   workspace,
   workspaces,
   tourAutoStart,
+  unreadNotifications,
   children,
 }: {
   user: ShellUser;
@@ -67,6 +68,8 @@ export function AppShell({
   workspaces: WorkspaceOption[];
   /* First shell visit for this membership (welcomedAt still null). */
   tourAutoStart: boolean;
+  /* Server-rendered seed for the bell badge; live updates take over client-side. */
+  unreadNotifications: number;
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -159,17 +162,10 @@ export function AppShell({
             </div>
             <div className="flex items-center gap-2">
               <ThemeToggle data-tour="theme-toggle" />
-              <button
-                type="button"
-                aria-label="Notifications"
-                className={cn(
-                  "relative grid size-9 place-items-center rounded-md border border-edge bg-surface text-ink-secondary transition-colors",
-                  "outline-accent hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2",
-                )}
-              >
-                <BellIcon className="size-4.5" />
-                <span className="absolute top-2 right-2 size-1.5 rounded-full bg-negative" />
-              </button>
+              <NotificationBell
+                initialUnread={unreadNotifications}
+                workspaceId={workspace?.id ?? null}
+              />
               <ProfileMenu
                 name={user.name}
                 email={user.email}
