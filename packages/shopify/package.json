@@ -1,0 +1,18 @@
+{
+  "name": "@wezesha/shopify",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shopify Admin API core: OAuth + HMAC verification, typed GraphQL client with rate-limit handling, id/sales mappers, token crypto",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

@@ -8,8 +8,8 @@ import type { Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { WebSocket } from "ws";
 import { decodeEnvelope, type RealtimeEnvelope } from "@wezesha/realtime";
-import { createSyncWorker } from "../src/demo-sync";
-import { createSyncQueue, enqueueSyncOnce, type SyncQueue } from "../src/queue";
+import { createSyncWorker } from "../src/worker";
+import { createSyncQueue, enqueueSyncOnce, type SyncQueue } from "@wezesha/queue";
 
 /**
  * End-to-end proof over real infrastructure: enqueue the demo sync job →
@@ -129,7 +129,9 @@ describe.skipIf(!redisUrl)("realtime pipeline (real Redis + real gateway process
     const b = await openClient(gatewayPort, TENANT_B);
 
     try {
-      const result = await enqueueSyncOnce(queue, { tenantId: TENANT_A, source: "shopify" });
+      // source "demo" exercises the demo processor — "shopify" would dispatch
+      // to the real sync, which needs a live connection row.
+      const result = await enqueueSyncOnce(queue, { tenantId: TENANT_A, source: "demo" });
       expect(result.enqueued).toBe(true);
 
       // 3 progress events + 1 done
@@ -150,7 +152,7 @@ describe.skipIf(!redisUrl)("realtime pipeline (real Redis + real gateway process
       const progress = received.filter((e) => e.type === "sync.progress");
       expect(progress.map((e) => e.data.done)).toEqual([1, 2, 3]);
       expect(progress.map((e) => e.data.phase)).toEqual(["fetch", "transform", "load"]);
-      expect(progress.every((e) => e.data.total === 3 && e.data.source === "shopify")).toBe(true);
+      expect(progress.every((e) => e.data.total === 3 && e.data.source === "demo")).toBe(true);
 
       const done = received[3]!;
       expect(done.type === "sync.done" && done.data.ok).toBe(true);
