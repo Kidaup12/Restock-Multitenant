@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Role } from "@wezesha/db";
 import { cn } from "@/lib/cn";
 import {
+  BanknoteIcon,
   BoxIcon,
   BulbIcon,
   CalendarIcon,
@@ -29,6 +30,7 @@ const sidebarNav = [
   { href: "/plan", label: "Plan", icon: <CalendarIcon />, tourKey: "nav-plan" },
   { href: "/orders", label: "Orders", icon: <ClipboardIcon />, tourKey: "nav-orders" },
   { href: "/stock", label: "Stock", icon: <BoxIcon />, tourKey: "nav-stock" },
+  { href: "/costs", label: "Costs", icon: <BanknoteIcon />, tourKey: "nav-costs" },
   { href: "/sales", label: "Sales data", icon: <ChartIcon />, tourKey: "nav-sales" },
   { href: "/insights", label: "Insights", icon: <BulbIcon />, tourKey: "nav-insights" },
   { href: "/settings", label: "Settings", icon: <GearIcon />, tourKey: "nav-settings" },

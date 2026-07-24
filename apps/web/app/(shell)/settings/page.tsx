@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
+  BoxIcon,
   ChevronRightIcon,
   GearIcon,
   LayersIcon,
@@ -15,6 +16,12 @@ export const metadata: Metadata = {
 };
 
 const sections = [
+  {
+    href: "/settings/locations",
+    icon: <BoxIcon />,
+    title: "Locations",
+    description: "What each location does for your stock math — sells, holds, ignores.",
+  },
   {
     href: "/settings/team",
     icon: <UsersIcon />,
