@@ -7,7 +7,6 @@
 // Idempotent — safe to re-run.
 import { execSync } from "node:child_process";
 import { existsSync, copyFileSync } from "node:fs";
-import net from "node:net";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -38,21 +37,21 @@ function seedEnv(example, target) {
   }
 }
 
-// Wait until Postgres accepts TCP connections on :5434 (compose maps it there).
-function waitForPostgres(timeoutMs = 60000) {
+// Wait until Postgres actually ACCEPTS QUERIES — not just until the port opens.
+// A fresh container publishes its port the instant it starts, but Postgres needs
+// a few more seconds to finish initdb; pg_isready inside the container is the
+// real readiness signal (works the same on every OS, incl. WSL).
+async function waitForPostgres(compose, timeoutMs = 120000) {
   const deadline = Date.now() + timeoutMs;
-  return new Promise((resolve, reject) => {
-    const tryOnce = () => {
-      const sock = net.connect(5434, "127.0.0.1");
-      sock.once("connect", () => { sock.destroy(); resolve(); });
-      sock.once("error", () => {
-        sock.destroy();
-        if (Date.now() > deadline) reject(new Error("Postgres not reachable on :5434 after 60s"));
-        else setTimeout(tryOnce, 1000);
-      });
-    };
-    tryOnce();
-  });
+  while (Date.now() < deadline) {
+    try {
+      execSync(`${compose} exec -T db pg_isready -U postgres -q`, { cwd: root, stdio: "ignore" });
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  throw new Error("Postgres did not become ready within 120s (is Docker healthy?)");
 }
 
 async function main() {
@@ -68,8 +67,8 @@ async function main() {
   seedEnv("packages/db/.env.example", "packages/db/.env");
   seedEnv("apps/web/.env.example", "apps/web/.env.local");
 
-  step(4, "waiting for Postgres");
-  await waitForPostgres();
+  step(4, "waiting for Postgres to accept connections");
+  await waitForPostgres(compose);
 
   step(5, "applying migrations (schema + restricted roles + RLS)");
   run("npm run -w @wezesha/db db:migrate:deploy");
@@ -85,7 +84,7 @@ Setup complete.
 
   Start the app:      npm run -w web dev
   Start the worker:   npm run -w @wezesha/worker dev   (crons + sync; needs Redis)
-  Sign in:            dev@wezesha.test  /  Dev12345!
+  Sign in:            owner@wezesha.test  /  Owner12345!   (also admin@ / staff@ — see docs/QA-TESTPLAN.md)
 
 Docs: docs/QUICKSTART.md  ·  docs/ARCHITECTURE.md
 `);
