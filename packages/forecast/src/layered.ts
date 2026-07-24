@@ -13,6 +13,7 @@ import {
   weightedDailyRateAdjusted,
   weightedDailyRateCensored,
   censoredDaysInWindow,
+  inferredStockoutGapDays,
   effectiveWindowDays,
   daysOfStockRemaining,
   kingsSafetyStock,
@@ -23,6 +24,12 @@ import {
   type SalesPoint,
   type Urgency,
 } from "./baseline";
+import {
+  confidenceWord,
+  leastConfident,
+  type ConfidenceSignals,
+  type ConfidenceWord,
+} from "./confidence-word";
 
 export type ActivePromo = {
   discountPct: number;
@@ -31,6 +38,20 @@ export type ActivePromo = {
   /** "all" | "sku" | "category" | "brand" */
   scope: string;
   scopeValue: string | null;
+};
+
+/**
+ * An external demand level (30-day units) that REPLACES the history-derived run
+ * rate: a cold-start borrow-from-similar, or an owner "I expect about X". Layer 2
+ * cap/promo is bypassed for it (the override IS the stated demand), but the
+ * sizing, inventory, and confidence math still run. Borrowed numbers read as a
+ * guess; an owner prior is capped at "fairly sure" — knowledge, never certainty.
+ */
+export type DemandOverride = {
+  forecast30d: number;
+  source: "borrowed" | "owner_prior";
+  /** Short chip text, e.g. "Borrowed from Cantu Shea Butter" or "Owner expects ~40/mo". */
+  label: string;
 };
 
 export type ForecastInput = {
@@ -61,6 +82,9 @@ export type ForecastInput = {
   serviceZ?: Partial<Record<"A" | "B" | "C", number | null>>;
   /** Cap multiple over the best trailing month (tenant setting). Absent -> 3. */
   capMultiple?: number;
+  /** Cold-start borrow / owner expectation that replaces the run rate. Absent ->
+   *  forecast from the product's own sales as usual. */
+  demandOverride?: DemandOverride | null;
 };
 
 /** No forecast may exceed this multiple of the product's best trailing month.
@@ -102,6 +126,9 @@ export type ForecastResult = {
   signals: Signal[];
   /** Std dev of recent daily demand — feeds the calibrated reorder path. */
   demandStd?: number;
+  /** The honesty word for this number, and the raw signals it came from. */
+  confidenceWord: ConfidenceWord;
+  confidenceSignals: ConfidenceSignals;
 };
 
 /** Days of history available as of `today` (0 when there is none). */
@@ -191,9 +218,14 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   const isNew = span < NEW_PRODUCT_DAYS;
   const hasHistory = input.history.length > 0;
 
-  // ── Layer 1: recency-weighted run rate ────────────────────────────────────
-  const dailyRate = runRateDaily(input.history, today, input.stockoutDates);
-  const layer1 = dailyRate * 30;
+  const override = input.demandOverride ?? null;
+
+  // ── Layer 1: recency-weighted run rate (or an external demand override) ────
+  const historyDailyRate = runRateDaily(input.history, today, input.stockoutDates);
+  // The rate the inventory + sizing math runs on: the override when present
+  // (cold-start borrow / owner expectation), else the history run rate.
+  const dailyRate = override ? override.forecast30d / 30 : historyDailyRate;
+  const layer1 = override ? override.forecast30d : historyDailyRate * 30;
 
   // ── Confidence: coefficient of variation of recent demand, capped for thin
   //    history so a week of data never reads as certainty ────────────────────
@@ -217,8 +249,12 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   const signals: Signal[] = [];
   let boosted = layer1;
 
+  // Promo lift and the runaway cap apply to a history-derived number only. An
+  // override IS the stated demand — layering promo/cap on top would double-count
+  // or clip the owner's own figure.
   const promo = activePromoLift(input.activePromos, input.productType, input.vendor, input.sku);
-  if (promo.lift > 1.01) {
+  const promoApplies = !override && promo.lift > 1.01;
+  if (promoApplies) {
     signals.push({
       label: `Active promo ${promo.channel ?? ""} +${((promo.lift - 1) * 100).toFixed(0)}%`,
       deltaPct: (promo.lift - 1) * 100,
@@ -230,7 +266,7 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   // ── Safety cap: never exceed capMultiple x the best trailing month ────────
   const capMultiple = input.capMultiple ?? DEFAULT_CAP_MULTIPLE;
   const best = bestTrailingMonth(input.history, today);
-  const cap = best > 0 ? capMultiple * best : Infinity;
+  const cap = best > 0 && !override ? capMultiple * best : Infinity;
   const capped = Math.min(boosted, cap);
   const wasCapped = capped < boosted - 1e-9;
   if (wasCapped) {
@@ -259,13 +295,18 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
 
   // A product with sales history but no run rate is a dead listing: never
   // recommended, never counted as a stockout, even at zero stock. A product
-  // with NO history at all is not dead — it's too new to judge, and the result
-  // must say so instead of silently reading as "not selling".
-  const isDead = hasHistory && dailyRate <= 0;
-  const tooNew = !hasHistory;
+  // with NO history at all is not dead — it's too new to judge. An override
+  // (borrow / owner prior) supplies a real demand, so neither state applies.
+  const isDead = hasHistory && historyDailyRate <= 0 && !override;
+  const tooNew = !hasHistory && !override;
+  if (override?.source === "borrowed") {
+    signals.push({ label: override.label, deltaPct: 0, emoji: "🔗" });
+  } else if (override?.source === "owner_prior") {
+    signals.push({ label: override.label, deltaPct: 0, emoji: "🗣️" });
+  }
   if (tooNew) {
     signals.push({ label: "New product — no sales history yet", deltaPct: 0, emoji: "🆕" });
-  } else if (isNew) {
+  } else if (isNew && hasHistory && !override) {
     signals.push({
       label: `New product — forecast from ${Math.max(1, Math.round(span))} days of history`,
       deltaPct: 0,
@@ -276,19 +317,46 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   const recommendedQty =
     isDead || tooNew ? 0 : Math.max(0, Math.ceil(finalForecast30d + safety - input.currentStock));
 
+  // ── Confidence word: the honesty label that travels with the number ───────
+  const stockoutGapDays = input.stockoutDates?.length
+    ? censoredDaysInWindow(input.stockoutDates, last30, today)
+    : inferredStockoutGapDays(input.history, last30, today);
+  const confidenceSignals: ConfidenceSignals = {
+    historyDays: span,
+    cv,
+    stockoutGapShare: Math.max(0, Math.min(1, stockoutGapDays / 30)),
+    promoContaminated: promoApplies,
+    coldStart: tooNew || override?.source === "borrowed",
+  };
+  let word = confidenceWord(confidenceSignals);
+  // An owner expectation is knowledge, not history — it never reads as "sure".
+  if (override?.source === "owner_prior") word = leastConfident(word, "fairly_sure");
+
   const reasoning = (tooNew
     ? [
         "No sales history yet — too new to forecast; collect sales before ordering against a prediction.",
         `Current stock ${input.currentStock}.`,
       ]
-    : [
-        `Forecast ${finalForecast30d.toFixed(0)} units over 30 days from the ${
-          isNew ? `last-${Math.max(1, Math.round(span))}-day rate (new product)` : "recency-weighted run rate (30/90/365-day blend)"
-        }: ${dailyRate.toFixed(2)} units/day.`,
-        wasCapped ? `Capped at ${capMultiple}× the best month (${best.toFixed(0)}) to block runaway numbers.` : "",
-        `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, lead time ${input.leadTimeAvg}±${input.leadTimeStd}d); reorder point ${rop.toFixed(0)}.`,
-        `Current stock ${input.currentStock} covers ~${daysLeft} days.`,
-      ]
+    : override?.source === "borrowed"
+      ? [
+          `Too new to forecast from its own sales — borrowing an established similar product's shape (${override.label}): ${dailyRate.toFixed(2)} units/day. Real sales take over as history builds.`,
+          `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, lead time ${input.leadTimeAvg}±${input.leadTimeStd}d).`,
+          `Current stock ${input.currentStock} covers ~${daysLeft} days.`,
+        ]
+      : override?.source === "owner_prior"
+        ? [
+            `Using the owner's expectation (${override.label}): ${finalForecast30d.toFixed(0)} units over 30 days, ${dailyRate.toFixed(2)} units/day.`,
+            `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, lead time ${input.leadTimeAvg}±${input.leadTimeStd}d); reorder point ${rop.toFixed(0)}.`,
+            `Current stock ${input.currentStock} covers ~${daysLeft} days.`,
+          ]
+        : [
+            `Forecast ${finalForecast30d.toFixed(0)} units over 30 days from the ${
+              isNew ? `last-${Math.max(1, Math.round(span))}-day rate (new product)` : "recency-weighted run rate (30/90/365-day blend)"
+            }: ${dailyRate.toFixed(2)} units/day.`,
+            wasCapped ? `Capped at ${capMultiple}× the best month (${best.toFixed(0)}) to block runaway numbers.` : "",
+            `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, lead time ${input.leadTimeAvg}±${input.leadTimeStd}d); reorder point ${rop.toFixed(0)}.`,
+            `Current stock ${input.currentStock} covers ~${daysLeft} days.`,
+          ]
   )
     .filter(Boolean)
     .join(" ");
@@ -307,5 +375,7 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
     urgency,
     signals,
     demandStd,
+    confidenceWord: word,
+    confidenceSignals,
   };
 }

@@ -142,6 +142,12 @@ export const builders: Record<string, Builder> = {
     bias: 0,
     sampleSize: 10,
   }),
+  OwnerPrior: (tenantId, key) => ({
+    tenantId,
+    scope: "product",
+    scopeValue: `prod-${key}`,
+    expectedUnits: 30,
+  }),
   SpotCheck: (tenantId, key) => ({
     tenantId,
     productId: `spot-product-${key}`,

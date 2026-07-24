@@ -37,4 +37,30 @@ describe("explainQty", () => {
     const input = { ...base, dailyDemandStd: 3, leadTimeAvg: 14, policy: { serviceLevel: 0.95, rule: "calibrated" as const } };
     expect(explainQty(input).recommendedQty).toBe(recommendedQty(input));
   });
+
+  it("the breakdown reconciles for EVERY rule — target − on hand − incoming = qty", () => {
+    const cases = [
+      base, // mean cover (no policy, not C)
+      { ...base, dailyDemandStd: 3, leadTimeAvg: 14, policy: { serviceLevel: 0.95, rule: "calibrated" as const } },
+      { ...base, abcCategory: "C" }, // min/max
+    ];
+    for (const input of cases) {
+      const e = explainQty(input);
+      expect(e.recommendedQty).toBe(recommendedQty(input));
+      if (e.recommendedQty > 0) {
+        // The printed arithmetic actually adds up — the trust promise.
+        expect(e.targetUnits - e.currentStock - e.onOrder).toBe(e.recommendedQty);
+      } else {
+        expect(e.targetUnits - e.currentStock - e.onOrder).toBeLessThanOrEqual(0);
+      }
+      expect(e.summary).toContain(`= ${e.recommendedQty}`);
+    }
+  });
+
+  it("an overridden (held) quantity is stated plainly, not as false arithmetic", () => {
+    const e = explainQty({ ...base, abcCategory: "C" }, 0); // pipeline zeroed a dead/too-new item
+    expect(e.recommendedQty).toBe(0);
+    expect(e.summary).toMatch(/held off the buy list/i);
+    expect(e.summary).toContain("= 0");
+  });
 });

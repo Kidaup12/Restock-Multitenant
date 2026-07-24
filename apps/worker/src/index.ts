@@ -22,6 +22,13 @@ import {
   registerPosCronSchedules,
   type PosCronQueue,
 } from "./pos-gap-cron";
+import {
+  FORECAST_CRON_QUEUE,
+  createForecastCronQueue,
+  createForecastCronWorker,
+  registerForecastCronSchedules,
+  type ForecastCronQueue,
+} from "./forecast-cron";
 import { createSyncWorker } from "./worker";
 
 /**
@@ -37,6 +44,8 @@ import { createSyncWorker } from "./worker";
  *                           (daily plan-limit checks); unset keeps dev/CI quiet
  *   POS_CRONS             — "1" registers + runs the POS cron schedules
  *                           (daily sales-gap checks); unset keeps dev/CI quiet
+ *   FORECAST_CRON         — "1" registers + runs the forecast crons (nightly
+ *                           forecast run + monthly backtest); unset keeps dev/CI quiet
  *   POS_FEED_SECRET       — bearer token for the POS feed fetch (per-provider)
  *   SENTRY_DSN            — error tracking; unset = tracking disabled (no-op)
  */
@@ -99,6 +108,19 @@ async function main(): Promise<void> {
     console.log("worker: pos crons registered (sales-gap check)");
   }
 
+  let forecastQueue: ForecastCronQueue | null = null;
+  let forecastWorker: Worker | null = null;
+  if (process.env.FORECAST_CRON === "1") {
+    forecastQueue = createForecastCronQueue(connection);
+    await registerForecastCronSchedules(forecastQueue);
+    forecastWorker = createForecastCronWorker({ connection, queue: forecastQueue });
+    forecastWorker.on("failed", (job, err) => {
+      console.error(`worker: forecast cron ${job?.id} failed`, err);
+      captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: FORECAST_CRON_QUEUE });
+    });
+    console.log("worker: forecast crons registered (nightly forecast + monthly backtest)");
+  }
+
   let closing = false;
   const shutdown = (signal: string) => {
     if (closing) return;
@@ -113,6 +135,8 @@ async function main(): Promise<void> {
       opsQueue?.close(),
       posWorker?.close(),
       posQueue?.close(),
+      forecastWorker?.close(),
+      forecastQueue?.close(),
     ])
       .then(() => Promise.all([connection.quit(), publisher.quit()]))
       .then(

@@ -1,0 +1,340 @@
+import { randomUUID } from "node:crypto";
+import { Redis } from "ioredis";
+import { prismaForTenant, prismaForTenantTx } from "@wezesha/db";
+import {
+  assignAbc,
+  dailySalesValue,
+  forecastProduct,
+  historySpanDays,
+  anchorToday,
+  policyForClass,
+  resolveForecastKnobs,
+  selectProxy,
+  isEstablishedProxy,
+  borrowedForecast30d,
+  selectPriorForProduct,
+  applyOwnerPrior,
+  type ActivePromo,
+  type DemandOverride,
+  type OwnerPriorFacts,
+  type PredictionFields,
+  type ProxyCandidate,
+  type ProxyTarget,
+  type SalesPoint,
+} from "@wezesha/forecast";
+import { publishEvent } from "@wezesha/realtime";
+
+/**
+ * One forecast run for one tenant: load facts + history + owner priors, run the
+ * pure engine per product, resolve cold-start borrows and owner expectations
+ * across the catalogue, then replace the tenant's Prediction rows under a shared
+ * forecastRunId and announce forecast.done over realtime.
+ *
+ * Trust layer (spec §6), persisted so the surfaces read it instead of
+ * recomputing: a confidence WORD on every number, cold-start state (too-new /
+ * borrowed, never a silent zero), the borrowed-from proxy, the owner-prior
+ * chip, and the reproducible reorder breakdown (explainParts).
+ *
+ * Everything — reads AND writes — goes through the RLS-enforced tenant client:
+ * the run is a single-tenant path, so the service client has no business here.
+ * The delete-then-create replacement runs inside one tenant transaction.
+ */
+
+const DAY_MS = 86_400_000;
+/** History window fed to the engine — matches its 30/90/365-day rate windows. */
+const HISTORY_DAYS = 365;
+/** A history-less product is a cold start only if it is genuinely NEW. An older
+ *  listing with no sales is a dead dud, not a cold start — it keeps the engine's
+ *  "recommend nothing" behaviour and never borrows a shape (spec §6/§11:
+ *  dead-stock is "new vs old dud"). Age comes from shopifyCreatedAt. */
+const COLD_START_MAX_AGE_DAYS = 60;
+
+function isGenuinelyNew(shopifyCreatedAt: Date | null, now: Date): boolean {
+  if (shopifyCreatedAt == null) return true; // no age signal — a history-less row reads as new
+  return (now.getTime() - shopifyCreatedAt.getTime()) / DAY_MS <= COLD_START_MAX_AGE_DAYS;
+}
+
+export type ForecastRunResult = { created: number; forecastRunId: string };
+
+const r0 = (n: number) => Math.round(n);
+
+/** Short chip text for an owner prior applied to a number. */
+function priorLabel(p: OwnerPriorFacts): string {
+  if (p.expectedUnits != null) return `Owner expects ~${r0(p.expectedUnits)}/mo`;
+  if (p.multiplier != null) return `Owner set ${p.multiplier}× for this ${p.scope}`;
+  return "Owner prior applied";
+}
+
+export async function runForecast(tenantId: string): Promise<ForecastRunResult> {
+  const db = prismaForTenant(tenantId);
+  const now = new Date();
+  const historySince = new Date(now.getTime() - HISTORY_DAYS * DAY_MS);
+
+  const [products, config, promos, sales, priorRows] = await Promise.all([
+    db.product.findMany({
+      // notForSale (testers/display/damaged) stay visible in the catalogue but
+      // never earn a forecast or a buy-list line — same exclusion the cost and
+      // stock surfaces apply.
+      where: { active: true, notForSale: false },
+      select: {
+        id: true,
+        sku: true,
+        title: true,
+        productType: true,
+        vendor: true,
+        customCategory: true,
+        priceKes: true,
+        costKes: true,
+        currentStock: true,
+        onOrder: true,
+        leadTimeDays: true,
+        shopifyCreatedAt: true,
+        supplier: { select: { leadTimeAvgDays: true, leadTimeStdDays: true } },
+      },
+    }),
+    db.tenantConfig.findFirst(),
+    db.promo.findMany({
+      where: { deletedAt: null, startDate: { lte: now }, endDate: { gte: now } },
+      select: { discountPct: true, promoType: true, channel: true, scope: true, scopeValue: true },
+    }),
+    db.salesHistory.findMany({
+      where: { date: { gte: historySince } },
+      select: { productId: true, date: true, quantity: true, revenueKes: true, channel: true },
+    }),
+    db.ownerPrior.findMany({
+      where: { revokedAt: null },
+      select: {
+        scope: true,
+        scopeValue: true,
+        expectedUnits: true,
+        multiplier: true,
+        proxyProductId: true,
+        weeks: true,
+        createdAt: true,
+        revokedAt: true,
+      },
+    }),
+  ]);
+
+  const historyByProduct = new Map<string, SalesPoint[]>();
+  for (const row of sales) {
+    let list = historyByProduct.get(row.productId);
+    if (!list) historyByProduct.set(row.productId, (list = []));
+    list.push(row);
+  }
+
+  // Cross-product steps the pure pipeline leaves to the caller.
+  const knobs = resolveForecastKnobs(config);
+  const abcByProduct = assignAbc(
+    products.map((p) => ({
+      id: p.id,
+      revenue: dailySalesValue(historyByProduct.get(p.id) ?? [], p.priceKes),
+    }))
+  );
+  const activePromos: ActivePromo[] = promos;
+  const runDateKey = now.toISOString().slice(0, 10);
+  const today = anchorToday(runDateKey);
+  const priorFacts: OwnerPriorFacts[] = priorRows.map((p) => ({
+    scope: p.scope === "brand" ? "brand" : "product",
+    scopeValue: p.scopeValue,
+    expectedUnits: p.expectedUnits,
+    multiplier: p.multiplier,
+    proxyProductId: p.proxyProductId,
+    weeks: p.weeks,
+    createdAt: p.createdAt,
+    revokedAt: p.revokedAt,
+  }));
+
+  const titleById = new Map(products.map((p) => [p.id, p.title]));
+
+  // Pass 1: forecast every product from its own history (no override). This
+  // gives the run rate that established products lend as cold-start proxies.
+  const firstPass = new Map<string, PredictionFields>();
+  const spanByProduct = new Map<string, number>();
+  const factsById = new Map<string, ProxyCandidate>();
+  for (const product of products) {
+    const history = historyByProduct.get(product.id) ?? [];
+    const abcCategory = abcByProduct[product.id] ?? null;
+    const fields = forecastProduct({
+      productId: product.id,
+      product: {
+        sku: product.sku,
+        productType: product.productType,
+        vendor: product.vendor,
+        currentStock: product.currentStock,
+        onOrder: product.onOrder,
+        leadTimeDays: product.leadTimeDays,
+        priceKes: product.priceKes,
+        costKes: product.costKes,
+      },
+      supplier: product.supplier,
+      history,
+      activePromos,
+      abcCategory,
+      policy: policyForClass(knobs.methods, abcCategory),
+      serviceZ: knobs.serviceZ,
+      capMultiple: knobs.capMultiple,
+      runDateKey,
+    });
+    firstPass.set(product.id, fields);
+    const span = historySpanDays(history, today);
+    spanByProduct.set(product.id, span);
+    factsById.set(product.id, {
+      productId: product.id,
+      vendor: product.vendor,
+      customCategory: product.customCategory,
+      historyDays: span,
+      dailyRate: fields.layer1Forecast30d / 30, // the pure run rate, promo/cap aside
+      priceKes: product.priceKes,
+    });
+  }
+  const candidates = [...factsById.values()].filter(isEstablishedProxy);
+
+  const forecastRunId = randomUUID();
+  const runDate = now;
+
+  const rows = products.map((product) => {
+    const history = historyByProduct.get(product.id) ?? [];
+    const abcCategory = abcByProduct[product.id] ?? null;
+    const first = firstPass.get(product.id)!;
+    const hasHistory = history.length > 0;
+    const target: ProxyTarget = {
+      productId: product.id,
+      vendor: product.vendor,
+      customCategory: product.customCategory,
+      priceKes: product.priceKes,
+    };
+    const prior = selectPriorForProduct(priorFacts, { id: product.id, vendor: product.vendor }, now);
+
+    let override: DemandOverride | null = null;
+    let coldStart: "too_new" | "borrowed" | null = null;
+    let borrowedFromProductId: string | null = null;
+
+    if (!hasHistory && isGenuinelyNew(product.shopifyCreatedAt, now)) {
+      // Cold start: never a silent zero. Owner "sell like X" wins, then owner
+      // "I expect about X", then an auto-borrow from a similar established
+      // product, else an honest "too new to forecast". An OLD history-less
+      // product skips this entirely — it is a dead dud, not a cold start.
+      const ownerProxy =
+        prior?.proxyProductId != null ? factsById.get(prior.proxyProductId) ?? null : null;
+      if (ownerProxy && isEstablishedProxy(ownerProxy)) {
+        override = {
+          forecast30d: borrowedForecast30d(ownerProxy, target),
+          source: "borrowed",
+          label: `Borrowed from ${titleById.get(ownerProxy.productId) ?? "a similar product"}`,
+        };
+        coldStart = "borrowed";
+        borrowedFromProductId = ownerProxy.productId;
+      } else if (prior?.expectedUnits != null) {
+        override = { forecast30d: prior.expectedUnits, source: "owner_prior", label: priorLabel(prior) };
+      } else {
+        const proxy = selectProxy(target, candidates);
+        if (proxy) {
+          override = {
+            forecast30d: borrowedForecast30d(proxy, target),
+            source: "borrowed",
+            label: `Borrowed from ${titleById.get(proxy.productId) ?? "a similar product"}`,
+          };
+          coldStart = "borrowed";
+          borrowedFromProductId = proxy.productId;
+        } else {
+          coldStart = "too_new";
+        }
+      }
+    } else if (prior && (prior.expectedUnits != null || prior.multiplier != null)) {
+      // Established product with an owner expectation/multiplier.
+      override = {
+        forecast30d: applyOwnerPrior(first.finalForecast30d, prior),
+        source: "owner_prior",
+        label: priorLabel(prior),
+      };
+    }
+
+    const fields =
+      override == null
+        ? first
+        : forecastProduct({
+            productId: product.id,
+            product: {
+              sku: product.sku,
+              productType: product.productType,
+              vendor: product.vendor,
+              currentStock: product.currentStock,
+              onOrder: product.onOrder,
+              leadTimeDays: product.leadTimeDays,
+              priceKes: product.priceKes,
+              costKes: product.costKes,
+            },
+            supplier: product.supplier,
+            history,
+            activePromos,
+            abcCategory,
+            policy: policyForClass(knobs.methods, abcCategory),
+            serviceZ: knobs.serviceZ,
+            capMultiple: knobs.capMultiple,
+            runDateKey,
+            demandOverride: override,
+          });
+
+    return {
+      tenantId,
+      productId: product.id,
+      runDate,
+      forecastRunId,
+      layer1Forecast30d: fields.layer1Forecast30d,
+      layer1Confidence: fields.layer1Confidence,
+      layer2Adjustment: fields.layer2Adjustment,
+      finalForecast30d: fields.finalForecast30d,
+      daysUntilStockout: fields.daysUntilStockout,
+      recommendedQty: fields.recommendedQty,
+      safetyStock: fields.safetyStock,
+      reorderPoint: fields.reorderPoint,
+      confidence: fields.confidence,
+      reasoning: fields.reasoning,
+      urgency: fields.urgency,
+      signals: JSON.stringify(fields.signals),
+      regime: fields.regime,
+      confidenceWord: fields.confidenceWord,
+      coldStart,
+      borrowedFromProductId,
+      explainParts: fields.explainParts,
+    };
+  });
+
+  // Replace, atomically: this run is the tenant's current forecast.
+  await prismaForTenantTx(tenantId, async (tx) => {
+    await tx.prediction.deleteMany({});
+    if (rows.length > 0) await tx.prediction.createMany({ data: rows });
+  });
+
+  await publishForecastDone(tenantId, forecastRunId, rows.length);
+  return { created: rows.length, forecastRunId };
+}
+
+/** Announce the run on the tenant's realtime channel. Best-effort: with no
+ *  REDIS_URL (tests, minimal dev) or an unreachable broker this is a no-op —
+ *  the run itself already succeeded. */
+async function publishForecastDone(
+  tenantId: string,
+  forecastRunId: string,
+  created: number
+): Promise<void> {
+  const url = process.env.REDIS_URL;
+  if (!url) return;
+  const redis = new Redis(url, {
+    lazyConnect: true,
+    enableOfflineQueue: false,
+    maxRetriesPerRequest: 0,
+  });
+  try {
+    await redis.connect();
+    await publishEvent(redis, {
+      type: "forecast.done",
+      data: { tenantId, forecastRunId, created },
+    });
+  } catch {
+    console.warn("forecast.done publish skipped (redis unavailable)");
+  } finally {
+    redis.disconnect();
+  }
+}

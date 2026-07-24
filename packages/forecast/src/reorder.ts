@@ -55,8 +55,40 @@ function tauForClass(abc: string | null | undefined): number {
  *  long-lead items: lead 28 > cover 21 meant running out before arrival). */
 const REVIEW_DAYS = ORDER_REVIEW_DAYS;
 
-export function recommendedQty(input: ReorderInput): number {
+export type ReorderMethod = "mean_cover" | "calibrated" | "min_max";
+
+/**
+ * The sizing decision, decomposed so the buy list and its "why" read from ONE
+ * source. Every rule reconciles the same way:
+ *   qty = max(0, targetUnits − currentStock − onOrder)
+ * where targetUnits is the shelf level the rule wants to reach. Making the
+ * target explicit is what lets the explanation add up for the calibrated and
+ * min/max rules too — not just mean cover (spec §6: a breakdown that doesn't
+ * sum to the shown number is worse than none).
+ */
+export type ReorderBreakdown = {
+  method: ReorderMethod;
+  /** Units to stock up to, before netting on-hand and incoming. Integer. */
+  targetUnits: number;
+  /** Final order, floored at 0: max(0, targetUnits − currentStock − onOrder). */
+  qty: number;
+  dailyForecast: number; // finalForecast30d / 30
+  safetyStock: number;
+  currentStock: number;
+  onOrder: number;
+  /** Days of demand the target protects: coverDays (mean cover), leadTimeAvg +
+   *  review (calibrated), or 14 (min/max). */
+  windowDays: number;
+  /** Cycle service level the calibrated target hits; null for the other rules. */
+  serviceLevel: number | null;
+  /** Mean-cover demand over the window (dailyForecast × windowDays); 0 otherwise. */
+  demandOverCover: number;
+};
+
+export function reorderBreakdown(input: ReorderInput): ReorderBreakdown {
   const { finalForecast30d, safetyStock, currentStock, onOrder, policy } = input;
+  const dailyForecast = finalForecast30d / 30;
+  const net = (target: number) => Math.max(0, target - currentStock - onOrder);
 
   const useMinMax = policy ? policy.rule === "min_max" : input.abcCategory === "C";
 
@@ -75,20 +107,37 @@ export function recommendedQty(input: ReorderInput): number {
       horizonDays: protectionDays,
       tau,
     });
-    return Math.max(0, Math.ceil(orderUpTo - currentStock - onOrder));
+    const targetUnits = Math.ceil(orderUpTo);
+    return {
+      method: "calibrated", targetUnits, qty: net(targetUnits),
+      dailyForecast, safetyStock, currentStock, onOrder,
+      windowDays: protectionDays, serviceLevel: tau, demandOverCover: 0,
+    };
   }
 
   if (useMinMax) {
     // Min/max rule: maintain a par level of 2 weeks of demand + safety stock.
     // Never order a full month's worth for a SKU that might sell 3 units a month.
-    const dailyRate = finalForecast30d / 30;
-    const parLevel = Math.max(1, Math.ceil(dailyRate * 14 + safetyStock));
-    return Math.max(0, parLevel - currentStock - onOrder);
+    const parLevel = Math.max(1, Math.ceil(dailyForecast * 14 + safetyStock));
+    return {
+      method: "min_max", targetUnits: parLevel, qty: net(parLevel),
+      dailyForecast, safetyStock, currentStock, onOrder,
+      windowDays: 14, serviceLevel: null, demandOverCover: dailyForecast * 14,
+    };
   }
 
   const coverDays = input.coverDays ?? 30;
-  const demandOverCover = (finalForecast30d / 30) * coverDays;
-  return Math.max(0, Math.ceil(demandOverCover + safetyStock - currentStock - onOrder));
+  const demandOverCover = dailyForecast * coverDays;
+  const targetUnits = Math.ceil(demandOverCover + safetyStock);
+  return {
+    method: "mean_cover", targetUnits, qty: net(targetUnits),
+    dailyForecast, safetyStock, currentStock, onOrder,
+    windowDays: coverDays, serviceLevel: null, demandOverCover,
+  };
+}
+
+export function recommendedQty(input: ReorderInput): number {
+  return reorderBreakdown(input).qty;
 }
 
 /** The method used for this item's recommendation — feeds Prediction.regime

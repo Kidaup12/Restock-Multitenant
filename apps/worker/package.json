@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@wezesha/db": "*",
+    "@wezesha/forecast": "*",
+    "@wezesha/forecast-run": "*",
     "@wezesha/observability": "*",
     "@wezesha/pos": "*",
     "@wezesha/queue": "*",

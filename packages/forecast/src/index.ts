@@ -28,8 +28,58 @@ export {
   type ForecastInput,
   type ForecastResult,
   type ActivePromo,
+  type DemandOverride,
   type Signal,
 } from "./layered";
+
+// Confidence vocabulary — the honesty word on every number
+export {
+  confidenceWord,
+  leastConfident,
+  SURE_MIN_HISTORY_DAYS,
+  GUESS_MAX_HISTORY_DAYS,
+  type ConfidenceWord,
+  type ConfidenceSignals,
+} from "./confidence-word";
+
+// Cold start — borrow-from-similar (established proxies only)
+export {
+  selectProxy,
+  isEstablishedProxy,
+  borrowedDailyRate,
+  borrowedForecast30d,
+  PROXY_MIN_HISTORY_DAYS,
+  type ProxyCandidate,
+  type ProxyTarget,
+} from "./cold-start";
+
+// Owner priors — "tell the forecast something"
+export {
+  priorActive,
+  priorMatchesProduct,
+  selectPriorForProduct,
+  applyOwnerPrior,
+  type PriorScope,
+  type OwnerPriorFacts,
+  type PriorProduct,
+} from "./owner-prior";
+
+// Walk-forward backtest + champion/challenger audition
+export {
+  walkForwardBacktest,
+  walkForwardCutoffs,
+  methodDailyRate,
+  auditChampion,
+  championsByClass,
+  DEMAND_METHODS,
+  CHAMPION_DEFAULT,
+  CHALLENGER_WIN_MARGIN,
+  type DemandMethod,
+  type BacktestProduct,
+  type BacktestResult,
+  type ClassAccuracy,
+  type Lean,
+} from "./backtest";
 
 // Reality guardrail
 export {
