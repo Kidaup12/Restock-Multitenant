@@ -28,6 +28,12 @@ const sections = [
     title: "Team",
     description: "Invite teammates, set roles, and remove access.",
   },
+  {
+    href: "/settings/connections",
+    icon: <LayersIcon />,
+    title: "Connections",
+    description: "Shopify, QuickBooks, and the POS feed — connect and check sync health.",
+  },
 ];
 
 const upcoming = [
@@ -35,11 +41,6 @@ const upcoming = [
     icon: <GearIcon />,
     title: "Workspace",
     description: "Name, currency, and forecast preferences.",
-  },
-  {
-    icon: <LayersIcon />,
-    title: "Integrations",
-    description: "Shopify, QuickBooks, and the POS feed.",
   },
 ];
 

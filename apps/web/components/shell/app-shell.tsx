@@ -14,6 +14,7 @@ import {
   DotsIcon,
   GearIcon,
   HomeIcon,
+  InboxIcon,
 } from "@/components/icons";
 import { NavItem } from "@/components/shell/nav-item";
 import { NotificationBell } from "@/components/shell/notification-bell";
@@ -31,6 +32,7 @@ const sidebarNav = [
   { href: "/orders", label: "Orders", icon: <ClipboardIcon />, tourKey: "nav-orders" },
   { href: "/stock", label: "Stock", icon: <BoxIcon />, tourKey: "nav-stock" },
   { href: "/costs", label: "Costs", icon: <BanknoteIcon />, tourKey: "nav-costs" },
+  { href: "/suppliers", label: "Suppliers", icon: <InboxIcon />, tourKey: "nav-suppliers" },
   { href: "/sales", label: "Sales data", icon: <ChartIcon />, tourKey: "nav-sales" },
   { href: "/insights", label: "Insights", icon: <BulbIcon />, tourKey: "nav-insights" },
   { href: "/settings", label: "Settings", icon: <GearIcon />, tourKey: "nav-settings" },
