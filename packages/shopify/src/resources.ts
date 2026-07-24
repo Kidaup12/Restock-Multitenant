@@ -24,6 +24,8 @@ export type ShopifyProductNode = {
 };
 
 export type ShopifyInventoryLevelNode = {
+  // Includes "available", "on_hand", and "incoming" (in-transit TO this
+  // location) — read the one you need by name.
   quantities?: Array<{ name: string; quantity: number }>;
   item?: { id?: string; variant?: { id?: string; product?: { id?: string } } };
 };
@@ -49,6 +51,10 @@ export type ShopifyOrderNode = {
     variant?: { id?: string };
     originalUnitPriceSet?: { shopMoney?: { amount?: string; currencyCode?: string } };
   }>;
+  // Locations that fulfilled the order — the branch(es) that shipped it. Used
+  // to attribute online sales to a branch's run rate (SalesHistory.locationId).
+  // Empty/absent for orders not yet fulfilled.
+  fulfillments?: Array<{ location?: { id?: string } }>;
 };
 
 const PAGE = 100;
@@ -114,6 +120,7 @@ export async function fetchOrdersSince(client: ShopifyClient, sinceIso: string):
         orders(first: ${PAGE}, after: $after, query: $q) {
           edges { node {
             id name createdAt processedAt
+            fulfillments(first: 10) { location { id } }
             lineItems(first: 50) { edges { node {
               quantity sku product { id } variant { id }
               originalUnitPriceSet { shopMoney { amount currencyCode } }
@@ -147,7 +154,7 @@ async function fetchInventoryLevelsForLocation(
         location(id: $id) {
           inventoryLevels(first: 250, after: $after) {
             edges { node {
-              quantities(names: ["available", "on_hand"]) { name quantity }
+              quantities(names: ["available", "on_hand", "incoming"]) { name quantity }
               item { id variant { id product { id } } }
             } }
             pageInfo { hasNextPage endCursor }

@@ -1,6 +1,6 @@
 import { UnrecoverableError, type Job } from "bullmq";
 import type { Redis } from "ioredis";
-import { prismaService } from "@wezesha/db";
+import { guessRoleFromName, prismaService, roleOfType, typeOfRole } from "@wezesha/db";
 import { publishEvent } from "@wezesha/realtime";
 import type { SyncJobData } from "@wezesha/queue";
 import type { SendEmail } from "./email";
@@ -112,24 +112,45 @@ async function syncProducts(tenantId: string, nodes: ShopifyProductNode[]): Prom
   return nodes.length;
 }
 
-/** Upsert locations + per-location on_hand levels; roll summed on_hand into
- *  Product.currentStock for every product seen in the level data. */
+/**
+ * Upsert locations + per-location levels, then roll them up BY ROLE:
+ *  - Sells locations' on_hand → Product.currentStock (sellable on-hand)
+ *  - En-route locations' on_hand → Product.onOrder (never counted as on-hand)
+ *  - Holds (warehouse) / Ignore contribute to neither (held for transfers /
+ *    excluded); their raw on_hand is still stored per InventoryLevel.
+ * Shopify "incoming" per level is stored on InventoryLevel.incoming.
+ *
+ * A location with no owner-confirmed role gets a name-guessed role stamped as
+ * "assumed"; a "confirmed" role is never overwritten by the sync.
+ */
 async function syncLocationsAndInventory(
   tenantId: string,
   locations: ShopifyLocationNode[],
   productIdByCore: Map<string, string>
 ): Promise<{ locations: number; levels: number }> {
   let levels = 0;
-  const onHandByProduct = new Map<string, number>();
+  const sellsByProduct = new Map<string, number>();
+  const enrouteByProduct = new Map<string, number>();
+  const seenProducts = new Set<string>();
 
   for (const loc of locations) {
     const locCore = numericCore(loc.id);
+    const existing = await prismaService.location.findUnique({
+      where: { tenantId_shopifyLocationId: { tenantId, shopifyLocationId: locCore } },
+      select: { roleStatus: true },
+    });
+    // Guess a role for new / still-assumed locations; never touch a confirmed one.
+    const roleData =
+      existing?.roleStatus === "confirmed"
+        ? {}
+        : { locationType: typeOfRole(guessRoleFromName(loc.name)), roleStatus: "assumed" };
     const row = await prismaService.location.upsert({
       where: { tenantId_shopifyLocationId: { tenantId, shopifyLocationId: locCore } },
-      create: { tenantId, shopifyLocationId: locCore, name: loc.name ?? "(unnamed)" },
-      update: { name: loc.name ?? "(unnamed)" },
-      select: { id: true },
+      create: { tenantId, shopifyLocationId: locCore, name: loc.name ?? "(unnamed)", ...roleData },
+      update: { name: loc.name ?? "(unnamed)", ...roleData },
+      select: { id: true, locationType: true },
     });
+    const role = roleOfType(row.locationType);
 
     for (const level of loc.inventoryLevels ?? []) {
       const productGid = level.item?.variant?.product?.id;
@@ -137,18 +158,31 @@ async function syncLocationsAndInventory(
       const productId = productIdByCore.get(numericCore(productGid));
       if (!productId) continue; // product not ingested (draft/archived) — skip
       const onHand = level.quantities?.find((q) => q.name === "on_hand")?.quantity ?? 0;
+      const incoming = level.quantities?.find((q) => q.name === "incoming")?.quantity ?? 0;
       await prismaService.inventoryLevel.upsert({
         where: { locationId_productId: { locationId: row.id, productId } },
-        create: { tenantId, locationId: row.id, productId, onHand },
-        update: { onHand },
+        create: { tenantId, locationId: row.id, productId, onHand, incoming },
+        update: { onHand, incoming },
       });
-      onHandByProduct.set(productId, (onHandByProduct.get(productId) ?? 0) + onHand);
+      seenProducts.add(productId);
+      if (role === "sells") sellsByProduct.set(productId, (sellsByProduct.get(productId) ?? 0) + onHand);
+      else if (role === "enroute")
+        enrouteByProduct.set(productId, (enrouteByProduct.get(productId) ?? 0) + onHand);
       levels++;
     }
   }
 
-  for (const [productId, currentStock] of onHandByProduct) {
-    await prismaService.product.updateMany({ where: { id: productId, tenantId }, data: { currentStock } });
+  // Full-snapshot semantics: every product seen this sync gets both figures
+  // rewritten (0 when it has no Sells / En-route stock), so stock that moved out
+  // of a selling location drops out of sellable on-hand instead of lingering.
+  for (const productId of seenProducts) {
+    await prismaService.product.updateMany({
+      where: { id: productId, tenantId },
+      data: {
+        currentStock: sellsByProduct.get(productId) ?? 0,
+        onOrder: enrouteByProduct.get(productId) ?? 0,
+      },
+    });
   }
   return { locations: locations.length, levels };
 }
@@ -158,9 +192,10 @@ async function syncLocationsAndInventory(
 async function syncOrders(
   tenantId: string,
   orders: ShopifyOrderNode[],
-  productIdByCore: Map<string, string>
+  productIdByCore: Map<string, string>,
+  locationIdByCore: Map<string, string>
 ): Promise<number> {
-  const buckets = [...bucketSalesByProductDay(orders, productIdByCore).values()];
+  const buckets = [...bucketSalesByProductDay(orders, productIdByCore, locationIdByCore).values()];
   if (buckets.length === 0) return 0;
 
   const rows = buckets.map((b) => ({
@@ -170,6 +205,7 @@ async function syncOrders(
     quantity: b.quantity,
     revenueKes: b.revenue,
     channel: "shopify" as const,
+    locationId: b.locationId,
   }));
 
   for (let i = 0; i < rows.length; i += SALES_CHUNK) {
@@ -192,6 +228,14 @@ async function loadProductIdByCore(tenantId: string): Promise<Map<string, string
     select: { id: true, shopifyProductId: true },
   });
   return new Map(products.map((p) => [p.shopifyProductId as string, p.id]));
+}
+
+async function loadLocationIdByCore(tenantId: string): Promise<Map<string, string>> {
+  const rows = await prismaService.location.findMany({
+    where: { tenantId, shopifyLocationId: { not: null } },
+    select: { id: true, shopifyLocationId: true },
+  });
+  return new Map(rows.map((l) => [l.shopifyLocationId as string, l.id]));
 }
 
 export interface ShopifySyncOptions {
@@ -269,7 +313,10 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
         overlapHours: OVERLAP_HOURS,
         firstRunLookbackDays: FIRST_RUN_ORDER_LOOKBACK_DAYS,
       });
-      await syncOrders(tenantId, await api.orders(ordersSince.toISOString()), productIdByCore);
+      // Locations exist now (inventory phase ran) — map them for fulfilment
+      // attribution of online sales.
+      const locationIdByCore = await loadLocationIdByCore(tenantId);
+      await syncOrders(tenantId, await api.orders(ordersSince.toISOString()), productIdByCore, locationIdByCore);
       await setCursor(tenantId, "orders", runStart);
       await progress("orders");
 

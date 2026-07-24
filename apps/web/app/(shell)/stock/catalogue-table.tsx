@@ -46,11 +46,16 @@ export async function CatalogueTable({
     );
   }
 
+  // Any warehouse (Holds) stock anywhere? Hide the column entirely for
+  // single-shelf shops so it never adds noise.
+  const hasWarehouseStock = rows.some((r) => r.warehouseUnits > 0);
+
   // The export mirrors the table: same rows, plus the status label it shows.
   const exportRows = rows.map((row) => ({
     title: row.title,
     sku: row.sku,
     onHandUnits: row.onHandUnits,
+    warehouseUnits: row.warehouseUnits,
     daysCover: row.onHandUnits <= 0 ? null : row.daysCover,
     status: status(row).label,
     costKes: row.costKes,
@@ -70,6 +75,7 @@ export async function CatalogueTable({
             <TableHead>Product</TableHead>
             <TableHead>SKU</TableHead>
             <TableHead numeric>On hand</TableHead>
+            {hasWarehouseStock && <TableHead numeric>In warehouse</TableHead>}
             <TableHead numeric>Days cover</TableHead>
             <TableHead>Status</TableHead>
             <TableHead numeric>Stock value</TableHead>
@@ -82,6 +88,11 @@ export async function CatalogueTable({
                   <TableCell className="font-medium text-ink">{row.title}</TableCell>
                   <TableCell className="font-mono text-xs">{row.sku}</TableCell>
                   <TableCell numeric>{row.onHandUnits}</TableCell>
+                  {hasWarehouseStock && (
+                    <TableCell numeric className="text-ink-muted">
+                      {row.warehouseUnits > 0 ? row.warehouseUnits : "—"}
+                    </TableCell>
+                  )}
                   <TableCell numeric>
                     {row.onHandUnits <= 0 || row.daysCover === null ? "—" : `${row.daysCover}d`}
                   </TableCell>

@@ -272,16 +272,23 @@ model Location {
   source            String  @default("shopify")
   name              String
   isPrimary         Boolean @default(false)
-  // Owner-set role: "branch" | "warehouse" | "virtual" | "enroute".
-  // null = not yet classified (treated as "branch").
+  // Owner-set role. The stored value is the DB enum; the CALCULATION ROLE it
+  // maps to (see @wezesha/db roleOf / lib/locations/roles) drives the math:
+  //   "branch"    → Sells   — on-hand available to sell (days-of-cover, reorder)
+  //   "warehouse" → Holds   — distributable stock (transfer suggestions only)
+  //   "enroute"   → En-route— on-order (feeds Product.onOrder; never on-hand)
+  //   "virtual"   → Ignore  — counts as nothing, excluded everywhere
+  // null = not yet classified (treated as "branch"/Sells — the safe default).
   locationType      String?
   // Role provenance: guessed from the name ("assumed") or owner-confirmed
-  // ("confirmed"). null = treated as assumed.
+  // ("confirmed"). null = treated as assumed. The sync only ever writes an
+  // "assumed" guess; it never overwrites a "confirmed" role.
   roleStatus        String?
 
   tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   inventoryLevels       InventoryLevel[]
   warehouseLocationMaps WarehouseLocationMap[]
+  salesHistory          SalesHistory[]
   distributionPlansFrom DistributionPlan[]     @relation("DistFrom")
   distributionLinesTo   DistributionPlanLine[] @relation("DistTo")
 
@@ -296,6 +303,7 @@ model InventoryLevel {
   locationId String
   productId  String
   onHand     Int      @default(0) // on_hand quantity, NOT available
+  incoming   Int      @default(0) // Shopify "incoming" quantity at this location (in-transit to it); feeds the in-transit-between-branches number, never sellable on-hand
   updatedAt  DateTime @updatedAt
 
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -376,12 +384,19 @@ model SalesHistory {
   quantity   Float
   revenueKes Float
   channel    String   @default("shopify")
+  // Fulfilment location (which branch shipped/sold this) for per-branch run
+  // rate. Populated by the sync when an order's fulfilment location is
+  // unambiguous; null = unattributed (POS/legacy rows, multi-branch days, or
+  // pre-attribution history). SetNull so deactivating a location keeps history.
+  locationId String?
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
   @@unique([productId, date, channel])
   @@index([tenantId, date])
+  @@index([tenantId, locationId])
 }
 
 // Raw POS sale (physical shop). Powers run-rate (via SalesHistory channel="pos")

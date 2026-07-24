@@ -51,16 +51,20 @@ const products: ShopifyProductNode[] = [
   },
 ];
 
+// Three roles: a selling branch, a holding warehouse, and an en-route bucket.
+// Only the branch's on_hand is sellable; the warehouse holds; en-route feeds
+// onOrder. Names are unclassified, so the sync must guess each role.
 const locations: ShopifyLocationNode[] = [
   {
     id: "gid://shopify/Location/9001",
-    name: "Main Store",
+    name: "Main Store", // guesses → branch (Sells)
     isActive: true,
     inventoryLevels: [
       {
         quantities: [
           { name: "available", quantity: 4 },
           { name: "on_hand", quantity: 6 },
+          { name: "incoming", quantity: 5 },
         ],
         item: { id: "gid://shopify/InventoryItem/301", variant: { id: "gid://shopify/ProductVariant/201", product: { id: "gid://shopify/Product/101" } } },
       },
@@ -68,7 +72,7 @@ const locations: ShopifyLocationNode[] = [
   },
   {
     id: "gid://shopify/Location/9002",
-    name: "Warehouse",
+    name: "Warehouse", // guesses → warehouse (Holds)
     isActive: true,
     inventoryLevels: [
       {
@@ -78,6 +82,17 @@ const locations: ShopifyLocationNode[] = [
       {
         quantities: [{ name: "on_hand", quantity: 3 }],
         item: { variant: { product: { id: "gid://shopify/Product/102" } } },
+      },
+    ],
+  },
+  {
+    id: "gid://shopify/Location/9003",
+    name: "INCOMING (QB) ENROUTE ORDERS", // guesses → enroute (En-route)
+    isActive: true,
+    inventoryLevels: [
+      {
+        quantities: [{ name: "on_hand", quantity: 20 }],
+        item: { variant: { product: { id: "gid://shopify/Product/101" } } },
       },
     ],
   },
@@ -96,6 +111,8 @@ const orders: ShopifyOrderNode[] = [
   {
     id: "gid://shopify/Order/502",
     createdAt: "2026-07-02T12:00:00Z",
+    // Fulfilled from Main Store — attributes this day's sales to that branch.
+    fulfillments: [{ location: { id: "gid://shopify/Location/9001" } }],
     lineItems: [
       { quantity: 1, product: { id: "gid://shopify/Product/101" }, originalUnitPriceSet: { shopMoney: { amount: "1200" } } },
       { quantity: 5, product: { id: "gid://shopify/Product/102" }, originalUnitPriceSet: { shopMoney: { amount: "800" } } },
@@ -176,21 +193,37 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     expect(argan.costSource).toBe("shopify");
     expect(argan.shopifyCreatedAt?.toISOString()).toBe("2025-01-15T08:00:00.000Z");
 
-    // Locations by core; levels carry on_hand (not available); stock rolls up.
+    // Locations by core; each gets a guessed, assumed role (never confirmed here).
     const locs = await prismaService.location.findMany({ where: { tenantId } });
-    expect(locs.map((l) => l.shopifyLocationId).sort()).toEqual(["9001", "9002"]);
-    const levels = await prismaService.inventoryLevel.findMany({ where: { tenantId } });
-    expect(levels).toHaveLength(3);
-    expect(levels.find((l) => l.onHand === 6)).toBeTruthy(); // on_hand 6, not available 4
-    expect(argan.id).toBeTruthy();
-    const arganFresh = await prismaService.product.findFirst({ where: { tenantId, sku: "ARG-100" } });
-    expect(arganFresh?.currentStock).toBe(16); // 6 + 10 across locations
+    expect(locs.map((l) => l.shopifyLocationId).sort()).toEqual(["9001", "9002", "9003"]);
+    const byCore = new Map(locs.map((l) => [l.shopifyLocationId, l]));
+    expect(byCore.get("9001")).toMatchObject({ locationType: "branch", roleStatus: "assumed" });
+    expect(byCore.get("9002")).toMatchObject({ locationType: "warehouse", roleStatus: "assumed" });
+    expect(byCore.get("9003")).toMatchObject({ locationType: "enroute", roleStatus: "assumed" });
 
-    // Sales bucketed by processedAt ?? createdAt.
+    // Levels carry on_hand (not available) + incoming.
+    const levels = await prismaService.inventoryLevel.findMany({ where: { tenantId } });
+    expect(levels).toHaveLength(4);
+    const mainStoreArgan = levels.find((l) => l.locationId === byCore.get("9001")!.id && l.onHand === 6);
+    expect(mainStoreArgan?.incoming).toBe(5); // "incoming" quantity stored per level
+    expect(argan.id).toBeTruthy();
+
+    // Role-correct rollup: currentStock is SELLS-only (Main Store 6); the
+    // warehouse's 10 holds (excluded), and the en-route 20 feeds onOrder.
+    const arganFresh = await prismaService.product.findFirst({ where: { tenantId, sku: "ARG-100" } });
+    expect(arganFresh?.currentStock).toBe(6);
+    expect(arganFresh?.onOrder).toBe(20);
+    // Shea only sits in the warehouse — nothing sellable.
+    const sheaFresh = await prismaService.product.findFirst({ where: { tenantId, sku: "SHEA-250" } });
+    expect(sheaFresh?.currentStock).toBe(0);
+
+    // Sales bucketed by processedAt ?? createdAt, attributed to the fulfilment branch.
     const sales = await prismaService.salesHistory.findMany({ where: { tenantId }, orderBy: { date: "asc" } });
     const byKey = new Map(sales.map((s) => [`${s.productId}|${s.date.toISOString().slice(0, 10)}`, s]));
     expect(byKey.get(`${argan.id}|2026-05-10`)?.quantity).toBe(2); // processedAt day, NOT createdAt
+    expect(byKey.get(`${argan.id}|2026-05-10`)?.locationId).toBeNull(); // no fulfilment → unattributed
     expect(byKey.get(`${argan.id}|2026-07-02`)?.quantity).toBe(1);
+    expect(byKey.get(`${argan.id}|2026-07-02`)?.locationId).toBe(byCore.get("9001")!.id); // shipped from Main Store
     const shea = rows.find((r) => r.sku === "SHEA-250")!;
     expect(byKey.get(`${shea.id}|2026-07-02`)?.revenueKes).toBe(4000);
 

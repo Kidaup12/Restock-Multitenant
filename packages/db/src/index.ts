@@ -9,6 +9,20 @@ export {
   resolvePlanLimits,
 } from "./limits";
 export type { LimitKey, LimitState, LimitUsage, PlanLimits, PlanSource, UsageCounts } from "./limits";
+export {
+  LOCATION_ROLE_DESCRIPTIONS,
+  LOCATION_TYPE_LABELS,
+  LOCATION_TYPES,
+  guessRoleFromName,
+  isEnroute,
+  isHolds,
+  isIgnore,
+  isSellable,
+  roleOf,
+  roleOfType,
+  typeOfRole,
+} from "./roles";
+export type { LocationRole, LocationType } from "./roles";
 export { Prisma, Role } from "../generated/client";
 export type { Tenant, Membership, TenantConfig } from "../generated/client";
 export type { User, Session, Account, Verification } from "../generated/client";

@@ -13,6 +13,7 @@ export type CatalogueExportRow = {
   title: string;
   sku: string;
   onHandUnits: number;
+  warehouseUnits: number;
   daysCover: number | null;
   status: string;
   costKes: number | null;
@@ -27,6 +28,7 @@ export function catalogueExportColumns(
     { header: "Product", cell: (r) => r.title },
     { header: "SKU", cell: (r) => r.sku },
     { header: "On hand", cell: (r) => r.onHandUnits },
+    { header: "In warehouse", cell: (r) => r.warehouseUnits },
     { header: "Days cover", cell: (r) => r.daysCover },
     { header: "Status", cell: (r) => r.status },
     ...(canViewCosts
