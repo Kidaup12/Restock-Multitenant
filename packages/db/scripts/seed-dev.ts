@@ -24,8 +24,14 @@ import { prismaService } from "../src/client";
 
 export const DEV_TENANT_SLUG = "amara-beauty";
 export const DEV_TENANT_NAME = "Amara Beauty";
-export const DEV_USER_EMAIL = "dev@wezesha.test";
-export const DEV_USER_PASSWORD = "Dev12345!";
+export const DEV_USER_EMAIL = "owner@wezesha.test";
+export const DEV_USER_PASSWORD = "Owner12345!";
+// One user per role so QA can test access levels (money-blind is role-based):
+// admin sees costs + manages; member (staff) never sees cost or profit.
+export const DEV_ADMIN_EMAIL = "admin@wezesha.test";
+export const DEV_ADMIN_PASSWORD = "Admin12345!";
+export const DEV_MEMBER_EMAIL = "staff@wezesha.test";
+export const DEV_MEMBER_PASSWORD = "Staff12345!";
 
 const DAYS = 90;
 
@@ -171,11 +177,25 @@ export async function seedDev(): Promise<SeedResult> {
     data: { name: DEV_TENANT_NAME, slug: DEV_TENANT_SLUG },
   });
 
+  // Clean slate for demo users so renamed/removed logins stop working — only the
+  // creds this seed defines authenticate. @wezesha.test is never a real domain.
+  const stale = await prismaService.user.findMany({
+    where: { email: { endsWith: "@wezesha.test" } },
+    select: { id: true },
+  });
+  if (stale.length) {
+    const ids = stale.map((u) => u.id);
+    await prismaService.session.deleteMany({ where: { userId: { in: ids } } });
+    await prismaService.account.deleteMany({ where: { userId: { in: ids } } });
+    await prismaService.membership.deleteMany({ where: { userId: { in: ids } } });
+    await prismaService.user.deleteMany({ where: { id: { in: ids } } });
+  }
+
   const passwordHash = await hashPassword(DEV_USER_PASSWORD);
   const user = await prismaService.user.upsert({
     where: { email: DEV_USER_EMAIL },
-    update: { name: "Amara Dev" },
-    create: { id: "dev-user-amara", name: "Amara Dev", email: DEV_USER_EMAIL, emailVerified: true },
+    update: { name: "Amara Owner" },
+    create: { id: "dev-user-owner", name: "Amara Owner", email: DEV_USER_EMAIL, emailVerified: true },
   });
   // Better Auth credential account: accountId = user id, providerId "credential".
   const existing = await prismaService.account.findFirst({
@@ -189,8 +209,32 @@ export async function seedDev(): Promise<SeedResult> {
     });
   }
   await prismaService.membership.create({
-    data: { userId: user.id, tenantId: tenant.id, role: "OWNER", displayName: "Amara Dev" },
+    data: { userId: user.id, tenantId: tenant.id, role: "OWNER", displayName: "Amara Owner" },
   });
+
+  // Admin + member (staff) users in the same tenant, so QA can test role-based
+  // access — especially that a member never sees cost or profit (money-blind).
+  async function seedRoleUser(email: string, name: string, password: string, role: "ADMIN" | "MEMBER") {
+    const hash = await hashPassword(password);
+    const u = await prismaService.user.upsert({
+      where: { email },
+      update: { name },
+      create: { id: `dev-user-${role.toLowerCase()}`, name, email, emailVerified: true },
+    });
+    const acct = await prismaService.account.findFirst({ where: { userId: u.id, providerId: "credential" } });
+    if (acct) {
+      await prismaService.account.update({ where: { id: acct.id }, data: { password: hash } });
+    } else {
+      await prismaService.account.create({
+        data: { id: `acct-${u.id}`, accountId: u.id, providerId: "credential", userId: u.id, password: hash },
+      });
+    }
+    await prismaService.membership.create({
+      data: { userId: u.id, tenantId: tenant.id, role, displayName: name },
+    });
+  }
+  await seedRoleUser(DEV_ADMIN_EMAIL, "Amara Admin", DEV_ADMIN_PASSWORD, "ADMIN");
+  await seedRoleUser(DEV_MEMBER_EMAIL, "Amara Staff", DEV_MEMBER_PASSWORD, "MEMBER");
 
   const suppliers = [];
   for (const s of SUPPLIERS) {
@@ -382,7 +426,7 @@ export async function seedOrdersDemo(tenantId: string): Promise<OrdersDemoResult
         sentAt,
         expectedAt,
         receivedAt,
-        createdByName: "Amara Dev",
+        createdByName: "Amara Owner",
         lines: {
           create: lines.map((l) => ({
             tenantId,
@@ -445,7 +489,11 @@ if (invokedDirectly) {
       console.log(
         `orders demo: ${demo.historicalPos} delivered POs, ${demo.pendingOrders} queued orders`
       );
-      console.log(`sign in as ${DEV_USER_EMAIL} / ${DEV_USER_PASSWORD}`);
+      console.log(
+        `sign in — owner:  ${DEV_USER_EMAIL} / ${DEV_USER_PASSWORD}\n` +
+        `          admin:  ${DEV_ADMIN_EMAIL} / ${DEV_ADMIN_PASSWORD}\n` +
+        `          member: ${DEV_MEMBER_EMAIL} / ${DEV_MEMBER_PASSWORD}  (money-blind / staff)`
+      );
       return prismaService.$disconnect();
     })
     .catch((err) => {
