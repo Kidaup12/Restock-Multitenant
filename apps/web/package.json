@@ -14,6 +14,7 @@
     "@wezesha/db": "*",
     "@wezesha/forecast": "*",
     "@wezesha/observability": "*",
+    "@wezesha/pos": "*",
     "@wezesha/queue": "*",
     "@wezesha/realtime": "*",
     "@wezesha/shopify": "*",

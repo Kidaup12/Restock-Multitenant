@@ -1,0 +1,22 @@
+{
+  "name": "@wezesha/pos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Physical-shop (POS) sales ingest: SKU match, tenant-day aggregation with revenue fallback, unmatched-sale surfacing, and sales-gap detection. Pure planners plus the idempotent DB writer.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@wezesha/db": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "dotenv": "^16.6.1",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

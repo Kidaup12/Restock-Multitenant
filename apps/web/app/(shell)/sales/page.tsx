@@ -11,7 +11,10 @@ import {
 } from "@/components/ui/skeleton";
 import { SalesHeadline } from "./headline";
 import { MonthBars } from "./month-bars";
+import { PosFixQueue } from "./pos-fix-queue";
+import { SalesGaps } from "./sales-gaps";
 import { TopProducts } from "./top-products";
+import { UnmappedTills } from "./unmapped-tills";
 
 export const metadata: Metadata = {
   title: "Sales data",
@@ -34,10 +37,23 @@ export default async function SalesPage() {
   }
 
   const tenantId = membership.tenantId;
+  const canFix = membership.role === "OWNER" || membership.role === "ADMIN";
 
   return (
     <div className="space-y-6">
       <PageHeader title="Sales data" description="What sold, when, across every channel" />
+
+      {/* POS data-health surfaces (spec §3). Each hides itself when clean, so a
+          healthy tenant sees only the metrics below. */}
+      <Suspense fallback={null}>
+        <PosFixQueue tenantId={tenantId} canFix={canFix} />
+      </Suspense>
+      <Suspense fallback={null}>
+        <SalesGaps tenantId={tenantId} canFix={canFix} />
+      </Suspense>
+      <Suspense fallback={null}>
+        <UnmappedTills tenantId={tenantId} />
+      </Suspense>
 
       <div data-tour="sales-overview">
         <Suspense

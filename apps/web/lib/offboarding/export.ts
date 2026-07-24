@@ -49,6 +49,7 @@ export const EXPORTED_MODELS: ReadonlyArray<{
   { model: "SalesHistory", delegate: "salesHistory" },
   { model: "PosSale", delegate: "posSale" },
   { model: "PosSaleLine", delegate: "posSaleLine" },
+  { model: "LocationClosure", delegate: "locationClosure" },
   { model: "MonthlyContext", delegate: "monthlyContext" },
   { model: "Promo", delegate: "promo" },
   { model: "Prediction", delegate: "prediction" },
