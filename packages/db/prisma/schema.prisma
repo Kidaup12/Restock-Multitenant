@@ -259,6 +259,10 @@ model Supplier {
   leadTimeAvgDays Int?
   leadTimeStdDays Int       @default(7)
   moq             Int       @default(1)
+  // Optional owner label ("Overseas", "Local pickup", "Fast restock"). Shown as
+  // the Group column and usable as a planner scope; nothing depends on it, and
+  // the filter's options derive from the labels actually in use.
+  supplierGroup   String?
   notes           String?
   createdAt       DateTime  @default(now())
   deletedAt       DateTime? // soft-delete: hidden from lists; product links + history kept
