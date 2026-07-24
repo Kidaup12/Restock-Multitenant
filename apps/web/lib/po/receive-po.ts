@@ -1,4 +1,4 @@
-import { prismaForTenantTx, prismaService } from "@wezesha/db";
+import { prismaForTenantTx, prismaService, isSellable } from "@wezesha/db";
 
 /**
  * Line-by-line receiving with partial quantities. One tenant transaction:
@@ -91,17 +91,22 @@ export async function receivePoLines(
       if (nextQty >= line.quantity) fullyReceivedProducts.push(line.productId);
     }
 
-    // currentStock is defined as the sum of the product's level rows — recompute
-    // from that source of truth rather than incrementing a second counter.
+    // currentStock is SELLABLE on-hand — the sum over Sells-role locations only,
+    // matching the sync's definition (a warehouse holds stock, it doesn't sell
+    // it). Summing every level here would let received warehouse stock inflate
+    // sellable cover. Recompute from that source of truth per touched product.
     const touched = [...new Set(receipts.map((e) => lineById.get(e.lineId)!.productId))];
     for (const productId of touched) {
-      const sum = await tx.inventoryLevel.aggregate({
+      const levels = await tx.inventoryLevel.findMany({
         where: { productId },
-        _sum: { onHand: true },
+        select: { onHand: true, location: { select: { locationType: true } } },
       });
+      const sellable = levels
+        .filter((l) => l.location && isSellable(l.location))
+        .reduce((sum, l) => sum + l.onHand, 0);
       await tx.product.update({
         where: { id: productId },
-        data: { currentStock: sum._sum.onHand ?? 0 },
+        data: { currentStock: sellable },
       });
     }
 
