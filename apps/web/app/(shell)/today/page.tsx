@@ -15,6 +15,7 @@ import { RealtimeRefresh } from "./realtime-refresh";
 import { ReorderTable } from "./reorder-table";
 import { RevenueTrend } from "./revenue-trend";
 import { RunForecastButton } from "./run-forecast-button";
+import { TodaySetupStrip } from "./today-setup-strip";
 
 export const metadata: Metadata = {
   title: "Today",
@@ -49,6 +50,16 @@ export default async function TodayPage() {
         actions={<RunForecastButton />}
       />
       <RealtimeRefresh />
+
+      <Suspense
+        fallback={
+          <Card className="px-5 py-4">
+            <div className="h-6 w-full animate-pulse rounded bg-surface-2" />
+          </Card>
+        }
+      >
+        <TodaySetupStrip tenantId={tenantId} />
+      </Suspense>
 
       <div data-tour="today-metrics">
         <Suspense
