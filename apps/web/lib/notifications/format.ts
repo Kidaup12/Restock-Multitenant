@@ -29,6 +29,8 @@ export function kindTone(kind: string): NotificationTone {
       return "negative";
     case "shopify_reconnect":
     case "shopify_uninstalled":
+    case "cost_moved":
+    case "accuracy_drop":
       return "warning";
     default:
       return "neutral";

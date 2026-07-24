@@ -1,0 +1,81 @@
+"use client";
+
+import { cn } from "@/lib/cn";
+
+/**
+ * Catalogue health strip (spec §2): a row of clickable chips above the table —
+ * every issue count filters the list to it, and clears by toggling off. Purely
+ * presentational; the catalogue view owns the counts (derived from the loaded
+ * rows) and the active filter.
+ */
+
+export type HealthChipTone = "neutral" | "warning" | "negative" | "accent";
+
+export type HealthChip = {
+  key: string;
+  label: string;
+  count: number;
+  tone: HealthChipTone;
+};
+
+const toneStyles: Record<HealthChipTone, { on: string; off: string }> = {
+  neutral: { on: "border-edge-strong bg-surface-2 text-ink", off: "border-edge bg-surface text-ink-muted hover:text-ink" },
+  warning: { on: "border-warning bg-warning-soft text-warning", off: "border-edge bg-surface text-ink-muted hover:text-ink" },
+  negative: { on: "border-negative bg-negative-soft text-negative", off: "border-edge bg-surface text-ink-muted hover:text-ink" },
+  accent: { on: "border-edge-strong bg-accent-soft text-accent-ink", off: "border-edge bg-surface text-ink-muted hover:text-ink" },
+};
+
+export function HealthStrip({
+  total,
+  shown,
+  chips,
+  active,
+  onToggle,
+  onClear,
+}: {
+  total: number;
+  shown: number;
+  chips: HealthChip[];
+  active: string | null;
+  onToggle: (key: string) => void;
+  onClear: () => void;
+}) {
+  const live = chips.filter((c) => c.count > 0);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-edge px-4 py-3">
+      <button
+        type="button"
+        onClick={onClear}
+        className={cn(
+          "rounded-md border px-2.5 py-1 text-sm font-medium transition-colors",
+          active == null ? "border-edge-strong bg-surface-2 text-ink" : "border-edge bg-surface text-ink-muted hover:text-ink",
+        )}
+      >
+        {shown === total ? `${total} products` : `${shown} of ${total}`}
+      </button>
+
+      {live.map((chip) => {
+        const on = active === chip.key;
+        const style = toneStyles[chip.tone];
+        return (
+          <button
+            key={chip.key}
+            type="button"
+            onClick={() => onToggle(chip.key)}
+            aria-pressed={on}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium transition-colors",
+              on ? style.on : style.off,
+            )}
+          >
+            {chip.label}
+            <span className={cn("rounded-full px-1.5 text-xs", on ? "bg-surface/60" : "bg-surface-2 text-ink-faint")}>
+              {chip.count}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}

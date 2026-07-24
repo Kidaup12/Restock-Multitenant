@@ -1,0 +1,233 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { Prisma, prismaForTenant, prismaService } from "@wezesha/db";
+import { activeMembership, requireSession } from "@/lib/auth";
+import { hasPermission, type PermissionKey } from "@/lib/auth/permissions";
+
+/**
+ * Catalogue row-editor writes: the manual cost pin (and its release back to the
+ * synced cost), the not-for-sale toggle, and category assign / rename / delete.
+ *
+ * Every action re-resolves the caller's membership server-side and re-checks the
+ * required permission; the tenant id comes from the membership, never the client.
+ * Cost edits also require `view_costs` — you can't pin a cost you're not allowed
+ * to see. Writes run on the RLS-scoped tenant client (a foreign id resolves to
+ * nothing); the audit row rides the service client so no tenant role can filter
+ * it. The sync guard already refuses to overwrite a manual pin, so setting
+ * costSource="manual" is what makes an owner's cost stick.
+ */
+
+export type CatalogueActionResult =
+  | { ok: true; message?: string }
+  | { ok: false; error: string };
+
+const err = (error: string): CatalogueActionResult => ({ ok: false, error });
+
+async function actorContext(need: PermissionKey[]) {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+  if (!membership) return null;
+  for (const key of need) if (!hasPermission(membership, key)) return null;
+  return {
+    tenantId: membership.tenantId,
+    actor: {
+      userId: session.user.id,
+      name: membership.displayName ?? session.user.name ?? session.user.email,
+    },
+  };
+}
+
+function audit(
+  tenantId: string,
+  productId: string,
+  action: string,
+  actor: { userId: string; name: string | null },
+  meta: Prisma.InputJsonObject,
+): Promise<unknown> {
+  return prismaService.auditEvent.create({
+    data: { tenantId, entity: "Product", entityId: productId, action, actorUserId: actor.userId, actorName: actor.name, meta },
+  });
+}
+
+function revalidateCatalogue() {
+  revalidatePath("/stock");
+  revalidatePath("/costs");
+}
+
+// ── Manual cost pin ──────────────────────────────────────────────────────────
+
+/**
+ * Pin a typed cost: writes costKes + costSource="manual" so the sync can't
+ * overwrite it (spec §2 priority tier 1). A zero/negative is rejected — a zero
+ * cost is "missing", never a real cost.
+ */
+export async function setManualCostAction(input: {
+  productId: string;
+  costKes: number;
+}): Promise<CatalogueActionResult> {
+  const ctx = await actorContext(["view_costs", "manage_settings"]);
+  if (!ctx) return err("You don't have cost-editing access in this workspace.");
+
+  const cost = Number(input.costKes);
+  if (!Number.isFinite(cost) || cost <= 0) return err("Enter a cost greater than zero.");
+  const rounded = Math.round(cost * 100) / 100;
+
+  const db = prismaForTenant(ctx.tenantId);
+  const product = await db.product.findFirst({
+    where: { id: input.productId },
+    select: { id: true, title: true, costKes: true, costSource: true },
+  });
+  if (!product) return err("That product no longer exists.");
+
+  await db.product.update({
+    where: { id: product.id },
+    data: { costKes: rounded, costSource: "manual", costUpdatedAt: new Date(), costMovedPct: null, costMovedAt: null },
+  });
+  await audit(ctx.tenantId, product.id, "cost_changed", ctx.actor, {
+    field: "costKes",
+    from: product.costKes,
+    to: rounded,
+    source: "manual",
+    previousSource: product.costSource,
+  });
+  revalidateCatalogue();
+  return { ok: true, message: `Pinned ${product.title} cost to KES ${rounded.toLocaleString("en-KE")}.` };
+}
+
+/**
+ * Release the pin ("use synced cost"): restores the last synced cost when we
+ * retained one (labelled shopify), else clears to missing so the next sync fills
+ * it. Either way costSource leaves "manual", handing the field back to the sync.
+ */
+export async function clearCostPinAction(input: {
+  productId: string;
+}): Promise<CatalogueActionResult> {
+  const ctx = await actorContext(["view_costs", "manage_settings"]);
+  if (!ctx) return err("You don't have cost-editing access in this workspace.");
+
+  const db = prismaForTenant(ctx.tenantId);
+  const product = await db.product.findFirst({
+    where: { id: input.productId },
+    select: { id: true, title: true, costKes: true, costSource: true, lastSyncedCostKes: true },
+  });
+  if (!product) return err("That product no longer exists.");
+  if (product.costSource !== "manual") return err("That cost isn't pinned.");
+
+  const synced = product.lastSyncedCostKes != null && product.lastSyncedCostKes > 0 ? product.lastSyncedCostKes : null;
+  await db.product.update({
+    where: { id: product.id },
+    data: {
+      costKes: synced ?? 0,
+      costSource: synced != null ? "shopify" : null,
+      costUpdatedAt: new Date(),
+      costMovedPct: null,
+      costMovedAt: null,
+    },
+  });
+  await audit(ctx.tenantId, product.id, "cost_changed", ctx.actor, {
+    action: "clear_pin",
+    from: product.costKes,
+    to: synced ?? 0,
+    source: synced != null ? "shopify" : "missing",
+  });
+  revalidateCatalogue();
+  return {
+    ok: true,
+    message: synced != null ? `${product.title} back to the synced cost.` : `${product.title} pin cleared — awaiting a synced cost.`,
+  };
+}
+
+// ── Not-for-sale toggle ──────────────────────────────────────────────────────
+
+export async function setNotForSaleAction(input: {
+  productId: string;
+  notForSale: boolean;
+}): Promise<CatalogueActionResult> {
+  const ctx = await actorContext(["manage_settings"]);
+  if (!ctx) return err("You don't have settings access in this workspace.");
+
+  const db = prismaForTenant(ctx.tenantId);
+  const product = await db.product.findFirst({ where: { id: input.productId }, select: { id: true, title: true } });
+  if (!product) return err("That product no longer exists.");
+
+  const notForSale = Boolean(input.notForSale);
+  await db.product.update({ where: { id: product.id }, data: { notForSale } });
+  await audit(ctx.tenantId, product.id, "edited", ctx.actor, { field: "notForSale", to: notForSale });
+  revalidateCatalogue();
+  return {
+    ok: true,
+    message: notForSale ? `${product.title} marked not for sale.` : `${product.title} back on sale.`,
+  };
+}
+
+// ── Categories (owner-defined; live on Product.customCategory, no table) ──────
+
+const MAX_CATEGORY = 60;
+const cleanCategory = (v: string | null | undefined): string | null => {
+  const t = v?.trim();
+  return t ? t.slice(0, MAX_CATEGORY) : null;
+};
+
+/** Assign a product to a category — the create-by-assign path ("+ New category"
+ *  inline): a brand-new name becomes a real category the moment it's assigned. */
+export async function assignCategoryAction(input: {
+  productId: string;
+  category: string | null;
+}): Promise<CatalogueActionResult> {
+  const ctx = await actorContext(["manage_settings"]);
+  if (!ctx) return err("You don't have settings access in this workspace.");
+
+  const category = cleanCategory(input.category);
+  const db = prismaForTenant(ctx.tenantId);
+  const product = await db.product.findFirst({ where: { id: input.productId }, select: { id: true, title: true, customCategory: true } });
+  if (!product) return err("That product no longer exists.");
+
+  await db.product.update({ where: { id: product.id }, data: { customCategory: category } });
+  await audit(ctx.tenantId, product.id, "edited", ctx.actor, { field: "customCategory", from: product.customCategory, to: category });
+  revalidateCatalogue();
+  return { ok: true, message: category ? `${product.title} → ${category}.` : `${product.title} uncategorised.` };
+}
+
+/** Rename a category across every product that carries it. */
+export async function renameCategoryAction(input: {
+  from: string;
+  to: string;
+}): Promise<CatalogueActionResult> {
+  const ctx = await actorContext(["manage_settings"]);
+  if (!ctx) return err("You don't have settings access in this workspace.");
+
+  const from = cleanCategory(input.from);
+  const to = cleanCategory(input.to);
+  if (!from) return err("Pick a category to rename.");
+  if (!to) return err("Give the category a name.");
+  if (from === to) return err("That's already the name.");
+
+  const db = prismaForTenant(ctx.tenantId);
+  const result = await db.product.updateMany({ where: { customCategory: from }, data: { customCategory: to } });
+  if (result.count === 0) return err("No products are in that category.");
+
+  await audit(ctx.tenantId, "-", "edited", ctx.actor, { action: "rename_category", from, to, products: result.count });
+  revalidateCatalogue();
+  return { ok: true, message: `Renamed "${from}" to "${to}" (${result.count} products).` };
+}
+
+/** Delete a category: clears it from its products (they keep working,
+ *  uncategorised) — spec "delete-clears-field". */
+export async function deleteCategoryAction(input: {
+  name: string;
+}): Promise<CatalogueActionResult> {
+  const ctx = await actorContext(["manage_settings"]);
+  if (!ctx) return err("You don't have settings access in this workspace.");
+
+  const name = cleanCategory(input.name);
+  if (!name) return err("Pick a category to delete.");
+
+  const db = prismaForTenant(ctx.tenantId);
+  const result = await db.product.updateMany({ where: { customCategory: name }, data: { customCategory: null } });
+  if (result.count === 0) return err("No products are in that category.");
+
+  await audit(ctx.tenantId, "-", "edited", ctx.actor, { action: "delete_category", name, products: result.count });
+  revalidateCatalogue();
+  return { ok: true, message: `Deleted "${name}" — ${result.count} products now uncategorised.` };
+}

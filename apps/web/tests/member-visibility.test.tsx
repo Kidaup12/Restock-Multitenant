@@ -180,17 +180,24 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     expect(kesDigits(owner).length).toBeGreaterThan(0);
   });
 
-  it("Stock catalogue: stock-value-at-cost masked on every row", async () => {
+  it("Stock catalogue: cost + cash-tied-up masked on every row, revenue stays", async () => {
     const html = renderToStaticMarkup(
       await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: false })
     );
+    // No cost KES leaks: unit cost and per-row cash-tied-up both mask, revenue is
+    // rendered as a bare number (its KES unit is in the header), so nothing
+    // matches "KES <digits>". The money band is not rendered for a money-blind
+    // member. Two masked cost columns per row → two masks each.
     expect(kesDigits(html)).toHaveLength(0);
-    expect(html.match(new RegExp(MASK, "g"))?.length).toBe(seeded.productCount);
+    expect(html.match(new RegExp(MASK, "g"))?.length).toBe(seeded.productCount * 2);
 
     const owner = renderToStaticMarkup(
       await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true })
     );
-    expect(kesDigits(owner).length).toBe(seeded.productCount);
+    // The owner sees real KES cost figures (unit cost + cash tied up per row, plus
+    // the money band) and no mask.
+    expect(kesDigits(owner).length).toBeGreaterThanOrEqual(seeded.productCount);
+    expect(owner).not.toContain(MASK);
   });
 
   it("Stock by location: per-line and per-location values masked", async () => {

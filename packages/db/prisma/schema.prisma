@@ -241,6 +241,10 @@ model Product {
   qbMatchedAt       DateTime? // last time the QB catalogue feed confirmed this product (null = never)
   notForSale        Boolean   @default(false) // tester/display/damaged: visible in catalogue, out of sellable stock, cover and the buy list
   costSource        String? // "manual" (pinned, wins) | "qb" | "shopify"; null = missing → held off the buy list
+  costUpdatedAt     DateTime? // when costKes last changed (any source) — freshness behind the source label + audit
+  lastSyncedCostKes Float? // last SYNCED cost (shopify/qb) the cost-moved check saw; the prior-cost signal for the >20% diff. null = no baseline captured yet
+  costMovedPct      Float? // last detected synced-cost jump, signed % (e.g. 18, -22); null = no active alert
+  costMovedAt       DateTime? // when that jump was detected (drives the attention row + "since" copy); null = none
 
   tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   supplier           Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
