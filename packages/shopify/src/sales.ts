@@ -18,19 +18,47 @@ export type DayBucket = {
   dateKey: string; // YYYY-MM-DD (UTC)
   quantity: number;
   revenue: number;
+  // Fulfilment location (local Location.id) when every contributing order that
+  // day shipped from the SAME branch; null when unknown or the day mixed
+  // branches. The (product, day, channel) row is one row, so a mixed day can
+  // only be attributed once — we decline rather than guess. See the sync.
+  locationId: string | null;
 };
 
+/** Resolve an order's single fulfilment location (local id), or null when it
+ *  has none or shipped from more than one place. */
+function orderLocationId(
+  order: ShopifyOrderNode,
+  locationIdByCore: Map<string, string>
+): string | null {
+  const ids = new Set<string>();
+  for (const f of order.fulfillments ?? []) {
+    const gid = f.location?.id;
+    if (!gid) continue;
+    const local = locationIdByCore.get(numericCore(gid));
+    if (local) ids.add(local);
+  }
+  return ids.size === 1 ? [...ids][0]! : null;
+}
+
 /** Aggregate order line items into (product, day) buckets. `productIdByCore`
- *  maps a Shopify product id CORE → local product id. */
+ *  maps a Shopify product id CORE → local product id. `locationIdByCore` (maps
+ *  a Shopify location id CORE → local Location.id) enables per-branch
+ *  attribution; omit it to leave every bucket unattributed. */
 export function bucketSalesByProductDay(
   orders: ShopifyOrderNode[],
-  productIdByCore: Map<string, string>
+  productIdByCore: Map<string, string>,
+  locationIdByCore?: Map<string, string>
 ): Map<string, DayBucket> {
   const buckets = new Map<string, DayBucket>();
+  // Track each bucket's contributing locations so a day is attributed only when
+  // it stays on one branch. "" marks an unattributable contribution.
+  const seenLocs = new Map<string, Set<string>>();
   for (const order of orders) {
     const saleAt = order.processedAt ?? order.createdAt;
     if (!saleAt) continue;
     const dateKey = saleAt.slice(0, 10); // YYYY-MM-DD
+    const loc = locationIdByCore ? orderLocationId(order, locationIdByCore) : null;
     for (const line of order.lineItems ?? []) {
       const gid = line.product?.id;
       if (!gid) continue;
@@ -49,8 +77,20 @@ export function bucketSalesByProductDay(
         existing.quantity += qty;
         existing.revenue += revenue;
       } else {
-        buckets.set(key, { productId, dateKey, quantity: qty, revenue });
+        buckets.set(key, { productId, dateKey, quantity: qty, revenue, locationId: null });
       }
+      let locs = seenLocs.get(key);
+      if (!locs) seenLocs.set(key, (locs = new Set()));
+      locs.add(loc ?? "");
+    }
+  }
+  // A bucket is attributed only when all its contributions came from exactly one
+  // real branch (no unattributed contribution mixed in).
+  for (const [key, bucket] of buckets) {
+    const locs = seenLocs.get(key)!;
+    if (locs.size === 1) {
+      const only = [...locs][0]!;
+      bucket.locationId = only === "" ? null : only;
     }
   }
   return buckets;

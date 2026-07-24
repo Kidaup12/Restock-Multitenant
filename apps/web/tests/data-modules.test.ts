@@ -8,6 +8,7 @@ import {
 } from "../../../packages/db/scripts/seed-dev";
 import { getReorderNeeded, getTodayMetrics } from "../lib/data/today";
 import { getRevenueByMonth, getSalesSeries, getTopProducts } from "../lib/data/sales";
+import { roleOf } from "@wezesha/db";
 import { getStockCatalogue, getStockByLocation } from "../lib/data/stock";
 
 /**
@@ -107,19 +108,39 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
     }
   });
 
-  it("getStockCatalogue reflects InventoryLevel sums and pre-forecast nulls", async () => {
+  it("getStockCatalogue reports SELLS on-hand, holds warehouse stock separately", async () => {
     const rows = await getStockCatalogue(seeded.tenantId, { canViewCosts: true });
     expect(rows).toHaveLength(seeded.productCount);
 
-    const levels = await prismaService.inventoryLevel.groupBy({
-      by: ["productId"],
-      where: { tenantId: seeded.tenantId },
-      _sum: { onHand: true },
-    });
-    const onHand = new Map(levels.map((l) => [l.productId, l._sum.onHand ?? 0]));
+    // Independently split each product's on-hand by its location's role.
+    const [levels, locations] = await Promise.all([
+      prismaService.inventoryLevel.groupBy({
+        by: ["productId", "locationId"],
+        where: { tenantId: seeded.tenantId },
+        _sum: { onHand: true },
+      }),
+      prismaService.location.findMany({
+        where: { tenantId: seeded.tenantId },
+        select: { id: true, locationType: true },
+      }),
+    ]);
+    const roleByLocation = new Map(locations.map((l) => [l.id, roleOf(l)]));
+    const sells = new Map<string, number>();
+    const holds = new Map<string, number>();
+    for (const l of levels) {
+      const role = roleByLocation.get(l.locationId);
+      const units = l._sum.onHand ?? 0;
+      if (role === "sells") sells.set(l.productId, (sells.get(l.productId) ?? 0) + units);
+      else if (role === "holds") holds.set(l.productId, (holds.get(l.productId) ?? 0) + units);
+    }
+
     for (const row of rows) {
-      expect(row.onHandUnits).toBe(onHand.get(row.productId) ?? 0);
-      expect(row.stockValueKes).toBeCloseTo(row.onHandUnits * row.costKes!, 5);
+      expect(row.onHandUnits).toBe(sells.get(row.productId) ?? 0);
+      expect(row.warehouseUnits).toBe(holds.get(row.productId) ?? 0);
+      expect(row.stockValueKes).toBeCloseTo(
+        (row.onHandUnits + row.warehouseUnits) * row.costKes!,
+        5
+      );
       // Fresh seed wipes predictions — cover is unknown until a forecast runs.
       expect(row.daysCover).toBeNull();
     }
@@ -128,7 +149,37 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
     }
   });
 
-  it("getStockByLocation reconciles with the catalogue totals", async () => {
+  it("sellable on-hand EXCLUDES the warehouse (a wrong role would corrupt cover)", async () => {
+    const rows = await getStockCatalogue(seeded.tenantId, { canViewCosts: true });
+
+    const levels = await prismaService.inventoryLevel.groupBy({
+      by: ["productId"],
+      where: { tenantId: seeded.tenantId },
+      _sum: { onHand: true },
+    });
+    const allLocations = new Map(levels.map((l) => [l.productId, l._sum.onHand ?? 0]));
+
+    // Some product has stock in the warehouse (Holds) — its sellable on-hand
+    // must be strictly below its all-locations total, i.e. the warehouse units
+    // dropped out of the cover math.
+    const withWarehouse = rows.filter((r) => r.warehouseUnits > 0);
+    expect(withWarehouse.length).toBeGreaterThan(0);
+    for (const row of withWarehouse) {
+      const all = allLocations.get(row.productId) ?? 0;
+      expect(row.onHandUnits).toBeLessThan(all);
+      expect(row.onHandUnits + row.warehouseUnits).toBe(all);
+    }
+
+    // Tenant-wide: sellable on-hand is less than total on-hand by exactly the
+    // warehouse holdings.
+    const sellable = rows.reduce((s, r) => s + r.onHandUnits, 0);
+    const warehouse = rows.reduce((s, r) => s + r.warehouseUnits, 0);
+    const total = [...allLocations.values()].reduce((s, v) => s + v, 0);
+    expect(warehouse).toBeGreaterThan(0);
+    expect(sellable).toBe(total - warehouse);
+  });
+
+  it("getStockByLocation labels roles and reconciles with the catalogue by role", async () => {
     const [locations, catalogue] = await Promise.all([
       getStockByLocation(seeded.tenantId, { canViewCosts: true }),
       getStockCatalogue(seeded.tenantId, { canViewCosts: true }),
@@ -136,13 +187,20 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
     expect(locations).toHaveLength(2);
     expect(locations[0]!.isPrimary).toBe(true);
 
-    const locationUnits = locations.reduce((sum, l) => sum + l.unitsOnHand, 0);
-    const catalogueUnits = catalogue.reduce((sum, r) => sum + r.onHandUnits, 0);
-    expect(locationUnits).toBe(catalogueUnits);
+    const shop = locations.find((l) => l.role === "sells")!;
+    const warehouse = locations.find((l) => l.role === "holds")!;
+    expect(shop.showCover).toBe(true);
+    expect(warehouse.showCover).toBe(false); // warehouses hold, they don't sell
+
+    // Sells-location units reconcile with catalogue sellable on-hand; holds with warehouse units.
+    const sellsUnits = locations.filter((l) => l.role === "sells").reduce((s, l) => s + l.unitsOnHand, 0);
+    const holdsUnits = locations.filter((l) => l.role === "holds").reduce((s, l) => s + l.unitsOnHand, 0);
+    expect(sellsUnits).toBe(catalogue.reduce((s, r) => s + r.onHandUnits, 0));
+    expect(holdsUnits).toBe(catalogue.reduce((s, r) => s + r.warehouseUnits, 0));
 
     for (const location of locations) {
       expect(location.skuCount).toBe(location.lines.length);
-      for (const line of location.lines) expect(line.onHand).toBeGreaterThan(0);
+      for (const line of location.lines) expect(line.onHand).not.toBe(0);
     }
   });
 

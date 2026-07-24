@@ -304,7 +304,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
 describe("export column gating", () => {
   it("cost columns exist only for cost viewers", () => {
     const memberHeaders = catalogueExportColumns(false).map((c) => c.header);
-    expect(memberHeaders).toEqual(["Product", "SKU", "On hand", "Days cover", "Status"]);
+    expect(memberHeaders).toEqual(["Product", "SKU", "On hand", "In warehouse", "Days cover", "Status"]);
     const ownerHeaders = catalogueExportColumns(true).map((c) => c.header);
     expect(ownerHeaders).toContain("Unit cost (KES)");
     expect(ownerHeaders).toContain("Stock value (KES)");
