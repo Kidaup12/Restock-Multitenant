@@ -1,29 +1,8 @@
 import { BoxIcon } from "@/components/icons";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { getStockCatalogue, type CatalogueRow } from "@/lib/data/stock";
-import { CatalogueExportBar } from "./catalogue-export";
-
-/** Shelf status from on-hand + forecast cover. Cover is null before the first
- *  forecast run — those rows read "No forecast" rather than guessing. */
-function status(row: CatalogueRow): { label: string; tone: "negative" | "warning" | "positive" | "neutral" } {
-  if (row.onHandUnits <= 0) return { label: "Stocked out", tone: "negative" };
-  if (row.daysCover === null) return { label: "No forecast", tone: "neutral" };
-  if (row.daysCover < 7) return { label: "Reorder now", tone: "negative" };
-  if (row.daysCover < 14) return { label: "Low", tone: "warning" };
-  if (row.daysCover > 45) return { label: "Overstocked", tone: "neutral" };
-  return { label: "Healthy", tone: "positive" };
-}
+import { getStockCatalogue } from "@/lib/data/stock";
+import { deriveFacetOptions } from "@/lib/facets";
+import { CatalogueView } from "./catalogue-view";
 
 export async function CatalogueTable({
   tenantId,
@@ -46,68 +25,9 @@ export async function CatalogueTable({
     );
   }
 
-  // Any warehouse (Holds) stock anywhere? Hide the column entirely for
-  // single-shelf shops so it never adds noise.
-  const hasWarehouseStock = rows.some((r) => r.warehouseUnits > 0);
+  // Facet options derived from what the catalogue actually contains (spec §7) —
+  // never a hard-coded list. The interactive view filters + sorts client-side.
+  const facetOptions = deriveFacetOptions(rows.map((r) => r.facet));
 
-  // The export mirrors the table: same rows, plus the status label it shows.
-  const exportRows = rows.map((row) => ({
-    title: row.title,
-    sku: row.sku,
-    onHandUnits: row.onHandUnits,
-    warehouseUnits: row.warehouseUnits,
-    daysCover: row.onHandUnits <= 0 ? null : row.daysCover,
-    status: status(row).label,
-    costKes: row.costKes,
-    stockValueKes: row.stockValueKes,
-  }));
-
-  return (
-    <Card>
-      <CardHeader
-        title="Catalogue"
-        subtitle={`${rows.length} products`}
-        action={<CatalogueExportBar rows={exportRows} canViewCosts={canViewCosts} />}
-      />
-      <CardContent className="p-0 py-2">
-        <Table>
-          <TableHeader>
-            <TableHead>Product</TableHead>
-            <TableHead>SKU</TableHead>
-            <TableHead numeric>On hand</TableHead>
-            {hasWarehouseStock && <TableHead numeric>In warehouse</TableHead>}
-            <TableHead numeric>Days cover</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead numeric>Stock value</TableHead>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => {
-              const s = status(row);
-              return (
-                <TableRow key={row.productId}>
-                  <TableCell className="font-medium text-ink">{row.title}</TableCell>
-                  <TableCell className="font-mono text-xs">{row.sku}</TableCell>
-                  <TableCell numeric>{row.onHandUnits}</TableCell>
-                  {hasWarehouseStock && (
-                    <TableCell numeric className="text-ink-muted">
-                      {row.warehouseUnits > 0 ? row.warehouseUnits : "—"}
-                    </TableCell>
-                  )}
-                  <TableCell numeric>
-                    {row.onHandUnits <= 0 || row.daysCover === null ? "—" : `${row.daysCover}d`}
-                  </TableCell>
-                  <TableCell>
-                    <Badge tone={s.tone}>{s.label}</Badge>
-                  </TableCell>
-                  <TableCell numeric>
-                    <CostValue amount={row.stockValueKes} canViewCosts={canViewCosts} />
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
+  return <CatalogueView rows={rows} facetOptions={facetOptions} canViewCosts={canViewCosts} />;
 }

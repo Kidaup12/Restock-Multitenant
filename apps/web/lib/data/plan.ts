@@ -165,6 +165,8 @@ export async function getBuyList(
         title: product.title,
         vendor: product.vendor,
         supplierName: product.supplier?.name ?? null,
+        // Sellable on-hand: Product.currentStock is the single source shared with
+        // Today and Stock (the Sells-only rollup) — never a second sum here.
         onHandUnits: product.currentStock,
         onOrderUnits: product.onOrder,
         daysUntilStockout: p.daysUntilStockout,

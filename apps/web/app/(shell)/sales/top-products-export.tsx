@@ -15,7 +15,7 @@ const columns: ExportColumn<TopProduct>[] = [
   { header: "SKU", cell: (r) => r.sku },
   { header: "Units", cell: (r) => r.unitsSold },
   { header: "Revenue (KES)", cell: (r) => r.revenueKes },
-  { header: "Run rate (units/day)", cell: (r) => Math.round(r.runRatePerDay * 10) / 10 },
+  { header: "Run rate (units/day)", cell: (r) => Math.round(r.runRate * 10) / 10 },
 ];
 
 export function TopProductsExportBar({ rows }: { rows: TopProduct[] }) {

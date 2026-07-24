@@ -106,9 +106,20 @@ const CATALOGUE: SeedProduct[] = [
   { sku: "MIK-TS-500",  title: "Mikalla Treatment Shampoo 500ml",            vendor: "Mikalla",         productType: "Hair Care",  priceKes: 1200, costKes: 760,  baseRate: 0.8, pattern: "dead",         coverDays: 0,  posShare: 0.6,  supplier: 1 },
 ];
 
+/** Owner-defined categories (the Category facet), seeded from productType and
+ *  grouped the way an owner would — broader than Shopify's product types, which
+ *  is the whole point of a custom category. */
+const CUSTOM_CATEGORY: Record<string, string> = {
+  "Hair Care": "Hair",
+  "Hair Extensions": "Hair",
+  "Skin Care": "Skin",
+  Makeup: "Makeup",
+};
+
 /** SKUs seeded with zero stock right now (the stockouts tile). */
 export const STOCKOUT_SKUS = ["NL-GLY-750", "DAR-EMB-3X", "MAY-COL-BLK"];
-/** SKUs with no sales for 70+ days but stock on the shelf (the dead-stock tile). */
+/** SKUs with stock on the shelf but no sales in the tracked window — dead under
+ *  the 90-day dead-stock default (spec §11). */
 export const DEAD_SKUS = ["BIO-SO-60", "MIK-TS-500"];
 const DEAD_STOCK_UNITS: Record<string, number> = { "BIO-SO-60": 42, "MIK-TS-500": 58 };
 
@@ -118,8 +129,9 @@ function demandCurve(p: SeedProduct, index: number): number[] {
   const out: number[] = [];
   for (let day = 0; day < DAYS; day++) {
     const daysAgo = DAYS - 1 - day;
-    // Dead SKUs: a little life in the first ~3 weeks of the window, then nothing.
-    if (p.pattern === "dead" && day > 20) {
+    // Dead SKUs: no sales anywhere in the window — stock sits idle past the
+    // 90-day dead-stock threshold.
+    if (p.pattern === "dead") {
       out.push(0);
       continue;
     }
@@ -213,7 +225,13 @@ export async function seedDev(): Promise<SeedResult> {
         : p.coverDays === 0
           ? 0
           : Math.max(1, Math.round((last30 / 30) * p.coverDays));
-    const shopShare = Math.ceil(onHand * 0.6);
+    // Backstock in the warehouse (Holds) is the slow-moving overstock and dead
+    // lines; everything actively selling sits on the shop floor. So only
+    // fallers/dead split off a warehouse share — fast movers are shop-only, and
+    // their sellable on-hand equals their whole position.
+    const inWarehouse = p.pattern === "faller" || p.pattern === "dead";
+    const shopShare = inWarehouse ? Math.ceil(onHand * 0.6) : onHand;
+    const warehouseShare = onHand - shopShare;
 
     const product = await prismaService.product.create({
       data: {
@@ -222,10 +240,13 @@ export async function seedDev(): Promise<SeedResult> {
         title: p.title,
         vendor: p.vendor,
         productType: p.productType,
+        customCategory: CUSTOM_CATEGORY[p.productType] ?? null,
         priceKes: p.priceKes,
         costKes: p.costKes,
         costSource: "manual",
-        currentStock: onHand,
+        // Sellable on-hand is the Sells-location rollup only (matches
+        // shopify-sync's invariant); warehouse/Holds stock is not sellable.
+        currentStock: shopShare,
         dailySalesRate: last30 / 30,
         supplierId: suppliers[p.supplier]!.id,
         shopifyCreatedAt: utcDay(DAYS + 120),
@@ -234,7 +255,7 @@ export async function seedDev(): Promise<SeedResult> {
 
     levelRows.push(
       { tenantId: tenant.id, locationId: shop.id, productId: product.id, onHand: shopShare },
-      { tenantId: tenant.id, locationId: warehouse.id, productId: product.id, onHand: onHand - shopShare }
+      { tenantId: tenant.id, locationId: warehouse.id, productId: product.id, onHand: warehouseShare }
     );
 
     for (let day = 0; day < DAYS; day++) {

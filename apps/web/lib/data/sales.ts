@@ -1,4 +1,5 @@
 import { prismaForTenant } from "@wezesha/db";
+import { runRate, type SalesPoint } from "@/lib/metrics";
 
 /**
  * Sales-screen queries. Server-only; explicit tenantId; RLS-enforced tenant
@@ -7,6 +8,8 @@ import { prismaForTenant } from "@wezesha/db";
  */
 
 const DAY_MS = 86_400_000;
+/** History span for the blended run rate — matches the engine's 30/90/365 windows. */
+const RUN_RATE_HISTORY_DAYS = 365;
 
 export type SalesDay = {
   /** UTC day, YYYY-MM-DD. */
@@ -111,10 +114,13 @@ export type TopProduct = {
   productId: string;
   sku: string;
   title: string;
+  /** Units sold inside the revenue window. */
   unitsSold: number;
+  /** Revenue (KES) over the window — the "revenue per product" metric. */
   revenueKes: number;
-  /** Average units/day over the window. */
-  runRatePerDay: number;
+  /** Run rate — the ONE blended, all-channel engine rate (units/day), not a
+   *  naive window average. Same number the forecast and stock screens show. */
+  runRate: number;
 };
 
 /** Best sellers by revenue over the trailing `days` days. */
@@ -123,7 +129,8 @@ export async function getTopProducts(
   { days = 30, limit = 10 }: { days?: number; limit?: number } = {}
 ): Promise<TopProduct[]> {
   const db = prismaForTenant(tenantId);
-  const since = new Date(Date.now() - days * DAY_MS);
+  const now = new Date();
+  const since = new Date(now.getTime() - days * DAY_MS);
   const grouped = await db.salesHistory.groupBy({
     by: ["productId"],
     where: { date: { gte: since } },
@@ -133,22 +140,37 @@ export async function getTopProducts(
   });
   if (grouped.length === 0) return [];
 
-  const products = await db.product.findMany({
-    where: { id: { in: grouped.map((g) => g.productId) } },
-    select: { id: true, sku: true, title: true },
-  });
+  const productIds = grouped.map((g) => g.productId);
+  // Full run-rate history for just the ranked products — the blended rate needs
+  // the engine's 30/90/365 windows, not only the revenue window above.
+  const runRateSince = new Date(now.getTime() - RUN_RATE_HISTORY_DAYS * DAY_MS);
+  const [products, history] = await Promise.all([
+    db.product.findMany({
+      where: { id: { in: productIds } },
+      select: { id: true, sku: true, title: true },
+    }),
+    db.salesHistory.findMany({
+      where: { productId: { in: productIds }, date: { gte: runRateSince } },
+      select: { productId: true, date: true, quantity: true, revenueKes: true, channel: true },
+    }),
+  ]);
   const byId = new Map(products.map((p) => [p.id, p]));
+  const historyByProduct = new Map<string, SalesPoint[]>();
+  for (const row of history) {
+    let list = historyByProduct.get(row.productId);
+    if (!list) historyByProduct.set(row.productId, (list = []));
+    list.push(row);
+  }
 
   return grouped.map((g) => {
     const product = byId.get(g.productId);
-    const unitsSold = g._sum.quantity ?? 0;
     return {
       productId: g.productId,
       sku: product?.sku ?? "—",
       title: product?.title ?? "Unknown product",
-      unitsSold,
+      unitsSold: g._sum.quantity ?? 0,
       revenueKes: g._sum.revenueKes ?? 0,
-      runRatePerDay: unitsSold / days,
+      runRate: runRate(historyByProduct.get(g.productId) ?? [], now),
     };
   });
 }

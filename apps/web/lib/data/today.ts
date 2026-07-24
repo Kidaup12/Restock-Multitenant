@@ -1,9 +1,16 @@
 import { prismaForTenant } from "@wezesha/db";
+import { moneyAtRest } from "@/lib/metrics";
 
 /**
  * Today-screen queries. Server-only: every function takes an explicit tenantId
  * and runs on the RLS-enforced tenant client — no query here can read another
  * tenant's rows even if a `where` is wrong.
+ *
+ * On-hand has ONE source: Product.currentStock (the sellable Sells-only rollup).
+ * Stocked-out and dead-stock read that number, never a second sum of
+ * InventoryLevel — a warehouse-heavy SKU is not "in stock" on the shelf, and the
+ * capital-at-rest figure uses the shared moneyAtRest formula so it agrees with
+ * the stock and plan screens to the shilling.
  *
  * Cost fields are redacted here, not at render: every getter takes an explicit
  * `canViewCosts` and returns null for cost figures when it is false, so a
@@ -13,8 +20,9 @@ import { prismaForTenant } from "@wezesha/db";
 
 const DAY_MS = 86_400_000;
 
-/** No sale in this many days = dead stock, unless the tenant configured its own window. */
-const DEFAULT_DEAD_STOCK_DAYS = 60;
+/** No sale in this many days = dead stock, unless the tenant configured its own
+ *  window (spec §11 default: 90 days). */
+const DEFAULT_DEAD_STOCK_DAYS = 90;
 
 export type TodayMetrics = {
   /** Sum of SalesHistory.revenueKes across all channels, trailing 30 days. */
@@ -39,19 +47,17 @@ export async function getTodayMetrics(
   const since30 = new Date(now - 30 * DAY_MS);
   const since60 = new Date(now - 60 * DAY_MS);
 
-  const [current, prior, products, levelSums, lastSales, config] = await Promise.all([
+  const [current, prior, products, lastSales, config] = await Promise.all([
     db.salesHistory.aggregate({ _sum: { revenueKes: true }, where: { date: { gte: since30 } } }),
     db.salesHistory.aggregate({
       _sum: { revenueKes: true },
       where: { date: { gte: since60, lt: since30 } },
     }),
-    db.product.findMany({ where: { active: true }, select: { id: true, costKes: true } }),
-    db.inventoryLevel.groupBy({ by: ["productId"], _sum: { onHand: true } }),
+    db.product.findMany({ where: { active: true }, select: { id: true, costKes: true, currentStock: true } }),
     db.salesHistory.groupBy({ by: ["productId"], _max: { date: true } }),
     db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } }),
   ]);
 
-  const onHand = new Map(levelSums.map((l) => [l.productId, l._sum.onHand ?? 0]));
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date]));
   const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
   const deadCutoff = now - windowDays * DAY_MS;
@@ -60,7 +66,7 @@ export async function getTodayMetrics(
   let deadSkus = 0;
   let deadCostKes = 0;
   for (const p of products) {
-    const units = onHand.get(p.id) ?? 0;
+    const units = p.currentStock; // sellable on-hand — the single source
     if (units <= 0) {
       stockedOut += 1;
       continue; // an empty shelf can't be dead stock
@@ -68,7 +74,7 @@ export async function getTodayMetrics(
     const last = lastSale.get(p.id);
     if (!last || last.getTime() < deadCutoff) {
       deadSkus += 1;
-      deadCostKes += units * p.costKes;
+      deadCostKes += moneyAtRest(p.costKes, units);
     }
   }
 

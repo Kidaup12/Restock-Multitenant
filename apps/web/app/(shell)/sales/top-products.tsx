@@ -52,7 +52,7 @@ export async function TopProducts({ tenantId }: { tenantId: string }) {
                 <TableCell className="font-mono text-xs">{row.sku}</TableCell>
                 <TableCell numeric>{formatNumber(row.unitsSold)}</TableCell>
                 <TableCell numeric>{formatNumber(row.revenueKes)}</TableCell>
-                <TableCell numeric>{row.runRatePerDay.toFixed(1)}/day</TableCell>
+                <TableCell numeric>{row.runRate.toFixed(1)}/day</TableCell>
               </TableRow>
             ))}
           </TableBody>
