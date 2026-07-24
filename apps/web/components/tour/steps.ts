@@ -14,6 +14,28 @@ export type TourStep = {
   body: string;
 };
 
+/**
+ * Route each step lives on, keyed by step.key. The engine navigates here before
+ * showing the step, so the tour walks THROUGH the pages instead of only pointing
+ * at the sidebar from Today. Steps that target shell-persistent controls
+ * (workspace switcher, theme, profile) are omitted — they show on the current
+ * page, no navigation needed.
+ */
+export const STEP_ROUTES: Record<string, string> = {
+  today: "/today",
+  "today-metrics": "/today",
+  "today-run-forecast": "/today",
+  "today-reorder": "/today",
+  plan: "/plan",
+  orders: "/orders",
+  stock: "/stock",
+  "stock-tabs": "/stock",
+  sales: "/sales",
+  "sales-overview": "/sales",
+  insights: "/insights",
+  settings: "/settings",
+};
+
 const step = (
   key: string,
   target: readonly string[],

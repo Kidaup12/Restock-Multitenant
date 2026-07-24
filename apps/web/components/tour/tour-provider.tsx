@@ -10,11 +10,12 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { usePathname, useRouter } from "next/navigation";
 import type { Role } from "@wezesha/db";
 import { cn } from "@/lib/cn";
 import { markWelcomed } from "@/lib/auth-actions";
 import { Button } from "@/components/ui/button";
-import { tourStepsForRole, type TourStep } from "@/components/tour/steps";
+import { tourStepsForRole, STEP_ROUTES, type TourStep } from "@/components/tour/steps";
 
 /**
  * In-house interactive tour engine, no dependencies. Steps point at
@@ -74,6 +75,8 @@ export function TourProvider({
   const [cardStyle, setCardStyle] = useState<React.CSSProperties | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const autoStarted = useRef(false);
+  const router = useRouter();
+  const pathname = usePathname();
 
   const step = steps !== null && steps.length > 0 ? (steps[index] ?? null) : null;
   const active = step !== null;
@@ -81,13 +84,15 @@ export function TourProvider({
 
   const start = useCallback(() => {
     if (!role) return;
-    // Only steps whose target is on screen right now — gives a stable count.
-    const visible = tourStepsForRole(role).filter((s) => findTarget(s));
-    if (visible.length === 0) return;
+    // Keep a step if the engine can navigate to its page (STEP_ROUTES) or its
+    // target is already on screen — so the walkthrough visits every page, not
+    // just the sidebar links visible from Today.
+    const chosen = tourStepsForRole(role).filter((s) => STEP_ROUTES[s.key] || findTarget(s));
+    if (chosen.length === 0) return;
     setIndex(0);
     setRect(null);
     setCardStyle(null);
-    setSteps(visible);
+    setSteps(chosen);
   }, [role]);
 
   const finish = useCallback(() => {
@@ -105,6 +110,15 @@ export function TourProvider({
     const timer = setTimeout(start, 600);
     return () => clearTimeout(timer);
   }, [autoStart, start]);
+
+  // Walk into the step's page. Navigating changes the page behind the
+  // spotlight; the target (a sidebar item, present on every page) stays put
+  // while the content the tour is describing loads underneath.
+  useEffect(() => {
+    if (!step) return;
+    const route = STEP_ROUTES[step.key];
+    if (route && pathname !== route) router.push(route);
+  }, [step, pathname, router]);
 
   // Bring the step's target into view.
   useEffect(() => {
@@ -140,10 +154,14 @@ export function TourProvider({
       raf = requestAnimationFrame(measure);
     };
     measure();
+    // After a navigation the target renders async — retry briefly so the
+    // spotlight locks onto the new page instead of sitting centered.
+    const retries = [80, 200, 400, 700, 1100, 1600].map((ms) => setTimeout(measure, ms));
     window.addEventListener("resize", schedule);
     window.addEventListener("scroll", schedule, true);
     return () => {
       cancelAnimationFrame(raf);
+      retries.forEach(clearTimeout);
       window.removeEventListener("resize", schedule);
       window.removeEventListener("scroll", schedule, true);
     };

@@ -194,8 +194,13 @@ export function NotificationBell({
         aria-haspopup="dialog"
         aria-expanded={open}
         className={cn(
-          "relative grid size-9 place-items-center rounded-md border border-edge bg-surface text-ink-secondary transition-colors",
-          "outline-accent hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2"
+          "relative grid size-9 place-items-center rounded-md border transition-colors",
+          "outline-accent hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2",
+          // Active look only when there is genuinely something unread; a
+          // caught-up bell is plain, with no dot of any kind.
+          unread > 0
+            ? "border-accent/40 bg-accent-soft text-accent-ink"
+            : "border-edge bg-surface text-ink-secondary"
         )}
       >
         <BellIcon className="size-4.5" />
@@ -205,16 +210,6 @@ export function NotificationBell({
           </span>
         )}
       </button>
-      {/* Live-connection indicator; deliberately subtle. */}
-      <span
-        title={`Live updates: ${meta.label}`}
-        aria-label={`Live updates: ${meta.label}`}
-        role="status"
-        className={cn(
-          "absolute -bottom-0.5 -left-0.5 size-2 rounded-full ring-2 ring-page",
-          meta.dot
-        )}
-      />
 
       {open && (
         <div
@@ -226,7 +221,20 @@ export function NotificationBell({
           className="absolute right-0 z-30 mt-2 w-[min(380px,calc(100vw-24px))] rounded-lg border border-edge bg-surface shadow-pop"
         >
           <div className="flex items-center justify-between border-b border-edge px-4 py-2.5">
-            <span className="text-sm font-semibold text-ink">Notifications</span>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold text-ink">Notifications</span>
+              {/* Connection status lives here, out of the way — not a persistent
+                  dot on the bell. Shown as a quiet label so a caught-up bell
+                  stays clean. */}
+              <span
+                role="status"
+                title={`Live updates: ${meta.label}`}
+                className="flex items-center gap-1 text-[11px] text-ink-faint"
+              >
+                <span className={cn("size-1.5 rounded-full", meta.dot)} />
+                {meta.label}
+              </span>
+            </div>
             {(unread > 0 || (items?.some((n) => n.wasUnread) ?? false)) && (
               <button
                 type="button"
