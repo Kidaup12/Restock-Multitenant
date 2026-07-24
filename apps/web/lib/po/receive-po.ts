@@ -1,12 +1,19 @@
 import { prismaForTenantTx, prismaService } from "@wezesha/db";
-import { actualLeadDays, leadTimeStats } from "@/lib/po/supplier-stats";
 
 /**
  * Line-by-line receiving with partial quantities. One tenant transaction:
  * line receivedQty/receivedAt, stock into the chosen location, product
  * currentStock recomputed from level sums, linked queue rows completed, PO
- * status advanced — and, on the delivery completing, the supplier's lead time
- * re-learned from its full receipt history.
+ * status advanced.
+ *
+ * The supplier's TYPED lead time is deliberately left untouched here. A received
+ * delivery used to overwrite Supplier.leadTimeAvgDays with the re-learned
+ * median, which silently replaced the number the owner set — the value that
+ * drives every reorder point moved without anyone deciding it should. The
+ * learned lead time is now derived from this same receipt history at read time
+ * (lib/data/suppliers.ts) and shown beside the typed value on the Suppliers
+ * page; the owner adopts it with one click ("use learned"), which is the only
+ * path that writes leadTimeAvgDays.
  */
 
 export type ReceiveEntry = { lineId: string; qty: number };
@@ -118,36 +125,9 @@ export async function receivePoLines(
         : { status: "partially_received" },
     });
 
-    // Delivery complete → re-learn this supplier's lead time from every full
-    // receipt on record (the row just updated included). Derived, not tallied:
-    // corrections and deletions can never leave a stale running total behind.
-    if (allFull && po.supplierId && po.sentAt) {
-      const history = await tx.purchaseOrder.findMany({
-        where: {
-          supplierId: po.supplierId,
-          status: "received",
-          sentAt: { not: null },
-          receivedAt: { not: null },
-          deletedAt: null,
-          id: { not: po.id },
-        },
-        select: { sentAt: true, receivedAt: true },
-      });
-      const samples = [
-        ...history.map((h) => actualLeadDays(h.sentAt!, h.receivedAt!)),
-        actualLeadDays(po.sentAt, now),
-      ];
-      const stats = leadTimeStats(samples);
-      if (stats) {
-        await tx.supplier.update({
-          where: { id: po.supplierId },
-          data: {
-            leadTimeAvgDays: stats.avg,
-            ...(stats.std != null ? { leadTimeStdDays: stats.std } : {}),
-          },
-        });
-      }
-    }
+    // The supplier's typed lead time is NOT rewritten on completion — the learned
+    // median is derived from this receipt history at read time and adopted only
+    // by the owner's explicit "use learned" action (see file header).
 
     return { ok: true, status: allFull ? "received" : "partially_received", receivedUnits };
   });

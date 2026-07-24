@@ -221,7 +221,7 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
     expect(orders.every((o) => o.status === "ordered")).toBe(true);
   });
 
-  it("completes the delivery: orders completed, supplier lead time learned", async () => {
+  it("completes the delivery: orders completed, lead time learned (typed not overwritten)", async () => {
     // Backdate the send so the learned lead time is a real number of days:
     // sent 20 days ago, promised in 42 — arriving today is early + on time.
     const sentAt = new Date(Date.now() - 20 * DAY_MS);
@@ -247,11 +247,12 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
     });
     expect(po!.receivedAt).not.toBeNull();
     expect(po!.orders.every((o) => o.status === "completed" && o.receivedAt != null)).toBe(true);
-    // One completed delivery, 20 days door to door: avg learned, std left alone
-    // (a single sample has no spread; the configured default survives).
-    expect(po!.supplier!.leadTimeAvgDays).toBe(20);
+    // Trust fix: a received delivery no longer overwrites the owner's typed lead
+    // time — Orbit's configured 42d ± 10d stands untouched. The 20-day actual is
+    // surfaced as the LEARNED value (below), adopted only via "use learned".
+    expect(po!.supplier!.leadTimeAvgDays).toBe(42);
     expect(po!.supplier!.leadTimeStdDays).toBe(10);
-    // The scorecard now includes Orbit: on time and in full.
+    // The scorecard now includes Orbit: on time and in full, learned lead 20d.
     const scores = await getSupplierScores(tenantId);
     expect(scores.get(po!.supplierId!)).toMatchObject({
       onTimePct: 100,
