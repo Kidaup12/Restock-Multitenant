@@ -214,6 +214,11 @@ model Product {
   imageUrl          String?
   currentStock      Float     @default(0)
   abcCategory       String?
+  // Owner-defined grouping (the "Category" facet), seeded from Shopify
+  // productType and freely re-grouped by the owner. null = uncategorised. The
+  // old Local/Korean/Western importCategory vocabulary is retired; nothing
+  // depends on this value — clearing it just drops the row from that facet.
+  customCategory    String?
   dailySalesRate    Float     @default(0)
   lastSynced        DateTime  @default(now())
   shopifyCreatedAt  DateTime? // when the SKU was first created in Shopify — product age signal (dead-stock: new vs old dud)
@@ -245,6 +250,7 @@ model Product {
   @@index([tenantId, vendor])
   @@index([tenantId, active])
   @@index([tenantId, notForSale])
+  @@index([tenantId, customCategory])
 }
 
 model Supplier {

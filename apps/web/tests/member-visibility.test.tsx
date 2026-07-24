@@ -20,11 +20,9 @@ vi.mock("next/link", () => ({
 import { MetricsTiles } from "../app/(shell)/today/metrics-tiles";
 import { ReorderTable } from "../app/(shell)/today/reorder-table";
 import { CatalogueTable } from "../app/(shell)/stock/catalogue-table";
+import { CatalogueView } from "../app/(shell)/stock/catalogue-view";
 import { LocationView } from "../app/(shell)/stock/location-view";
-import {
-  CatalogueExportBar,
-  catalogueExportColumns,
-} from "../app/(shell)/stock/catalogue-export";
+import { catalogueExportColumns } from "../app/(shell)/stock/catalogue-export";
 
 /**
  * Money-blindness proof for the live screens, at two depths:
@@ -287,17 +285,19 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     expect(redactBudgetSplit(split, true)).toBe(split);
   });
 
-  it("catalogue export bar receives only redacted rows in its serialized props", async () => {
+  it("catalogue view receives only redacted rows in its serialized props", async () => {
+    // The server table hands the (redacted) rows to the client CatalogueView —
+    // that prop boundary is exactly what Next serializes into the client bundle,
+    // so a money-blind member's rows must carry no cost numbers.
     const tree = await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: false });
-    const bars = findElements(tree, CatalogueExportBar);
-    expect(bars).toHaveLength(1);
-    // These props are exactly what Next would serialize to the client bundle.
-    const props = (bars[0] as { props: unknown }).props;
+    const views = findElements(tree, CatalogueView);
+    expect(views).toHaveLength(1);
+    const props = (views[0] as { props: unknown }).props;
     expect(costNumbers(props)).toEqual([]);
 
     const ownerTree = await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true });
-    const ownerBar = findElements(ownerTree, CatalogueExportBar)[0] as { props: unknown };
-    expect(costNumbers(ownerBar.props).length).toBeGreaterThan(0);
+    const ownerView = findElements(ownerTree, CatalogueView)[0] as { props: unknown };
+    expect(costNumbers(ownerView.props).length).toBeGreaterThan(0);
   });
 });
 

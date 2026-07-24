@@ -47,19 +47,14 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
     expect(metrics.trackedProducts).toBe(seeded.productCount);
     expect(metrics.stockedOutProducts).toBe(STOCKOUT_SKUS.length);
 
-    // Dead stock: exactly the seeded dead SKUs, at on-hand x cost.
+    // Dead stock: exactly the seeded dead SKUs, at SELLABLE on-hand x cost —
+    // the single source is Product.currentStock (Sells-only), not all locations.
     const deadProducts = await prismaService.product.findMany({
       where: { tenantId: seeded.tenantId, sku: { in: DEAD_SKUS } },
-      select: { id: true, costKes: true },
+      select: { id: true, costKes: true, currentStock: true },
     });
-    const levels = await prismaService.inventoryLevel.groupBy({
-      by: ["productId"],
-      where: { tenantId: seeded.tenantId, productId: { in: deadProducts.map((p) => p.id) } },
-      _sum: { onHand: true },
-    });
-    const onHand = new Map(levels.map((l) => [l.productId, l._sum.onHand ?? 0]));
     const expectedDeadCost = deadProducts.reduce(
-      (sum, p) => sum + (onHand.get(p.id) ?? 0) * p.costKes,
+      (sum, p) => sum + p.currentStock * p.costKes,
       0
     );
     expect(metrics.deadStock.skus).toBe(DEAD_SKUS.length);
@@ -104,7 +99,10 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
     }
     for (const row of top) {
       expect(row.title.length).toBeGreaterThan(0);
-      expect(row.runRatePerDay).toBeCloseTo(row.unitsSold / 30, 8);
+      // Run rate is the blended engine rate (recency-weighted, all-channel), not
+      // the naive units/window that used to live here.
+      expect(Number.isFinite(row.runRate)).toBe(true);
+      expect(row.runRate).toBeGreaterThan(0);
     }
   });
 
@@ -141,8 +139,11 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
         (row.onHandUnits + row.warehouseUnits) * row.costKes!,
         5
       );
-      // Fresh seed wipes predictions — cover is unknown until a forecast runs.
-      expect(row.daysCover).toBeNull();
+      // Cover is recomputed LIVE from current stock at the run rate — no forecast
+      // run required. Null only when there is no run rate to divide by.
+      expect(row.daysCover).toBe(
+        row.runRate > 1e-4 ? Math.floor(row.onHandUnits / row.runRate) : null
+      );
     }
     for (const sku of STOCKOUT_SKUS) {
       expect(rows.find((r) => r.sku === sku)?.onHandUnits).toBe(0);

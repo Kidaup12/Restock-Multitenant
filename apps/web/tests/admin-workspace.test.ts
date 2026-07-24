@@ -30,7 +30,10 @@ describe.skipIf(!runnable)("impersonated summary reads (RLS-scoped)", () => {
     const mkTenant = async (slug: string, name: string, revenue: number) => {
       const tenant = await db.prismaService.tenant.create({ data: { name, slug } });
       const product = await db.prismaService.product.create({
-        data: { tenantId: tenant.id, sku: `${slug}-SKU`, title: `${name} Product`, costKes: 100 },
+        // currentStock is the sellable (Sells-only) rollup the sync maintains and
+        // the screens read; set it alongside the level so the fixture matches a
+        // synced tenant.
+        data: { tenantId: tenant.id, sku: `${slug}-SKU`, title: `${name} Product`, costKes: 100, currentStock: 5 },
       });
       await db.prismaService.salesHistory.create({
         data: {
