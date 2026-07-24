@@ -38,14 +38,14 @@ describe("bucketSalesByProductDay", () => {
   it("sums quantity + revenue per (product, day)", () => {
     const buckets = bucketSalesByProductDay(orders, coreMap);
     expect(buckets.get("local-1|2026-06-04")).toEqual({
-      productId: "local-1", dateKey: "2026-06-04", quantity: 5, revenue: 500,
+      productId: "local-1", dateKey: "2026-06-04", quantity: 5, revenue: 500, locationId: null,
     });
   });
 
   it("keeps separate products on the same day separate", () => {
     const buckets = bucketSalesByProductDay(orders, coreMap);
     expect(buckets.get("local-2|2026-06-04")).toEqual({
-      productId: "local-2", dateKey: "2026-06-04", quantity: 1, revenue: 50,
+      productId: "local-2", dateKey: "2026-06-04", quantity: 1, revenue: 50, locationId: null,
     });
   });
 
@@ -82,10 +82,10 @@ describe("bucketSalesByProductDay", () => {
     ];
     const buckets = bucketSalesByProductDay(backdated, coreMap);
     expect(buckets.get("local-1|2026-05-10")).toEqual({
-      productId: "local-1", dateKey: "2026-05-10", quantity: 1, revenue: 100,
+      productId: "local-1", dateKey: "2026-05-10", quantity: 1, revenue: 100, locationId: null,
     });
     expect(buckets.get("local-1|2026-06-04")).toEqual({
-      productId: "local-1", dateKey: "2026-06-04", quantity: 2, revenue: 200,
+      productId: "local-1", dateKey: "2026-06-04", quantity: 2, revenue: 200, locationId: null,
     });
   });
 
