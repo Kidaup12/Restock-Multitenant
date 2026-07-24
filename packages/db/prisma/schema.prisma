@@ -183,6 +183,12 @@ model TenantConfig {
   // Cleared when usage drops back under; null = within limits.
   limitsExceededAt DateTime?
 
+  // Per-tenant feature switches (capability gate 4): { transfers?, pos_feed?,
+  // quickbooks?, supplier_email?, weekly_digest?: bool }. An absent key falls
+  // back to its documented default (see lib/capabilities/feature-flags.ts);
+  // Settings toggles write here. null = every flag at its default.
+  featureFlags Json?
+
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
