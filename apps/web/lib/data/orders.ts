@@ -6,6 +6,16 @@ import { computeSupplierScore, type SupplierScore } from "@/lib/po/supplier-stat
  * Orders-screen queries. Server-only: every function takes an explicit
  * tenantId and runs on the RLS-enforced tenant client — no query here can
  * read another tenant's rows even if a `where` is wrong.
+ *
+ * Cost fields are redacted here, not at render: every getter that returns KES
+ * cost figures takes an explicit `canViewCosts` and nulls those figures when it
+ * is false, so a money-blind member's payload never carries the numbers —
+ * supplier unit costs, PO line totals and subtotals all come back null and
+ * render as the mask. What a staff member needs to receive a delivery (PO
+ * number, quantities, supplier, status, dates) stays visible either way.
+ * getPoDocument is the on-screen printable view, so it redacts too; the
+ * supplier email is a separate, send-authorised path (lib/po/send-po.ts) that
+ * always carries costs.
  */
 
 // ── Supplier scorecards ──────────────────────────────────────────────────────
@@ -47,8 +57,10 @@ export type OrderQueueLine = {
   sku: string;
   title: string;
   qty: number;
-  unitCostKes: number;
-  lineCostKes: number;
+  /** Null when the caller can't view costs. */
+  unitCostKes: number | null;
+  /** qty x unit cost. Null when the caller can't view costs. */
+  lineCostKes: number | null;
   onHandUnits: number;
 };
 
@@ -58,16 +70,29 @@ export type OrderQueueGroup = {
   supplierName: string | null;
   moq: number | null;
   leadTimeAvgDays: number | null;
+  /** Supplier scorecard — counts, percentages and lead-days only, no money. */
   score: SupplierScore | null;
   lines: OrderQueueLine[];
   totalUnits: number;
+  /** Cost of ordering this group. Null when the caller can't view costs. */
+  totalCostKes: number | null;
+};
+
+/** A group before redaction — built and totalled on real costs. */
+type FullQueueGroup = OrderQueueGroup & {
+  lines: (OrderQueueLine & { unitCostKes: number; lineCostKes: number })[];
   totalCostKes: number;
 };
 
 /** Pending Order rows grouped per supplier — the "what to buy" queue the
  *  Create PO action consumes. Queue rows arrive from the planner's
- *  add-to-order and the forecast's auto-queue as those flows land. */
-export async function getOrderQueue(tenantId: string): Promise<OrderQueueGroup[]> {
+ *  add-to-order and the forecast's auto-queue as those flows land. Groups are
+ *  built (and sorted) on full costs, then redacted, so a money-blind member
+ *  sees the same suppliers and quantities with only the KES figures gone. */
+export async function getOrderQueue(
+  tenantId: string,
+  { canViewCosts }: { canViewCosts: boolean }
+): Promise<OrderQueueGroup[]> {
   const db = prismaForTenant(tenantId);
   const [orders, scores] = await Promise.all([
     db.order.findMany({
@@ -92,7 +117,7 @@ export async function getOrderQueue(tenantId: string): Promise<OrderQueueGroup[]
   });
   const productById = new Map(products.map((p) => [p.id, p]));
 
-  const groups = new Map<string, OrderQueueGroup>();
+  const groups = new Map<string, FullQueueGroup>();
   for (const order of orders) {
     const product = productById.get(order.productId!);
     if (!product) continue;
@@ -128,11 +153,17 @@ export async function getOrderQueue(tenantId: string): Promise<OrderQueueGroup[]
   }
 
   // Suppliers alphabetically; the unassigned bucket last.
-  return [...groups.values()].sort((a, b) => {
+  const sorted = [...groups.values()].sort((a, b) => {
     if (a.supplierId === null) return 1;
     if (b.supplierId === null) return -1;
     return (a.supplierName ?? "").localeCompare(b.supplierName ?? "");
   });
+  if (canViewCosts) return sorted;
+  return sorted.map((group) => ({
+    ...group,
+    totalCostKes: null,
+    lines: group.lines.map((line) => ({ ...line, unitCostKes: null, lineCostKes: null })),
+  }));
 }
 
 // ── Purchase order list + detail ─────────────────────────────────────────────
@@ -145,14 +176,18 @@ export type PoListRow = {
   lineCount: number;
   totalUnits: number;
   receivedUnits: number;
-  subtotalKes: number;
+  /** PO value. Null when the caller can't view costs. */
+  subtotalKes: number | null;
   createdAt: Date;
   sentAt: Date | null;
   expectedAt: Date | null;
   receivedAt: Date | null;
 };
 
-export async function getPurchaseOrders(tenantId: string): Promise<PoListRow[]> {
+export async function getPurchaseOrders(
+  tenantId: string,
+  { canViewCosts }: { canViewCosts: boolean }
+): Promise<PoListRow[]> {
   const db = prismaForTenant(tenantId);
   const pos = await db.purchaseOrder.findMany({
     where: { deletedAt: null },
@@ -178,7 +213,7 @@ export async function getPurchaseOrders(tenantId: string): Promise<PoListRow[]> 
     lineCount: po.lines.length,
     totalUnits: po.lines.reduce((s, l) => s + l.quantity, 0),
     receivedUnits: po.lines.reduce((s, l) => s + l.receivedQty, 0),
-    subtotalKes: po.subtotalKes,
+    subtotalKes: canViewCosts ? po.subtotalKes : null,
     createdAt: po.createdAt,
     sentAt: po.sentAt,
     expectedAt: po.expectedAt,
@@ -192,8 +227,9 @@ export type PoDetailLine = {
   sku: string;
   title: string;
   quantity: number;
-  unitCostKes: number;
-  lineTotalKes: number;
+  /** Null when the caller can't view costs. */
+  unitCostKes: number | null;
+  lineTotalKes: number | null;
   receivedQty: number;
   receivedAt: Date | null;
 };
@@ -203,7 +239,8 @@ export type PoDetail = {
   poNumber: string;
   status: string;
   currency: string;
-  subtotalKes: number;
+  /** PO value. Null when the caller can't view costs. */
+  subtotalKes: number | null;
   createdAt: Date;
   sentAt: Date | null;
   expectedAt: Date | null;
@@ -223,7 +260,11 @@ export type PoDetail = {
   locations: { id: string; name: string; isPrimary: boolean }[];
 };
 
-export async function getPoDetail(tenantId: string, poId: string): Promise<PoDetail | null> {
+export async function getPoDetail(
+  tenantId: string,
+  poId: string,
+  { canViewCosts }: { canViewCosts: boolean }
+): Promise<PoDetail | null> {
   const db = prismaForTenant(tenantId);
   const [po, locations] = await Promise.all([
     db.purchaseOrder.findFirst({
@@ -267,16 +308,23 @@ export async function getPoDetail(tenantId: string, poId: string): Promise<PoDet
   if (!po) return null;
   return {
     ...po,
+    subtotalKes: canViewCosts ? po.subtotalKes : null,
+    lines: po.lines.map((line) =>
+      canViewCosts ? line : { ...line, unitCostKes: null, lineTotalKes: null }
+    ),
     totalUnits: po.lines.reduce((s, l) => s + l.quantity, 0),
     receivedUnits: po.lines.reduce((s, l) => s + l.receivedQty, 0),
     locations,
   };
 }
 
-/** The PO shaped for the printable document / email renderers. */
+/** The PO shaped for the on-screen printable document. Redacts costs for a
+ *  money-blind member — the supplier email builds its own copy with costs on
+ *  the send-authorised path (lib/po/send-po.ts), independent of the viewer. */
 export async function getPoDocument(
   tenantId: string,
-  poId: string
+  poId: string,
+  { canViewCosts }: { canViewCosts: boolean }
 ): Promise<PoDocumentData | null> {
   const db = prismaForTenant(tenantId);
   const [po, tenant] = await Promise.all([
@@ -301,5 +349,5 @@ export async function getPoDocument(
     db.tenant.findUnique({ where: { id: tenantId }, select: { name: true } }),
   ]);
   if (!po || !tenant) return null;
-  return buildPoDocument(po, tenant.name);
+  return buildPoDocument(po, tenant.name, { canViewCosts });
 }

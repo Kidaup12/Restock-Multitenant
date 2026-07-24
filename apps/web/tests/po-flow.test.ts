@@ -74,7 +74,7 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
   });
 
   it("groups the queue by supplier with totals and scorecards", async () => {
-    const queue = await getOrderQueue(tenantId);
+    const queue = await getOrderQueue(tenantId, { canViewCosts: true });
     expect(queue).toHaveLength(3);
     const orbit = queue.find((g) => g.supplierName === "Orbit Imports")!;
     expect(orbit.lines.map((l) => l.sku).sort()).toEqual(["CAN-SHE-340", "MAY-COL-BLK"]);
@@ -92,7 +92,7 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
   });
 
   it("creates a PO: MOQ floor, cost totals, orders moved and linked", async () => {
-    const queue = await getOrderQueue(tenantId);
+    const queue = await getOrderQueue(tenantId, { canViewCosts: true });
     const orbit = queue.find((g) => g.supplierName === "Orbit Imports")!;
     const result = await createPoFromOrders(tenantId, orbit.lines.map((l) => l.orderId), {
       userId: seeded.userId,
@@ -124,7 +124,7 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
   });
 
   it("issues distinct numbers under parallel creation", async () => {
-    const queue = await getOrderQueue(tenantId);
+    const queue = await getOrderQueue(tenantId, { canViewCosts: true });
     const beautyPlus = queue.find((g) => g.supplierName === "Beauty Plus Distributors")!;
     const haria = queue.find((g) => g.supplierName === "Haria Industries")!;
     const [a, b] = await Promise.all([
@@ -138,7 +138,7 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
     expect([a.poNumber, b.poNumber].sort()).toEqual(["PO-0004", "PO-0005"]);
     beautyPlusPoId = a.poId;
     // Queue fully drained — every group became a PO.
-    expect(await getOrderQueue(tenantId)).toHaveLength(0);
+    expect(await getOrderQueue(tenantId, { canViewCosts: true })).toHaveLength(0);
   });
 
   it("emails the PO through the seam and stamps sent + expected", async () => {
@@ -174,7 +174,7 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
   });
 
   it("rejects over-receipt and foreign locations", async () => {
-    const detail = (await getPoDetail(tenantId, orbitPoId))!;
+    const detail = (await getPoDetail(tenantId, orbitPoId, { canViewCosts: true }))!;
     const can = detail.lines.find((l) => l.sku === "CAN-SHE-340")!;
     const primary = detail.locations.find((l) => l.isPrimary)!;
     expect(
@@ -186,7 +186,7 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
   });
 
   it("receives a partial delivery: line, status, stock and product recompute", async () => {
-    const detail = (await getPoDetail(tenantId, orbitPoId))!;
+    const detail = (await getPoDetail(tenantId, orbitPoId, { canViewCosts: true }))!;
     const can = detail.lines.find((l) => l.sku === "CAN-SHE-340")!;
     const primary = detail.locations.find((l) => l.isPrimary)!;
     const levelBefore = await prismaService.inventoryLevel.findUnique({
@@ -204,7 +204,7 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
     );
     expect(result).toEqual({ ok: true, status: "partially_received", receivedUnits: 25 });
 
-    const after = (await getPoDetail(tenantId, orbitPoId))!;
+    const after = (await getPoDetail(tenantId, orbitPoId, { canViewCosts: true }))!;
     expect(after.status).toBe("partially_received");
     expect(after.lines.find((l) => l.sku === "CAN-SHE-340")!.receivedQty).toBe(25);
     const levelAfter = await prismaService.inventoryLevel.findUnique({
@@ -231,7 +231,7 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
       data: { sentAt, expectedAt },
     });
 
-    const detail = (await getPoDetail(tenantId, orbitPoId))!;
+    const detail = (await getPoDetail(tenantId, orbitPoId, { canViewCosts: true }))!;
     const primary = detail.locations.find((l) => l.isPrimary)!;
     const remaining = detail.lines
       .filter((l) => l.receivedQty < l.quantity)
@@ -265,7 +265,7 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
       data: { name: "PO Probe", slug: "po-flow-probe" },
     });
     try {
-      const detail = await getPoDetail(probe.id, orbitPoId);
+      const detail = await getPoDetail(probe.id, orbitPoId, { canViewCosts: true });
       expect(detail).toBeNull();
       const result = await receivePoLines(
         probe.id,
@@ -285,7 +285,7 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
     const po = await prismaService.purchaseOrder.findUnique({ where: { id: beautyPlusPoId } });
     expect(po?.status).toBe("cancelled");
     expect(po?.cancelledAt).not.toBeNull();
-    const queue = await getOrderQueue(tenantId);
+    const queue = await getOrderQueue(tenantId, { canViewCosts: true });
     const beautyPlus = queue.find((g) => g.supplierName === "Beauty Plus Distributors");
     expect(beautyPlus?.lines).toHaveLength(2);
     // A received PO stays on the books.

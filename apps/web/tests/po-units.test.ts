@@ -127,7 +127,8 @@ describe("po email rendering", () => {
         { sku: "GAR-VCS-30", title: "Garnier <Serum>", quantity: 36, unitCostKes: 980, lineTotalKes: 35_280 },
       ],
     },
-    "Amara Beauty"
+    "Amara Beauty",
+    { canViewCosts: true }
   );
 
   it("both renderings carry the number, supplier, line and total", () => {

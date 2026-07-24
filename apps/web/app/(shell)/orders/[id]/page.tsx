@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { activeMembership, requireSession } from "@/lib/auth";
+import { hasPermission } from "@/lib/auth/permissions";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -47,11 +48,11 @@ export default async function PoDetailPage({
     );
   }
 
-  const po = await getPoDetail(membership.tenantId, id);
+  // Money-blind gate: MEMBERs (without view_costs) see no KES cost figures.
+  const canViewCosts = hasPermission(membership, "view_costs");
+  const po = await getPoDetail(membership.tenantId, id, { canViewCosts });
   if (!po) notFound();
 
-  // The money-blind gate (role-based cost visibility) plugs in here.
-  const canViewCosts = true;
   const receivable = po.status === "sent" || po.status === "partially_received";
 
   const timeline = [

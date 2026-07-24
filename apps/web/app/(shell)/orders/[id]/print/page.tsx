@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { activeMembership, requireSession } from "@/lib/auth";
+import { hasPermission } from "@/lib/auth/permissions";
 import { getPoDocument } from "@/lib/data/orders";
 import { PoDocument } from "@/lib/po/po-document";
 import { PrintButton } from "./print-button";
@@ -25,7 +26,10 @@ export default async function PoPrintPage({
   const membership = await activeMembership(session.user.id);
   if (!membership) notFound();
 
-  const doc = await getPoDocument(membership.tenantId, id);
+  // Money-blind gate: a MEMBER printing a PO sees the document with costs
+  // masked. The supplier's own copy is sent with costs from the send action.
+  const canViewCosts = hasPermission(membership, "view_costs");
+  const doc = await getPoDocument(membership.tenantId, id, { canViewCosts });
   if (!doc) notFound();
 
   return (

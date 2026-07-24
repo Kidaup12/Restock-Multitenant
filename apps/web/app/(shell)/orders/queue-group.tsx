@@ -40,7 +40,9 @@ export function QueueGroup({
     [group.lines, selected]
   );
   const selectedUnits = selection.reduce((s, l) => s + l.qty, 0);
-  const selectedCost = selection.reduce((s, l) => s + l.lineCostKes, 0);
+  // lineCostKes is null for a money-blind member; the running total is only
+  // shown when canViewCosts, so a redacted line contributes nothing here.
+  const selectedCost = selection.reduce((s, l) => s + (l.lineCostKes ?? 0), 0);
 
   const toggle = (orderId: string) => {
     setSelected((prev) => {
