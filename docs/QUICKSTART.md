@@ -3,6 +3,10 @@
 Works on Windows, macOS, and Linux. Prerequisites: **Node 20+**, **npm**, and **Docker Desktop**
 (running).
 
+> **On WSL (Ubuntu):** also enable Docker Desktop → **Settings → Resources → WSL Integration** →
+> toggle your distro **on** → *Apply & Restart* (otherwise `docker` isn't available inside the distro).
+> Install Node 20 in the distro if missing (`curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs`).
+
 ## One command
 
 ```bash
@@ -22,7 +26,9 @@ npm run dev          # the web app on http://localhost:3000
 npm run -w @wezesha/worker dev   # (optional) crons + sync; needs Redis
 ```
 
-Sign in with the seeded owner: **`dev@wezesha.test` / `Dev12345!`**.
+Seeded sign-ins (same shop, three roles): **owner** `owner@wezesha.test` / `Owner12345!` · **admin**
+`admin@wezesha.test` / `Admin12345!` · **member/staff** `staff@wezesha.test` / `Staff12345!`
+(money-blind). See `docs/QA-TESTPLAN.md`.
 
 ## What the app talks to
 
