@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
+  BoxIcon,
   ChevronRightIcon,
   GearIcon,
   LayersIcon,
@@ -16,10 +17,22 @@ export const metadata: Metadata = {
 
 const sections = [
   {
+    href: "/settings/locations",
+    icon: <BoxIcon />,
+    title: "Locations",
+    description: "What each location does for your stock math — sells, holds, ignores.",
+  },
+  {
     href: "/settings/team",
     icon: <UsersIcon />,
     title: "Team",
     description: "Invite teammates, set roles, and remove access.",
+  },
+  {
+    href: "/settings/connections",
+    icon: <LayersIcon />,
+    title: "Connections",
+    description: "Shopify, QuickBooks, and the POS feed — connect and check sync health.",
   },
 ];
 
@@ -28,11 +41,6 @@ const upcoming = [
     icon: <GearIcon />,
     title: "Workspace",
     description: "Name, currency, and forecast preferences.",
-  },
-  {
-    icon: <LayersIcon />,
-    title: "Integrations",
-    description: "Shopify, QuickBooks, and the POS feed.",
   },
 ];
 
