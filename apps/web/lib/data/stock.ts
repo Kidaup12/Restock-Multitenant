@@ -2,6 +2,14 @@ import { prismaForTenant, roleOf, type LocationRole } from "@wezesha/db";
 import { leadDaysFor, urgencyFromDays, type AbcCategory } from "@wezesha/forecast";
 import { getCatalogueMetrics } from "@/lib/metrics";
 import { buildFacetItems, type FacetItem, type FacetSourceRow } from "@/lib/facets";
+import {
+  coverVerdict,
+  marginPct,
+  resolveCost,
+  suspectCostPresent,
+  type CostSource,
+  type VerdictKind,
+} from "@/lib/cost";
 
 /**
  * Stock-screen queries. Server-only; explicit tenantId; RLS-enforced tenant
@@ -50,11 +58,38 @@ export type CatalogueRow = {
   /** (sellable + warehouse) on-hand x unit cost — owned inventory at cost.
    *  Null when the caller can't view costs. */
   stockValueKes: number | null;
-  /** cost x sellable on-hand — capital tied up in the shelf. Null when the
-   *  caller can't view costs. */
+  /** cost x sellable on-hand — capital tied up in the shelf (also the per-row
+   *  "cash tied up" column). Null when the caller can't view costs. */
   moneyAtRestKes: number | null;
   /** ABC class; null = too-new / no sales ("—"). */
   abc: AbcCategory | null;
+  // ── Cost chain + inventory-truth (this slice) ──────────────────────────────
+  /** Owner-defined category (the Category facet); null = uncategorised. */
+  customCategory: string | null;
+  /** Resolved cost source with zero-as-missing applied — always shown (a source
+   *  label / data-quality signal, not a KES amount). */
+  costSource: CostSource;
+  /** Owner-marked tester/display/damaged: stays in the catalogue, out of
+   *  sellable cover / money band / buy list. */
+  notForSale: boolean;
+  /** Resolved lead time (product override → supplier → 30d default) — feeds the
+   *  cover verdict and the "below lead" revenue-at-risk tile. */
+  leadDays: number;
+  /** Cover verdict pill; null for a not-for-sale row (no sellable judgement). */
+  verdict: VerdictKind | null;
+  /** Margin % of price (loud red when negative). Null when there's no price, or
+   *  the caller can't view costs. */
+  marginPct: number | null;
+  /** Cost is missing/zero (held off the buy list). */
+  missingCost: boolean;
+  /** Cost is present but >= price (suspect). */
+  suspectCost: boolean;
+  /** Held off the buy list (engine's plannable rule). */
+  heldOffBuyList: boolean;
+  /** A synced cost jumped sharply — the attention signal (signed %); null = no
+   *  active alert. Not a KES amount, so shown regardless of cost visibility. */
+  costMovedPct: number | null;
+  costMovedAt: Date | null;
   /** This product projected onto every metadata facet (brand, type, category,
    *  supplier, speed band, ABC, health) — the input the filter bar derives from. */
   facet: FacetItem;
@@ -77,6 +112,10 @@ export async function getStockCatalogue(
         customCategory: true,
         priceKes: true,
         costKes: true,
+        costSource: true,
+        notForSale: true,
+        costMovedPct: true,
+        costMovedAt: true,
         supplierId: true,
         leadTimeDays: true,
         shopifyCreatedAt: true,
@@ -125,6 +164,14 @@ export async function getStockCatalogue(
     const rate = m?.runRate ?? 0;
     const hasRate = rate > NO_RATE_EPSILON;
     const cover = m?.coverDays ?? null;
+    const daysCover = hasRate ? cover : null;
+
+    // Resolve the cost once (zero-as-missing, suspect, held-off). A not-for-sale
+    // row is out of sellable stock, so its cover verdict and cost/supplier health
+    // flags go quiet (spec §2).
+    const cost = resolveCost({ costKes: p.costKes, costSource: p.costSource, priceKes: p.priceKes });
+    const leadDays = leadDaysFor(p, p.supplier) ?? 30;
+
     return {
       productId: p.id,
       sku: p.sku,
@@ -132,7 +179,7 @@ export async function getStockCatalogue(
       vendor: p.vendor,
       onHandUnits: sellable,
       warehouseUnits: warehouse,
-      daysCover: hasRate ? cover : null,
+      daysCover: p.notForSale ? null : daysCover,
       urgency: hasRate && sellable > 0 && cover != null ? urgencyFromDays(cover, rate) : null,
       priceKes: p.priceKes,
       runRate: rate,
@@ -141,9 +188,39 @@ export async function getStockCatalogue(
       stockValueKes: canViewCosts ? (sellable + warehouse) * p.costKes : null,
       moneyAtRestKes: canViewCosts ? (m?.moneyAtRestKes ?? 0) : null,
       abc: m?.abc ?? null,
+      customCategory: p.customCategory,
+      costSource: cost.source,
+      notForSale: p.notForSale,
+      leadDays,
+      verdict: p.notForSale ? null : coverVerdict(sellable, daysCover, leadDays),
+      marginPct: canViewCosts && cost.costKes > 0 ? marginPct(cost.costKes, p.priceKes) : null,
+      missingCost: !p.notForSale && cost.suspectReason === "missing",
+      suspectCost: !p.notForSale && suspectCostPresent({ costKes: p.costKes, costSource: p.costSource, priceKes: p.priceKes }),
+      heldOffBuyList: cost.heldOffBuyList,
+      costMovedPct: p.notForSale ? null : p.costMovedPct,
+      costMovedAt: p.notForSale ? null : p.costMovedAt,
       facet: facetById.get(p.id)!,
     };
   });
+}
+
+export type CategoryUsage = { name: string; count: number };
+
+/** Owner-defined categories in use (distinct Product.customCategory) with their
+ *  product counts — the source for the Manage-categories panel and the row
+ *  editor's category picker. Categories live on the product, so this is derived,
+ *  never a table. */
+export async function getCustomCategories(tenantId: string): Promise<CategoryUsage[]> {
+  const db = prismaForTenant(tenantId);
+  const groups = await db.product.groupBy({
+    by: ["customCategory"],
+    where: { active: true, customCategory: { not: null } },
+    _count: { _all: true },
+  });
+  return groups
+    .filter((g): g is typeof g & { customCategory: string } => g.customCategory != null)
+    .map((g) => ({ name: g.customCategory, count: g._count._all }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export type LocationLine = {

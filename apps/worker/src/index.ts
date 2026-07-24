@@ -22,6 +22,13 @@ import {
   registerPosCronSchedules,
   type PosCronQueue,
 } from "./pos-gap-cron";
+import {
+  COST_CRON_QUEUE,
+  createCostCronQueue,
+  createCostCronWorker,
+  registerCostCronSchedules,
+  type CostCronQueue,
+} from "./cost-moved-cron";
 import { createSyncWorker } from "./worker";
 
 /**
@@ -37,6 +44,8 @@ import { createSyncWorker } from "./worker";
  *                           (daily plan-limit checks); unset keeps dev/CI quiet
  *   POS_CRONS             — "1" registers + runs the POS cron schedules
  *                           (daily sales-gap checks); unset keeps dev/CI quiet
+ *   COST_CRONS            — "1" registers + runs the cost cron schedules
+ *                           (nightly cost-moved checks); unset keeps dev/CI quiet
  *   POS_FEED_SECRET       — bearer token for the POS feed fetch (per-provider)
  *   SENTRY_DSN            — error tracking; unset = tracking disabled (no-op)
  */
@@ -99,6 +108,19 @@ async function main(): Promise<void> {
     console.log("worker: pos crons registered (sales-gap check)");
   }
 
+  let costQueue: CostCronQueue | null = null;
+  let costWorker: Worker | null = null;
+  if (process.env.COST_CRONS === "1") {
+    costQueue = createCostCronQueue(connection);
+    await registerCostCronSchedules(costQueue);
+    costWorker = createCostCronWorker({ connection, queue: costQueue, publisher });
+    costWorker.on("failed", (job, err) => {
+      console.error(`worker: cost cron ${job?.id} failed`, err);
+      captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: COST_CRON_QUEUE });
+    });
+    console.log("worker: cost crons registered (cost-moved check)");
+  }
+
   let closing = false;
   const shutdown = (signal: string) => {
     if (closing) return;
@@ -113,6 +135,8 @@ async function main(): Promise<void> {
       opsQueue?.close(),
       posWorker?.close(),
       posQueue?.close(),
+      costWorker?.close(),
+      costQueue?.close(),
     ])
       .then(() => Promise.all([connection.quit(), publisher.quit()]))
       .then(

@@ -64,6 +64,8 @@ export default async function StockPage({
   const tenantId = membership.tenantId;
   // Money-blind gate: MEMBERs (without view_costs) see no KES cost figures.
   const canViewCosts = hasPermission(membership, "view_costs");
+  // Catalogue editing (cost pin, category, not-for-sale) needs settings access.
+  const canManage = hasPermission(membership, "manage_settings");
 
   return (
     <div className="space-y-6">
@@ -84,7 +86,7 @@ export default async function StockPage({
         {view === "locations" ? (
           <LocationView tenantId={tenantId} canViewCosts={canViewCosts} />
         ) : (
-          <CatalogueTable tenantId={tenantId} canViewCosts={canViewCosts} />
+          <CatalogueTable tenantId={tenantId} canViewCosts={canViewCosts} canManage={canManage} />
         )}
       </Suspense>
     </div>
