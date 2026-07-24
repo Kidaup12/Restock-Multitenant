@@ -1,0 +1,25 @@
+{
+  "name": "@wezesha/forecast-run",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Forecast orchestration: nightly run, walk-forward backtest, champion audition, and owner-prior writes — the DB-bound layer over the pure @wezesha/forecast engine, shared by the web app and the worker",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@wezesha/db": "*",
+    "@wezesha/forecast": "*",
+    "@wezesha/realtime": "*",
+    "ioredis": "^5.11.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "dotenv": "^16.6.1",
+    "typescript": "^5",
+    "vitest": "^4.1.7"
+  }
+}

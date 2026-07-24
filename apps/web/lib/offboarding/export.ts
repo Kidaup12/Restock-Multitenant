@@ -52,6 +52,7 @@ export const EXPORTED_MODELS: ReadonlyArray<{
   { model: "LocationClosure", delegate: "locationClosure" },
   { model: "MonthlyContext", delegate: "monthlyContext" },
   { model: "Promo", delegate: "promo" },
+  { model: "OwnerPrior", delegate: "ownerPrior" },
   { model: "Prediction", delegate: "prediction" },
   { model: "BacktestRun", delegate: "backtestRun" },
   { model: "SpotCheck", delegate: "spotCheck" },

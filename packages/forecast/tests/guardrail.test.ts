@@ -20,6 +20,14 @@ function baseResult(f30: number): ForecastResult {
     urgency: "high",
     signals: [],
     demandStd: 2,
+    confidenceWord: "fairly_sure",
+    confidenceSignals: {
+      historyDays: 200,
+      cv: 0.3,
+      stockoutGapShare: 0,
+      promoContaminated: false,
+      coldStart: false,
+    },
   };
 }
 

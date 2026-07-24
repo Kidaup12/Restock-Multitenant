@@ -115,6 +115,7 @@ model Tenant {
   monthlyContext        MonthlyContext[]
   promos                Promo[]
   predictions           Prediction[]
+  ownerPriors           OwnerPrior[]
   orders                Order[]
   purchaseOrders        PurchaseOrder[]
   distributionPlans     DistributionPlan[]
@@ -179,6 +180,13 @@ model TenantConfig {
   methodA String?
   methodB String?
   methodC String?
+
+  // Champion demand method per ABC class, chosen by the monthly walk-forward
+  // audition (spec §6). Run rate is the reigning champion; a challenger only
+  // lands here after beating it on the shop's own history. Shape:
+  // { A: "run_rate", B: "run_rate", C: "run_rate", auditedAt: "<iso>" }.
+  // The user never picks a model and never sees these names.
+  forecastChampions Json?
 
   // When this tenant first went over any plan limit (grace window anchor).
   // Cleared when usage drops back under; null = within limits.
@@ -537,9 +545,19 @@ model Prediction {
   signals           String
   forecastRunId     String  @default(cuid())
   regime            String?
-  // Per-driver forecast breakdown parts; the forecast run persists these (write
-  // lands with the forecast-hardening branch).
+  // Per-driver forecast breakdown parts (the QtyExplanation object); the forecast
+  // run persists these so the "why" is read back, not recomputed per screen.
   explainParts      Json?
+  // The honesty word travelling with this number: "sure" | "fairly_sure" |
+  // "guessing" (spec §6). Rendered on every surface a forecast number appears.
+  confidenceWord    String?
+  // Cold-start state (spec §6): "too_new" (no proxy, no prior — never a silent
+  // zero) | "borrowed" (shape borrowed from an established similar product) |
+  // null (a normal forecast from the product's own history).
+  coldStart         String?
+  // When coldStart = "borrowed", the established proxy product whose shape was
+  // borrowed (owner-picked "sell like", else the engine's auto choice).
+  borrowedFromProductId String?
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -551,9 +569,10 @@ model Prediction {
   @@index([tenantId, forecastRunId])
 }
 
-// Stored forecast-accuracy run — the monthly backtest cron writes one row so
-// accuracy is tracked over time and the drop-detector can compare runs.
-// tenantId-only (no relation).
+// Stored forecast-accuracy run — the monthly walk-forward backtest cron writes
+// rows so accuracy is tracked over time and the drop-detector can compare runs.
+// tenantId-only (no relation). One row per (class × method) plus an "ALL"
+// rollup per run, all sharing a runDate.
 model BacktestRun {
   id         String   @id @default(cuid())
   tenantId   String
@@ -562,9 +581,48 @@ model BacktestRun {
   bias       Float
   mape       Float?
   sampleSize Int
-  tag        String? // "holdout" | "walkforward"
+  tag        String? // "walkforward" (accuracy tracking) | "audition" (champion/challenger)
+  // ABC class this row scored ("A" | "B" | "C"), or "ALL" for the whole-shop
+  // rollup. null on legacy rows written before by-class tracking.
+  abcClass   String?
+  // Demand method audited ("run_rate" | "recent_heavy"). null = the reigning
+  // champion (legacy). Model names never reach the UI — this is internal.
+  method     String?
+  // Said-vs-happened in UNITS (spec §6 — the founder rejected error %): total
+  // forecast vs total actual units across the scored windows.
+  saidUnits     Float?
+  happenedUnits Float?
+  // Bias direction in plain words: "over" | "under" | "even".
+  leans      String?
 
   @@index([tenantId, runDate])
+}
+
+// Owner prior — "tell the forecast something" (spec §6). The owner's stated
+// expectation for a product or brand: an expected 30-day level, a multiplier,
+// or a cold-start "sell like X" proxy pointer. Listed and revocable (soft-
+// delete via revokedAt); the forecast shows it listened. Real sales take over
+// as history builds. Same object powers the cold-start starting point.
+model OwnerPrior {
+  id         String   @id @default(cuid())
+  tenantId   String
+  scope      String // "product" | "brand"
+  scopeValue String // productId (product scope) or vendor/brand name (brand scope)
+  // Exactly one expectation form is set:
+  expectedUnits  Float? // "I expect about X units / 30 days"
+  multiplier     Float? // scale the current forecast by this factor
+  proxyProductId String? // cold-start "sell like": the established product to borrow from
+  weeks      Int      @default(4) // how long the prior stays in force from createdAt
+  note       String?
+  createdByUserId String?
+  createdByName   String?
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime? // soft-delete: still listed, no longer applied
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, scope, scopeValue])
+  @@index([tenantId, revokedAt])
 }
 
 // Weekly shelf-vs-system spot-check: the app prompts a count of 5 SKUs to

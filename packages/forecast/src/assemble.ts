@@ -12,8 +12,18 @@ import {
   zForServiceLevel,
   urgencyFromDays,
   daysOfStockRemaining,
+  inferredStockoutGapDays,
+  censoredDaysInWindow,
 } from "./baseline";
-import { anchorToday, runRateDaily, type ForecastInput, type ForecastResult, type Signal } from "./layered";
+import {
+  anchorToday,
+  historySpanDays,
+  runRateDaily,
+  type ForecastInput,
+  type ForecastResult,
+  type Signal,
+} from "./layered";
+import { confidenceWord, type ConfidenceSignals } from "./confidence-word";
 
 /** Demand-only output from an external engine (e.g. a model service). */
 export type DemandForecast = {
@@ -45,6 +55,25 @@ export function assembleForecastResult(
   last90Cutoff.setUTCDate(last90Cutoff.getUTCDate() - 90);
   const last90Pts = input.history.filter((p) => p.date >= last90Cutoff);
   const demandStd = standardDeviation(last90Pts.map((p) => p.quantity));
+
+  // Confidence word from the same signal quality the built-in engine reads.
+  const last30Cutoff = new Date(today);
+  last30Cutoff.setUTCDate(last30Cutoff.getUTCDate() - 30);
+  const recent30 = input.history.filter((p) => p.date >= last30Cutoff);
+  const meanRecent =
+    recent30.length > 0 ? recent30.reduce((s, p) => s + p.quantity, 0) / recent30.length : 0;
+  const std90 = standardDeviation(last90Pts.map((p) => p.quantity));
+  const cv = meanRecent > 0 ? std90 / meanRecent : 1.0;
+  const stockoutGapDays = input.stockoutDates?.length
+    ? censoredDaysInWindow(input.stockoutDates, last30Cutoff, today)
+    : inferredStockoutGapDays(input.history, last30Cutoff, today);
+  const confidenceSignals: ConfidenceSignals = {
+    historyDays: historySpanDays(input.history, today),
+    cv,
+    stockoutGapShare: Math.max(0, Math.min(1, stockoutGapDays / 30)),
+    promoContaminated: false, // the external engine folds promos into its own number
+    coldStart: input.history.length === 0,
+  };
 
   const z = zForServiceLevel(input.abcCategory, input.serviceZ);
   const safetyStock = kingsSafetyStock({
@@ -83,5 +112,7 @@ export function assembleForecastResult(
     recommendedQty,
     urgency,
     demandStd,
+    confidenceWord: confidenceWord(confidenceSignals),
+    confidenceSignals,
   };
 }

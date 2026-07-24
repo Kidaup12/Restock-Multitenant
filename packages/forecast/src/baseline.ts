@@ -68,6 +68,13 @@ export function weightedDailyRateAdjusted(history: SalesPoint[], asOf: Date = ne
   return weighted;
 }
 
+/** Public view of the gap-inference used by the adjusted rate: inferred
+ *  stockout gap-days in [since, asOf) for a product that normally sells. Feeds
+ *  the confidence word's stockout-gap share when no snapshot mask is available. */
+export function inferredStockoutGapDays(history: SalesPoint[], since: Date, asOf: Date): number {
+  return gapDaysInWindow(history, since, asOf);
+}
+
 /** Count of censored (proven out-of-stock) day-keys falling inside [since, asOf). */
 export function censoredDaysInWindow(stockoutDates: Date[], since: Date, asOf: Date): number {
   let n = 0;

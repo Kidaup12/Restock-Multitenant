@@ -9,11 +9,19 @@
  * table, and the stockout mask comes from inventory snapshots.
  */
 import type { SalesPoint, Urgency } from "./baseline";
-import { anchorToday, layeredForecast, type ActivePromo, type Signal } from "./layered";
+import {
+  anchorToday,
+  layeredForecast,
+  type ActivePromo,
+  type DemandOverride,
+  type Signal,
+} from "./layered";
 import { guardForecastResult } from "./guardrail";
-import { recommendedQty, reorderMethod } from "./reorder";
+import { recommendedQty, reorderMethod, type ReorderInput } from "./reorder";
+import { explainQty, type QtyExplanation } from "./explain";
 import { leadDaysFor, leadStdFor, coverDaysFor } from "./lead-time";
 import type { OrderPolicy } from "./config";
+import type { ConfidenceWord } from "./confidence-word";
 
 export type ProductFacts = {
   sku: string;
@@ -51,6 +59,9 @@ export type ProductForecastInput = {
   capMultiple?: number;
   /** Tenant-local run day (YYYY-MM-DD) anchoring all date math. */
   runDateKey?: string;
+  /** Cold-start borrow / owner expectation that replaces the run rate for this
+   *  product. The forecast-run resolves it (cross-product proxy + prior table). */
+  demandOverride?: DemandOverride | null;
 };
 
 /** The Prediction row fields the engine is responsible for. `signals` stays
@@ -69,6 +80,11 @@ export type PredictionFields = {
   urgency: Urgency;
   signals: Signal[];
   regime: "min_max" | "forecast";
+  /** The honesty word for this number (sure / fairly_sure / guessing). */
+  confidenceWord: ConfidenceWord;
+  /** Reproducible reorder-quantity breakdown, persisted so the "why" is read at
+   *  read time instead of recomputed on every screen. */
+  explainParts: QtyExplanation;
 };
 
 export function forecastProduct(input: ProductForecastInput): PredictionFields {
@@ -80,34 +96,40 @@ export function forecastProduct(input: ProductForecastInput): PredictionFields {
   const leadTimeAvg = leadDaysFor(product, supplier) ?? 0;
   const leadTimeStd = leadStdFor(supplier);
 
-  const result = guardForecastResult(
-    layeredForecast({
-      productId: input.productId,
-      productType: product.productType ?? null,
-      vendor: product.vendor ?? null,
-      sku: product.sku,
-      currentStock: product.currentStock,
-      abcCategory: input.abcCategory ?? null,
-      history: input.history,
-      leadTimeAvg,
-      leadTimeStd,
-      activePromos: input.activePromos ?? [],
-      runDateKey: input.runDateKey,
-      stockoutDates: input.stockoutDates,
-      serviceZ: input.serviceZ,
-      capMultiple: input.capMultiple,
-    }),
-    {
-      history: input.history,
-      currentStock: product.currentStock,
-      today,
-      stockoutDates: input.stockoutDates,
-    }
-  );
+  const forecast = layeredForecast({
+    productId: input.productId,
+    productType: product.productType ?? null,
+    vendor: product.vendor ?? null,
+    sku: product.sku,
+    currentStock: product.currentStock,
+    abcCategory: input.abcCategory ?? null,
+    history: input.history,
+    leadTimeAvg,
+    leadTimeStd,
+    activePromos: input.activePromos ?? [],
+    runDateKey: input.runDateKey,
+    stockoutDates: input.stockoutDates,
+    serviceZ: input.serviceZ,
+    capMultiple: input.capMultiple,
+    demandOverride: input.demandOverride ?? null,
+  });
+
+  // The reality guardrail clamps engine output to recent actual sales. It must
+  // NOT touch a demand OVERRIDE — a cold-start borrow (no sales to clamp against)
+  // or an owner's explicit expectation is intentional, not an engine misfire.
+  const result = input.demandOverride
+    ? forecast
+    : guardForecastResult(forecast, {
+        history: input.history,
+        currentStock: product.currentStock,
+        today,
+        stockoutDates: input.stockoutDates,
+      });
 
   // Order sizing: the policy (or ABC fallback) picks the rule; the cover
-  // window comes from the item's own lead + review cycle.
-  const qty = recommendedQty({
+  // window comes from the item's own lead + review cycle. The same input object
+  // feeds explainQty, so the persisted breakdown always sums to this quantity.
+  const reorderInput: ReorderInput = {
     finalForecast30d: result.finalForecast30d,
     safetyStock: result.safetyStock,
     currentStock: product.currentStock,
@@ -117,11 +139,11 @@ export function forecastProduct(input: ProductForecastInput): PredictionFields {
     dailyDemandStd: result.demandStd,
     leadTimeAvg,
     policy: input.policy,
-  });
-
+  };
   // A dead or brand-new listing keeps the engine's zero recommendation — the
   // reorder rules only apply to items with a real run rate.
   const engineSaysZero = result.recommendedQty === 0 && result.finalForecast30d <= 0;
+  const qty = engineSaysZero ? 0 : recommendedQty(reorderInput);
 
   return {
     layer1Forecast30d: result.layer1Forecast30d,
@@ -129,7 +151,7 @@ export function forecastProduct(input: ProductForecastInput): PredictionFields {
     layer2Adjustment: result.layer2Adjustment,
     finalForecast30d: result.finalForecast30d,
     daysUntilStockout: result.daysUntilStockout,
-    recommendedQty: engineSaysZero ? 0 : qty,
+    recommendedQty: qty,
     safetyStock: result.safetyStock,
     reorderPoint: result.reorderPoint,
     confidence: result.confidence,
@@ -137,5 +159,9 @@ export function forecastProduct(input: ProductForecastInput): PredictionFields {
     urgency: result.urgency,
     signals: result.signals,
     regime: reorderMethod(input.abcCategory, input.policy),
+    confidenceWord: result.confidenceWord,
+    // Pass the final quantity so the persisted breakdown always matches it,
+    // even when the engine zeroed a dead/too-new item min/max would floor at 1.
+    explainParts: explainQty(reorderInput, qty),
   };
 }
