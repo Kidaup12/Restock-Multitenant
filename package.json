@@ -4,5 +4,13 @@
   "workspaces": [
     "apps/*",
     "packages/*"
-  ]
+  ],
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "npm run -w web dev",
+    "db:up": "docker compose up -d db redis",
+    "db:down": "docker compose down",
+    "migrate": "npm run -w @wezesha/db db:migrate:deploy",
+    "seed": "cd packages/db && npx tsx scripts/seed-dev.ts"
+  }
 }
