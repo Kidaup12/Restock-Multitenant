@@ -121,6 +121,7 @@ model Tenant {
   shopifyConnection     ShopifyConnection?
   ingestCursors         IngestCursor[]
   notifications         Notification[]
+  locationClosures      LocationClosure[]
 }
 
 enum Role {
@@ -305,6 +306,7 @@ model Location {
   inventoryLevels       InventoryLevel[]
   warehouseLocationMaps WarehouseLocationMap[]
   salesHistory          SalesHistory[]
+  closures              LocationClosure[]
   distributionPlansFrom DistributionPlan[]     @relation("DistFrom")
   distributionLinesTo   DistributionPlanLine[] @relation("DistTo")
 
@@ -457,6 +459,27 @@ model PosSaleLine {
 
   @@index([tenantId, productId])
   @@index([posSaleId])
+}
+
+// A branch marked closed for a day — the "shop was closed" dismissal of a sales
+// gap (spec §3). Distinct from a feed problem: a closure is a genuine no-trading
+// day the forecast should honour later (not counted as lost sales), so it is a
+// record, not just a dismissed alert. One row per (location, day).
+model LocationClosure {
+  id              String   @id @default(cuid())
+  tenantId        String
+  locationId      String
+  date            DateTime // UTC-midnight marker for the tenant-local closed day
+  reason          String   @default("closed")
+  note            String?
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([locationId, date])
+  @@index([tenantId, date])
 }
 
 model MonthlyContext {

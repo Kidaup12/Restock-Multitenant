@@ -71,6 +71,11 @@ export const builders: Record<string, Builder> = {
     kind: "till_sku",
     value: `junk-${key}`,
   }),
+  LocationClosure: (tenantId, key) => ({
+    date: new Date("2026-01-01T00:00:00Z"),
+    tenant: { connect: { id: tenantId } },
+    location: { create: { tenantId, name: `loc-cl-${key}` } },
+  }),
   SavedFilter: (tenantId, key) => ({
     tenantId,
     userId: `00000000-0000-4000-8000-${key.padStart(12, "0")}`,

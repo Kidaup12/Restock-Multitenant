@@ -34,6 +34,7 @@ export type {
   InventorySnapshot,
   WarehouseLocationMap,
   IgnoreRule,
+  LocationClosure,
   SavedFilter,
 } from "../generated/client";
 export type {
