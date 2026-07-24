@@ -5,7 +5,7 @@
    page outlives the session that produced it (worst case: a redirect chain at
    install time caches the login page under an app route). Offline navigation
    gets the neutral static shell (/offline.html) instead. */
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE = `wezesha-${VERSION}`;
 const OFFLINE_URL = "/offline.html";
 
@@ -58,6 +58,19 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
+  // Never intercept React Server Component / router payloads. They are
+  // request-specific (keyed by router-state headers the Cache API ignores), so
+  // serving a cached one makes the App Router fall back to a FULL page reload.
+  // These carry the RSC header (navigations/prefetches) or the _rsc query; let
+  // them reach the network untouched.
+  if (
+    request.headers.get("RSC") === "1" ||
+    request.headers.get("Next-Router-Prefetch") === "1" ||
+    url.searchParams.has("_rsc")
+  ) {
+    return;
+  }
+
   // Hashed build assets never change: cache-first.
   if (url.pathname.startsWith("/_next/static/")) {
     event.respondWith(
@@ -74,27 +87,29 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Navigations: network only — never cached — offline shell as the fallback.
+  // Full-document navigations: network only — never cached — offline shell fallback.
   if (request.mode === "navigate") {
     event.respondWith(fetch(request).catch(() => caches.match(OFFLINE_URL)));
     return;
   }
 
-  // Everything else (manifest, icons, fonts): stale-while-revalidate, but only
-  // non-HTML responses are ever written to the cache.
-  event.respondWith(
-    caches.match(request).then((hit) => {
-      const refresh = fetch(request)
-        .then((res) => {
-          const type = res.headers.get("content-type") || "";
-          if (res.ok && !type.includes("text/html")) {
-            const copy = res.clone();
-            caches.open(CACHE).then((cache) => cache.put(request, copy));
-          }
-          return res;
-        })
-        .catch(() => hit);
-      return hit || refresh;
-    }),
-  );
+  // Static shell assets ONLY (icons, manifest, fonts, styles): stale-while-
+  // revalidate. Everything else (API calls, dynamic data) is left to the network
+  // so nothing request-specific is ever served from cache.
+  if (["image", "font", "style", "manifest"].includes(request.destination)) {
+    event.respondWith(
+      caches.match(request).then((hit) => {
+        const refresh = fetch(request)
+          .then((res) => {
+            if (res.ok) {
+              const copy = res.clone();
+              caches.open(CACHE).then((cache) => cache.put(request, copy));
+            }
+            return res;
+          })
+          .catch(() => hit);
+        return hit || refresh;
+      }),
+    );
+  }
 });
