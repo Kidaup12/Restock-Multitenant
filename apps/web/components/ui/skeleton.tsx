@@ -1,4 +1,5 @@
 import { cn } from "@/lib/cn";
+import { SkeletonLoadingBeacon } from "@/components/shell/route-loading";
 
 /*
  * Skeleton variants mirror the shape of the component they stand in for.
@@ -37,6 +38,7 @@ export function SkeletonCard({
         className,
       )}
     >
+      <SkeletonLoadingBeacon />
       <Skeleton className="h-4 w-1/3" />
       <div className="mt-4 space-y-2.5">
         {Array.from({ length: lines }, (_, i) => (
@@ -56,6 +58,7 @@ export function SkeletonStatTile({ className }: { className?: string }) {
         className,
       )}
     >
+      <SkeletonLoadingBeacon />
       <Skeleton className="absolute top-4 right-4 size-9 rounded-md" />
       <Skeleton className="h-3 w-24" />
       <Skeleton className="mt-3 h-8 w-32" />
@@ -80,6 +83,7 @@ export function SkeletonTableRows({
 }) {
   return (
     <div aria-hidden="true" className={cn("w-full", className)}>
+      <SkeletonLoadingBeacon />
       {Array.from({ length: rows }, (_, i) => {
         const cols = rowWidths[i % rowWidths.length];
         return (
@@ -106,6 +110,7 @@ const chartBars = [40, 62, 35, 70, 55, 82, 45, 66, 50, 76, 60, 90, 72, 96];
 export function SkeletonChart({ className }: { className?: string }) {
   return (
     <div aria-hidden="true" className={cn("w-full", className)}>
+      <SkeletonLoadingBeacon />
       <div className="flex h-28 items-end gap-1.5 border-b border-edge pb-px">
         {chartBars.map((h, i) => (
           <Skeleton

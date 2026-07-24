@@ -17,6 +17,7 @@ import {
   InboxIcon,
 } from "@/components/icons";
 import { NavItem } from "@/components/shell/nav-item";
+import { RouteLoadingProvider } from "@/components/shell/route-loading";
 import { NotificationBell } from "@/components/shell/notification-bell";
 import { ProfileMenu } from "@/components/shell/profile-menu";
 import {
@@ -79,6 +80,7 @@ export function AppShell({
   const [collapsed, setCollapsed] = useState(false);
 
   return (
+    <RouteLoadingProvider>
     <TourProvider role={workspace?.role ?? null} autoStart={tourAutoStart}>
       <div className="flex min-h-dvh">
         {/* Desktop sidebar rail */}
@@ -191,5 +193,6 @@ export function AppShell({
         </nav>
       </div>
     </TourProvider>
+    </RouteLoadingProvider>
   );
 }
