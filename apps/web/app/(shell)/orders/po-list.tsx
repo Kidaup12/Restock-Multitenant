@@ -25,7 +25,7 @@ export async function PoList({
   tenantId: string;
   canViewCosts?: boolean;
 }) {
-  const pos = await getPurchaseOrders(tenantId);
+  const pos = await getPurchaseOrders(tenantId, { canViewCosts });
 
   return (
     <Card>

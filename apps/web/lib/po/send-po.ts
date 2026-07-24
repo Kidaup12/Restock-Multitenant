@@ -49,7 +49,10 @@ export async function sendPoToSupplier(tenantId: string, poId: string): Promise<
   const lead = po.supplier.leadTimeAvgDays;
   const expectedAt = lead != null ? new Date(sentAt.getTime() + lead * DAY_MS) : null;
 
-  const doc = buildPoDocument({ ...po, sentAt, expectedAt }, tenant.name);
+  // The supplier is quoting against these figures — the send action is what
+  // authorises the costs to leave the building, not the viewing member — so the
+  // supplier-facing document always carries them.
+  const doc = buildPoDocument({ ...po, sentAt, expectedAt }, tenant.name, { canViewCosts: true });
   await sendEmail({
     to: po.supplier.email,
     subject: poEmailSubject(doc),

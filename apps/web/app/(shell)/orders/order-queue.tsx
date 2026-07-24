@@ -12,7 +12,7 @@ export async function OrderQueue({
   tenantId: string;
   canViewCosts?: boolean;
 }) {
-  const groups = await getOrderQueue(tenantId);
+  const groups = await getOrderQueue(tenantId, { canViewCosts });
 
   if (groups.length === 0) {
     return (
