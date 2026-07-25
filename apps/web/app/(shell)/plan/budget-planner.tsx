@@ -32,6 +32,9 @@ const PLANNABLE_LABELS: Record<string, string> = {
   "cost-exceeds-price": "cost above price",
 };
 
+const dayLabel = (date: Date) =>
+  new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+
 export function BudgetPlanner({
   canViewCosts,
   backLink,
@@ -60,9 +63,16 @@ export function BudgetPlanner({
     { header: "Status", cell: (r) => r.status },
     { header: "SKU", cell: (r) => r.sku },
     { header: "Product", cell: (r) => r.title },
+    { header: "ABC", cell: (r) => r.abc ?? "" },
     { header: "Supplier", cell: (r) => r.supplierName ?? "" },
+    { header: "MOQ", cell: (r) => r.moq },
+    { header: "Lead days", cell: (r) => r.leadDays },
+    { header: "Run/day", cell: (r) => r.runRatePerDay },
     { header: "Days left", cell: (r) => r.daysUntilStockout },
+    { header: "Order by", cell: (r) => dayLabel(r.orderByDate) },
     { header: "Order qty", cell: (r) => r.recommendedQty },
+    // Revenue is a sales figure — exported for every role.
+    { header: "Revenue 30d (KES)", cell: (r) => r.revenue30dKes },
     // Money-blind members export what they see: no cost columns.
     ...(canViewCosts
       ? ([
@@ -252,37 +262,58 @@ function BudgetTable({
       <TableHeader>
         <TableHead>Product</TableHead>
         <TableHead className="hidden md:table-cell">Supplier</TableHead>
+        <TableHead numeric className="hidden md:table-cell">Run/day</TableHead>
         <TableHead numeric>Days left</TableHead>
+        <TableHead className="hidden md:table-cell">Order by</TableHead>
         <TableHead numeric>Qty</TableHead>
+        <TableHead numeric className="hidden lg:table-cell">Rev · 30d (KES)</TableHead>
         <TableHead numeric>Line total</TableHead>
         {showAtRisk && <TableHead numeric>At risk (30d)</TableHead>}
       </TableHeader>
       <TableBody>
-        {rows.map((row) => (
-          <TableRow key={row.predictionId}>
-            <TableCell>
-              <div className="font-medium text-ink">{row.title}</div>
-              <div className="mt-0.5 font-mono text-xs text-ink-muted">{row.sku}</div>
-            </TableCell>
-            <TableCell className="hidden md:table-cell">{row.supplierName ?? "—"}</TableCell>
-            <TableCell numeric>
-              {row.onHandUnits <= 0 ? "—" : `${row.daysUntilStockout}d`}
-            </TableCell>
-            <TableCell numeric>{row.recommendedQty}</TableCell>
-            <TableCell numeric>
-              <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
-            </TableCell>
-            {showAtRisk && (
+        {rows.map((row) => {
+          const overdue = row.daysLeftToOrder <= 0;
+          return (
+            <TableRow key={row.predictionId}>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-ink">{row.title}</span>
+                  {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
+                </div>
+                <div className="mt-0.5 font-mono text-xs text-ink-muted">{row.sku}</div>
+              </TableCell>
+              <TableCell className="hidden md:table-cell">{row.supplierName ?? "—"}</TableCell>
+              <TableCell numeric className="hidden md:table-cell">{row.runRatePerDay}</TableCell>
               <TableCell numeric>
-                {(row.atRiskKes ?? 0) > 0 ? (
-                  <CostValue amount={row.atRiskKes} canViewCosts={canViewCosts} className="text-negative" />
+                {row.onHandUnits <= 0 ? "—" : `${row.daysUntilStockout}d`}
+              </TableCell>
+              <TableCell className="hidden md:table-cell">
+                {overdue ? (
+                  <span className="font-medium text-negative">{dayLabel(row.orderByDate)}</span>
                 ) : (
-                  "—"
+                  dayLabel(row.orderByDate)
                 )}
               </TableCell>
-            )}
-          </TableRow>
-        ))}
+              <TableCell numeric>{row.recommendedQty}</TableCell>
+              <TableCell numeric className="hidden lg:table-cell">
+                {/* Revenue is a sales figure — visible to every role as a plain KES amount. */}
+                {row.revenue30dKes > 0 ? Math.round(row.revenue30dKes).toLocaleString("en-KE") : "—"}
+              </TableCell>
+              <TableCell numeric>
+                <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
+              </TableCell>
+              {showAtRisk && (
+                <TableCell numeric>
+                  {(row.atRiskKes ?? 0) > 0 ? (
+                    <CostValue amount={row.atRiskKes} canViewCosts={canViewCosts} className="text-negative" />
+                  ) : (
+                    "—"
+                  )}
+                </TableCell>
+              )}
+            </TableRow>
+          );
+        })}
       </TableBody>
     </Table>
   );

@@ -56,6 +56,16 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     expect(buyList!.rows.length).toBeGreaterThan(0);
 
     const bySku = new Map(predictions.map((p) => [p.product.sku, p]));
+
+    // Independent trailing-30d revenue sum, same window as the data layer.
+    const revSince = new Date(Date.now() - 30 * 86_400_000);
+    const revAgg = await prismaService.salesHistory.groupBy({
+      by: ["productId"],
+      where: { tenantId: seeded.tenantId, date: { gte: revSince } },
+      _sum: { revenueKes: true },
+    });
+    const revByProduct = new Map(revAgg.map((g) => [g.productId, g._sum.revenueKes ?? 0]));
+
     for (const row of buyList!.rows) {
       const p = bySku.get(row.sku)!;
       expect(row.recommendedQty).toBe(Math.round(p.recommendedQty));
@@ -70,6 +80,18 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       expect(row.atRiskKes).toBe(
         Math.round((p.finalForecast30d / 30) * p.product.priceKes * stockoutDays)
       );
+
+      // Richer planning columns (added, existing computations unchanged).
+      expect(row.abc).toBe(p.product.abcCategory);
+      expect(row.moq).toBe(p.product.supplier?.moq ?? 1);
+      const leadDays = p.product.leadTimeDays ?? p.product.supplier?.leadTimeAvgDays ?? 0;
+      expect(row.leadDays).toBe(leadDays);
+      // Run/day derives from the persisted forecast, never a re-derivation.
+      expect(row.runRatePerDay).toBeCloseTo(Math.round((p.finalForecast30d / 30) * 10) / 10, 5);
+      expect(row.orderByDate.getTime()).toBe(
+        buyList!.runDate.getTime() + row.daysLeftToOrder * 86_400_000
+      );
+      expect(row.revenue30dKes).toBeCloseTo(revByProduct.get(row.productId) ?? 0, 5);
     }
     expect(buyList!.totalCostKes).toBeCloseTo(
       buyList!.rows.reduce((sum, r) => sum + r.lineTotalKes!, 0),
@@ -255,9 +277,14 @@ describe("splitByBudget (pure)", () => {
       onOrderUnits: 0,
       daysUntilStockout: 10,
       daysLeftToOrder: 5,
+      leadDays: 5,
+      orderByDate: new Date(),
       urgency: "medium",
       tier: "this_week",
       recommendedQty: 10,
+      runRatePerDay: 1,
+      moq: 1,
+      abc: null,
       unitCostKes: 100,
       lineTotalKes: 1000,
       priceKes: 200,
@@ -266,6 +293,7 @@ describe("splitByBudget (pure)", () => {
       qtySummary: "test summary",
       plannable: "ok",
       atRiskKes: 0,
+      revenue30dKes: 0,
       ...partial,
     };
   }

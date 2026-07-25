@@ -41,6 +41,16 @@ const PLANNABLE_NOTES: Record<string, string> = {
   "cost-exceeds-price": "Cost is above the selling price — restocking this loses money.",
 };
 
+// Column class fragments — the table is a raw <table>, so headers/cells repeat
+// these; the `hidden … :table-cell` variants keep the wide detail off mobile.
+const TH = "px-4 py-3 text-left text-xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase";
+const TH_NUM = "px-4 py-3 text-right text-xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase";
+const TD = "px-4 py-3 whitespace-nowrap text-ink-secondary";
+const TD_NUM = "px-4 py-3 text-right font-mono tabular-nums whitespace-nowrap text-ink";
+
+const dayLabel = (date: Date) =>
+  new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+
 export function BuyChecklist({
   buyList,
   canViewCosts,
@@ -95,10 +105,18 @@ export function BuyChecklist({
     { header: "Tier", cell: (r) => TIERS.find((t) => t.tier === r.tier)?.title ?? r.tier },
     { header: "SKU", cell: (r) => r.sku },
     { header: "Product", cell: (r) => r.title },
+    { header: "ABC", cell: (r) => r.abc ?? "" },
     { header: "Supplier", cell: (r) => r.supplierName ?? "" },
+    { header: "MOQ", cell: (r) => r.moq },
+    { header: "Lead days", cell: (r) => r.leadDays },
     { header: "In stock", cell: (r) => r.onHandUnits },
+    { header: "On order", cell: (r) => r.onOrderUnits },
+    { header: "Run/day", cell: (r) => r.runRatePerDay },
     { header: "Days left", cell: (r) => r.daysUntilStockout },
+    { header: "Order by", cell: (r) => dayLabel(r.orderByDate) },
     { header: "Order qty", cell: (r) => r.recommendedQty },
+    // Revenue is a sales figure — exported for every role.
+    { header: "Revenue 30d (KES)", cell: (r) => r.revenue30dKes },
     // Money-blind members export what they see: no cost columns.
     ...(canViewCosts
       ? ([
@@ -109,10 +127,7 @@ export function BuyChecklist({
     { header: "Why", cell: (r) => r.reasoning },
   ];
 
-  const runDay = new Date(buyList.runDate).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  });
+  const runDay = dayLabel(buyList.runDate);
 
   return (
     <div className="space-y-6">
@@ -142,25 +157,21 @@ export function BuyChecklist({
           <Card key={tier}>
             <CardHeader title={`${title} · ${tierRows.length}`} subtitle={subtitle} />
             <div className="mt-2 w-full overflow-x-auto pb-2">
-              <table className="w-full min-w-[560px] text-sm">
+              <table className="w-full min-w-[640px] text-sm">
                 <thead>
                   <tr className="border-b border-edge">
                     <th scope="col" className="w-10 px-4 py-3" aria-label="Tick to order" />
-                    <th scope="col" className="px-4 py-3 text-left text-xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase">
-                      Product
-                    </th>
-                    <th scope="col" className="hidden px-4 py-3 text-left text-xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase md:table-cell">
-                      Supplier
-                    </th>
-                    <th scope="col" className="px-4 py-3 text-right text-xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase">
-                      Days left
-                    </th>
-                    <th scope="col" className="px-4 py-3 text-right text-xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase">
-                      Qty
-                    </th>
-                    <th scope="col" className="px-4 py-3 text-right text-xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase">
-                      Line total
-                    </th>
+                    <th scope="col" className={TH}>Product</th>
+                    <th scope="col" className={cn(TH, "hidden md:table-cell")}>Supplier</th>
+                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>On order</th>
+                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>MOQ</th>
+                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>Lead</th>
+                    <th scope="col" className={cn(TH_NUM, "hidden md:table-cell")}>Run/day</th>
+                    <th scope="col" className={TH_NUM}>Days left</th>
+                    <th scope="col" className={cn(TH, "hidden md:table-cell")}>Order by</th>
+                    <th scope="col" className={TH_NUM}>Qty</th>
+                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>Rev · 30d (KES)</th>
+                    <th scope="col" className={TH_NUM}>Line total</th>
                     <th scope="col" className="w-10 px-4 py-3" aria-label="Show reasoning" />
                   </tr>
                 </thead>
@@ -168,6 +179,10 @@ export function BuyChecklist({
                   {tierRows.map((row) => {
                     const isPicked = picked.has(row.predictionId);
                     const isOpen = expanded.has(row.predictionId);
+                    // Overdue keys off the run-date-relative days-left (stable across
+                    // SSR/hydration), not a live clock: <= 0 means the order-by day
+                    // is here or past.
+                    const overdue = row.daysLeftToOrder <= 0;
                     return (
                       <Fragment key={row.predictionId}>
                         <tr
@@ -189,7 +204,10 @@ export function BuyChecklist({
                             />
                           </td>
                           <td className="px-4 py-3">
-                            <div className="font-medium text-ink">{row.title}</div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-ink">{row.title}</span>
+                              {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
+                            </div>
                             <div className="mt-0.5 font-mono text-xs text-ink-muted">
                               {row.sku}
                               {row.plannable !== "ok" && (
@@ -199,16 +217,32 @@ export function BuyChecklist({
                               )}
                             </div>
                           </td>
-                          <td className="hidden px-4 py-3 whitespace-nowrap text-ink-secondary md:table-cell">
+                          <td className={cn(TD, "hidden md:table-cell")}>
                             {row.supplierName ?? "—"}
                           </td>
-                          <td className="px-4 py-3 text-right font-mono tabular-nums whitespace-nowrap text-ink">
+                          <td className={cn(TD_NUM, "hidden lg:table-cell")}>
+                            {row.onOrderUnits > 0 ? row.onOrderUnits : "—"}
+                          </td>
+                          <td className={cn(TD_NUM, "hidden lg:table-cell")}>{row.moq}</td>
+                          <td className={cn(TD_NUM, "hidden lg:table-cell")}>{row.leadDays}d</td>
+                          <td className={cn(TD_NUM, "hidden md:table-cell")}>{row.runRatePerDay}</td>
+                          <td className={TD_NUM}>
                             {row.onHandUnits <= 0 ? "—" : `${row.daysUntilStockout}d`}
                           </td>
-                          <td className="px-4 py-3 text-right font-mono tabular-nums whitespace-nowrap text-ink">
-                            {row.recommendedQty}
+                          <td className={cn(TD, "hidden md:table-cell")}>
+                            {overdue ? (
+                              <span className="font-medium text-negative">{dayLabel(row.orderByDate)}</span>
+                            ) : (
+                              dayLabel(row.orderByDate)
+                            )}
                           </td>
-                          <td className="px-4 py-3 text-right font-mono tabular-nums whitespace-nowrap text-ink">
+                          <td className={TD_NUM}>{row.recommendedQty}</td>
+                          <td className={cn(TD_NUM, "hidden lg:table-cell")}>
+                            {/* Revenue is a sales figure — shown to every role as a plain
+                                KES amount (unit in the header), like the Stock catalogue. */}
+                            {row.revenue30dKes > 0 ? Math.round(row.revenue30dKes).toLocaleString("en-KE") : "—"}
+                          </td>
+                          <td className={TD_NUM}>
                             <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
                           </td>
                           <td className="px-4 py-3">
@@ -227,7 +261,7 @@ export function BuyChecklist({
                         </tr>
                         {isOpen && (
                           <tr className="border-b border-edge">
-                            <td colSpan={7} className="px-4 pt-0 pb-4">
+                            <td colSpan={13} className="px-4 pt-0 pb-4">
                               <div className="rounded-md bg-surface-2/60 px-4 py-3 text-sm">
                                 <p className="font-mono text-xs text-ink">
                                   {row.explain?.summary ?? row.qtySummary}
