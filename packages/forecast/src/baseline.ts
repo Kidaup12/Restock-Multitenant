@@ -32,11 +32,59 @@ export function weightedDailyRate(history: SalesPoint[], asOf: Date = new Date()
   return weighted;
 }
 
+/** UTC-midnight epoch (ms) for a date's day-key. */
+export function dayKeyOf(d: Date): number {
+  const t = new Date(d);
+  t.setUTCHours(0, 0, 0, 0);
+  return t.getTime();
+}
+
+/** Count of day-keys in the set falling inside [since, asOf). */
+function countDayKeysInWindow(keys: Set<number>, since: Date, asOf: Date): number {
+  const lo = since.getTime();
+  const hi = asOf.getTime();
+  let n = 0;
+  for (const k of keys) if (k >= lo && k < hi) n++;
+  return n;
+}
+
+/** DISTINCT count of blocked day-keys — proven out-of-stock (stockoutDates) ∪
+ *  excluded promo/closure days — inside [since, asOf). With no excluded days
+ *  this is exactly censoredDaysInWindow, so the stockout-only path is unchanged. */
+export function blockedDaysInWindow(
+  stockoutDates: Date[],
+  excludedDates: Date[] | undefined,
+  since: Date,
+  asOf: Date
+): number {
+  if (!excludedDates?.length) return censoredDaysInWindow(stockoutDates, since, asOf);
+  const lo = since.getTime();
+  const hi = asOf.getTime();
+  const seen = new Set<number>();
+  for (const d of stockoutDates) {
+    const k = dayKeyOf(d);
+    if (k >= lo && k < hi) seen.add(k);
+  }
+  for (const d of excludedDates) {
+    const k = dayKeyOf(d);
+    if (k >= lo && k < hi) seen.add(k);
+  }
+  return seen.size;
+}
+
 /** Count calendar days inside a window consumed by stockout gaps — runs of 7+
  *  consecutive days with no sale record for a product that normally sells. The
  *  gap days are excluded from the denominator so the rate reflects demand WHEN
- *  IN STOCK, not demand diluted by empty shelves. */
-function gapDaysInWindow(history: SalesPoint[], since: Date, asOf: Date, minGap = 7): number {
+ *  IN STOCK, not demand diluted by empty shelves. Excluded promo/closure days
+ *  sitting inside a gap are dropped here so the caller's separate excluded-day
+ *  subtraction counts them once, not twice. */
+function gapDaysInWindow(
+  history: SalesPoint[],
+  since: Date,
+  asOf: Date,
+  minGap = 7,
+  excludedDates?: Date[]
+): number {
   const inWindow = history
     .filter((p) => p.date >= since && p.date < asOf)
     .sort((a, b) => a.date.getTime() - b.date.getTime());
@@ -44,25 +92,46 @@ function gapDaysInWindow(history: SalesPoint[], since: Date, asOf: Date, minGap 
   const windowDays = Math.round((asOf.getTime() - since.getTime()) / 86400000);
   const totalQty = inWindow.reduce((s, p) => s + p.quantity, 0);
   if (totalQty / windowDays < 0.5) return 0; // below ~15/month: gaps are natural, not stockouts
+  const excluded = excludedDates?.length ? new Set(excludedDates.map(dayKeyOf)) : null;
   let gap = 0;
   for (let i = 0; i < inWindow.length - 1; i++) {
-    const between = Math.round((inWindow[i + 1]!.date.getTime() - inWindow[i]!.date.getTime()) / 86400000);
-    if (between > minGap) gap += between - 1;
+    const a = inWindow[i]!.date.getTime();
+    const b = inWindow[i + 1]!.date.getTime();
+    const between = Math.round((b - a) / 86400000);
+    if (between > minGap) {
+      let span = between - 1;
+      if (excluded) for (const k of excluded) if (k > a && k < b) span--; // closure inside gap
+      gap += span;
+    }
   }
   return Math.min(gap, windowDays - 1); // never exclude the whole window
 }
 
 /** Like weightedDailyRate but removes inferred stockout gap days from each
  *  window's denominator, preventing prolonged out-of-stock periods from
- *  deflating the run rate and causing chronic under-ordering. */
-export function weightedDailyRateAdjusted(history: SalesPoint[], asOf: Date = new Date()): number {
+ *  deflating the run rate and causing chronic under-ordering. `excludedDates`
+ *  (promo-spike ∪ closure day-keys) are dropped from BOTH the numerator (their
+ *  sales don't inflate the sum) and the denominator (their days don't dilute it),
+ *  de-duplicated against the gap subtraction. Empty/absent -> unchanged. */
+export function weightedDailyRateAdjusted(
+  history: SalesPoint[],
+  asOf: Date = new Date(),
+  excludedDates?: Date[]
+): number {
   if (history.length === 0) return 0;
+  const excluded = excludedDates?.length ? new Set(excludedDates.map(dayKeyOf)) : null;
   let weighted = 0;
   for (const w of RATE_WINDOWS) {
     const since = new Date(asOf);
     since.setUTCDate(since.getUTCDate() - w.days);
-    const qty = history.filter((p) => p.date >= since).reduce((s, p) => s + p.quantity, 0);
-    const effectiveDays = Math.max(1, w.days - gapDaysInWindow(history, since, asOf));
+    const qty = history
+      .filter((p) => p.date >= since && (!excluded || !excluded.has(dayKeyOf(p.date))))
+      .reduce((s, p) => s + p.quantity, 0);
+    const excludedDays = excluded ? countDayKeysInWindow(excluded, since, asOf) : 0;
+    const effectiveDays = Math.max(
+      1,
+      w.days - gapDaysInWindow(history, since, asOf, 7, excludedDates) - excludedDays
+    );
     weighted += (qty / effectiveDays) * w.weight;
   }
   return weighted;
@@ -91,19 +160,23 @@ export function censoredDaysInWindow(stockoutDates: Date[], since: Date, asOf: D
 export function weightedDailyRateCensored(
   history: SalesPoint[],
   stockoutDates: Date[],
-  asOf: Date = new Date()
+  asOf: Date = new Date(),
+  excludedDates?: Date[]
 ): number {
   if (history.length === 0) return 0;
-  if (stockoutDates.length === 0) return weightedDailyRateAdjusted(history, asOf);
+  if (stockoutDates.length === 0) return weightedDailyRateAdjusted(history, asOf, excludedDates);
+  const excluded = excludedDates?.length ? new Set(excludedDates.map(dayKeyOf)) : null;
   let weighted = 0;
   for (const w of RATE_WINDOWS) {
     const since = new Date(asOf);
     since.setUTCDate(since.getUTCDate() - w.days);
-    const inWin = history.filter((p) => p.date >= since);
+    const inWin = history.filter((p) => p.date >= since && (!excluded || !excluded.has(dayKeyOf(p.date))));
     const qty = inWin.reduce((s, p) => s + p.quantity, 0);
-    const censored = censoredDaysInWindow(stockoutDates, since, asOf);
+    // Blocked = proven stockout ∪ excluded promo/closure, distinct so a day that
+    // is both is subtracted once.
+    const blocked = blockedDaysInWindow(stockoutDates, excludedDates, since, asOf);
     const saleDays = inWin.filter((p) => p.quantity > 0).length;
-    const effectiveDays = effectiveWindowDays(w.days, censored, { inStockDays: w.days - censored, saleDays });
+    const effectiveDays = effectiveWindowDays(w.days, blocked, { inStockDays: w.days - blocked, saleDays });
     weighted += (qty / effectiveDays) * w.weight;
   }
   return weighted;

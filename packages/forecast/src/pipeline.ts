@@ -49,6 +49,10 @@ export type ProductForecastInput = {
   history: SalesPoint[];
   /** Proven out-of-stock day-keys (UTC midnight) for censored-demand correction. */
   stockoutDates?: Date[];
+  /** Past promo-window ∪ full-closure day-keys (UTC midnight) censored from the
+   *  run rate so a past spike doesn't over-order and a closed day doesn't deflate
+   *  it. Resolved cross-product by the forecast-run (promo table + closures). */
+  excludedDates?: Date[];
   activePromos?: ActivePromo[];
   abcCategory?: string | null;
   /** Resolved ordering policy for this product's class (config.policyForClass). */
@@ -109,6 +113,7 @@ export function forecastProduct(input: ProductForecastInput): PredictionFields {
     activePromos: input.activePromos ?? [],
     runDateKey: input.runDateKey,
     stockoutDates: input.stockoutDates,
+    excludedDates: input.excludedDates,
     serviceZ: input.serviceZ,
     capMultiple: input.capMultiple,
     demandOverride: input.demandOverride ?? null,
