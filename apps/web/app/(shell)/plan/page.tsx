@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { getBuyList } from "@/lib/data/plan";
+import { getTenantPlan, planAllows } from "@/lib/capabilities";
 import { RunForecastButton } from "../today/run-forecast-button";
 import { PlanView } from "./plan-view";
 
@@ -25,7 +26,13 @@ async function PlanContent({
   // canViewCosts flows into the query: PlanView is a client component, so the
   // rows serialize to the browser — costs come back null for a money-blind
   // member and the figures never reach the payload.
-  const buyList = await getBuyList(tenantId, { canViewCosts });
+  const [buyList, plan] = await Promise.all([
+    getBuyList(tenantId, { canViewCosts }),
+    getTenantPlan(tenantId),
+  ]);
+  // Gate 2 (plan) for the budget allocator — a Growth feature. Starter sees the
+  // checklist mode only; the server action re-checks so the gate can't be spoofed.
+  const canBudget = planAllows(plan, "budget_planner");
 
   if (!buyList) {
     return (
@@ -49,7 +56,7 @@ async function PlanContent({
     );
   }
 
-  return <PlanView buyList={buyList} canViewCosts={canViewCosts} />;
+  return <PlanView buyList={buyList} canViewCosts={canViewCosts} canBudget={canBudget} />;
 }
 
 export default async function PlanPage() {

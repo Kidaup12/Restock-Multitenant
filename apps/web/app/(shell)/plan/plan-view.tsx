@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { BanknoteIcon, ClipboardIcon } from "@/components/icons";
+import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-features";
 import type { BuyList } from "@/lib/data/plan";
 import { BudgetPlanner } from "./budget-planner";
 import { BuyChecklist } from "./buy-checklist";
@@ -40,14 +41,45 @@ function ModeCard({
   );
 }
 
+/** A mode the tenant's plan doesn't include yet: shown, but locked, with a
+ *  one-line upsell instead of an action. */
+function LockedModeCard({
+  icon,
+  title,
+  description,
+  upsell,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  upsell: string;
+}) {
+  return (
+    <div
+      aria-disabled="true"
+      className="rounded-lg border border-edge bg-surface p-5 text-left opacity-75"
+    >
+      <div className="grid size-9 place-items-center rounded-md bg-surface-2 text-ink-muted [&_svg]:size-4.5">
+        {icon}
+      </div>
+      <h2 className="mt-3 font-display text-base font-semibold text-ink">{title}</h2>
+      <p className="mt-1 text-sm text-ink-muted">{description}</p>
+      <p className="mt-3 text-sm font-medium text-accent-ink">{upsell}</p>
+    </div>
+  );
+}
+
 export function PlanView({
   buyList,
   canViewCosts,
+  canBudget,
 }: {
   buyList: BuyList;
   canViewCosts: boolean;
+  canBudget: boolean;
 }) {
   const [mode, setMode] = useState<Mode>("choose");
+  const budgetTier = PLAN_TIER_LABEL[planFeatureTier("budget_planner")];
 
   if (mode === "choose") {
     const runDay = new Date(buyList.runDate).toLocaleDateString("en-GB", {
@@ -67,12 +99,21 @@ export function PlanView({
             description="Every product that needs restocking, tiered by its last safe day to order. Each quantity comes with its arithmetic. You tick, we total."
             onClick={() => setMode("list")}
           />
-          <ModeCard
-            icon={<BanknoteIcon />}
-            title="I have a budget to keep"
-            description="Tell us the cash you can spend. We put it where it earns most, and show you, in shillings and days, what the items you defer will cost."
-            onClick={() => setMode("budget")}
-          />
+          {canBudget ? (
+            <ModeCard
+              icon={<BanknoteIcon />}
+              title="I have a budget to keep"
+              description="Tell us the cash you can spend. We put it where it earns most, and show you, in shillings and days, what the items you defer will cost."
+              onClick={() => setMode("budget")}
+            />
+          ) : (
+            <LockedModeCard
+              icon={<BanknoteIcon />}
+              title="I have a budget to keep"
+              description="Tell us the cash you can spend. We put it where it earns most, and show you, in shillings and days, what the items you defer will cost."
+              upsell={`Budget planner is on the ${budgetTier} plan.`}
+            />
+          )}
         </div>
       </div>
     );

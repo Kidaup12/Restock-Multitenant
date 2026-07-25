@@ -24,6 +24,13 @@ describe("planAllows", () => {
     expect(planAllows("scale", "transfers")).toBe(true);
   });
 
+  it("locks the budget planner on Starter and opens it at Growth+", () => {
+    expect(planAllows("starter", "budget_planner")).toBe(false);
+    expect(planAllows(null, "budget_planner")).toBe(false); // null = entry tier
+    expect(planAllows("growth", "budget_planner")).toBe(true);
+    expect(planAllows("scale", "budget_planner")).toBe(true);
+  });
+
   it("locks Scale features until Scale", () => {
     expect(planAllows("growth", "team_depth")).toBe(false);
     expect(planAllows("scale", "team_depth")).toBe(true);
@@ -47,6 +54,7 @@ describe("the feature-to-tier map", () => {
   it("names the tier a feature needs, for upgrade copy", () => {
     expect(planFeatureTier("run_forecast")).toBe("starter");
     expect(planFeatureTier("supplier_po_email")).toBe("growth");
+    expect(planFeatureTier("budget_planner")).toBe("growth");
     expect(planFeatureTier("team_depth")).toBe("scale");
   });
 

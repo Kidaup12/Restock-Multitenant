@@ -220,6 +220,19 @@ export async function resolveCapabilityContext(
   };
 }
 
+/**
+ * Resolve just the tenant's billing plan on the RLS-scoped client — for a
+ * plan-only feature gate (planAllows) that doesn't need the full four-gate
+ * context. null = the entry tier (starter).
+ */
+export async function getTenantPlan(tenantId: string): Promise<string | null> {
+  const tenant = await prismaForTenant(tenantId).tenant.findUnique({
+    where: { id: tenantId },
+    select: { plan: true },
+  });
+  return tenant?.plan ?? null;
+}
+
 export * from "./setup-depth";
 export * from "./feature-flags";
 export * from "./plan-features";
