@@ -346,6 +346,7 @@ describe("plan buy-list redaction (pure)", () => {
     runRatePerDay: 1.5,
     moq: 1,
     abc: "A",
+    category: null,
     unitCostKes: 100,
     lineTotalKes: 1000,
     priceKes: 200,

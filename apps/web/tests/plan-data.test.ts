@@ -15,6 +15,13 @@ import {
   upsertPlanOverride,
   type BuyListRow,
 } from "../lib/data/plan";
+import {
+  EMPTY_SCOPE,
+  filterBuyListRows,
+  leadBandFor,
+  type ScopeSelection,
+} from "../app/(shell)/plan/scope-bar";
+import { NONE_VALUE } from "../lib/facets/types";
 
 /**
  * Plan data module against the seeded local database: seed -> forecast ->
@@ -85,6 +92,8 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
 
       // Richer planning columns (added, existing computations unchanged).
       expect(row.abc).toBe(p.product.abcCategory);
+      // Owner category rides through unredacted — a scope-bar facet, not money.
+      expect(row.category).toBe(p.product.customCategory);
       expect(row.moq).toBe(p.product.supplier?.moq ?? 1);
       const leadDays = p.product.leadTimeDays ?? p.product.supplier?.leadTimeAvgDays ?? 0;
       expect(row.leadDays).toBe(leadDays);
@@ -395,6 +404,7 @@ describe("splitByBudget (pure)", () => {
       runRatePerDay: 1,
       moq: 1,
       abc: null,
+      category: null,
       unitCostKes: 100,
       lineTotalKes: 1000,
       priceKes: 200,
@@ -436,5 +446,103 @@ describe("splitByBudget (pure)", () => {
     expect(split.deferred.map((r) => r.predictionId)).toEqual([small.predictionId]);
     expect(split.deferredAtRiskKes).toBe(100);
     expect(split.leftoverKes).toBe(0);
+  });
+});
+
+/** Pure scope-bar filter — no database, no React. AND across the four
+ *  dimensions, OR within each; lead band bucketed off resolved lead days. */
+describe("filterBuyListRows (pure)", () => {
+  let seq = 0;
+  function mkRow(partial: Partial<BuyListRow>): BuyListRow {
+    seq += 1;
+    return {
+      predictionId: `f-${seq}`,
+      productId: `fp-${seq}`,
+      sku: `FSKU-${seq}`,
+      title: `Filter row ${seq}`,
+      vendor: null,
+      supplierName: null,
+      onHandUnits: 10,
+      onOrderUnits: 0,
+      daysUntilStockout: 10,
+      daysLeftToOrder: 5,
+      leadDays: 5,
+      orderByDate: new Date(),
+      urgency: "medium",
+      tier: "this_week",
+      recommendedQty: 10,
+      overriddenQty: null,
+      runRatePerDay: 1,
+      moq: 1,
+      abc: null,
+      category: null,
+      unitCostKes: 100,
+      lineTotalKes: 1000,
+      priceKes: 200,
+      reasoning: "test row",
+      explain: null,
+      qtySummary: "test summary",
+      plannable: "ok",
+      atRiskKes: 0,
+      revenue30dKes: 0,
+      ...partial,
+    };
+  }
+
+  const scope = (partial: Partial<ScopeSelection>): ScopeSelection => ({ ...EMPTY_SCOPE, ...partial });
+
+  const fastA = mkRow({ abc: "A", category: "Drinks", supplierName: "Acme", leadDays: 3 });
+  const medB = mkRow({ abc: "B", category: "Drinks", supplierName: "Beta", leadDays: 14 });
+  const slowA = mkRow({ abc: "A", category: "Snacks", supplierName: "Acme", leadDays: 40 });
+  const gap = mkRow({ abc: null, category: null, supplierName: null, leadDays: 7 });
+  const rows = [fastA, medB, slowA, gap];
+  const ids = (rs: BuyListRow[]) => rs.map((r) => r.predictionId);
+
+  it("buckets lead days: fast ≤7, medium 8–28, slow >28", () => {
+    expect(leadBandFor(0)).toBe("fast");
+    expect(leadBandFor(7)).toBe("fast");
+    expect(leadBandFor(8)).toBe("medium");
+    expect(leadBandFor(28)).toBe("medium");
+    expect(leadBandFor(29)).toBe("slow");
+    expect(leadBandFor(40)).toBe("slow");
+  });
+
+  it("no selection returns the input list untouched (same reference)", () => {
+    expect(filterBuyListRows(rows, EMPTY_SCOPE)).toBe(rows);
+  });
+
+  it("filters within a dimension as OR", () => {
+    expect(ids(filterBuyListRows(rows, scope({ abc: ["A"] })))).toEqual(ids([fastA, slowA]));
+    expect(ids(filterBuyListRows(rows, scope({ supplier: ["Acme", "Beta"] })))).toEqual(
+      ids([fastA, medB, slowA])
+    );
+    expect(ids(filterBuyListRows(rows, scope({ category: ["Drinks"] })))).toEqual(ids([fastA, medB]));
+  });
+
+  it("buckets and filters by lead band", () => {
+    expect(ids(filterBuyListRows(rows, scope({ leadBand: ["fast"] })))).toEqual(ids([fastA, gap]));
+    expect(ids(filterBuyListRows(rows, scope({ leadBand: ["medium"] })))).toEqual(ids([medB]));
+    expect(ids(filterBuyListRows(rows, scope({ leadBand: ["slow"] })))).toEqual(ids([slowA]));
+  });
+
+  it("combines dimensions as AND", () => {
+    // A-class AND Drinks: slowA is A but Snacks, so only fastA survives.
+    expect(ids(filterBuyListRows(rows, scope({ abc: ["A"], category: ["Drinks"] })))).toEqual(
+      ids([fastA])
+    );
+    // Acme AND fast: slowA is Acme but slow, so only fastA survives.
+    expect(ids(filterBuyListRows(rows, scope({ supplier: ["Acme"], leadBand: ["fast"] })))).toEqual(
+      ids([fastA])
+    );
+  });
+
+  it("scopes to the gaps via the none sentinel", () => {
+    expect(ids(filterBuyListRows(rows, scope({ abc: [NONE_VALUE] })))).toEqual(ids([gap]));
+    expect(ids(filterBuyListRows(rows, scope({ category: [NONE_VALUE] })))).toEqual(ids([gap]));
+    expect(ids(filterBuyListRows(rows, scope({ supplier: [NONE_VALUE] })))).toEqual(ids([gap]));
+  });
+
+  it("returns nothing when no row matches the selection", () => {
+    expect(filterBuyListRows(rows, scope({ category: ["Nonexistent"] }))).toEqual([]);
   });
 });
