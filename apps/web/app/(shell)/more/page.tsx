@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ChevronRightIcon } from "@/components/icons";
 import {
-  BulbIcon,
-  ChevronRightIcon,
-  ClipboardIcon,
-  GearIcon,
-} from "@/components/icons";
+  NAV_DESTINATIONS,
+  TAB_BAR_HREFS,
+} from "@/components/shell/nav-config";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 
@@ -13,12 +12,9 @@ export const metadata: Metadata = {
   title: "More",
 };
 
-/* Mobile overflow for sidebar destinations that don't fit the tab bar. */
-const links = [
-  { href: "/orders", label: "Orders", icon: <ClipboardIcon /> },
-  { href: "/insights", label: "Insights", icon: <BulbIcon /> },
-  { href: "/settings", label: "Settings", icon: <GearIcon /> },
-];
+/* Mobile overflow: every sidebar destination the bottom tab bar doesn't already
+ * carry. Derived from the shared nav config so it can't fall out of sync. */
+const links = NAV_DESTINATIONS.filter((d) => !TAB_BAR_HREFS.includes(d.href));
 
 export default function MorePage() {
   return (
