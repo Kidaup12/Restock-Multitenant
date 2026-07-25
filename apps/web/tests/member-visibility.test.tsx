@@ -7,7 +7,7 @@ import { hasPermission } from "../lib/auth/permissions";
 import { MoneyGate } from "../components/money-gate";
 import { getReorderNeeded, getTodayMetrics } from "../lib/data/today";
 import { getStockByLocation, getStockCatalogue } from "../lib/data/stock";
-import { getBuyList, redactBudgetSplit, splitByBudget } from "../lib/data/plan";
+import { getBuyList, redactBudgetSplit, splitByBudget, type BuyListRow } from "../lib/data/plan";
 
 // ReorderTable links to /stock; next/link needs an app-router context that a
 // bare renderToStaticMarkup doesn't provide — a plain anchor is equivalent here.
@@ -269,6 +269,12 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     expect(buyList!.rows.map((r) => r.predictionId)).toEqual(
       ownerList!.rows.map((r) => r.predictionId)
     );
+    // Actual trailing revenue is a sales figure — it STAYS visible for a member
+    // (never nulled), identical to what the owner sees.
+    for (const row of buyList!.rows) expect(typeof row.revenue30dKes).toBe("number");
+    expect(buyList!.rows.map((r) => r.revenue30dKes)).toEqual(
+      ownerList!.rows.map((r) => r.revenue30dKes)
+    );
   });
 
   it("budget split redacts every KES aggregate before it leaves the server", async () => {
@@ -315,5 +321,54 @@ describe("export column gating", () => {
     const ownerHeaders = catalogueExportColumns(true).map((c) => c.header);
     expect(ownerHeaders).toContain("Unit cost (KES)");
     expect(ownerHeaders).toContain("Stock value (KES)");
+  });
+});
+
+/** No database needed — drives the redactor directly, so it runs everywhere. */
+describe("plan buy-list redaction (pure)", () => {
+  const mkRow = (revenue30dKes: number): BuyListRow => ({
+    predictionId: "p1",
+    productId: "prod1",
+    sku: "SKU1",
+    title: "Item",
+    vendor: null,
+    supplierName: null,
+    onHandUnits: 5,
+    onOrderUnits: 0,
+    daysUntilStockout: 6,
+    daysLeftToOrder: 2,
+    leadDays: 4,
+    orderByDate: new Date(),
+    urgency: "high",
+    tier: "this_week",
+    recommendedQty: 10,
+    runRatePerDay: 1.5,
+    moq: 1,
+    abc: "A",
+    unitCostKes: 100,
+    lineTotalKes: 1000,
+    priceKes: 200,
+    reasoning: "x",
+    explain: null,
+    qtySummary: "s",
+    plannable: "ok",
+    atRiskKes: 0,
+    revenue30dKes,
+  });
+
+  it("nulls costs for a member but keeps the member-visible trailing revenue", () => {
+    const split = splitByBudget([mkRow(5000)], 100_000);
+    const member = redactBudgetSplit(split, false);
+    // Cost/margin figures go dark for a member...
+    expect(member.funded[0]!.lineTotalKes).toBeNull();
+    expect(member.funded[0]!.atRiskKes).toBeNull();
+    // ...but actual trailing revenue is a sales figure — it stays.
+    expect(member.funded[0]!.revenue30dKes).toBe(5000);
+    // Non-money planning fields survive too.
+    expect(member.funded[0]!.runRatePerDay).toBe(1.5);
+    expect(member.funded[0]!.abc).toBe("A");
+    // No non-revenue *Kes cost number leaks (revenue30dKes is allowlisted).
+    expect(costNumbers(member.funded)).toEqual([]);
+    expect(redactBudgetSplit(split, true).funded[0]!.revenue30dKes).toBe(5000);
   });
 });

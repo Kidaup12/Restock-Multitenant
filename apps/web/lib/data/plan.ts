@@ -30,6 +30,9 @@ const URGENCY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, 
 /** Horizon (days) for the "what deferring costs you" revenue-at-risk figure. */
 const RISK_HORIZON_DAYS = 30;
 
+/** Trailing window (days) for the per-product actual-revenue column. */
+const REVENUE_WINDOW_DAYS = 30;
+
 /**
  * How urgent placing the order is, keyed off the last safe day to order:
  * the day stock runs out minus the days the restock takes to arrive.
@@ -48,9 +51,19 @@ export type BuyListRow = {
   daysUntilStockout: number;
   /** Days left before ordering any later means a stockout: stockout minus lead time. */
   daysLeftToOrder: number;
+  /** Supplier lead time (days) — the same value subtracted to get daysLeftToOrder. */
+  leadDays: number;
+  /** Last safe day to order: run date + daysLeftToOrder. Consumers flag it overdue when past. */
+  orderByDate: Date;
   urgency: string;
   tier: BuyTier;
   recommendedQty: number;
+  /** Forecast daily run rate — persisted finalForecast30d / 30 (the one engine, not re-derived). */
+  runRatePerDay: number;
+  /** Supplier minimum order quantity (units); 1 when none is set. */
+  moq: number;
+  /** ABC class from the shared metric run; null when unranked or too new. */
+  abc: string | null;
   /** Null when the caller can't view costs. */
   unitCostKes: number | null;
   /** recommendedQty x unit cost — what this line costs to order. Null when the
@@ -75,6 +88,9 @@ export type BuyListRow = {
    *  left to stock out. Gated with the cost figures: null when the caller
    *  can't view costs (the screens mask it behind the same permission). */
   atRiskKes: number | null;
+  /** Trailing-30-day actual revenue for the product (all channels). A sales
+   *  figure — visible to every role, matching Stock/Today's revenue30dKes. */
+  revenue30dKes: number;
 };
 
 export type BuyList = {
@@ -144,15 +160,32 @@ export async function getBuyList(
           currentStock: true,
           onOrder: true,
           leadTimeDays: true,
-          supplier: { select: { name: true, leadTimeAvgDays: true, leadTimeStdDays: true } },
+          abcCategory: true,
+          supplier: { select: { name: true, leadTimeAvgDays: true, leadTimeStdDays: true, moq: true } },
         },
       },
     },
   });
 
-  const rows = predictions
+  const kept = predictions
     .map((p) => ({ ...p, qty: Math.round(p.recommendedQty) }))
-    .filter((p) => p.qty > 0)
+    .filter((p) => p.qty > 0);
+
+  // Trailing-30-day actual revenue per buy-list product: one tenant-scoped SQL
+  // sum. A sales figure — member-visible like Stock/Today's revenue30dKes, not
+  // recomputed per screen.
+  const revenueSince = new Date(Date.now() - REVENUE_WINDOW_DAYS * 86_400_000);
+  const revenueByProduct = new Map<string, number>();
+  if (kept.length > 0) {
+    const grouped = await db.salesHistory.groupBy({
+      by: ["productId"],
+      where: { productId: { in: kept.map((p) => p.productId) }, date: { gte: revenueSince } },
+      _sum: { revenueKes: true },
+    });
+    for (const g of grouped) revenueByProduct.set(g.productId, g._sum.revenueKes ?? 0);
+  }
+
+  const rows = kept
     .map((p): FullBuyListRow => {
       const product = p.product;
       const leadDays = leadDaysFor(product, product.supplier) ?? 0;
@@ -171,9 +204,14 @@ export async function getBuyList(
         onOrderUnits: product.onOrder,
         daysUntilStockout: p.daysUntilStockout,
         daysLeftToOrder,
+        leadDays,
+        orderByDate: new Date(latest.runDate.getTime() + daysLeftToOrder * 86_400_000),
         urgency: p.urgency,
         tier: tierFor(p.urgency, daysLeftToOrder),
         recommendedQty: p.qty,
+        runRatePerDay: r1(p.finalForecast30d / 30),
+        moq: product.supplier?.moq ?? 1,
+        abc: product.abcCategory,
         unitCostKes: product.costKes,
         lineTotalKes: p.qty * product.costKes,
         priceKes: product.priceKes,
@@ -182,6 +220,7 @@ export async function getBuyList(
         qtySummary: buildQtySummary(p, p.qty),
         plannable: plannableReason(product),
         atRiskKes: Math.round((p.finalForecast30d / RISK_HORIZON_DAYS) * product.priceKes * stockoutDays),
+        revenue30dKes: revenueByProduct.get(p.productId) ?? 0,
       };
     })
     .sort(
