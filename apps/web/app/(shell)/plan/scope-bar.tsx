@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 import type { BuyListRow } from "@/lib/data/plan";
 // The "no value" sentinel is shared with the catalogue facets so scoping to a
 // gap (uncategorised, no supplier, unranked) reads the same everywhere.
 import { NONE_VALUE } from "@/lib/facets/types";
+import type { SavedScope } from "./scope-actions";
 
 /**
  * Scope bar for the buy list: narrow the checklist by ABC class, category,
@@ -155,6 +156,10 @@ export function ScopeBar({
   selection,
   onChange,
   showing,
+  savedScopes = [],
+  onSaveScope,
+  onDeleteScope,
+  scopesBusy = false,
 }: {
   /** The full (unfiltered) buy-list rows — options and their counts derive from
    *  these, so a value never vanishes from the bar as you narrow the list. */
@@ -163,8 +168,19 @@ export function ScopeBar({
   onChange: (next: ScopeSelection) => void;
   /** How many rows survive the current selection — for the honest count. */
   showing: number;
+  /** The caller's saved scopes, ready to apply or delete. Omitted (empty) when
+   *  saving isn't wired, so the bar degrades to plain filters. */
+  savedScopes?: SavedScope[];
+  /** Persist the current selection under a name. Absent = the save affordance
+   *  hides. */
+  onSaveScope?: (name: string) => void;
+  /** Remove a saved scope by id. */
+  onDeleteScope?: (id: string) => void;
+  /** A save/delete round-trip is in flight — disables the save control. */
+  scopesBusy?: boolean;
 }) {
   const facets = useMemo(() => deriveScopeFacets(rows), [rows]);
+  const [name, setName] = useState("");
   // Only dimensions with something to choose between earn a control.
   const activeDims = DIMENSIONS.filter(({ key }) => facets[key].length > 1);
   const activeCount =
@@ -176,6 +192,13 @@ export function ScopeBar({
       ? current.filter((v) => v !== value)
       : [...current, value];
     onChange({ ...selection, [key]: next });
+  }
+
+  function saveCurrent() {
+    const trimmed = name.trim();
+    if (!trimmed || !onSaveScope) return;
+    onSaveScope(trimmed);
+    setName("");
   }
 
   if (activeDims.length === 0) return null;
@@ -226,18 +249,84 @@ export function ScopeBar({
         );
       })}
       {activeCount > 0 && (
-        <>
-          <button
-            type="button"
-            onClick={() => onChange(EMPTY_SCOPE)}
-            className="rounded-md px-2 py-1 text-sm text-ink-muted underline-offset-2 hover:text-ink hover:underline"
-          >
-            Clear ({activeCount})
-          </button>
-          <span className="text-sm text-ink-muted">
-            Showing {showing} of {rows.length}
-          </span>
-        </>
+        <button
+          type="button"
+          onClick={() => onChange(EMPTY_SCOPE)}
+          className="rounded-md px-2 py-1 text-sm text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+        >
+          Clear ({activeCount})
+        </button>
+      )}
+
+      {savedScopes.length > 0 && (
+        <details className="group relative">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-edge bg-surface px-2.5 py-1 text-sm font-medium text-ink-muted transition-colors hover:text-ink">
+            Saved scopes
+            <span className="rounded-full bg-surface-2 px-1.5 text-xs text-ink-muted">
+              {savedScopes.length}
+            </span>
+          </summary>
+          <div className="absolute z-10 mt-1 flex max-h-72 min-w-52 flex-col gap-0.5 overflow-auto rounded-lg border border-edge bg-surface p-1.5 shadow-lg">
+            {savedScopes.map((scope) => (
+              <div key={scope.id} className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => onChange(scope.selection)}
+                  className="min-w-0 flex-1 truncate rounded-md px-2 py-1 text-left text-sm text-ink-secondary transition-colors hover:bg-surface-2 hover:text-ink"
+                >
+                  {scope.name}
+                </button>
+                {onDeleteScope && (
+                  <button
+                    type="button"
+                    onClick={() => onDeleteScope(scope.id)}
+                    aria-label={`Delete scope ${scope.name}`}
+                    className="rounded-md px-1.5 py-1 text-sm text-ink-faint transition-colors hover:text-negative"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
+      {onSaveScope && activeCount > 0 && (
+        <details className="group relative">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-edge bg-surface px-2.5 py-1 text-sm font-medium text-ink-muted transition-colors hover:text-ink">
+            Save scope
+          </summary>
+          <div className="absolute z-10 mt-1 flex min-w-56 items-center gap-1.5 rounded-lg border border-edge bg-surface p-1.5 shadow-lg">
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  saveCurrent();
+                }
+              }}
+              maxLength={60}
+              placeholder="Name this scope"
+              className="min-w-0 flex-1 rounded-md border border-edge bg-surface-2 px-2 py-1 text-sm text-ink placeholder:text-ink-faint focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+            />
+            <button
+              type="button"
+              onClick={saveCurrent}
+              disabled={!name.trim() || scopesBusy}
+              className="rounded-md border border-edge-strong bg-accent-soft px-2.5 py-1 text-sm font-medium text-accent-ink transition-colors hover:bg-accent-soft/70 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Save
+            </button>
+          </div>
+        </details>
+      )}
+
+      {activeCount > 0 && (
+        <span className="text-sm text-ink-muted">
+          Showing {showing} of {rows.length}
+        </span>
       )}
     </div>
   );
