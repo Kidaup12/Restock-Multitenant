@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { BanknoteIcon, CalendarIcon, ClipboardIcon } from "@/components/icons";
 import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-features";
 import type { BuyList } from "@/lib/data/plan";
 import { BudgetPlanner } from "./budget-planner";
 import { BuyChecklist } from "./buy-checklist";
+import { deleteScope, listScopes, saveScope, type SavedScope } from "./scope-actions";
 import { EMPTY_SCOPE, filterBuyListRows, ScopeBar, type ScopeSelection } from "./scope-bar";
 import { SupplyCalendarMode } from "./supply-calendar";
 
@@ -85,7 +86,35 @@ export function PlanView({
 }) {
   const [mode, setMode] = useState<Mode>("choose");
   const [scope, setScope] = useState<ScopeSelection>(EMPTY_SCOPE);
+  const [savedScopes, setSavedScopes] = useState<SavedScope[]>([]);
+  const [scopesBusy, startScopes] = useTransition();
   const budgetTier = PLAN_TIER_LABEL[planFeatureTier("budget_planner")];
+
+  // Load the member's saved scopes once — the tenant/user resolve server-side in
+  // the action, so nothing tenant-identifying rides the client request.
+  useEffect(() => {
+    let active = true;
+    listScopes().then((res) => {
+      if (active && res.ok) setSavedScopes(res.data);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function handleSaveScope(name: string) {
+    startScopes(async () => {
+      const res = await saveScope({ name, selection: scope });
+      if (res.ok) setSavedScopes((prev) => [...prev, res.data]);
+    });
+  }
+
+  function handleDeleteScope(id: string) {
+    startScopes(async () => {
+      const res = await deleteScope({ id });
+      if (res.ok) setSavedScopes((prev) => prev.filter((s) => s.id !== id));
+    });
+  }
 
   if (mode === "choose") {
     const runDay = new Date(buyList.runDate).toLocaleDateString("en-GB", {
@@ -160,6 +189,10 @@ export function PlanView({
           selection={scope}
           onChange={setScope}
           showing={filteredRows.length}
+          savedScopes={savedScopes}
+          onSaveScope={handleSaveScope}
+          onDeleteScope={handleDeleteScope}
+          scopesBusy={scopesBusy}
         />
         <BuyChecklist
           buyList={filteredBuyList}
