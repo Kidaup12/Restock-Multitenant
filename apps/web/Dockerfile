@@ -10,12 +10,48 @@
 FROM node:22-alpine AS build
 WORKDIR /repo
 
+# Workspace graph first, for layer caching: lockfile + every manifest the web
+# app resolves (it imports eight @wezesha/* packages). npm ci -w prunes the
+# install to web and its workspace deps.
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/
+COPY packages/db/package.json packages/db/
+COPY packages/forecast/package.json packages/forecast/
+COPY packages/forecast-run/package.json packages/forecast-run/
+COPY packages/observability/package.json packages/observability/
+COPY packages/pos/package.json packages/pos/
+COPY packages/queue/package.json packages/queue/
+COPY packages/realtime/package.json packages/realtime/
+COPY packages/shopify/package.json packages/shopify/
 RUN npm ci -w web
 
+COPY packages/db/ packages/db/
+COPY packages/forecast/ packages/forecast/
+COPY packages/forecast-run/ packages/forecast-run/
+COPY packages/observability/ packages/observability/
+COPY packages/pos/ packages/pos/
+COPY packages/queue/ packages/queue/
+COPY packages/realtime/ packages/realtime/
+COPY packages/shopify/ packages/shopify/
 COPY apps/web/ apps/web/
-ENV NEXT_OUTPUT=standalone NEXT_TELEMETRY_DISABLED=1
+
+# @wezesha/db bundles its generated Prisma client (the build context excludes
+# **/generated); generate it + the linux-musl engine before next build imports
+# it. Prisma CLI is a devDependency of @wezesha/db not installed by the pruned
+# ci — run it transiently, as the worker/ws-gateway images do.
+RUN npx --yes prisma@^6.1.0 generate --schema packages/db/prisma/schema.prisma
+
+# next build collects page data by evaluating route modules; @wezesha/db
+# (client.ts) and Better Auth fail module init if these are unset. Build-only
+# placeholders — pages are dynamic so nothing connects, and the separate runner
+# FROM means they never reach the runtime image (real values come from the
+# platform / compose env).
+ENV NEXT_OUTPUT=standalone NEXT_TELEMETRY_DISABLED=1 \
+    DATABASE_URL=postgresql://build:build@localhost:5432/build \
+    SERVICE_DATABASE_URL=postgresql://build:build@localhost:5432/build \
+    DIRECT_URL=postgresql://build:build@localhost:5432/build \
+    BETTER_AUTH_SECRET=build-only-secret \
+    BETTER_AUTH_URL=http://localhost:3000
 RUN npm run -w web build
 
 FROM node:22-alpine AS runner
