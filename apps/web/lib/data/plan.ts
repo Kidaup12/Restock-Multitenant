@@ -70,6 +70,10 @@ export type BuyListRow = {
   moq: number;
   /** ABC class from the shared metric run; null when unranked or too new. */
   abc: string | null;
+  /** Owner-defined grouping (the "Category" facet), from Product.customCategory;
+   *  null = uncategorised. Metadata, not money — passed through to every role so
+   *  the scope bar can filter by it. */
+  category: string | null;
   /** Null when the caller can't view costs. */
   unitCostKes: number | null;
   /** recommendedQty x unit cost — what this line costs to order. Null when the
@@ -167,6 +171,7 @@ export async function getBuyList(
           onOrder: true,
           leadTimeDays: true,
           abcCategory: true,
+          customCategory: true,
           supplier: { select: { name: true, leadTimeAvgDays: true, leadTimeStdDays: true, moq: true } },
         },
       },
@@ -236,6 +241,7 @@ export async function getBuyList(
         runRatePerDay: r1(p.finalForecast30d / 30),
         moq: product.supplier?.moq ?? 1,
         abc: product.abcCategory,
+        category: product.customCategory,
         unitCostKes: product.costKes,
         lineTotalKes: qty * product.costKes,
         priceKes: product.priceKes,

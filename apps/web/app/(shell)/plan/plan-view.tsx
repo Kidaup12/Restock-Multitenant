@@ -6,6 +6,7 @@ import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-featur
 import type { BuyList } from "@/lib/data/plan";
 import { BudgetPlanner } from "./budget-planner";
 import { BuyChecklist } from "./buy-checklist";
+import { EMPTY_SCOPE, filterBuyListRows, ScopeBar, type ScopeSelection } from "./scope-bar";
 import { SupplyCalendarMode } from "./supply-calendar";
 
 /**
@@ -83,6 +84,7 @@ export function PlanView({
   canOverride: boolean;
 }) {
   const [mode, setMode] = useState<Mode>("choose");
+  const [scope, setScope] = useState<ScopeSelection>(EMPTY_SCOPE);
   const budgetTier = PLAN_TIER_LABEL[planFeatureTier("budget_planner")];
 
   if (mode === "choose") {
@@ -140,13 +142,32 @@ export function PlanView({
   );
 
   if (mode === "list") {
+    // Scope the list before the checklist sees it: it renders whatever buyList
+    // it's given, so the filtered rows keep its "N products" line honest. The
+    // total re-sums the visible rows (null stays null for a money-blind member).
+    const filteredRows = filterBuyListRows(buyList.rows, scope);
+    const filteredBuyList: BuyList = {
+      ...buyList,
+      rows: filteredRows,
+      totalCostKes: canViewCosts
+        ? filteredRows.reduce((sum, r) => sum + (r.lineTotalKes ?? 0), 0)
+        : null,
+    };
     return (
-      <BuyChecklist
-        buyList={buyList}
-        canViewCosts={canViewCosts}
-        canOverride={canOverride}
-        backLink={backLink}
-      />
+      <div className="space-y-4">
+        <ScopeBar
+          rows={buyList.rows}
+          selection={scope}
+          onChange={setScope}
+          showing={filteredRows.length}
+        />
+        <BuyChecklist
+          buyList={filteredBuyList}
+          canViewCosts={canViewCosts}
+          canOverride={canOverride}
+          backLink={backLink}
+        />
+      </div>
     );
   }
   if (mode === "calendar") {
