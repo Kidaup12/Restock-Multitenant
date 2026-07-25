@@ -61,6 +61,7 @@ export const EXPORTED_MODELS: ReadonlyArray<{
   { model: "PurchaseOrderLine", delegate: "purchaseOrderLine" },
   { model: "DistributionPlan", delegate: "distributionPlan" },
   { model: "DistributionPlanLine", delegate: "distributionPlanLine" },
+  { model: "ProductPlanOverride", delegate: "productPlanOverride" },
   { model: "ShopifyConnection", delegate: "shopifyConnection", omit: { accessToken: true } },
   { model: "IngestCursor", delegate: "ingestCursor" },
   { model: "Notification", delegate: "notification" },
