@@ -53,6 +53,119 @@ jobs:
       - name: Tests (RLS isolation + coverage census, as wezesha_app)
         run: npm run -w @wezesha/db test
 
+  web-tests:
+    name: web — vitest suite (real db + redis)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wezesha
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d wezesha"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://wezesha_app:wezesha_app_dev@localhost:5434/wezesha
+      SERVICE_DATABASE_URL: postgresql://wezesha_service:wezesha_service_dev@localhost:5434/wezesha
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5434/wezesha
+      REDIS_URL: redis://localhost:6380
+      BETTER_AUTH_SECRET: ci-test-only-secret
+      BETTER_AUTH_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run -w @wezesha/db db:generate
+
+      - name: Apply migrations (roles, tables, policies)
+        run: npm run -w @wezesha/db db:migrate:deploy
+
+      # Executes the metric-contract one-engine proof, member-visibility
+      # money-blindness, plan-data and the rest of the suite against a real,
+      # migrated database — logic regressions and cost leaks now fail CI.
+      - name: Tests (apps/web — seeded db + redis)
+        run: npm run -w web test
+
+  worker-tests:
+    name: worker — vitest suite (real db + redis)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wezesha
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d wezesha"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://wezesha_app:wezesha_app_dev@localhost:5434/wezesha
+      SERVICE_DATABASE_URL: postgresql://wezesha_service:wezesha_service_dev@localhost:5434/wezesha
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5434/wezesha
+      REDIS_URL: redis://localhost:6380
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client (worker imports @wezesha/db)
+        run: npm run -w @wezesha/db db:generate
+
+      - name: Apply migrations (roles, tables, policies)
+        run: npm run -w @wezesha/db db:migrate:deploy
+
+      # Cron processors, pos/shopify sync and the realtime pipeline against a
+      # real db + redis — the queue-backed paths CI only typechecked before.
+      - name: Tests (apps/worker — seeded db + redis)
+        run: npm run -w @wezesha/worker test
+
   web-build:
     name: web — next build
     runs-on: ubuntu-latest
@@ -102,11 +215,17 @@ jobs:
       - name: Typecheck @wezesha/forecast
         run: npm run -w @wezesha/forecast typecheck
 
+      - name: Tests @wezesha/forecast (pure engine — no infra)
+        run: npm run -w @wezesha/forecast test
+
       - name: Typecheck @wezesha/queue
         run: npm run -w @wezesha/queue typecheck
 
       - name: Typecheck @wezesha/shopify
         run: npm run -w @wezesha/shopify typecheck
+
+      - name: Tests @wezesha/shopify (hmac, oauth, crypto, sales — no infra)
+        run: npm run -w @wezesha/shopify test
 
       - name: Typecheck @wezesha/observability
         run: npm run -w @wezesha/observability typecheck
