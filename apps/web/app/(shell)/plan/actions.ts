@@ -4,6 +4,12 @@ import { revalidatePath } from "next/cache";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import {
+  getTenantPlan,
+  planAllows,
+  planFeatureTier,
+  PLAN_TIER_LABEL,
+} from "@/lib/capabilities";
+import {
   createOrdersForPredictions,
   getBuyList,
   redactBudgetSplit,
@@ -52,6 +58,13 @@ export async function planBudget(input: {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
   if (!membership) return err("You're not in a workspace.");
+
+  // Gate 2 (plan) re-checked server-side: the budget allocator is a Growth
+  // feature, so a crafted call from a Starter tenant can't bypass the UI lock.
+  const plan = await getTenantPlan(membership.tenantId);
+  if (!planAllows(plan, "budget_planner")) {
+    return err(`Budget planner is on the ${PLAN_TIER_LABEL[planFeatureTier("budget_planner")]} plan.`);
+  }
 
   const budget = Number(input.budgetKes);
   if (!Number.isFinite(budget) || budget < 0) return err("Enter a budget in KES.");
