@@ -10,7 +10,7 @@ import { cn } from "@/lib/cn";
 import type { BuyList, BuyListRow, BuyTier } from "@/lib/data/plan";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import { moqPreview, type MoqPreview } from "@/lib/plan/moq-preview";
-import { addToOrder, clearPlanOverride, setPlanOverride } from "./actions";
+import { addToOrder, clearPlanOverride, planCoverHorizon, setPlanOverride } from "./actions";
 
 /**
  * Mode 1 — the tiered checklist. Tick rows, watch the running total, expand any
@@ -41,6 +41,14 @@ const PLANNABLE_NOTES: Record<string, string> = {
   "missing-price": "No selling price on file — margin can't be checked.",
   "cost-exceeds-price": "Cost is above the selling price — restocking this loses money.",
 };
+
+// Cover-days what-if control: step a uniform days-of-cover horizon and re-size
+// the whole list to it. A weekly step keeps the choices meaningful; the server
+// floors each line at its own lead time, so this is the range the owner explores.
+const DEFAULT_WHATIF_COVER = 30;
+const COVER_MIN = 7;
+const COVER_MAX = 120;
+const COVER_STEP = 7;
 
 // Column class fragments — the table is a raw <table>, so headers/cells repeat
 // these; the `hidden … :table-cell` variants keep the wide detail off mobile.
@@ -197,7 +205,37 @@ export function BuyChecklist({
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const rows = buyList.rows;
+  // Cover-days what-if: null means "show the plan" (the scoped prop). Once the
+  // owner steps a horizon it holds the re-sized list the server returns. The
+  // re-size runs the one engine server-side; overrides and ordering still act on
+  // the underlying plan, so this stays an exploration, not a second commit path.
+  const [whatIf, setWhatIf] = useState<BuyList | null>(null);
+  const [coverDays, setCoverDays] = useState(DEFAULT_WHATIF_COVER);
+  const [resizeError, setResizeError] = useState<string | null>(null);
+  const [resizing, startResize] = useTransition();
+
+  const view = whatIf ?? buyList;
+  const rows = view.rows;
+
+  function applyCover(days: number) {
+    const clamped = Math.max(COVER_MIN, Math.min(COVER_MAX, days));
+    setCoverDays(clamped);
+    startResize(async () => {
+      const result = await planCoverHorizon({ coverDays: clamped });
+      if (!result.ok) {
+        setResizeError(result.error);
+        return;
+      }
+      setResizeError(null);
+      setWhatIf(result.data);
+    });
+  }
+
+  function resetToPlan() {
+    setWhatIf(null);
+    setResizeError(null);
+    setCoverDays(DEFAULT_WHATIF_COVER);
+  }
   // Line totals are null for money-blind members; the total masks with them.
   const pickedTotalKes = useMemo(
     () =>
@@ -259,14 +297,14 @@ export function BuyChecklist({
     { header: "Why", cell: (r) => r.reasoning },
   ];
 
-  const runDay = dayLabel(buyList.runDate);
+  const runDay = dayLabel(view.runDate);
 
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink-muted">
           {rows.length} products to order · full list costs{" "}
-          <CostValue amount={buyList.totalCostKes} canViewCosts={canViewCosts} /> · {backLink}
+          <CostValue amount={view.totalCostKes} canViewCosts={canViewCosts} /> · {backLink}
         </p>
         <ExportBar
           rows={rows}
@@ -276,10 +314,62 @@ export function BuyChecklist({
             title: "Restock buy list",
             subtitle: `Forecast run ${runDay} · ${rows.length} products`,
             footNote: canViewCosts
-              ? `Full list: KES ${Math.round(buyList.totalCostKes ?? 0).toLocaleString("en-KE")}`
+              ? `Full list: KES ${Math.round(view.totalCostKes ?? 0).toLocaleString("en-KE")}`
               : undefined,
           }}
         />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-edge bg-surface-2/40 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-ink">Size to cover</span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => applyCover(coverDays - COVER_STEP)}
+              disabled={resizing || coverDays <= COVER_MIN}
+              aria-label="Fewer days of cover"
+              className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
+            >
+              −
+            </button>
+            <span className="w-20 text-center font-mono text-sm tabular-nums text-ink">
+              {coverDays} days
+            </span>
+            <button
+              type="button"
+              onClick={() => applyCover(coverDays + COVER_STEP)}
+              disabled={resizing || coverDays >= COVER_MAX}
+              aria-label="More days of cover"
+              className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
+            >
+              +
+            </button>
+          </div>
+          {whatIf && (
+            <Badge tone="warning" className="font-sans">
+              what-if
+            </Badge>
+          )}
+        </div>
+        <p className="max-w-prose text-xs text-ink-muted">
+          Sizes every line to {coverDays} days of cover, never below an item&apos;s
+          lead time. A what-if — for calibrated or min/max items it can differ from
+          the nightly recommendation. Overrides and ordering still use the plan.
+        </p>
+        <div className="ml-auto flex items-center gap-3">
+          {resizeError && <span className="text-xs text-negative">{resizeError}</span>}
+          {whatIf && (
+            <button
+              type="button"
+              onClick={resetToPlan}
+              disabled={resizing}
+              className="text-xs font-medium text-accent-ink hover:underline disabled:opacity-60"
+            >
+              reset to plan
+            </button>
+          )}
+        </div>
       </div>
 
       {TIERS.map(({ tier, title, subtitle }) => {

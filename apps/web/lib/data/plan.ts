@@ -5,6 +5,7 @@ import {
   explainQty,
   leadDaysFor,
   plannableReason,
+  recommendedQty,
   type PlannableReason,
   type QtyExplanation,
 } from "@wezesha/forecast";
@@ -136,10 +137,18 @@ function tierFor(urgency: string, daysLeftToOrder: number): BuyTier {
 
 /** The latest run's buy list, or null when no forecast has run yet. Rows are
  *  built (and sorted) on full costs, then redacted, so ordering is identical
- *  whichever way the flag lands. */
+ *  whichever way the flag lands.
+ *
+ *  `coverDays` is an optional what-if. Absent, every quantity is the persisted
+ *  plan and every field is byte-identical to before — the one-engine CI
+ *  contract depends on this default path staying untouched. Present, every
+ *  NON-overridden row is re-sized through the one engine (`recommendedQty`, the
+ *  mean-cover branch, floored at the item's lead time); an owner override always
+ *  wins and is never re-sized. Costs redact exactly as always — the re-sized
+ *  `lineTotalKes` carries no new field. */
 export async function getBuyList(
   tenantId: string,
-  { canViewCosts }: { canViewCosts: boolean }
+  { canViewCosts, coverDays }: { canViewCosts: boolean; coverDays?: number }
 ): Promise<BuyList | null> {
   const db = prismaForTenant(tenantId);
   const latest = await db.prediction.findFirst({
@@ -217,8 +226,28 @@ export async function getBuyList(
       // The engine's number is the default; the owner's override wins when set.
       // With no override, `qty === p.qty` so every field below is byte-identical
       // to the pre-override behaviour — only overridden products diverge.
+      //
+      // Cover-days what-if: when `coverDays` is passed, re-size every
+      // NON-overridden row through the ONE engine — `recommendedQty()` is
+      // `reorderBreakdown()`'s qty, the same function the nightly pipeline
+      // persists with. No policy/abcCategory is passed, so it takes the
+      // mean-cover branch; the horizon is floored at the item's lead time so the
+      // order always covers the wait. An overridden row is never re-sized — the
+      // owner's number wins over any what-if. With `coverDays` absent,
+      // `resizedQty` is null and `qty === override ?? p.qty`, byte-identical to
+      // today.
       const override = overrideByProduct.get(p.productId) ?? null;
-      const qty = override ?? p.qty;
+      const resizedQty =
+        coverDays != null && override == null
+          ? recommendedQty({
+              finalForecast30d: p.finalForecast30d,
+              safetyStock: p.safetyStock,
+              currentStock: product.currentStock,
+              onOrder: product.onOrder,
+              coverDays: Math.max(coverDays, leadDays),
+            })
+          : null;
+      const qty = override ?? resizedQty ?? p.qty;
       return {
         predictionId: p.id,
         productId: p.productId,
@@ -260,12 +289,31 @@ export async function getBuyList(
         b.lineTotalKes - a.lineTotalKes
     );
 
+  // A what-if re-size can zero out a row that no longer needs ordering at the
+  // chosen cover; drop those so the checklist never shows an "order 0" line.
+  // Only the what-if path filters — the default path keeps `rows` untouched, so
+  // the one-engine contract stays byte-identical.
+  const sizedRows = coverDays != null ? rows.filter((r) => r.recommendedQty > 0) : rows;
+
   return {
     forecastRunId: latest.forecastRunId,
     runDate: latest.runDate,
-    rows: canViewCosts ? rows : rows.map(redactRow),
+    rows: canViewCosts ? sizedRows : sizedRows.map(redactRow),
     totalPredicted: predictions.length,
-    totalCostKes: canViewCosts ? rows.reduce((sum, r) => sum + r.lineTotalKes, 0) : null,
+    totalCostKes: canViewCosts ? sizedRows.reduce((sum, r) => sum + r.lineTotalKes, 0) : null,
+  };
+}
+
+/** Null out every KES figure in a buy list for a money-blind caller — the row
+ *  list and counts survive, the money does not. Mirrors `redactBudgetSplit`;
+ *  reuses the same `redactRow`, so an action can fetch a buy list with costs and
+ *  redact on the way out to the caller's own cost visibility. */
+export function redactBuyList(buyList: BuyList, canViewCosts: boolean): BuyList {
+  if (canViewCosts) return buyList;
+  return {
+    ...buyList,
+    rows: buyList.rows.map(redactRow),
+    totalCostKes: null,
   };
 }
 
