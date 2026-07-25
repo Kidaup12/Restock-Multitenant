@@ -3,19 +3,12 @@
 import { useState } from "react";
 import type { Role } from "@wezesha/db";
 import { cn } from "@/lib/cn";
+import { ChevronsLeftIcon, DotsIcon } from "@/components/icons";
 import {
-  BanknoteIcon,
-  BoxIcon,
-  BulbIcon,
-  CalendarIcon,
-  ChartIcon,
-  ChevronsLeftIcon,
-  ClipboardIcon,
-  DotsIcon,
-  GearIcon,
-  HomeIcon,
-  InboxIcon,
-} from "@/components/icons";
+  NAV_DESTINATIONS,
+  TAB_BAR_HREFS,
+  TAB_BAR_LABEL,
+} from "@/components/shell/nav-config";
 import { NavItem } from "@/components/shell/nav-item";
 import { RouteLoadingProvider } from "@/components/shell/route-loading";
 import { NotificationBell } from "@/components/shell/notification-bell";
@@ -27,23 +20,16 @@ import {
 import { TourProvider } from "@/components/tour/tour-provider";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
-const sidebarNav = [
-  { href: "/today", label: "Today", icon: <HomeIcon />, tourKey: "nav-today" },
-  { href: "/plan", label: "Plan", icon: <CalendarIcon />, tourKey: "nav-plan" },
-  { href: "/orders", label: "Orders", icon: <ClipboardIcon />, tourKey: "nav-orders" },
-  { href: "/stock", label: "Stock", icon: <BoxIcon />, tourKey: "nav-stock" },
-  { href: "/costs", label: "Costs", icon: <BanknoteIcon />, tourKey: "nav-costs" },
-  { href: "/suppliers", label: "Suppliers", icon: <InboxIcon />, tourKey: "nav-suppliers" },
-  { href: "/sales", label: "Sales data", icon: <ChartIcon />, tourKey: "nav-sales" },
-  { href: "/insights", label: "Insights", icon: <BulbIcon />, tourKey: "nav-insights" },
-  { href: "/settings", label: "Settings", icon: <GearIcon />, tourKey: "nav-settings" },
-];
+/* Desktop rail = every destination; mobile tab bar = the promoted few plus a
+ * "More" entry for the overflow. Both derive from the shared nav config so a new
+ * destination surfaces everywhere at once. */
+const sidebarNav = NAV_DESTINATIONS;
 
 const tabNav = [
-  { href: "/today", label: "Today", icon: <HomeIcon />, tourKey: "nav-today" },
-  { href: "/plan", label: "Plan", icon: <CalendarIcon />, tourKey: "nav-plan" },
-  { href: "/stock", label: "Stock", icon: <BoxIcon />, tourKey: "nav-stock" },
-  { href: "/sales", label: "Sales", icon: <ChartIcon />, tourKey: "nav-sales" },
+  ...NAV_DESTINATIONS.filter((d) => TAB_BAR_HREFS.includes(d.href)).map((d) => ({
+    ...d,
+    label: TAB_BAR_LABEL[d.href] ?? d.label,
+  })),
   { href: "/more", label: "More", icon: <DotsIcon />, tourKey: "nav-more" },
 ];
 
