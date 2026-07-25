@@ -43,6 +43,10 @@ const MAX_OVERRIDE_QTY = 1_000_000;
  *  any real ordering decision. */
 const MAX_COVER_DAYS = 365;
 
+/** Sanity cap on the sales-push what-if (whole percent). 500% is 6x demand —
+ *  well past any real promotion, and the guard against a runaway order size. */
+const MAX_UPLIFT_PCT = 500;
+
 export async function addToOrder(input: {
   predictionIds: string[];
 }): Promise<PlanActionResult<CreateOrdersResult>> {
@@ -114,6 +118,41 @@ export async function planCoverHorizon(input: {
   // Fetch with costs visible so the re-size runs on real inputs, then redact to
   // the caller's own cost visibility before it leaves the server.
   const buyList = await getBuyList(membership.tenantId, { canViewCosts: true, coverDays });
+  if (!buyList) return err("Run a forecast first — there's nothing to plan yet.");
+
+  return { ok: true, data: redactBuyList(buyList, hasPermission(membership, "view_costs")) };
+}
+
+/**
+ * Re-size the buy list for a sales push — lift expected demand by a whole-percent
+ * uplift and let the plan grow to match, so the owner can stock for a
+ * promotion/season. Mirrors `planCoverHorizon`: tenant and membership resolve
+ * server-side (never a client tenantId), the fetch runs with costs visible so
+ * the re-size sees real inputs, and the result is redacted to the caller's own
+ * cost visibility on the way out — a money-blind member never receives costs.
+ * The re-size itself is the one engine (`getBuyList`'s `demandUplift` path); the
+ * percentage becomes a multiplier here and no sizing math lives in this file.
+ */
+export async function planSalesTarget(input: {
+  upliftPct: number;
+}): Promise<PlanActionResult<BuyList>> {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+  if (!membership) return err("You're not in a workspace.");
+
+  const upliftPct = Math.round(Number(input.upliftPct));
+  if (!Number.isFinite(upliftPct) || upliftPct < 0) {
+    return err("Enter a sales push of 0% or more.");
+  }
+  if (upliftPct > MAX_UPLIFT_PCT) return err("That sales push is too large.");
+
+  // A whole-percent lift becomes the demand multiplier the engine re-sizes on:
+  // +25% -> 1.25. Zero is a no-op (1x) — the plan comes back unchanged.
+  const demandUplift = 1 + upliftPct / 100;
+
+  // Fetch with costs visible so the re-size runs on real inputs, then redact to
+  // the caller's own cost visibility before it leaves the server.
+  const buyList = await getBuyList(membership.tenantId, { canViewCosts: true, demandUplift });
   if (!buyList) return err("Run a forecast first — there's nothing to plan yet.");
 
   return { ok: true, data: redactBuyList(buyList, hasPermission(membership, "view_costs")) };

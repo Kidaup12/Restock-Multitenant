@@ -10,7 +10,13 @@ import { cn } from "@/lib/cn";
 import type { BuyList, BuyListRow, BuyTier, ExcludedReason, ExcludedRow } from "@/lib/data/plan";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import { moqPreview, type MoqPreview } from "@/lib/plan/moq-preview";
-import { addToOrder, clearPlanOverride, planCoverHorizon, setPlanOverride } from "./actions";
+import {
+  addToOrder,
+  clearPlanOverride,
+  planCoverHorizon,
+  planSalesTarget,
+  setPlanOverride,
+} from "./actions";
 
 /**
  * Mode 1 — the tiered checklist. Tick rows, watch the running total, expand any
@@ -70,6 +76,14 @@ const DEFAULT_WHATIF_COVER = 30;
 const COVER_MIN = 7;
 const COVER_MAX = 120;
 const COVER_STEP = 7;
+
+// Sales-push what-if control: step a uniform demand uplift (whole percent) and
+// re-size the whole list to the lifted demand — planning for a promotion or
+// season. The server re-sizes on the same engine over each item's own cover.
+const DEFAULT_WHATIF_UPLIFT = 0;
+const UPLIFT_MIN = 0;
+const UPLIFT_MAX = 100;
+const UPLIFT_STEP = 10;
 
 // Column class fragments — the table is a raw <table>, so headers/cells repeat
 // these; the `hidden … :table-cell` variants keep the wide detail off mobile.
@@ -298,12 +312,17 @@ export function BuyChecklist({
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
-  // Cover-days what-if: null means "show the plan" (the scoped prop). Once the
-  // owner steps a horizon it holds the re-sized list the server returns. The
-  // re-size runs the one engine server-side; overrides and ordering still act on
-  // the underlying plan, so this stays an exploration, not a second commit path.
+  // What-if lenses: null means "show the plan" (the scoped prop). Once the owner
+  // steps a horizon or a sales push, `whatIf` holds the re-sized list the server
+  // returns. Both lenses share this one slot and re-size on the one engine
+  // server-side; overrides and ordering still act on the underlying plan, so
+  // this stays an exploration, not a second commit path. The two actions each
+  // carry a single dimension, so engaging one lens returns the other to neutral
+  // — the on-screen steppers always reflect the applied view. "Reset to plan"
+  // clears both.
   const [whatIf, setWhatIf] = useState<BuyList | null>(null);
   const [coverDays, setCoverDays] = useState(DEFAULT_WHATIF_COVER);
+  const [upliftPct, setUpliftPct] = useState(DEFAULT_WHATIF_UPLIFT);
   const [resizeError, setResizeError] = useState<string | null>(null);
   const [resizing, startResize] = useTransition();
 
@@ -313,8 +332,29 @@ export function BuyChecklist({
   function applyCover(days: number) {
     const clamped = Math.max(COVER_MIN, Math.min(COVER_MAX, days));
     setCoverDays(clamped);
+    setUpliftPct(DEFAULT_WHATIF_UPLIFT); // cover lens takes over from any sales push
     startResize(async () => {
       const result = await planCoverHorizon({ coverDays: clamped });
+      if (!result.ok) {
+        setResizeError(result.error);
+        return;
+      }
+      setResizeError(null);
+      setWhatIf(result.data);
+    });
+  }
+
+  function applyUplift(pct: number) {
+    const clamped = Math.max(UPLIFT_MIN, Math.min(UPLIFT_MAX, pct));
+    setUpliftPct(clamped);
+    setCoverDays(DEFAULT_WHATIF_COVER); // sales-push lens takes over from any cover
+    // Stepping back to no push is the same as showing the plan.
+    if (clamped <= 0) {
+      resetToPlan();
+      return;
+    }
+    startResize(async () => {
+      const result = await planSalesTarget({ upliftPct: clamped });
       if (!result.ok) {
         setResizeError(result.error);
         return;
@@ -328,6 +368,7 @@ export function BuyChecklist({
     setWhatIf(null);
     setResizeError(null);
     setCoverDays(DEFAULT_WHATIF_COVER);
+    setUpliftPct(DEFAULT_WHATIF_UPLIFT);
   }
   // Line totals are null for money-blind members; the total masks with them.
   const pickedTotalKes = useMemo(
@@ -440,6 +481,32 @@ export function BuyChecklist({
               +
             </button>
           </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-ink">Size for a sales push</span>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => applyUplift(upliftPct - UPLIFT_STEP)}
+              disabled={resizing || upliftPct <= UPLIFT_MIN}
+              aria-label="Smaller sales push"
+              className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
+            >
+              −
+            </button>
+            <span className="w-16 text-center font-mono text-sm tabular-nums text-ink">
+              +{upliftPct}%
+            </span>
+            <button
+              type="button"
+              onClick={() => applyUplift(upliftPct + UPLIFT_STEP)}
+              disabled={resizing || upliftPct >= UPLIFT_MAX}
+              aria-label="Bigger sales push"
+              className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
+            >
+              +
+            </button>
+          </div>
           {whatIf && (
             <Badge tone="warning" className="font-sans">
               what-if
@@ -447,9 +514,11 @@ export function BuyChecklist({
           )}
         </div>
         <p className="max-w-prose text-xs text-ink-muted">
-          Sizes every line to {coverDays} days of cover, never below an item&apos;s
-          lead time. A what-if — for calibrated or min/max items it can differ from
-          the nightly recommendation. Overrides and ordering still use the plan.
+          Two ways to explore, never below an item&apos;s lead time: size every line
+          to {coverDays} days of cover, or size for a +{upliftPct}% sales push
+          (what-if) that lifts expected demand for a promotion or season. For
+          calibrated or min/max items a re-size can differ from the nightly
+          recommendation. Overrides and ordering still use the plan.
         </p>
         <div className="ml-auto flex items-center gap-3">
           {resizeError && <span className="text-xs text-negative">{resizeError}</span>}
