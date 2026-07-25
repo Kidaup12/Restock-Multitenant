@@ -9,7 +9,7 @@
  * total, so a SKU that USED to sell but has gone slow drops out of A, while a
  * pricey earner still outranks a cheap fast-mover.
  */
-import { weightedDailyRate, type SalesPoint } from "./baseline";
+import { weightedDailyRateAdjusted, type SalesPoint } from "./baseline";
 
 export type AbcInput = { id: string; revenue: number };
 export type AbcCategory = "A" | "B" | "C";
@@ -29,8 +29,10 @@ export function assignAbc(productsWithValue: AbcInput[]): Record<string, AbcCate
   return map;
 }
 
-/** The ABC ranking value for one product: recency-weighted daily units x unit
- *  price. Compute this for every product, then pass the lot to assignAbc. */
+/** The ABC ranking value for one product: gap-corrected recency-weighted daily
+ *  units x unit price. Uses the stockout-adjusted rate so a strong earner that
+ *  keeps selling out isn't ranked on its deflated on-shelf rate. Compute this
+ *  for every product, then pass the lot to assignAbc. */
 export function dailySalesValue(history: SalesPoint[], priceKes: number, asOf?: Date): number {
-  return weightedDailyRate(history, asOf) * priceKes;
+  return weightedDailyRateAdjusted(history, asOf) * priceKes;
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { assignAbc, dailySalesValue } from "../src/abc";
+import { weightedDailyRate, type SalesPoint } from "../src/baseline";
 
 /**
  * Boundary semantics: for each product in revenue-desc order, cumulative share
@@ -101,5 +102,18 @@ describe("dailySalesValue", () => {
 
   it("a product with no sales has zero value", () => {
     expect(dailySalesValue([], 5000, TODAY)).toBe(0);
+  });
+
+  it("ranks a strong seller on its in-stock rate, not its stockout-diluted rate", () => {
+    // Sells 2/day for a stretch, then a long out-of-stock gap, then sells again.
+    // The gap days come out of the denominator, so the ABC value reflects demand
+    // while in stock — otherwise a chronic-stockout earner is under-ranked.
+    const gappy: SalesPoint[] = [
+      ...Array.from({ length: 5 }, (_, i) => ({ date: day(30 - i), quantity: 2 })),
+      ...Array.from({ length: 10 }, (_, i) => ({ date: day(10 - i), quantity: 2 })),
+    ];
+    expect(dailySalesValue(gappy, 1000, TODAY)).toBeGreaterThan(
+      weightedDailyRate(gappy, TODAY) * 1000
+    );
   });
 });
