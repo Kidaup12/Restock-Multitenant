@@ -13,10 +13,12 @@ import {
   createOrdersForPredictions,
   getBuyList,
   redactBudgetSplit,
+  redactBuyList,
   removePlanOverride,
   splitByBudget,
   upsertPlanOverride,
   type BudgetSplit,
+  type BuyList,
   type CreateOrdersResult,
 } from "@/lib/data/plan";
 
@@ -36,6 +38,10 @@ const MAX_LINES = 500;
 
 /** Sanity cap on a single override quantity — a real order never approaches it. */
 const MAX_OVERRIDE_QTY = 1_000_000;
+
+/** Sanity cap on the cover-days what-if — a year of cover is already well past
+ *  any real ordering decision. */
+const MAX_COVER_DAYS = 365;
 
 export async function addToOrder(input: {
   predictionIds: string[];
@@ -81,6 +87,36 @@ export async function planBudget(input: {
 
   const split = splitByBudget(buyList.rows, budget);
   return { ok: true, data: redactBudgetSplit(split, hasPermission(membership, "view_costs")) };
+}
+
+/**
+ * Re-size the buy list to a chosen days-of-cover horizon — a what-if the owner
+ * drives from the checklist. Mirrors `planBudget`: tenant and membership resolve
+ * server-side (never a client tenantId), the fetch runs with costs visible so
+ * the re-size sees real inputs, and the result is redacted to the caller's own
+ * cost visibility on the way out — a money-blind member never receives costs.
+ * The re-size itself is the one engine (`getBuyList`'s `coverDays` path), so no
+ * sizing math lives here.
+ */
+export async function planCoverHorizon(input: {
+  coverDays: number;
+}): Promise<PlanActionResult<BuyList>> {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+  if (!membership) return err("You're not in a workspace.");
+
+  const coverDays = Math.round(Number(input.coverDays));
+  if (!Number.isFinite(coverDays) || coverDays < 1) {
+    return err("Pick a cover of at least one day.");
+  }
+  if (coverDays > MAX_COVER_DAYS) return err("That cover horizon is too long.");
+
+  // Fetch with costs visible so the re-size runs on real inputs, then redact to
+  // the caller's own cost visibility before it leaves the server.
+  const buyList = await getBuyList(membership.tenantId, { canViewCosts: true, coverDays });
+  if (!buyList) return err("Run a forecast first — there's nothing to plan yet.");
+
+  return { ok: true, data: redactBuyList(buyList, hasPermission(membership, "view_costs")) };
 }
 
 /**

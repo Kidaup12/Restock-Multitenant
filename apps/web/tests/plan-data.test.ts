@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prismaForTenant, prismaService } from "@wezesha/db";
+import { coverDaysFor, leadDaysFor, recommendedQty } from "@wezesha/forecast";
 import {
   DEAD_SKUS,
   STOCKOUT_SKUS,
@@ -173,6 +174,103 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
         );
         expect(total).toBe(row.recommendedQty);
       }
+    }
+  });
+
+  it("re-sizes the list to a cover horizon through the same engine, floored at lead", async () => {
+    const base = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    expect(base).not.toBeNull();
+
+    const predictions = await prismaService.prediction.findMany({
+      where: { tenantId: seeded.tenantId },
+      include: { product: { include: { supplier: true } } },
+    });
+    const bySku = new Map(predictions.map((p) => [p.product.sku, p]));
+
+    // The one engine at a lead-floored cover — the exact call the data layer
+    // makes. Recomputed independently here, so a hand-rolled ceil (a second
+    // formula) or a dropped input shows up as a mismatch.
+    const engineQtyAt = (sku: string, requestedCover: number) => {
+      const p = bySku.get(sku)!;
+      const leadDays = leadDaysFor(p.product, p.product.supplier) ?? 0;
+      return recommendedQty({
+        finalForecast30d: p.finalForecast30d,
+        safetyStock: p.safetyStock,
+        currentStock: p.product.currentStock,
+        onOrder: p.product.onOrder,
+        coverDays: Math.max(requestedCover, leadDays),
+      });
+    };
+
+    // No overrides set at this point, so every row is re-sized: its qty is the
+    // engine's number at the lead-floored cover, and every qty-derived field
+    // follows it. Rows that fall to 0 at this cover are dropped.
+    const requested = 45;
+    const sized = await getBuyList(seeded.tenantId, { canViewCosts: true, coverDays: requested });
+    expect(sized).not.toBeNull();
+    expect(sized!.rows.length).toBeGreaterThan(0);
+    for (const row of sized!.rows) {
+      const expected = engineQtyAt(row.sku, requested);
+      expect(row.recommendedQty, row.sku).toBe(expected);
+      expect(expected, row.sku).toBeGreaterThan(0);
+      expect(row.lineTotalKes).toBeCloseTo(expected * row.unitCostKes!, 5);
+      expect(row.qtySummary).toContain(`+ ${expected} ordered`);
+    }
+    expect(sized!.totalCostKes).toBeCloseTo(
+      sized!.rows.reduce((s, r) => s + r.lineTotalKes!, 0),
+      5
+    );
+
+    // For a mean-cover-regime row — its persisted qty IS the mean-cover number
+    // at its own lead+review cover — the slider at coverDaysFor reproduces the
+    // persisted qty exactly (proving it reuses the same engine), and a longer
+    // cover raises it. Guarded: under the default tenant config classes resolve
+    // to calibrated/min-max policies, so such a row is present only when the
+    // seed leaves one on the mean-cover branch.
+    const meanCover = base!.rows.find((r) => {
+      const p = bySku.get(r.sku)!;
+      const cover = coverDaysFor(p.product, p.product.supplier);
+      return p.finalForecast30d > 0 && engineQtyAt(r.sku, cover) === Math.round(p.recommendedQty);
+    });
+    if (meanCover) {
+      const p = bySku.get(meanCover.sku)!;
+      const cover = coverDaysFor(p.product, p.product.supplier);
+      const atCover = await getBuyList(seeded.tenantId, { canViewCosts: true, coverDays: cover });
+      expect(atCover!.rows.find((r) => r.sku === meanCover.sku)!.recommendedQty).toBe(
+        Math.round(p.recommendedQty)
+      );
+      const longer = await getBuyList(seeded.tenantId, { canViewCosts: true, coverDays: cover + 90 });
+      expect(longer!.rows.find((r) => r.sku === meanCover.sku)!.recommendedQty).toBeGreaterThan(
+        Math.round(p.recommendedQty)
+      );
+    }
+  });
+
+  it("re-size respects the owner override and keeps costs money-blind", async () => {
+    const base = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = base!.rows[0]!;
+    const pinned = target.recommendedQty + 13;
+    try {
+      await upsertPlanOverride(seeded.tenantId, { productId: target.productId, qty: pinned });
+
+      // A cover horizon that would re-size the row must not move an overridden
+      // one — the owner's number wins over the what-if.
+      const sized = await getBuyList(seeded.tenantId, { canViewCosts: true, coverDays: 90 });
+      const row = sized!.rows.find((r) => r.productId === target.productId)!;
+      expect(row.overriddenQty).toBe(pinned);
+      expect(row.recommendedQty).toBe(pinned);
+      expect(row.lineTotalKes).toBeCloseTo(pinned * row.unitCostKes!, 5);
+
+      // A money-blind member gets the re-sized list with costs redacted.
+      const member = await getBuyList(seeded.tenantId, { canViewCosts: false, coverDays: 90 });
+      const blind = member!.rows.find((r) => r.productId === target.productId)!;
+      expect(blind.recommendedQty).toBe(pinned);
+      expect(blind.lineTotalKes).toBeNull();
+      expect(blind.unitCostKes).toBeNull();
+      expect(blind.atRiskKes).toBeNull();
+      expect(member!.totalCostKes).toBeNull();
+    } finally {
+      await removePlanOverride(seeded.tenantId, target.productId);
     }
   });
 
