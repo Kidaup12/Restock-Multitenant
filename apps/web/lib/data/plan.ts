@@ -28,6 +28,15 @@ import {
 
 const URGENCY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
+/** Open Order statuses = queued to buy or on a live PO, not yet received or
+ *  cancelled. A product with one of these is already on the way. Mirrors the
+ *  supply calendar's definition so the two screens agree on "already on order". */
+const OPEN_ORDER_STATUSES = ["pending", "ordered"];
+
+/** A "slow mover" the plan holds back: it has plenty of cover (urgency "low")
+ *  AND sells below this daily pace, so restocking now just ties up cash. */
+const SLOW_MOVER_MAX_RUN_RATE = 1; // < 1 unit/day
+
 /** Horizon (days) for the "what deferring costs you" revenue-at-risk figure. */
 const RISK_HORIZON_DAYS = 30;
 
@@ -102,16 +111,38 @@ export type BuyListRow = {
   /** Trailing-30-day actual revenue for the product (all channels). A sales
    *  figure — visible to every role, matching Stock/Today's revenue30dKes. */
   revenue30dKes: number;
+  /** True when this product also sits on an open DRAFT purchase order. The row
+   *  stays on the active list — the PO isn't placed yet — but the UI warns that
+   *  ordering it again would double up. Absent (undefined) when it isn't. */
+  doubleOrderWarn?: boolean;
 };
+
+/** Why a product was held OFF the active buy list. Order of precedence when a
+ *  product qualifies for more than one:
+ *   - already-ordered: an open in-app Order (pending/ordered, not received) —
+ *     it's on the way, re-recommending would double-order.
+ *   - unplannable: the budget planner can't reason about its economics
+ *     (missing/broken cost). The specific `plannable` reason rides on the row.
+ *   - slow-mover: plenty of cover (urgency "low") AND selling below the
+ *     slow-mover pace — the cash is better spent elsewhere first. */
+export type ExcludedReason = "already-ordered" | "unplannable" | "slow-mover";
+
+/** An excluded row — a full buy-list row plus the typed reason it was held back.
+ *  Surfaced read-only so nothing the run sized is ever silently dropped. */
+export type ExcludedRow = BuyListRow & { reason: ExcludedReason };
 
 export type BuyList = {
   forecastRunId: string;
   runDate: Date;
-  /** Everything the run wants ordered, most urgent first. */
+  /** Everything the run wants ordered and nothing blocks, most urgent first. */
   rows: BuyListRow[];
+  /** Products the run sized but held OFF the active list, each tagged with why
+   *  (already on the way, cost needs checking, too slow to stock now). Surfaced
+   *  so the owner sees what was dropped and can act on it. */
+  excluded: ExcludedRow[];
   /** Total products covered by the run (for the "n of m" subtitle). */
   totalPredicted: number;
-  /** Cost of ordering the whole list. Null when the caller can't view costs. */
+  /** Cost of ordering the whole active list. Null when the caller can't view costs. */
   totalCostKes: number | null;
 };
 
@@ -129,10 +160,26 @@ const redactRow = (r: BuyListRow): BuyListRow => ({
   atRiskKes: null,
 });
 
+/** Redact an excluded row's costs, keeping its reason — same money-blind masking
+ *  as an active row (the reason is metadata, not money). */
+const redactExcluded = (r: ExcludedRow): ExcludedRow => ({ ...redactRow(r), reason: r.reason });
+
 function tierFor(urgency: string, daysLeftToOrder: number): BuyTier {
   if (urgency === "critical" || daysLeftToOrder <= 0) return "order_today";
   if (daysLeftToOrder <= 7) return "this_week";
   return "can_wait";
+}
+
+/** Why this row is held off the active list, or null to keep it active. Order
+ *  matters — already-ordered outranks a data problem, which outranks slow. */
+function excludedReasonFor(
+  row: { plannable: PlannableReason; urgency: string; runRatePerDay: number },
+  hasOpenOrder: boolean
+): ExcludedReason | null {
+  if (hasOpenOrder) return "already-ordered";
+  if (row.plannable !== "ok") return "unplannable";
+  if (row.urgency === "low" && row.runRatePerDay < SLOW_MOVER_MAX_RUN_RATE) return "slow-mover";
+  return null;
 }
 
 /** The latest run's buy list, or null when no forecast has run yet. Rows are
@@ -217,7 +264,36 @@ export async function getBuyList(
     for (const g of grouped) revenueByProduct.set(g.productId, g._sum.revenueKes ?? 0);
   }
 
-  const rows = kept
+  // What's already in flight for these products, so the plan stops re-recommending
+  // it. Two independent signals, both tenant-scoped through the same client:
+  //   - an OPEN in-app Order (pending/ordered, not received) → drop from active.
+  //   - a DRAFT purchase-order line → keep active, but warn on double-ordering.
+  const openOrderProductIds = new Set<string>();
+  const draftPoProductIds = new Set<string>();
+  if (kept.length > 0) {
+    const productIds = kept.map((p) => p.productId);
+    const [openOrders, draftLines] = await Promise.all([
+      db.order.findMany({
+        where: {
+          productId: { in: productIds },
+          status: { in: OPEN_ORDER_STATUSES },
+          receivedAt: null,
+        },
+        select: { productId: true },
+      }),
+      db.purchaseOrderLine.findMany({
+        where: {
+          productId: { in: productIds },
+          purchaseOrder: { status: "draft", deletedAt: null },
+        },
+        select: { productId: true },
+      }),
+    ]);
+    for (const o of openOrders) if (o.productId) openOrderProductIds.add(o.productId);
+    for (const l of draftLines) draftPoProductIds.add(l.productId);
+  }
+
+  const built = kept
     .map((p): FullBuyListRow => {
       const product = p.product;
       const leadDays = leadDaysFor(product, product.supplier) ?? 0;
@@ -280,25 +356,42 @@ export async function getBuyList(
         plannable: plannableReason(product),
         atRiskKes: Math.round((p.finalForecast30d / RISK_HORIZON_DAYS) * product.priceKes * stockoutDays),
         revenue30dKes: revenueByProduct.get(p.productId) ?? 0,
+        // Draft-PO overlap is a warn, not a drop: keep the row active but flag it.
+        doubleOrderWarn: draftPoProductIds.has(p.productId) || undefined,
       };
-    })
-    .sort(
-      (a, b) =>
-        (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
-        a.daysUntilStockout - b.daysUntilStockout ||
-        b.lineTotalKes - a.lineTotalKes
-    );
+    });
+
+  // Split the sized rows: hold already-ordered / unplannable / slow-mover
+  // products OFF the active list (surfaced under `excluded`, never silently
+  // dropped), keep the rest. Both paths — default and cover-days what-if —
+  // classify the same way; the reasons key off the persisted forecast, so a
+  // what-if horizon never changes what's excluded.
+  const activeRows: FullBuyListRow[] = [];
+  const excludedRows: (FullBuyListRow & { reason: ExcludedReason })[] = [];
+  for (const row of built) {
+    const reason = excludedReasonFor(row, openOrderProductIds.has(row.productId));
+    if (reason) excludedRows.push({ ...row, reason });
+    else activeRows.push(row);
+  }
+
+  const byUrgency = (a: FullBuyListRow, b: FullBuyListRow) =>
+    (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
+    a.daysUntilStockout - b.daysUntilStockout ||
+    b.lineTotalKes - a.lineTotalKes;
+  activeRows.sort(byUrgency);
+  excludedRows.sort(byUrgency);
 
   // A what-if re-size can zero out a row that no longer needs ordering at the
   // chosen cover; drop those so the checklist never shows an "order 0" line.
-  // Only the what-if path filters — the default path keeps `rows` untouched, so
-  // the one-engine contract stays byte-identical.
-  const sizedRows = coverDays != null ? rows.filter((r) => r.recommendedQty > 0) : rows;
+  // Only the what-if path filters — the default path keeps active rows untouched,
+  // so the one-engine contract stays byte-identical.
+  const sizedRows = coverDays != null ? activeRows.filter((r) => r.recommendedQty > 0) : activeRows;
 
   return {
     forecastRunId: latest.forecastRunId,
     runDate: latest.runDate,
     rows: canViewCosts ? sizedRows : sizedRows.map(redactRow),
+    excluded: canViewCosts ? excludedRows : excludedRows.map(redactExcluded),
     totalPredicted: predictions.length,
     totalCostKes: canViewCosts ? sizedRows.reduce((sum, r) => sum + r.lineTotalKes, 0) : null,
   };
@@ -313,6 +406,7 @@ export function redactBuyList(buyList: BuyList, canViewCosts: boolean): BuyList 
   return {
     ...buyList,
     rows: buyList.rows.map(redactRow),
+    excluded: buyList.excluded.map(redactExcluded),
     totalCostKes: null,
   };
 }

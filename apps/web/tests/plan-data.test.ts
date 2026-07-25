@@ -62,7 +62,13 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     const expectedIds = new Set(
       predictions.filter((p) => Math.round(p.recommendedQty) > 0).map((p) => p.id)
     );
-    expect(new Set(buyList!.rows.map((r) => r.predictionId))).toEqual(expectedIds);
+    // The exclusion split holds some products off the active list (already on the
+    // way / bad cost / too slow) but never drops them: active ∪ excluded is still
+    // exactly every prediction the run sized, each appearing once.
+    const activeIds = buyList!.rows.map((r) => r.predictionId);
+    const excludedIds = buyList!.excluded.map((r) => r.predictionId);
+    expect(new Set([...activeIds, ...excludedIds])).toEqual(expectedIds);
+    expect(activeIds.length + excludedIds.length).toBe(expectedIds.size); // no overlap
     expect(buyList!.rows.length).toBeGreaterThan(0);
 
     const bySku = new Map(predictions.map((p) => [p.product.sku, p]));
@@ -76,7 +82,10 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     });
     const revByProduct = new Map(revAgg.map((g) => [g.productId, g._sum.revenueKes ?? 0]));
 
-    for (const row of buyList!.rows) {
+    // The one-engine contract holds for every sized row — active OR held back:
+    // its qty is the persisted prediction, never re-derived. The split only moves
+    // the bucket, so prove the fields across active ∪ excluded.
+    for (const row of [...buyList!.rows, ...buyList!.excluded]) {
       const p = bySku.get(row.sku)!;
       expect(row.recommendedQty).toBe(Math.round(p.recommendedQty));
       expect(row.daysUntilStockout).toBe(p.daysUntilStockout);
@@ -128,7 +137,124 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       expect(row!.tier).toBe("order_today");
     }
     for (const sku of DEAD_SKUS) {
+      // Dead SKUs size to zero, so they're off the run entirely — not merely
+      // held back. They appear in neither the active list nor the excluded one.
       expect(buyList!.rows.find((r) => r.sku === sku)).toBeUndefined();
+      expect(buyList!.excluded.find((r) => r.sku === sku)).toBeUndefined();
+    }
+  });
+
+  it("holds a product with an open order off the active list, tagged already-ordered", async () => {
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0]!;
+    const order = await prismaService.order.create({
+      data: {
+        tenantId: seeded.tenantId,
+        status: "pending",
+        productId: target.productId,
+        orderedQty: 5,
+        stockAtOrder: 0,
+      },
+    });
+    try {
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      // Dropped from the active list...
+      expect(after!.rows.find((r) => r.productId === target.productId)).toBeUndefined();
+      // ...surfaced under excluded, tagged, with the engine qty still riding it.
+      const held = after!.excluded.find((r) => r.productId === target.productId);
+      expect(held, target.sku).toBeDefined();
+      expect(held!.reason).toBe("already-ordered");
+      expect(held!.recommendedQty).toBe(target.recommendedQty);
+    } finally {
+      await prismaService.order.delete({ where: { id: order.id } });
+    }
+  });
+
+  it("keeps a draft-PO product on the active list with a double-order warning", async () => {
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0]!;
+    const po = await prismaService.purchaseOrder.create({
+      data: {
+        tenantId: seeded.tenantId,
+        poNumber: "PO-DRAFT-TEST",
+        status: "draft",
+        lines: {
+          create: {
+            tenantId: seeded.tenantId,
+            productId: target.productId,
+            sku: target.sku,
+            title: target.title,
+            quantity: target.recommendedQty,
+            unitCostKes: target.unitCostKes!,
+            lineTotalKes: target.lineTotalKes!,
+          },
+        },
+      },
+    });
+    try {
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      const row = after!.rows.find((r) => r.productId === target.productId);
+      // A draft PO isn't placed yet, so the row stays active...
+      expect(row, target.sku).toBeDefined();
+      // ...but carries the warn, and never lands in excluded.
+      expect(row!.doubleOrderWarn).toBe(true);
+      expect(after!.excluded.find((r) => r.productId === target.productId)).toBeUndefined();
+    } finally {
+      await prismaService.purchaseOrder.delete({ where: { id: po.id } });
+    }
+  });
+
+  it("excludes a product with no usable cost as unplannable", async () => {
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0]!;
+    const original = await prismaService.product.findUnique({
+      where: { id: target.productId },
+      select: { costKes: true },
+    });
+    // No unit cost on file → the planner can't reason about the line.
+    await prismaService.product.update({
+      where: { id: target.productId },
+      data: { costKes: 0 },
+    });
+    try {
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      expect(after!.rows.find((r) => r.productId === target.productId)).toBeUndefined();
+      const held = after!.excluded.find((r) => r.productId === target.productId);
+      expect(held, target.sku).toBeDefined();
+      expect(held!.reason).toBe("unplannable");
+      expect(held!.plannable).toBe("missing-cost");
+    } finally {
+      await prismaService.product.update({
+        where: { id: target.productId },
+        data: { costKes: original!.costKes },
+      });
+    }
+  });
+
+  it("excludes a slow mover: plenty of cover (low urgency) and a low run rate", async () => {
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0]!;
+    const original = await prismaService.prediction.findUnique({
+      where: { id: target.predictionId },
+      select: { urgency: true, finalForecast30d: true },
+    });
+    // Force the slow-mover shape on the persisted prediction: 0.2 units/day and
+    // plenty of cover. The recommended qty is untouched, so it still wants > 0.
+    await prismaService.prediction.update({
+      where: { id: target.predictionId },
+      data: { urgency: "low", finalForecast30d: 6 },
+    });
+    try {
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      expect(after!.rows.find((r) => r.productId === target.productId)).toBeUndefined();
+      const held = after!.excluded.find((r) => r.productId === target.productId);
+      expect(held, target.sku).toBeDefined();
+      expect(held!.reason).toBe("slow-mover");
+    } finally {
+      await prismaService.prediction.update({
+        where: { id: target.predictionId },
+        data: { urgency: original!.urgency, finalForecast30d: original!.finalForecast30d },
+      });
     }
   });
 
