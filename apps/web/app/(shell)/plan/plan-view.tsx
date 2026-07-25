@@ -1,19 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { BanknoteIcon, ClipboardIcon } from "@/components/icons";
+import { BanknoteIcon, CalendarIcon, ClipboardIcon } from "@/components/icons";
 import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-features";
 import type { BuyList } from "@/lib/data/plan";
 import { BudgetPlanner } from "./budget-planner";
 import { BuyChecklist } from "./buy-checklist";
+import { SupplyCalendarMode } from "./supply-calendar";
 
 /**
- * The planner's two ways in: the full tiered checklist ("show me what to
- * order, and why") or the budget allocator ("I have a budget to keep").
- * Nothing is planned until the user picks.
+ * The planner's ways in: the full tiered checklist ("show me what to order, and
+ * why"), the budget allocator ("I have a budget to keep"), or the forward
+ * supply calendar ("what's coming up, and when"). Nothing is planned until the
+ * user picks.
  */
 
-type Mode = "choose" | "list" | "budget";
+type Mode = "choose" | "list" | "budget" | "calendar";
 
 function ModeCard({
   icon,
@@ -94,12 +96,18 @@ export function PlanView({
           {buyList.rows.length} of {buyList.totalPredicted} forecast products need restocking ·
           run {runDay}. Nothing is planned until you pick.
         </p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <ModeCard
             icon={<ClipboardIcon />}
             title="Show me what to order, and why"
             description="Every product that needs restocking, tiered by its last safe day to order. Each quantity comes with its arithmetic. You tick, we total."
             onClick={() => setMode("list")}
+          />
+          <ModeCard
+            icon={<CalendarIcon />}
+            title="See my ordering calendar"
+            description="The next three months of order-by dates, grouped by supplier, with the cash each month needs — your upcoming ordering commitments at a glance."
+            onClick={() => setMode("calendar")}
           />
           {canBudget ? (
             <ModeCard
@@ -131,14 +139,18 @@ export function PlanView({
     </button>
   );
 
-  return mode === "list" ? (
-    <BuyChecklist
-      buyList={buyList}
-      canViewCosts={canViewCosts}
-      canOverride={canOverride}
-      backLink={backLink}
-    />
-  ) : (
-    <BudgetPlanner canViewCosts={canViewCosts} backLink={backLink} />
-  );
+  if (mode === "list") {
+    return (
+      <BuyChecklist
+        buyList={buyList}
+        canViewCosts={canViewCosts}
+        canOverride={canOverride}
+        backLink={backLink}
+      />
+    );
+  }
+  if (mode === "calendar") {
+    return <SupplyCalendarMode canViewCosts={canViewCosts} backLink={backLink} />;
+  }
+  return <BudgetPlanner canViewCosts={canViewCosts} backLink={backLink} />;
 }
