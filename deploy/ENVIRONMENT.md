@@ -25,6 +25,8 @@ it embeds a password).
 | `SHOPIFY_APP_URL` | `apps/web/lib/shopify/env.ts`; `apps/worker/src/shopify-sync.ts` | web (OAuth redirect URI); worker (webhook registration) | Vercel; Railway | url (config) | `http://localhost:3000` (OAuth/webhooks need a public tunnel locally) |
 | `TOKEN_ENCRYPTION_KEY` | `packages/shopify/src/crypto.ts` (via web callback + worker sync) | web, worker | Vercel; Railway — SAME value on both | secret | unset (token store/read throws) |
 | `EMAIL_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` in environments that should send scheduled email) | config | unset (no cron schedules registered — dev/CI stay quiet) |
+| `BREVO_API_KEY` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | secret | unset (mail is logged to the console, never sent — dev/CI/tests stay offline) |
+| `EMAIL_FROM` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | config | unset (only read when `BREVO_API_KEY` is set; sender as `Name <address>` or a bare address) |
 | `ADMIN_EMAILS` | `apps/web/lib/admin/gate.ts` | web | Vercel | config (sensitive — names the operator accounts) | unset (the `/admin` console 404s for everyone — fail closed) |
 | `OPS_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` in environments that should run the daily plan-limit check) | config | unset (no ops schedules registered — dev/CI stay quiet) |
 | `SENTRY_DSN` | `packages/observability/src/index.ts` (via each service's init) | web (`apps/web/instrumentation.ts`) | Vercel | secret | unset (error tracking disabled — complete no-op) |
@@ -114,6 +116,8 @@ Supabase specifics that are easy to get wrong:
 | `SHOPIFY_APP_URL` | prod origin | preview origin | tunnel origin |
 | `TOKEN_ENCRYPTION_KEY` | prod key (= worker's) | preview key (= staging worker's) | local key |
 | `SENTRY_DSN` | prod DSN (when provisioned) | preview DSN or unset | unset |
+| `BREVO_API_KEY` | prod key (= worker's) | preview key or unset (console fallback) | unset |
+| `EMAIL_FROM` | prod sender | preview sender | unset |
 | AUTH vars (below) | prod values | preview values | local |
 
 `develop` deploys as Preview (Production Branch is `main`), so Preview values are what
@@ -135,6 +139,9 @@ previews must never hold prod credentials.
 - `TOKEN_ENCRYPTION_KEY` — same value as web for the environment
 - `SHOPIFY_APP_URL` — the web origin for the environment (webhook registration)
 - `EMAIL_CRONS` / `OPS_CRONS` — `1` in environments that should run the schedules
+- `BREVO_API_KEY` — same key as web for the environment; unset makes the worker
+  log alerts/summaries to the console instead of sending them
+- `EMAIL_FROM` — same sender as web for the environment
 - `SENTRY_DSN` — when provisioned; unset keeps tracking a no-op
 
 **CI** (`.github/workflows/ci.yml`, db job) — already wired to the throwaway Postgres
@@ -154,5 +161,5 @@ names/read-sites when that branch merges. Expected shape:
 |---|---|---|---|---|
 | `BETTER_AUTH_SECRET` | web | Vercel | secret | signing secret (Better Auth reads it from env by convention); generate per environment, never shared between preview and prod |
 | `BETTER_AUTH_URL` | web | Vercel | url (config) | canonical app URL per environment |
-| (email provider creds) | web | Vercel | secret | the branch ships a console-log email seam (`apps/web/lib/email.ts`); real provider creds arrive when one is wired |
+| `BREVO_API_KEY` / `EMAIL_FROM` | web, worker | Vercel; Railway | secret / config | Brevo transactional email — see the matrix above. The seam (`apps/web/lib/email.ts`, `apps/worker/src/email.ts`) falls back to console logging when `BREVO_API_KEY` is unset |
 | (gateway session auth) | ws-gateway | Railway | — | the branch disables `WS_DEV_TOKEN` when `NODE_ENV=production` and authorizes sockets against sessions instead — expect gateway DB access and its own env additions |
