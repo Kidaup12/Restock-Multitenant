@@ -9,7 +9,7 @@ import { CostValue } from "@/components/ui/cost-value";
 import { cn } from "@/lib/cn";
 import type { BuyList, BuyListRow, BuyTier } from "@/lib/data/plan";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
-import { addToOrder } from "./actions";
+import { addToOrder, clearPlanOverride, setPlanOverride } from "./actions";
 
 /**
  * Mode 1 — the tiered checklist. Tick rows, watch the running total, expand any
@@ -51,13 +51,120 @@ const TD_NUM = "px-4 py-3 text-right font-mono tabular-nums whitespace-nowrap te
 const dayLabel = (date: Date) =>
   new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
+/**
+ * The quantity cell: shows the number to order and, for anyone who can approve
+ * orders, an inline control to override the engine's figure. When an override is
+ * set the cell reads "you set N · revert to engine"; otherwise it offers a small
+ * "set qty" affordance. Writes go through the tenant/permission-gated actions,
+ * then the plan revalidates and the new figure streams back down.
+ */
+function QtyCell({ row, canOverride }: { row: BuyListRow; canOverride: boolean }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(row.recommendedQty));
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  if (!canOverride) return <>{row.recommendedQty}</>;
+
+  function save() {
+    const qty = Math.round(Number(value));
+    if (!Number.isFinite(qty) || qty < 1) {
+      setError("1 or more");
+      return;
+    }
+    startTransition(async () => {
+      const result = await setPlanOverride({ productId: row.productId, qty });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setError(null);
+      setEditing(false);
+    });
+  }
+
+  function revert() {
+    startTransition(async () => {
+      const result = await clearPlanOverride({ productId: row.productId });
+      if (result.ok) setEditing(false);
+    });
+  }
+
+  if (editing) {
+    return (
+      <div className="flex flex-col items-end gap-1">
+        <div className="flex items-center gap-1.5">
+          <input
+            type="number"
+            min={1}
+            value={value}
+            onChange={(e) => {
+              setValue(e.target.value);
+              setError(null);
+            }}
+            aria-label={`Order quantity for ${row.title}`}
+            className="w-16 rounded-md border border-edge bg-surface px-2 py-1 text-right font-mono text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent"
+          />
+          <Button size="sm" loading={pending} onClick={save}>
+            Save
+          </Button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditing(false);
+              setError(null);
+              setValue(String(row.recommendedQty));
+            }}
+            className="text-xs font-medium text-ink-muted hover:text-ink"
+          >
+            Cancel
+          </button>
+        </div>
+        {error && <span className="text-xs text-negative">{error}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <span className="font-medium text-ink">{row.recommendedQty}</span>
+      {row.overriddenQty !== null ? (
+        <span className="font-sans text-xs text-ink-muted">
+          you set {row.overriddenQty} ·{" "}
+          <button
+            type="button"
+            onClick={revert}
+            disabled={pending}
+            className="font-medium text-accent-ink hover:underline disabled:opacity-60"
+          >
+            revert to engine
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setValue(String(row.recommendedQty));
+            setEditing(true);
+          }}
+          className="font-sans text-xs font-medium text-accent-ink hover:underline"
+        >
+          set qty
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function BuyChecklist({
   buyList,
   canViewCosts,
+  canOverride,
   backLink,
 }: {
   buyList: BuyList;
   canViewCosts: boolean;
+  canOverride: boolean;
   backLink: React.ReactNode;
 }) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -236,7 +343,9 @@ export function BuyChecklist({
                               dayLabel(row.orderByDate)
                             )}
                           </td>
-                          <td className={TD_NUM}>{row.recommendedQty}</td>
+                          <td className={TD_NUM}>
+                            <QtyCell row={row} canOverride={canOverride} />
+                          </td>
                           <td className={cn(TD_NUM, "hidden lg:table-cell")}>
                             {/* Revenue is a sales figure — shown to every role as a plain
                                 KES amount (unit in the header), like the Stock catalogue. */}

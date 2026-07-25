@@ -154,6 +154,11 @@ export const builders: Record<string, Builder> = {
     weekKey: `2026-W01-${key}`,
     systemQty: 5,
   }),
+  ProductPlanOverride: (tenantId, key) => ({
+    tenantId,
+    productId: `ppo-product-${key}`,
+    qty: 5,
+  }),
 
   // Purchasing & audit
   Order: (tenantId, key) => ({

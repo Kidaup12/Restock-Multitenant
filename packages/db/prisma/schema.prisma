@@ -123,6 +123,7 @@ model Tenant {
   ingestCursors         IngestCursor[]
   notifications         Notification[]
   locationClosures      LocationClosure[]
+  productPlanOverrides  ProductPlanOverride[]
 }
 
 enum Role {
@@ -642,6 +643,27 @@ model SpotCheck {
   countedAt  DateTime?
 
   @@index([tenantId, weekKey])
+}
+
+// Owner override of the engine's recommended order quantity for a product, set
+// on the plan. Keyed by productId (not predictionId): the nightly run wipes and
+// recreates every Prediction row, so a prediction-keyed override would vanish —
+// this one applies to whichever prediction the next run produces for the product.
+model ProductPlanOverride {
+  id              String   @id @default(cuid())
+  tenantId        String
+  productId       String
+  qty             Int
+  note            String?
+  createdByUserId String?
+  createdByName   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, productId])
+  @@index([tenantId])
 }
 
 // ── Purchasing & audit ───────────────────────────────────────────────────────

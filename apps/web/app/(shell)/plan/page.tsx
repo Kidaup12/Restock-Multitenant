@@ -19,9 +19,11 @@ export const metadata: Metadata = {
 async function PlanContent({
   tenantId,
   canViewCosts,
+  canOverride,
 }: {
   tenantId: string;
   canViewCosts: boolean;
+  canOverride: boolean;
 }) {
   // canViewCosts flows into the query: PlanView is a client component, so the
   // rows serialize to the browser — costs come back null for a money-blind
@@ -56,7 +58,14 @@ async function PlanContent({
     );
   }
 
-  return <PlanView buyList={buyList} canViewCosts={canViewCosts} canBudget={canBudget} />;
+  return (
+    <PlanView
+      buyList={buyList}
+      canViewCosts={canViewCosts}
+      canBudget={canBudget}
+      canOverride={canOverride}
+    />
+  );
 }
 
 export default async function PlanPage() {
@@ -76,6 +85,7 @@ export default async function PlanPage() {
   }
 
   const canViewCosts = hasPermission(membership, "view_costs");
+  const canOverride = hasPermission(membership, "approve_orders");
 
   return (
     <div className="space-y-6">
@@ -88,7 +98,11 @@ export default async function PlanPage() {
           </div>
         }
       >
-        <PlanContent tenantId={membership.tenantId} canViewCosts={canViewCosts} />
+        <PlanContent
+          tenantId={membership.tenantId}
+          canViewCosts={canViewCosts}
+          canOverride={canOverride}
+        />
       </Suspense>
     </div>
   );

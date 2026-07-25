@@ -73,10 +73,12 @@ export function PlanView({
   buyList,
   canViewCosts,
   canBudget,
+  canOverride,
 }: {
   buyList: BuyList;
   canViewCosts: boolean;
   canBudget: boolean;
+  canOverride: boolean;
 }) {
   const [mode, setMode] = useState<Mode>("choose");
   const budgetTier = PLAN_TIER_LABEL[planFeatureTier("budget_planner")];
@@ -130,7 +132,12 @@ export function PlanView({
   );
 
   return mode === "list" ? (
-    <BuyChecklist buyList={buyList} canViewCosts={canViewCosts} backLink={backLink} />
+    <BuyChecklist
+      buyList={buyList}
+      canViewCosts={canViewCosts}
+      canOverride={canOverride}
+      backLink={backLink}
+    />
   ) : (
     <BudgetPlanner canViewCosts={canViewCosts} backLink={backLink} />
   );

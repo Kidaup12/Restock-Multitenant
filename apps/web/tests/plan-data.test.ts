@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { prismaService } from "@wezesha/db";
+import { prismaForTenant, prismaService } from "@wezesha/db";
 import {
   DEAD_SKUS,
   STOCKOUT_SKUS,
@@ -10,7 +10,9 @@ import { runForecast } from "../lib/forecast-run/run";
 import {
   createOrdersForPredictions,
   getBuyList,
+  removePlanOverride,
   splitByBudget,
+  upsertPlanOverride,
   type BuyListRow,
 } from "../lib/data/plan";
 
@@ -259,6 +261,113 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       await prismaService.tenant.delete({ where: { id: probe.id } });
     }
   });
+
+  it("an owner override replaces the engine qty and recomputes the line total", async () => {
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0]!;
+    const other = before!.rows.find((r) => r.productId !== target.productId)!;
+    const newQty = target.recommendedQty + 7;
+    try {
+      await upsertPlanOverride(seeded.tenantId, { productId: target.productId, qty: newQty });
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      const overridden = after!.rows.find((r) => r.productId === target.productId)!;
+      expect(overridden.overriddenQty).toBe(newQty);
+      expect(overridden.recommendedQty).toBe(newQty);
+      expect(overridden.lineTotalKes).toBeCloseTo(newQty * overridden.unitCostKes!, 5);
+      // The qty breakdown follows the override, not the engine's original number.
+      expect(overridden.qtySummary).toContain(`+ ${newQty} ordered`);
+
+      // One-engine default: every other product is untouched by the override.
+      const untouched = after!.rows.find((r) => r.productId === other.productId)!;
+      expect(untouched.overriddenQty).toBeNull();
+      expect(untouched.recommendedQty).toBe(other.recommendedQty);
+      expect(untouched.lineTotalKes).toBeCloseTo(other.lineTotalKes!, 5);
+    } finally {
+      await removePlanOverride(seeded.tenantId, target.productId);
+    }
+  });
+
+  it("clearing the override reverts the row to the engine quantity", async () => {
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0]!;
+    const engineQty = target.recommendedQty;
+
+    await upsertPlanOverride(seeded.tenantId, { productId: target.productId, qty: engineQty + 3 });
+    await removePlanOverride(seeded.tenantId, target.productId);
+
+    const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const row = after!.rows.find((r) => r.productId === target.productId)!;
+    expect(row.overriddenQty).toBeNull();
+    expect(row.recommendedQty).toBe(engineQty);
+  });
+
+  it("an override survives a re-plan that wipes and recreates every prediction", async () => {
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0]!;
+    const predBefore = target.predictionId;
+    const newQty = target.recommendedQty + 11;
+    try {
+      await upsertPlanOverride(seeded.tenantId, { productId: target.productId, qty: newQty });
+      // The nightly pipeline: prediction.deleteMany({}) then recreate — new ids.
+      await runForecast(seeded.tenantId);
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      const row = after!.rows.find((r) => r.productId === target.productId)!;
+      expect(row.predictionId).not.toBe(predBefore); // predictions really were rebuilt
+      expect(row.overriddenQty).toBe(newQty); // productId-keyed override still applies
+      expect(row.recommendedQty).toBe(newQty);
+    } finally {
+      await removePlanOverride(seeded.tenantId, target.productId);
+    }
+  }, 60_000);
+
+  it("an overridden row keeps its line total hidden from a money-blind member", async () => {
+    const owner = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = owner!.rows[0]!;
+    const newQty = target.recommendedQty + 5;
+    try {
+      await upsertPlanOverride(seeded.tenantId, { productId: target.productId, qty: newQty });
+      const member = await getBuyList(seeded.tenantId, { canViewCosts: false });
+      const row = member!.rows.find((r) => r.productId === target.productId)!;
+      // The quantity itself is operational — a member still sees it.
+      expect(row.overriddenQty).toBe(newQty);
+      expect(row.recommendedQty).toBe(newQty);
+      // The money the override implies stays redacted.
+      expect(row.lineTotalKes).toBeNull();
+      expect(row.unitCostKes).toBeNull();
+      expect(row.atRiskKes).toBeNull();
+    } finally {
+      await removePlanOverride(seeded.tenantId, target.productId);
+    }
+  });
+
+  it("overrides are tenant-scoped: a foreign tenant reads none", async () => {
+    const target = (await getBuyList(seeded.tenantId, { canViewCosts: true }))!.rows[0]!;
+    const probe = await prismaService.tenant.create({
+      data: { name: "Override Probe", slug: "override-probe" },
+    });
+    try {
+      await upsertPlanOverride(seeded.tenantId, { productId: target.productId, qty: 99 });
+
+      // The probe's scope sees no overrides — not even asking for the exact id.
+      const foreign = await prismaForTenant(probe.id).productPlanOverride.findMany({
+        where: { productId: target.productId },
+      });
+      expect(foreign).toEqual([]);
+
+      // A write under the probe's scope for the same product is a separate row,
+      // never touching the victim's.
+      await upsertPlanOverride(probe.id, { productId: target.productId, qty: 1 });
+      const victim = await prismaForTenant(seeded.tenantId).productPlanOverride.findMany({
+        where: { productId: target.productId },
+      });
+      expect(victim).toHaveLength(1);
+      expect(victim[0]!.qty).toBe(99);
+      expect(victim[0]!.tenantId).toBe(seeded.tenantId);
+    } finally {
+      await removePlanOverride(seeded.tenantId, target.productId);
+      await prismaService.tenant.delete({ where: { id: probe.id } });
+    }
+  });
 });
 
 /** Pure allocator wrapper — no database needed. */
@@ -282,6 +391,7 @@ describe("splitByBudget (pure)", () => {
       urgency: "medium",
       tier: "this_week",
       recommendedQty: 10,
+      overriddenQty: null,
       runRatePerDay: 1,
       moq: 1,
       abc: null,
