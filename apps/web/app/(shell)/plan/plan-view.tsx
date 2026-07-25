@@ -6,6 +6,7 @@ import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-featur
 import type { BuyList } from "@/lib/data/plan";
 import { BudgetPlanner } from "./budget-planner";
 import { BuyChecklist } from "./buy-checklist";
+import { PlanDecisionHeader } from "./decision-header";
 import { deleteScope, listScopes, saveScope, type SavedScope } from "./scope-actions";
 import { EMPTY_SCOPE, filterBuyListRows, ScopeBar, type ScopeSelection } from "./scope-bar";
 import { SupplyCalendarMode } from "./supply-calendar";
@@ -184,6 +185,7 @@ export function PlanView({
     };
     return (
       <div className="space-y-4">
+        <PlanDecisionHeader rows={filteredRows} canViewCosts={canViewCosts} />
         <ScopeBar
           rows={buyList.rows}
           selection={scope}
