@@ -400,6 +400,105 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     }
   });
 
+  it("re-sizes the list for a sales push through the same engine, lifting demand", async () => {
+    const base = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    expect(base).not.toBeNull();
+
+    const predictions = await prismaService.prediction.findMany({
+      where: { tenantId: seeded.tenantId },
+      include: { product: { include: { supplier: true } } },
+    });
+    const bySku = new Map(predictions.map((p) => [p.product.sku, p]));
+
+    // The one engine over the item's own lead+review cover with demand lifted —
+    // the exact call the data layer makes for the uplift path. Recomputed here,
+    // so a second formula or a dropped input shows up as a mismatch. No policy is
+    // passed, so it stays mean-cover, whatever the persisted regime was.
+    const engineUpliftAt = (sku: string, multiplier: number) => {
+      const p = bySku.get(sku)!;
+      return recommendedQty({
+        finalForecast30d: p.finalForecast30d * multiplier,
+        safetyStock: p.safetyStock,
+        currentStock: p.product.currentStock,
+        onOrder: p.product.onOrder,
+        coverDays: coverDaysFor(p.product, p.product.supplier),
+      });
+    };
+
+    // A no-op uplift (1x) is the persisted plan, byte-for-byte: same rows, same
+    // order, same quantities and line totals as the default fetch. This is the
+    // one-engine contract — a 0% push must not perturb anything.
+    const noop = await getBuyList(seeded.tenantId, { canViewCosts: true, demandUplift: 1 });
+    expect(noop!.rows.map((r) => r.predictionId)).toEqual(base!.rows.map((r) => r.predictionId));
+    for (const row of noop!.rows) {
+      const b = base!.rows.find((r) => r.predictionId === row.predictionId)!;
+      expect(row.recommendedQty, row.sku).toBe(b.recommendedQty);
+      expect(row.lineTotalKes).toBeCloseTo(b.lineTotalKes!, 5);
+    }
+
+    // A +100% push doubles expected demand: no override is set, so every emitted
+    // row is the engine's number at the lifted demand, and every qty-derived
+    // field follows it. Rows that still fall to 0 are dropped.
+    const lifted = await getBuyList(seeded.tenantId, { canViewCosts: true, demandUplift: 2 });
+    expect(lifted).not.toBeNull();
+    expect(lifted!.rows.length).toBeGreaterThan(0);
+    for (const row of lifted!.rows) {
+      const expected = engineUpliftAt(row.sku, 2);
+      expect(row.recommendedQty, row.sku).toBe(expected);
+      expect(expected, row.sku).toBeGreaterThan(0);
+      expect(row.lineTotalKes).toBeCloseTo(expected * row.unitCostKes!, 5);
+      expect(row.qtySummary).toContain(`+ ${expected} ordered`);
+    }
+    expect(lifted!.totalCostKes).toBeCloseTo(
+      lifted!.rows.reduce((s, r) => s + r.lineTotalKes!, 0),
+      5
+    );
+
+    // For a mean-cover-regime row — its persisted qty IS the mean-cover number at
+    // its own cover — lifting demand raises the order strictly above the plan,
+    // proving the uplift feeds the same sizing engine. Guarded: under the default
+    // tenant config classes resolve to calibrated/min-max, so such a row is
+    // present only when the seed leaves one on the mean-cover branch.
+    const meanCover = base!.rows.find((r) => {
+      const p = bySku.get(r.sku)!;
+      return p.finalForecast30d > 0 && engineUpliftAt(r.sku, 1) === Math.round(p.recommendedQty);
+    });
+    if (meanCover) {
+      const p = bySku.get(meanCover.sku)!;
+      const liftedRow = lifted!.rows.find((r) => r.sku === meanCover.sku)!;
+      expect(liftedRow.recommendedQty).toBe(engineUpliftAt(meanCover.sku, 2));
+      expect(liftedRow.recommendedQty).toBeGreaterThan(Math.round(p.recommendedQty));
+    }
+  });
+
+  it("a sales-push re-size respects the owner override and keeps costs money-blind", async () => {
+    const base = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = base!.rows[0]!;
+    const pinned = target.recommendedQty + 13;
+    try {
+      await upsertPlanOverride(seeded.tenantId, { productId: target.productId, qty: pinned });
+
+      // A sales push that would re-size the row must not move an overridden one —
+      // the owner's number wins over the what-if.
+      const lifted = await getBuyList(seeded.tenantId, { canViewCosts: true, demandUplift: 2 });
+      const row = lifted!.rows.find((r) => r.productId === target.productId)!;
+      expect(row.overriddenQty).toBe(pinned);
+      expect(row.recommendedQty).toBe(pinned);
+      expect(row.lineTotalKes).toBeCloseTo(pinned * row.unitCostKes!, 5);
+
+      // A money-blind member gets the lifted list with costs redacted.
+      const member = await getBuyList(seeded.tenantId, { canViewCosts: false, demandUplift: 2 });
+      const blind = member!.rows.find((r) => r.productId === target.productId)!;
+      expect(blind.recommendedQty).toBe(pinned);
+      expect(blind.lineTotalKes).toBeNull();
+      expect(blind.unitCostKes).toBeNull();
+      expect(blind.atRiskKes).toBeNull();
+      expect(member!.totalCostKes).toBeNull();
+    } finally {
+      await removePlanOverride(seeded.tenantId, target.productId);
+    }
+  });
+
   it("splits the list against a budget: sums reconcile, criticals never wait", async () => {
     const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     const rows = buyList!.rows;

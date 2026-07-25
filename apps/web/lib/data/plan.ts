@@ -186,16 +186,26 @@ function excludedReasonFor(
  *  built (and sorted) on full costs, then redacted, so ordering is identical
  *  whichever way the flag lands.
  *
- *  `coverDays` is an optional what-if. Absent, every quantity is the persisted
- *  plan and every field is byte-identical to before — the one-engine CI
- *  contract depends on this default path staying untouched. Present, every
- *  NON-overridden row is re-sized through the one engine (`recommendedQty`, the
- *  mean-cover branch, floored at the item's lead time); an owner override always
- *  wins and is never re-sized. Costs redact exactly as always — the re-sized
- *  `lineTotalKes` carries no new field. */
+ *  `coverDays` and `demandUplift` are optional what-ifs on the same engine.
+ *  Absent (uplift absent or 1), every quantity is the persisted plan and every
+ *  field is byte-identical to before — the one-engine CI contract depends on
+ *  this default path staying untouched. Present, every NON-overridden row is
+ *  re-sized through the one engine (`recommendedQty`, the mean-cover branch):
+ *    - `coverDays` sizes each line to that days-of-cover horizon, floored at the
+ *      item's lead time.
+ *    - `demandUplift` (a multiplier ≥ 1; 1.25 = +25%) lifts expected demand so
+ *      the owner can size for a promotion/season, over the item's own lead+review
+ *      cover.
+ *  They compose: with both set, demand is lifted AND sized to the chosen cover.
+ *  An owner override always wins and is never re-sized. Costs redact exactly as
+ *  always — the re-sized `lineTotalKes` carries no new field. */
 export async function getBuyList(
   tenantId: string,
-  { canViewCosts, coverDays }: { canViewCosts: boolean; coverDays?: number }
+  {
+    canViewCosts,
+    coverDays,
+    demandUplift,
+  }: { canViewCosts: boolean; coverDays?: number; demandUplift?: number }
 ): Promise<BuyList | null> {
   const db = prismaForTenant(tenantId);
   const latest = await db.prediction.findFirst({
@@ -293,6 +303,13 @@ export async function getBuyList(
     for (const l of draftLines) draftPoProductIds.add(l.productId);
   }
 
+  // What-if flags, resolved once. A demand uplift only counts when it lifts
+  // (multiplier > 1) — a 1x (or absent) uplift is a no-op, so with no coverDays
+  // the whole re-size path is skipped and every field stays byte-identical to
+  // the persisted plan.
+  const demandMultiplier = demandUplift != null && demandUplift > 1 ? demandUplift : 1;
+  const whatIf = coverDays != null || demandMultiplier > 1;
+
   const built = kept
     .map((p): FullBuyListRow => {
       const product = p.product;
@@ -303,24 +320,31 @@ export async function getBuyList(
       // With no override, `qty === p.qty` so every field below is byte-identical
       // to the pre-override behaviour — only overridden products diverge.
       //
-      // Cover-days what-if: when `coverDays` is passed, re-size every
-      // NON-overridden row through the ONE engine — `recommendedQty()` is
-      // `reorderBreakdown()`'s qty, the same function the nightly pipeline
-      // persists with. No policy/abcCategory is passed, so it takes the
-      // mean-cover branch; the horizon is floored at the item's lead time so the
-      // order always covers the wait. An overridden row is never re-sized — the
-      // owner's number wins over any what-if. With `coverDays` absent,
-      // `resizedQty` is null and `qty === override ?? p.qty`, byte-identical to
-      // today.
+      // What-if re-size: when a cover horizon or a demand uplift is in play,
+      // re-size every NON-overridden row through the ONE engine —
+      // `recommendedQty()` is `reorderBreakdown()`'s qty, the same function the
+      // nightly pipeline persists with. No policy/abcCategory is passed, so it
+      // takes the mean-cover branch. The two lenses compose:
+      //   - demand: lifted by `demandMultiplier` (1x = no lift) for a sales push.
+      //   - cover:  the passed `coverDays` floored at the item's lead time when
+      //     set, else the item's own lead+review window (`coverDaysFor`) — the
+      //     natural mean-cover horizon, so an uplift-only re-size just scales the
+      //     existing plan's demand.
+      // An overridden row is never re-sized — the owner's number wins over any
+      // what-if. With neither lens active, `whatIf` is false, `resizedQty` is
+      // null and `qty === override ?? p.qty`, byte-identical to today.
       const override = overrideByProduct.get(p.productId) ?? null;
       const resizedQty =
-        coverDays != null && override == null
+        whatIf && override == null
           ? recommendedQty({
-              finalForecast30d: p.finalForecast30d,
+              finalForecast30d: p.finalForecast30d * demandMultiplier,
               safetyStock: p.safetyStock,
               currentStock: product.currentStock,
               onOrder: product.onOrder,
-              coverDays: Math.max(coverDays, leadDays),
+              coverDays:
+                coverDays != null
+                  ? Math.max(coverDays, leadDays)
+                  : coverDaysFor(product, product.supplier),
             })
           : null;
       const qty = override ?? resizedQty ?? p.qty;
@@ -382,10 +406,11 @@ export async function getBuyList(
   excludedRows.sort(byUrgency);
 
   // A what-if re-size can zero out a row that no longer needs ordering at the
-  // chosen cover; drop those so the checklist never shows an "order 0" line.
-  // Only the what-if path filters — the default path keeps active rows untouched,
-  // so the one-engine contract stays byte-identical.
-  const sizedRows = coverDays != null ? activeRows.filter((r) => r.recommendedQty > 0) : activeRows;
+  // chosen cover (a demand uplift only raises quantities, but it composes with a
+  // short cover that can); drop those so the checklist never shows an "order 0"
+  // line. Only the what-if path filters — the default path keeps active rows
+  // untouched, so the one-engine contract stays byte-identical.
+  const sizedRows = whatIf ? activeRows.filter((r) => r.recommendedQty > 0) : activeRows;
 
   return {
     forecastRunId: latest.forecastRunId,
