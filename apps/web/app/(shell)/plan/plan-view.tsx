@@ -43,9 +43,11 @@ function ModeCard({
 export function PlanView({
   buyList,
   canViewCosts,
+  canOverride,
 }: {
   buyList: BuyList;
   canViewCosts: boolean;
+  canOverride: boolean;
 }) {
   const [mode, setMode] = useState<Mode>("choose");
 
@@ -89,7 +91,12 @@ export function PlanView({
   );
 
   return mode === "list" ? (
-    <BuyChecklist buyList={buyList} canViewCosts={canViewCosts} backLink={backLink} />
+    <BuyChecklist
+      buyList={buyList}
+      canViewCosts={canViewCosts}
+      canOverride={canOverride}
+      backLink={backLink}
+    />
   ) : (
     <BudgetPlanner canViewCosts={canViewCosts} backLink={backLink} />
   );

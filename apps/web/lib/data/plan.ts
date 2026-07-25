@@ -57,7 +57,13 @@ export type BuyListRow = {
   orderByDate: Date;
   urgency: string;
   tier: BuyTier;
+  /** The quantity to order: the engine's number, or the owner's override when one
+   *  is set for this product. Every qty-derived figure (line total, summary) uses it. */
   recommendedQty: number;
+  /** The owner's override quantity when one exists for this product, else null.
+   *  Lets the UI show "you set N" and offer a revert; keyed on productId so it
+   *  survives the nightly re-plan that wipes and recreates predictions. */
+  overriddenQty: number | null;
   /** Forecast daily run rate — persisted finalForecast30d / 30 (the one engine, not re-derived). */
   runRatePerDay: number;
   /** Supplier minimum order quantity (units); 1 when none is set. */
@@ -171,6 +177,18 @@ export async function getBuyList(
     .map((p) => ({ ...p, qty: Math.round(p.recommendedQty) }))
     .filter((p) => p.qty > 0);
 
+  // Owner overrides of the recommended quantity, keyed by productId so they
+  // outlive the nightly re-plan (it wipes and recreates every prediction). A
+  // product with no override is untouched below — the one-engine default.
+  const overrideByProduct = new Map<string, number>();
+  if (kept.length > 0) {
+    const overrides = await db.productPlanOverride.findMany({
+      where: { productId: { in: kept.map((p) => p.productId) } },
+      select: { productId: true, qty: true },
+    });
+    for (const o of overrides) overrideByProduct.set(o.productId, o.qty);
+  }
+
   // Trailing-30-day actual revenue per buy-list product: one tenant-scoped SQL
   // sum. A sales figure — member-visible like Stock/Today's revenue30dKes, not
   // recomputed per screen.
@@ -191,6 +209,11 @@ export async function getBuyList(
       const leadDays = leadDaysFor(product, product.supplier) ?? 0;
       const daysLeftToOrder = p.daysUntilStockout - leadDays;
       const stockoutDays = Math.max(0, RISK_HORIZON_DAYS - p.daysUntilStockout);
+      // The engine's number is the default; the owner's override wins when set.
+      // With no override, `qty === p.qty` so every field below is byte-identical
+      // to the pre-override behaviour — only overridden products diverge.
+      const override = overrideByProduct.get(p.productId) ?? null;
+      const qty = override ?? p.qty;
       return {
         predictionId: p.id,
         productId: p.productId,
@@ -208,16 +231,17 @@ export async function getBuyList(
         orderByDate: new Date(latest.runDate.getTime() + daysLeftToOrder * 86_400_000),
         urgency: p.urgency,
         tier: tierFor(p.urgency, daysLeftToOrder),
-        recommendedQty: p.qty,
+        recommendedQty: qty,
+        overriddenQty: override,
         runRatePerDay: r1(p.finalForecast30d / 30),
         moq: product.supplier?.moq ?? 1,
         abc: product.abcCategory,
         unitCostKes: product.costKes,
-        lineTotalKes: p.qty * product.costKes,
+        lineTotalKes: qty * product.costKes,
         priceKes: product.priceKes,
         reasoning: p.reasoning,
-        explain: buildExplain(p, p.qty),
-        qtySummary: buildQtySummary(p, p.qty),
+        explain: buildExplain(p, qty),
+        qtySummary: buildQtySummary(p, qty),
         plannable: plannableReason(product),
         atRiskKes: Math.round((p.finalForecast30d / RISK_HORIZON_DAYS) * product.priceKes * stockoutDays),
         revenue30dKes: revenueByProduct.get(p.productId) ?? 0,
@@ -419,4 +443,44 @@ export async function createOrdersForPredictions(
     }
     return { created, updated, skipped: predictionIds.length - predictions.length };
   });
+}
+
+export type PlanOverrideInput = {
+  productId: string;
+  qty: number;
+  createdByUserId?: string | null;
+  createdByName?: string | null;
+};
+
+/**
+ * Set (or replace) this tenant's owner override of the recommended order
+ * quantity for a product. Upsert on the (tenantId, productId) unique — one
+ * standing override per product, updated in place. RLS-scoped end to end: the
+ * tenant client can only reach its own rows, and the WITH CHECK policy rejects
+ * any write that names a foreign tenant.
+ */
+export async function upsertPlanOverride(
+  tenantId: string,
+  input: PlanOverrideInput
+): Promise<void> {
+  const qty = Math.round(input.qty);
+  const db = prismaForTenant(tenantId);
+  await db.productPlanOverride.upsert({
+    where: { tenantId_productId: { tenantId, productId: input.productId } },
+    create: {
+      tenantId,
+      productId: input.productId,
+      qty,
+      createdByUserId: input.createdByUserId ?? null,
+      createdByName: input.createdByName ?? null,
+    },
+    update: { qty },
+  });
+}
+
+/** Drop this tenant's override for a product — the buy list reverts to the
+ *  engine's recommendation. A foreign productId matches nothing under RLS. */
+export async function removePlanOverride(tenantId: string, productId: string): Promise<void> {
+  const db = prismaForTenant(tenantId);
+  await db.productPlanOverride.deleteMany({ where: { productId } });
 }

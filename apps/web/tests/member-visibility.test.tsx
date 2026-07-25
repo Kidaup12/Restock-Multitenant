@@ -342,6 +342,7 @@ describe("plan buy-list redaction (pure)", () => {
     urgency: "high",
     tier: "this_week",
     recommendedQty: 10,
+    overriddenQty: null,
     runRatePerDay: 1.5,
     moq: 1,
     abc: "A",
@@ -370,5 +371,16 @@ describe("plan buy-list redaction (pure)", () => {
     // No non-revenue *Kes cost number leaks (revenue30dKes is allowlisted).
     expect(costNumbers(member.funded)).toEqual([]);
     expect(redactBudgetSplit(split, true).funded[0]!.revenue30dKes).toBe(5000);
+  });
+
+  it("an owner-overridden row keeps its quantity but still hides the line total from a member", () => {
+    // The override changes the qty (and therefore the line total). The qty is
+    // operational and stays; the money it implies is redacted like any other.
+    const row: BuyListRow = { ...mkRow(0), overriddenQty: 8, recommendedQty: 8, lineTotalKes: 800 };
+    const member = redactBudgetSplit(splitByBudget([row], 100_000), false);
+    expect(member.funded[0]!.overriddenQty).toBe(8);
+    expect(member.funded[0]!.recommendedQty).toBe(8);
+    expect(member.funded[0]!.lineTotalKes).toBeNull();
+    expect(costNumbers(member.funded)).toEqual([]);
   });
 });
