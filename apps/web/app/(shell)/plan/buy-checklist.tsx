@@ -9,6 +9,7 @@ import { CostValue } from "@/components/ui/cost-value";
 import { cn } from "@/lib/cn";
 import type { BuyList, BuyListRow, BuyTier } from "@/lib/data/plan";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
+import { moqPreview, type MoqPreview } from "@/lib/plan/moq-preview";
 import { addToOrder, clearPlanOverride, setPlanOverride } from "./actions";
 
 /**
@@ -153,6 +154,30 @@ function QtyCell({ row, canOverride }: { row: BuyListRow; canOverride: boolean }
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * MOQ-floor preview under the quantity: when the supplier minimum forces the
+ * order above what we'd otherwise buy, show "N → M (MOQ)"; when that floor buys
+ * an uncomfortable run of cover, add a subtle "≈ X mo" warning. Quantities only,
+ * so it renders for every role. The floor itself is applied at PO creation —
+ * this is read-only.
+ */
+function MoqNote({ preview }: { preview: MoqPreview }) {
+  if (!preview.roundedUp) return null;
+  return (
+    <span
+      className="flex flex-col items-end font-sans text-xs leading-tight text-ink-muted"
+      title={`Supplier minimum is ${preview.flooredQty}; the plan recommends ${preview.effectiveQty}.`}
+    >
+      <span>
+        {preview.effectiveQty} → <span className="font-medium text-ink">{preview.flooredQty}</span> MOQ
+      </span>
+      {preview.badMoq && preview.monthsOfCover !== null && (
+        <span className="text-warning">≈ {Math.round(preview.monthsOfCover)} mo cover</span>
+      )}
+    </span>
   );
 }
 
@@ -344,7 +369,10 @@ export function BuyChecklist({
                             )}
                           </td>
                           <td className={TD_NUM}>
-                            <QtyCell row={row} canOverride={canOverride} />
+                            <div className="flex flex-col items-end gap-0.5">
+                              <QtyCell row={row} canOverride={canOverride} />
+                              <MoqNote preview={moqPreview(row)} />
+                            </div>
                           </td>
                           <td className={cn(TD_NUM, "hidden lg:table-cell")}>
                             {/* Revenue is a sales figure — shown to every role as a plain
