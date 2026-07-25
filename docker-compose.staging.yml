@@ -61,7 +61,28 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+    environment:
+      REDIS_URL: redis://redis:6379
+      # web imports @wezesha/db: client.ts throws at import when
+      # SERVICE_DATABASE_URL is unset, and the app client reads DATABASE_URL —
+      # same in-network roles as the worker/ws-gateway services above.
+      DATABASE_URL: postgresql://wezesha_app:wezesha_app_dev@db:5432/wezesha
+      SERVICE_DATABASE_URL: postgresql://wezesha_service:wezesha_service_dev@db:5432/wezesha
+      # Better Auth signs sessions; the image runs NODE_ENV=production, where a
+      # missing secret fails module init. Dev-only value for the rehearsal.
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-staging-dev-secret}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      # Shopify token crypto — same key as the worker so the OAuth callback
+      # (web) and the sync (worker) agree on the at-rest encryption.
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+      SHOPIFY_APP_URL: ${SHOPIFY_APP_URL:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:
-      - ws-gateway
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      ws-gateway:
+        condition: service_started
