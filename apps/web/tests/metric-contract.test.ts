@@ -66,9 +66,11 @@ describe.skipIf(!runnable)("shared metric contract (seeded local db)", () => {
       expect(catalogueOnHand.get(p.id)).toBe(p.currentStock);
     }
 
-    // Plan buy list reads the same on-hand for every line it emits.
+    // Plan buy list reads the same on-hand for every line it emits — active AND
+    // held-back (excluded). The exclusion split changes which bucket a product
+    // lands in, never the shared on-hand it reads.
     expect(buyList).not.toBeNull();
-    for (const row of buyList!.rows) {
+    for (const row of [...buyList!.rows, ...buyList!.excluded]) {
       expect(row.onHandUnits).toBe(currentStock.get(row.productId));
       expect(row.onHandUnits).toBe(catalogueOnHand.get(row.productId));
     }

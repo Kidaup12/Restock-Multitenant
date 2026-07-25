@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { cn } from "@/lib/cn";
-import type { BuyList, BuyListRow, BuyTier } from "@/lib/data/plan";
+import type { BuyList, BuyListRow, BuyTier, ExcludedReason, ExcludedRow } from "@/lib/data/plan";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import { moqPreview, type MoqPreview } from "@/lib/plan/moq-preview";
 import { addToOrder, clearPlanOverride, planCoverHorizon, setPlanOverride } from "./actions";
@@ -41,6 +41,27 @@ const PLANNABLE_NOTES: Record<string, string> = {
   "missing-price": "No selling price on file — margin can't be checked.",
   "cost-exceeds-price": "Cost is above the selling price — restocking this loses money.",
 };
+
+// The "Excluded" section below the tiers: products the run sized but held off
+// the active list, grouped by why. Read-only — nothing here is being ordered;
+// it's surfaced so nothing drops silently.
+const EXCLUDED_GROUPS: { reason: ExcludedReason; title: string; subtitle: string }[] = [
+  {
+    reason: "already-ordered",
+    title: "Already on the way",
+    subtitle: "These already have an open order in progress — the plan isn't ordering them again.",
+  },
+  {
+    reason: "unplannable",
+    title: "Cost needs checking",
+    subtitle: "Missing or broken cost data — fix the numbers and they rejoin the list.",
+  },
+  {
+    reason: "slow-mover",
+    title: "Too slow to stock now",
+    subtitle: "Plenty of cover and selling slowly — the cash is better spent elsewhere first.",
+  },
+];
 
 // Cover-days what-if control: step a uniform days-of-cover horizon and re-size
 // the whole list to it. A weekly step keeps the choices meaningful; the server
@@ -189,6 +210,78 @@ function MoqNote({ preview }: { preview: MoqPreview }) {
   );
 }
 
+/**
+ * The "Excluded" section: products the run sized but held off the active list,
+ * grouped by why. Read-only — no ticking, no override — so it reads as context,
+ * not a second buy list. Costs redact through the same CostValue as the tiers.
+ */
+function ExcludedSection({
+  excluded,
+  canViewCosts,
+}: {
+  excluded: ExcludedRow[];
+  canViewCosts: boolean;
+}) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="font-display text-base font-semibold text-ink">
+          Held off the list · {excluded.length}
+        </h2>
+        <p className="mt-0.5 text-sm text-ink-muted">
+          Nothing here is being ordered — surfaced so nothing drops silently.
+        </p>
+      </div>
+      {EXCLUDED_GROUPS.map(({ reason, title, subtitle }) => {
+        const groupRows = excluded.filter((r) => r.reason === reason);
+        if (groupRows.length === 0) return null;
+        return (
+          <Card key={reason}>
+            <CardHeader title={`${title} · ${groupRows.length}`} subtitle={subtitle} />
+            <div className="mt-2 w-full overflow-x-auto pb-2">
+              <table className="w-full min-w-[560px] text-sm">
+                <thead>
+                  <tr className="border-b border-edge">
+                    <th scope="col" className={TH}>Product</th>
+                    <th scope="col" className={cn(TH, "hidden md:table-cell")}>Supplier</th>
+                    <th scope="col" className={TH_NUM}>Days left</th>
+                    <th scope="col" className={cn(TH_NUM, "hidden md:table-cell")}>Suggested qty</th>
+                    <th scope="col" className={TH_NUM}>Line total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupRows.map((row) => (
+                    <tr key={row.predictionId} className="border-b border-edge">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-ink">{row.title}</span>
+                          {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
+                        </div>
+                        <div className="mt-0.5 font-mono text-xs text-ink-muted">{row.sku}</div>
+                        {reason === "unplannable" && PLANNABLE_NOTES[row.plannable] && (
+                          <p className="mt-1 text-xs text-warning">{PLANNABLE_NOTES[row.plannable]}</p>
+                        )}
+                      </td>
+                      <td className={cn(TD, "hidden md:table-cell")}>{row.supplierName ?? "—"}</td>
+                      <td className={TD_NUM}>
+                        {row.onHandUnits <= 0 ? "—" : `${row.daysUntilStockout}d`}
+                      </td>
+                      <td className={cn(TD_NUM, "hidden md:table-cell")}>{row.recommendedQty}</td>
+                      <td className={TD_NUM}>
+                        <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 export function BuyChecklist({
   buyList,
   canViewCosts,
@@ -304,7 +397,8 @@ export function BuyChecklist({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink-muted">
           {rows.length} products to order · full list costs{" "}
-          <CostValue amount={view.totalCostKes} canViewCosts={canViewCosts} /> · {backLink}
+          <CostValue amount={view.totalCostKes} canViewCosts={canViewCosts} />
+          {view.excluded.length > 0 && <> · {view.excluded.length} held back</>} · {backLink}
         </p>
         <ExportBar
           rows={rows}
@@ -437,6 +531,11 @@ export function BuyChecklist({
                                   Check cost
                                 </Badge>
                               )}
+                              {row.doubleOrderWarn && (
+                                <Badge tone="warning" className="ml-2 font-sans">
+                                  also on a draft PO
+                                </Badge>
+                              )}
                             </div>
                           </td>
                           <td className={cn(TD, "hidden md:table-cell")}>
@@ -512,6 +611,10 @@ export function BuyChecklist({
           </Card>
         );
       })}
+
+      {view.excluded.length > 0 && (
+        <ExcludedSection excluded={view.excluded} canViewCosts={canViewCosts} />
+      )}
 
       {(picked.size > 0 || notice) && (
         <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-surface px-4 py-3 shadow-pop">
