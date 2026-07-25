@@ -21,6 +21,8 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
+const appUrl = process.env.BETTER_AUTH_URL;
+
 export const metadata: Metadata = {
   title: {
     default: "Wezesha Restock",
@@ -28,6 +30,7 @@ export const metadata: Metadata = {
   },
   description: "Stock replenishment for beauty retailers.",
   applicationName: "Wezesha Restock",
+  metadataBase: appUrl ? new URL(appUrl) : undefined,
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
@@ -40,6 +43,18 @@ export const metadata: Metadata = {
       { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
     apple: "/icons/icon-192.png",
+  },
+  openGraph: {
+    title: "Wezesha Restock",
+    description: "Stock replenishment for beauty retailers.",
+    siteName: "Wezesha Restock",
+    type: "website",
+    url: appUrl,
+  },
+  twitter: {
+    card: "summary",
+    title: "Wezesha Restock",
+    description: "Stock replenishment for beauty retailers.",
   },
 };
 
