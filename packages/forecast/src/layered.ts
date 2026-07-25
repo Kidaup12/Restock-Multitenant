@@ -13,6 +13,8 @@ import {
   weightedDailyRateAdjusted,
   weightedDailyRateCensored,
   censoredDaysInWindow,
+  blockedDaysInWindow,
+  dayKeyOf,
   inferredStockoutGapDays,
   effectiveWindowDays,
   daysOfStockRemaining,
@@ -78,6 +80,14 @@ export type ForecastInput = {
    * "couldn't sell", not "no demand"). Absent/empty -> gap-inference fallback.
    */
   stockoutDates?: Date[];
+  /**
+   * Day-keys (UTC midnight) to censor from the run rate for reasons OTHER than
+   * proven stockouts: past/ongoing promo-window days (whose spike must not
+   * inflate the baseline) and days the shop was fully closed (whose zero sales
+   * must not deflate it). Dropped from both numerator and denominator, distinct
+   * from stockoutDates. Absent/empty -> no change.
+   */
+  excludedDates?: Date[];
   /** Per-class z overrides for safety stock (tenant setting). Absent -> defaults. */
   serviceZ?: Partial<Record<"A" | "B" | "C", number | null>>;
   /** Cap multiple over the best trailing month (tenant setting). Absent -> 3. */
@@ -142,17 +152,25 @@ export function historySpanDays(history: SalesPoint[], today: Date): number {
 /** Plain mean daily rate over the trailing `windowDays` before `today`.
  *  Censored (proven out-of-stock) days come out of the denominator, and the
  *  floor adapts to signal quality (effectiveWindowDays). */
-function rateOverWindow(history: SalesPoint[], today: Date, windowDays: number, stockoutDates?: Date[]): number {
+function rateOverWindow(
+  history: SalesPoint[],
+  today: Date,
+  windowDays: number,
+  stockoutDates?: Date[],
+  excludedDates?: Date[]
+): number {
   const since = new Date(today);
   since.setUTCDate(since.getUTCDate() - windowDays);
-  const inWindow = history.filter((p) => p.date >= since && p.date < today);
+  const excluded = excludedDates?.length ? new Set(excludedDates.map(dayKeyOf)) : null;
+  const inWindow = history.filter(
+    (p) => p.date >= since && p.date < today && (!excluded || !excluded.has(dayKeyOf(p.date)))
+  );
   const qty = inWindow.reduce((s, p) => s + p.quantity, 0);
-  const censored = stockoutDates?.length ? censoredDaysInWindow(stockoutDates, since, today) : 0;
+  const hasMask = !!(stockoutDates?.length || excludedDates?.length);
+  const blocked = hasMask ? blockedDaysInWindow(stockoutDates ?? [], excludedDates, since, today) : 0;
   const saleDays = inWindow.filter((p) => p.quantity > 0).length;
-  const signal = stockoutDates?.length
-    ? { inStockDays: windowDays - censored, saleDays }
-    : undefined;
-  return qty / effectiveWindowDays(windowDays, censored, signal);
+  const signal = hasMask ? { inStockDays: windowDays - blocked, saleDays } : undefined;
+  return qty / effectiveWindowDays(windowDays, blocked, signal);
 }
 
 /**
@@ -163,17 +181,24 @@ function rateOverWindow(history: SalesPoint[], today: Date, windowDays: number, 
  * (floored at 7 days) — dividing a 10-day-old product's sales by a fixed 30
  * would silently under-forecast it 3x. Snapshot-proven stockout days are
  * excluded from denominators when the mask is provided; otherwise the
- * gap-inference fallback covers pre-snapshot history.
+ * gap-inference fallback covers pre-snapshot history. `excludedDates` (past
+ * promo-spike ∪ shop-closure day-keys) are censored from every path — distinct
+ * from stockoutDates, so they never flip the censored-vs-inference dispatch.
  */
-export function runRateDaily(history: SalesPoint[], today: Date, stockoutDates?: Date[]): number {
+export function runRateDaily(
+  history: SalesPoint[],
+  today: Date,
+  stockoutDates?: Date[],
+  excludedDates?: Date[]
+): number {
   const span = historySpanDays(history, today);
   if (span < NEW_PRODUCT_DAYS) {
     const window = Math.min(30, Math.max(7, Math.ceil(span)));
-    return rateOverWindow(history, today, window, stockoutDates);
+    return rateOverWindow(history, today, window, stockoutDates, excludedDates);
   }
   return stockoutDates?.length
-    ? weightedDailyRateCensored(history, stockoutDates, today)
-    : weightedDailyRateAdjusted(history, today); // gap inference when no snapshot mask
+    ? weightedDailyRateCensored(history, stockoutDates, today, excludedDates)
+    : weightedDailyRateAdjusted(history, today, excludedDates); // gap inference when no snapshot mask
 }
 
 /** Largest single calendar-month sales total in the history before `today` (0 if none). */
@@ -221,7 +246,7 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   const override = input.demandOverride ?? null;
 
   // ── Layer 1: recency-weighted run rate (or an external demand override) ────
-  const historyDailyRate = runRateDaily(input.history, today, input.stockoutDates);
+  const historyDailyRate = runRateDaily(input.history, today, input.stockoutDates, input.excludedDates);
   // The rate the inventory + sizing math runs on: the override when present
   // (cold-start borrow / owner expectation), else the history run rate.
   const dailyRate = override ? override.forecast30d / 30 : historyDailyRate;

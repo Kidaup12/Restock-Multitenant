@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
-import { prismaForTenant, prismaForTenantTx } from "@wezesha/db";
+import { prismaForTenant, prismaForTenantTx, isSellable } from "@wezesha/db";
 import {
   assignAbc,
   dailySalesValue,
@@ -14,10 +14,13 @@ import {
   borrowedForecast30d,
   selectPriorForProduct,
   applyOwnerPrior,
+  windowsForProduct,
+  expandPromoWindowsToDays,
   type ActivePromo,
   type DemandOverride,
   type OwnerPriorFacts,
   type PredictionFields,
+  type PromoWindow,
   type ProxyCandidate,
   type ProxyTarget,
   type SalesPoint,
@@ -54,6 +57,36 @@ function isGenuinelyNew(shopifyCreatedAt: Date | null, now: Date): boolean {
   return (now.getTime() - shopifyCreatedAt.getTime()) / DAY_MS <= COLD_START_MAX_AGE_DAYS;
 }
 
+/** UTC-midnight day-key (ms) for a stored closure date. */
+function dayKeyMs(d: Date): number {
+  const t = new Date(d);
+  t.setUTCHours(0, 0, 0, 0);
+  return t.getTime();
+}
+
+/** Day-keys on which EVERY Sells-role location was closed. A partial closure
+ *  (one branch of several shut) is deliberately left in the rate — censoring it
+ *  would over-correct a multi-branch tenant, so v1 only drops fully-closed days. */
+function fullClosureDayKeys(
+  closures: Array<{ locationId: string; date: Date }>,
+  sellsLocationIds: Set<string>
+): Date[] {
+  if (sellsLocationIds.size === 0) return [];
+  const closedByDay = new Map<number, Set<string>>();
+  for (const c of closures) {
+    if (!sellsLocationIds.has(c.locationId)) continue;
+    const k = dayKeyMs(c.date);
+    let set = closedByDay.get(k);
+    if (!set) closedByDay.set(k, (set = new Set()));
+    set.add(c.locationId);
+  }
+  const out: Date[] = [];
+  for (const [k, closed] of closedByDay) {
+    if (closed.size >= sellsLocationIds.size) out.push(new Date(k));
+  }
+  return out;
+}
+
 export type ForecastRunResult = { created: number; forecastRunId: string };
 
 const r0 = (n: number) => Math.round(n);
@@ -70,7 +103,7 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
   const now = new Date();
   const historySince = new Date(now.getTime() - HISTORY_DAYS * DAY_MS);
 
-  const [products, config, promos, sales, priorRows] = await Promise.all([
+  const [products, config, promos, pastPromos, closures, locations, sales, priorRows] = await Promise.all([
     db.product.findMany({
       // notForSale (testers/display/damaged) stay visible in the catalogue but
       // never earn a forecast or a buy-list line — same exclusion the cost and
@@ -97,6 +130,20 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
       where: { deletedAt: null, startDate: { lte: now }, endDate: { gte: now } },
       select: { discountPct: true, promoType: true, channel: true, scope: true, scopeValue: true },
     }),
+    // Past/ongoing promo windows overlapping the history window: their spike days
+    // are censored from the baseline run rate (distinct from the active-promo LIFT
+    // above, which boosts the forward forecast).
+    db.promo.findMany({
+      where: { deletedAt: null, startDate: { lte: now }, endDate: { gte: historySince } },
+      select: { startDate: true, endDate: true, scope: true, scopeValue: true },
+    }),
+    // Shop-closure days across the history window, censored so a closed-day zero
+    // doesn't deflate the rate. Per-location; the full-closure filter is below.
+    db.locationClosure.findMany({
+      where: { date: { gte: historySince } },
+      select: { locationId: true, date: true },
+    }),
+    db.location.findMany({ select: { id: true, locationType: true } }),
     db.salesHistory.findMany({
       where: { date: { gte: historySince } },
       select: { productId: true, date: true, quantity: true, revenueKes: true, channel: true },
@@ -147,6 +194,28 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
 
   const titleById = new Map(products.map((p) => [p.id, p.title]));
 
+  // Days censored from the baseline run rate: past-promo spike days (matched per
+  // product) ∪ days the shop was fully closed. Promo spikes would otherwise
+  // permanently over-order; closed-day zeros would deflate the rate.
+  const pastPromoWindows: PromoWindow[] = pastPromos.map((p) => ({
+    start: p.startDate,
+    end: p.endDate,
+    scope: p.scope,
+    scopeValue: p.scopeValue,
+  }));
+  const sellsLocationIds = new Set(locations.filter(isSellable).map((l) => l.id));
+  const fullClosureDays = fullClosureDayKeys(closures, sellsLocationIds);
+  const excludedByProduct = new Map<string, Date[]>();
+  for (const product of products) {
+    const windows = windowsForProduct(pastPromoWindows, {
+      sku: product.sku,
+      productType: product.productType,
+      vendor: product.vendor,
+    });
+    const promoDays = expandPromoWindowsToDays(windows, historySince, now);
+    excludedByProduct.set(product.id, [...promoDays, ...fullClosureDays]);
+  }
+
   // Pass 1: forecast every product from its own history (no override). This
   // gives the run rate that established products lend as cold-start proxies.
   const firstPass = new Map<string, PredictionFields>();
@@ -171,6 +240,7 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
       history,
       activePromos,
       abcCategory,
+      excludedDates: excludedByProduct.get(product.id),
       policy: policyForClass(knobs.methods, abcCategory),
       serviceZ: knobs.serviceZ,
       capMultiple: knobs.capMultiple,
@@ -269,6 +339,7 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
             history,
             activePromos,
             abcCategory,
+            excludedDates: excludedByProduct.get(product.id),
             policy: policyForClass(knobs.methods, abcCategory),
             serviceZ: knobs.serviceZ,
             capMultiple: knobs.capMultiple,

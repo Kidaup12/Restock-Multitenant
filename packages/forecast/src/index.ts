@@ -133,6 +133,7 @@ export {
   promoMatchesProduct,
   windowsForProduct,
   excludePromoDays,
+  expandPromoWindowsToDays,
   type PromoWindow,
   type ProductMatch,
 } from "./promo-windows";
