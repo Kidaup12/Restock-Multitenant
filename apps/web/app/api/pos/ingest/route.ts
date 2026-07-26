@@ -1,6 +1,5 @@
-import crypto from "node:crypto";
 import { NextResponse } from "next/server";
-import { ingestPosSales, resolvePosFeedTenant, type PosSaleInput } from "@wezesha/pos";
+import { authenticatePosFeed, ingestPosSales, type PosSaleInput } from "@wezesha/pos";
 import { withCapture } from "@/lib/observability/wrap";
 
 /**
@@ -9,20 +8,22 @@ import { withCapture } from "@/lib/observability/wrap";
  * worker's feed pull (identical semantics); a real POS provider or an n8n bridge
  * posts here on its own cadence.
  *
- * Auth is a shared bearer secret (POS_INGEST_SECRET), NOT a user session — the
- * caller is a machine feed. The tenant is resolved from the body's `slug`
- * (TenantConfig.posFeedSlug, else the tenant slug), never from a session.
+ * Auth is a per-tenant bearer secret, NOT a user session — the caller is a
+ * machine feed. The body names the tenant (`slug` → TenantConfig.posFeedSlug,
+ * else the tenant slug) but naming it grants nothing: the secret is verified
+ * against that tenant's own stored hash, so a bridge for one shop cannot write
+ * another shop's sales. A tenant with no secret provisioned is closed — there is
+ * no shared fallback credential. Provision one with
+ * `npx tsx scripts/provision-ingest-secret.ts <slug>` in packages/pos.
+ *
+ * Every rejection answers the same 401, so the caller learns nothing about which
+ * slugs exist.
  *
  * Body: { slug: string, sales: PosSaleInput[] }.
  */
 export const POST = withCapture(async (request: Request) => {
-  const secret = process.env.POS_INGEST_SECRET;
-  if (!secret) return NextResponse.json({ error: "pos ingest not configured" }, { status: 503 });
-
-  const header = request.headers.get("authorization") ?? "";
-  if (!bearerMatches(header, secret)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+  const presented = bearerToken(request.headers.get("authorization"));
+  if (!presented) return unauthorized();
 
   let body: { slug?: unknown; sales?: unknown };
   try {
@@ -36,18 +37,24 @@ export const POST = withCapture(async (request: Request) => {
     return NextResponse.json({ error: "sales must be an array" }, { status: 400 });
   }
 
-  const tenant = await resolvePosFeedTenant(slug);
-  if (!tenant) return NextResponse.json({ error: "unknown slug" }, { status: 404 });
+  const tenant = await authenticatePosFeed(slug, presented);
+  if (!tenant) return unauthorized();
 
   const result = await ingestPosSales({ tenantId: tenant.id, sales: body.sales as PosSaleInput[] });
   if (!result) return NextResponse.json({ error: "unknown tenant" }, { status: 404 });
   return NextResponse.json(result);
 });
 
-/** Constant-time bearer check (avoids leaking the secret via response timing). */
-function bearerMatches(header: string, secret: string): boolean {
-  const expected = `Bearer ${secret}`;
-  const a = Buffer.from(header);
-  const b = Buffer.from(expected);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+/** One answer for every rejection: no slug, no secret, wrong secret alike. */
+function unauthorized(): NextResponse {
+  return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+}
+
+/** The token out of `Authorization: Bearer <token>` ("" when absent or another
+ *  scheme). The scheme isn't secret; the token is compared in constant time
+ *  downstream, as a digest. */
+function bearerToken(header: string | null): string {
+  const [scheme, ...rest] = (header ?? "").trim().split(/\s+/);
+  if (scheme?.toLowerCase() !== "bearer") return "";
+  return rest.join(" ").trim();
 }

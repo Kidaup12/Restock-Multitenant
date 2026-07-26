@@ -56,18 +56,9 @@ function mergeLearnedAliases(
   }
 }
 
-/** Resolve the tenant a feed slug belongs to: an explicit posFeedSlug wins,
- *  else the tenant's own slug. Null = unknown slug (caller → 404). */
-export async function resolvePosFeedTenant(slug: string): Promise<{ id: string } | null> {
-  const cfg = await prismaService.tenantConfig.findFirst({
-    where: { posFeedSlug: slug },
-    select: { tenantId: true },
-  });
-  if (cfg) return { id: cfg.tenantId };
-  return prismaService.tenant.findUnique({ where: { slug }, select: { id: true } });
-}
-
-/** Ingest a window of physical sales for one tenant. Null = unknown tenant. */
+/** Ingest a window of physical sales for one tenant. Null = unknown tenant.
+ *  The tenantId is the caller's to prove: on the feed path it comes from
+ *  authenticatePosFeed (src/auth.ts), never straight off a request body. */
 export async function ingestPosSales(args: {
   tenantId: string;
   sales: PosSaleInput[];
