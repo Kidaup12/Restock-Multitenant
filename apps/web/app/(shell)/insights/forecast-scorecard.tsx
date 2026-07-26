@@ -24,10 +24,20 @@ const LEAN_COPY: Record<AccuracyCheck["leans"], { text: string; tone: "positive"
   even: { text: "That's about right", tone: "positive" },
 };
 
-/** Days between the first sale and the first check being possible. */
-function firstCheckDue(firstSaleAt: Date): string {
-  const due = new Date(firstSaleAt.getTime() + ACCURACY_MIN_HISTORY_DAYS * 86_400_000);
-  return dateLabel(due);
+/**
+ * Why there is no grade yet, in the shop's terms. Once the history bar is met
+ * the wait is the monthly check, not the history — promising a date that has
+ * already passed reads as broken.
+ */
+export function noGradeYet(firstSaleAt: Date | null, now: Date = new Date()): string {
+  if (!firstSaleAt) {
+    return `The check replays past forecasts against real sales. It can run once you have about ${ACCURACY_MIN_HISTORY_DAYS} days of sales on record.`;
+  }
+  const due = firstSaleAt.getTime() + ACCURACY_MIN_HISTORY_DAYS * 86_400_000;
+  if (due > now.getTime()) {
+    return `The check replays past forecasts against real sales, so it needs about ${ACCURACY_MIN_HISTORY_DAYS} days of history. Yours is due around ${dateLabel(new Date(due))}.`;
+  }
+  return "You have enough sales history for the check now — it runs on the first of each month, and the result lands here.";
 }
 
 function AccuracyBars({ history }: { history: AccuracyCheck[] }) {
@@ -78,11 +88,7 @@ export async function ForecastScorecard({ tenantId }: { tenantId: string }) {
             <EmptyState
               icon={<BulbIcon />}
               title="We haven't graded ourselves yet"
-              description={
-                scorecard.firstSaleAt
-                  ? `The check replays past forecasts against real sales, so it needs about ${ACCURACY_MIN_HISTORY_DAYS} days of history. Yours is due around ${firstCheckDue(scorecard.firstSaleAt)}.`
-                  : `The check replays past forecasts against real sales. It can run once you have about ${ACCURACY_MIN_HISTORY_DAYS} days of sales on record.`
-              }
+              description={noGradeYet(scorecard.firstSaleAt)}
             />
           ) : (
             <>
