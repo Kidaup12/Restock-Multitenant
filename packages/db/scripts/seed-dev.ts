@@ -9,6 +9,10 @@ import { prismaService } from "../src/client";
  * history shaped so every screen state shows up — fast movers, slow movers,
  * stockout gaps, dead stock, and an overstocked SKU.
  *
+ * The tenant sits on the Growth plan. Insights, the budget planner and supplier
+ * PO-email are all Growth-tier features, so on the entry tier a demo of those
+ * screens shows an upgrade wall instead of the feature.
+ *
  * Idempotent: the tenant is deleted and rebuilt each run (cascade wipes all
  * child rows); the user is upserted by email so existing sessions survive a
  * re-seed. Writes go through the service client — this is an offline script,
@@ -174,7 +178,8 @@ export async function seedDev(): Promise<SeedResult> {
   // Rebuild the tenant from scratch; keep the user (sessions survive).
   await prismaService.tenant.deleteMany({ where: { slug: DEV_TENANT_SLUG } });
   const tenant = await prismaService.tenant.create({
-    data: { name: DEV_TENANT_NAME, slug: DEV_TENANT_SLUG },
+    // Growth, not the null default — the demo has to reach every shipped screen.
+    data: { name: DEV_TENANT_NAME, slug: DEV_TENANT_SLUG, plan: "growth" },
   });
 
   // Clean slate for demo users so renamed/removed logins stop working — only the
