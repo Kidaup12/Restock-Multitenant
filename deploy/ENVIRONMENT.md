@@ -29,6 +29,7 @@ it embeds a password).
 | `EMAIL_FROM` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | config | unset (only read when `BREVO_API_KEY` is set; sender as `Name <address>` or a bare address) |
 | `ADMIN_EMAILS` | `apps/web/lib/admin/gate.ts` | web | Vercel | config (sensitive — names the operator accounts) | unset (the `/admin` console 404s for everyone — fail closed) |
 | `OPS_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` in environments that should run the daily plan-limit check) | config | unset (no ops schedules registered — dev/CI stay quiet) |
+| `SNAPSHOT_CRON` | `apps/worker/src/index.ts` | worker | Railway (`1` everywhere on-hand history is wanted — stockout-rate and dead-stock trends read off it) | config | unset (no snapshot schedule registered — dev/CI stay quiet) |
 | `SENTRY_DSN` | `packages/observability/src/index.ts` (via each service's init) | web (`apps/web/instrumentation.ts`) | Vercel | secret | unset (error tracking disabled — complete no-op) |
 | `SENTRY_DSN` | same | worker (`apps/worker/src/index.ts`) | Railway | secret | unset (no-op) |
 | `SENTRY_DSN` | same | ws-gateway (`apps/ws-gateway/src/index.ts`) | Railway | secret | unset (no-op) |
