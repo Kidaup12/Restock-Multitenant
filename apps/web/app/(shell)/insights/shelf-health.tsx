@@ -95,12 +95,10 @@ export async function ShelfHealth({
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead numeric>Normally sells</TableHead>
-                  <TableHead numeric>Missing per day</TableHead>
-                  <TableHead numeric>Last sold</TableHead>
-                </TableRow>
+                <TableHead>Product</TableHead>
+                <TableHead numeric>Normally sells</TableHead>
+                <TableHead numeric>Missing per day</TableHead>
+                <TableHead numeric>Last sold</TableHead>
               </TableHeader>
               <TableBody>
                 {shelfRows.map((row) => (
@@ -145,13 +143,11 @@ export async function ShelfHealth({
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead>Why</TableHead>
-                  <TableHead numeric>On hand</TableHead>
-                  <TableHead numeric>Cover</TableHead>
-                  <TableHead numeric>Cash tied up</TableHead>
-                </TableRow>
+                <TableHead>Product</TableHead>
+                <TableHead>Why</TableHead>
+                <TableHead numeric>On hand</TableHead>
+                <TableHead numeric>Cover</TableHead>
+                <TableHead numeric>Cash tied up</TableHead>
               </TableHeader>
               <TableBody>
                 {cashRows.map((row) => (

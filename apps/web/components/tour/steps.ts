@@ -144,7 +144,7 @@ const insights = step(
   "insights",
   ["nav-insights", "nav-more"],
   "Insights",
-  "Trends, dead stock, and forecast health at a glance.",
+  "Which shelves are empty, how much cash is asleep in stock, and whether the forecast has been right.",
 );
 
 const settings = step(
