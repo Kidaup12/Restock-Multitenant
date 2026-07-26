@@ -45,6 +45,10 @@ in-store POS ───┘        (Product.currentStock = on-hand)        │    
   worker runs it nightly (`FORECAST_CRON`) and writes `Prediction` rows.
 - **The worker** also runs cost-moved detection (`COST_CRONS`), POS sales-gap detection, and plan-limit
   checks, and performs Shopify OAuth sync. Realtime events flow web ⇄ ws-gateway ⇄ worker via Redis.
+- **On-hand history.** A nightly snapshot (`SNAPSHOT_CRON`, 01:00, ahead of the forecast) writes one
+  `InventorySnapshot` row per active product per UTC day from `Product.currentStock`, pruned to ~400
+  days. Stockout rate and dead stock week over week are read off it; nothing else records on-hand
+  over time, so it has to be running before those trends can exist.
 
 ## Multi-tenant isolation (security)
 

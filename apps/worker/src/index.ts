@@ -36,6 +36,13 @@ import {
   registerCostCronSchedules,
   type CostCronQueue,
 } from "./cost-moved-cron";
+import {
+  SNAPSHOT_CRON_QUEUE,
+  createSnapshotCronQueue,
+  createSnapshotCronWorker,
+  registerSnapshotCronSchedules,
+  type SnapshotCronQueue,
+} from "./snapshot-cron";
 import { createSyncWorker } from "./worker";
 
 /**
@@ -59,6 +66,8 @@ import { createSyncWorker } from "./worker";
  *                           forecast run + monthly backtest); unset keeps dev/CI quiet
  *   COST_CRONS            — "1" registers + runs the cost cron schedules
  *                           (nightly cost-moved checks); unset keeps dev/CI quiet
+ *   SNAPSHOT_CRON         — "1" registers + runs the inventory-snapshot cron
+ *                           (nightly on-hand history); unset keeps dev/CI quiet
  *   POS_FEED_SECRET       — bearer token for the POS feed fetch (per-provider)
  *   SENTRY_DSN            — error tracking; unset = tracking disabled (no-op)
  */
@@ -147,6 +156,19 @@ async function main(): Promise<void> {
     console.log("worker: cost crons registered (cost-moved check)");
   }
 
+  let snapshotQueue: SnapshotCronQueue | null = null;
+  let snapshotWorker: Worker | null = null;
+  if (process.env.SNAPSHOT_CRON === "1") {
+    snapshotQueue = createSnapshotCronQueue(connection);
+    await registerSnapshotCronSchedules(snapshotQueue);
+    snapshotWorker = createSnapshotCronWorker({ connection, queue: snapshotQueue });
+    snapshotWorker.on("failed", (job, err) => {
+      console.error(`worker: snapshot cron ${job?.id} failed`, err);
+      captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: SNAPSHOT_CRON_QUEUE });
+    });
+    console.log("worker: snapshot cron registered (nightly inventory snapshot)");
+  }
+
   let closing = false;
   const shutdown = (signal: string) => {
     if (closing) return;
@@ -165,6 +187,8 @@ async function main(): Promise<void> {
       forecastQueue?.close(),
       costWorker?.close(),
       costQueue?.close(),
+      snapshotWorker?.close(),
+      snapshotQueue?.close(),
     ])
       .then(() => Promise.all([connection.quit(), publisher.quit()]))
       .then(
