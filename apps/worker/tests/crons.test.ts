@@ -43,18 +43,37 @@ describe.skipIf(!runnable)("email crons (real redis + db)", () => {
     tenantId = tenant.id;
 
     const inStock = await prismaService.product.create({
-      data: { tenantId, sku: "CRON-1", title: "Marula Oil 50ml", priceKes: 1000, costKes: 600 },
+      data: {
+        tenantId,
+        sku: "CRON-1",
+        title: "Marula Oil 50ml",
+        priceKes: 1000,
+        costKes: 600,
+        currentStock: 12,
+      },
     });
     const stockedOut = await prismaService.product.create({
-      data: { tenantId, sku: "CRON-2", title: "Baobab Butter 200g", priceKes: 800, costKes: 500 },
+      data: {
+        tenantId,
+        sku: "CRON-2",
+        title: "Baobab Butter 200g",
+        priceKes: 800,
+        costKes: 500,
+        currentStock: 0,
+      },
     });
-    const location = await prismaService.location.create({
-      data: { tenantId, name: "Cron Shop", isPrimary: true },
+    const shop = await prismaService.location.create({
+      data: { tenantId, name: "Cron Shop", isPrimary: true, locationType: "branch" },
+    });
+    const warehouse = await prismaService.location.create({
+      data: { tenantId, name: "Cron Warehouse", locationType: "warehouse" },
     });
     await prismaService.inventoryLevel.createMany({
       data: [
-        { tenantId, locationId: location.id, productId: inStock.id, onHand: 12 },
-        { tenantId, locationId: location.id, productId: stockedOut.id, onHand: 0 },
+        { tenantId, locationId: shop.id, productId: inStock.id, onHand: 12 },
+        { tenantId, locationId: shop.id, productId: stockedOut.id, onHand: 0 },
+        // Held in the warehouse, nothing on the shelf — still stocked out.
+        { tenantId, locationId: warehouse.id, productId: stockedOut.id, onHand: 9 },
       ],
     });
     await prismaService.salesHistory.createMany({

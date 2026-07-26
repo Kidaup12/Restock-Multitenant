@@ -27,19 +27,14 @@ export async function buildWeeklySummary(tenantId: string): Promise<WeeklySummar
   if (!tenant) return null;
 
   const since = new Date(Date.now() - 30 * DAY_MS);
-  const [totals, products, levelSums, movers] = await Promise.all([
+  const [totals, products, movers] = await Promise.all([
     prismaService.salesHistory.aggregate({
       _sum: { revenueKes: true, quantity: true },
       where: { tenantId, date: { gte: since } },
     }),
     prismaService.product.findMany({
       where: { tenantId, active: true },
-      select: { id: true },
-    }),
-    prismaService.inventoryLevel.groupBy({
-      by: ["productId"],
-      where: { tenantId },
-      _sum: { onHand: true },
+      select: { currentStock: true },
     }),
     prismaService.salesHistory.groupBy({
       by: ["productId"],
@@ -50,8 +45,9 @@ export async function buildWeeklySummary(tenantId: string): Promise<WeeklySummar
     }),
   ]);
 
-  const onHand = new Map(levelSums.map((l) => [l.productId, l._sum.onHand ?? 0]));
-  const stockouts = products.filter((p) => (onHand.get(p.id) ?? 0) <= 0).length;
+  // Stocked out reads the same sellable rollup the app does (Product.currentStock),
+  // not a sum across all locations — a warehouse hold is not stock on the shelf.
+  const stockouts = products.filter((p) => p.currentStock <= 0).length;
 
   const moverTitles = await prismaService.product.findMany({
     where: { tenantId, id: { in: movers.map((m) => m.productId) } },

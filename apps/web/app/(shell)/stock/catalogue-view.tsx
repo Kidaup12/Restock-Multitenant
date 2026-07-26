@@ -87,7 +87,7 @@ const HEALTH_CHIP_META: { key: string; label: string; tone: HealthChip["tone"] }
   { key: "no_sku", label: "No SKU", tone: "warning" },
   { key: "dup_sku", label: "Duplicate SKU", tone: "warning" },
   { key: "negative", label: "Negative stock", tone: "negative" },
-  { key: "dead", label: "Dead stock", tone: "neutral" },
+  { key: "dead", label: "Not selling", tone: "neutral" },
   { key: "not_for_sale", label: "Not for sale", tone: "neutral" },
 ];
 
