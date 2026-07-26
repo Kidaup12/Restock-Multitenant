@@ -1,9 +1,11 @@
 import { prismaForTenant, prismaForTenantTx } from "@wezesha/db";
 import {
   allocateByBudget,
+  ASSUMED_LEAD_DAYS,
   coverDaysFor,
   explainQty,
   leadDaysFor,
+  NO_STOCKOUT_DAYS,
   plannableReason,
   recommendedQty,
   type PlannableReason,
@@ -58,10 +60,15 @@ export type BuyListRow = {
   supplierName: string | null;
   onHandUnits: number;
   onOrderUnits: number;
-  daysUntilStockout: number;
+  /** Days of cover left, or null when the run rate is ~zero and the engine has
+   *  no stockout in sight — the sentinel is resolved here so no screen or export
+   *  can print it as a day count. */
+  daysUntilStockout: number | null;
   /** Days left before ordering any later means a stockout: stockout minus lead time. */
   daysLeftToOrder: number;
-  /** Supplier lead time (days) — the same value subtracted to get daysLeftToOrder. */
+  /** Lead time (days) — the same value subtracted to get daysLeftToOrder.
+   *  Falls back to the shared ASSUMED_LEAD_DAYS when the product has neither an
+   *  override nor a supplier average, so Plan and Stock agree on the verdict. */
   leadDays: number;
   /** Last safe day to order: run date + daysLeftToOrder. Consumers flag it overdue when past. */
   orderByDate: Date;
@@ -163,6 +170,17 @@ const redactRow = (r: BuyListRow): BuyListRow => ({
 /** Redact an excluded row's costs, keeping its reason — same money-blind masking
  *  as an active row (the reason is metadata, not money). */
 const redactExcluded = (r: ExcludedRow): ExcludedRow => ({ ...redactRow(r), reason: r.reason });
+
+/** The persisted cover as a real day count, or null once it reaches the engine's
+ *  "effectively forever" sentinel — a cover that far out is a ~zero run rate,
+ *  not a date the shop can plan against. Resolved once, here, so the sentinel
+ *  cannot reach a table cell, a CSV, or a printed PDF. */
+const stockoutDaysLeft = (days: number): number | null =>
+  days >= NO_STOCKOUT_DAYS ? null : days;
+
+/** Sort key for "soonest stockout first" — no stockout in sight sorts last. */
+const stockoutRank = (r: { daysUntilStockout: number | null }): number =>
+  r.daysUntilStockout ?? Number.POSITIVE_INFINITY;
 
 function tierFor(urgency: string, daysLeftToOrder: number): BuyTier {
   if (urgency === "critical" || daysLeftToOrder <= 0) return "order_today";
@@ -313,7 +331,15 @@ export async function getBuyList(
   const built = kept
     .map((p): FullBuyListRow => {
       const product = p.product;
-      const leadDays = leadDaysFor(product, product.supplier) ?? 0;
+      // Two lenses on the same fact, and they must not be swapped. The measured
+      // lead (null when there is none) floors the what-if SIZING below — a
+      // guessed lead would inflate the order. The urgency lens has no such
+      // option: `daysLeftToOrder`, the tier, and the order-by date are a
+      // deadline the owner acts on, so an unknown lead resolves to the shared
+      // assumption rather than to zero, which would say "order it the day the
+      // shelf empties".
+      const measuredLeadDays = leadDaysFor(product, product.supplier);
+      const leadDays = measuredLeadDays ?? ASSUMED_LEAD_DAYS;
       const daysLeftToOrder = p.daysUntilStockout - leadDays;
       const stockoutDays = Math.max(0, RISK_HORIZON_DAYS - p.daysUntilStockout);
       // The engine's number is the default; the owner's override wins when set.
@@ -326,10 +352,10 @@ export async function getBuyList(
       // nightly pipeline persists with. No policy/abcCategory is passed, so it
       // takes the mean-cover branch. The two lenses compose:
       //   - demand: lifted by `demandMultiplier` (1x = no lift) for a sales push.
-      //   - cover:  the passed `coverDays` floored at the item's lead time when
-      //     set, else the item's own lead+review window (`coverDaysFor`) — the
-      //     natural mean-cover horizon, so an uplift-only re-size just scales the
-      //     existing plan's demand.
+      //   - cover:  the passed `coverDays` floored at the item's MEASURED lead
+      //     time when set, else the item's own lead+review window
+      //     (`coverDaysFor`) — the natural mean-cover horizon, so an uplift-only
+      //     re-size just scales the existing plan's demand.
       // An overridden row is never re-sized — the owner's number wins over any
       // what-if. With neither lens active, `whatIf` is false, `resizedQty` is
       // null and `qty === override ?? p.qty`, byte-identical to today.
@@ -343,7 +369,7 @@ export async function getBuyList(
               onOrder: product.onOrder,
               coverDays:
                 coverDays != null
-                  ? Math.max(coverDays, leadDays)
+                  ? Math.max(coverDays, measuredLeadDays ?? 0)
                   : coverDaysFor(product, product.supplier),
             })
           : null;
@@ -359,7 +385,7 @@ export async function getBuyList(
         // Today and Stock (the Sells-only rollup) — never a second sum here.
         onHandUnits: product.currentStock,
         onOrderUnits: product.onOrder,
-        daysUntilStockout: p.daysUntilStockout,
+        daysUntilStockout: stockoutDaysLeft(p.daysUntilStockout),
         daysLeftToOrder,
         leadDays,
         orderByDate: new Date(latest.runDate.getTime() + daysLeftToOrder * 86_400_000),
@@ -400,7 +426,7 @@ export async function getBuyList(
 
   const byUrgency = (a: FullBuyListRow, b: FullBuyListRow) =>
     (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
-    a.daysUntilStockout - b.daysUntilStockout ||
+    stockoutRank(a) - stockoutRank(b) ||
     b.lineTotalKes - a.lineTotalKes;
   activeRows.sort(byUrgency);
   excludedRows.sort(byUrgency);
@@ -520,7 +546,7 @@ export function splitByBudget(rows: BuyListRow[], budgetKes: number): BudgetSpli
       (a, b) =>
         (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
         (b.atRiskKes ?? 0) - (a.atRiskKes ?? 0) ||
-        a.daysUntilStockout - b.daysUntilStockout
+        stockoutRank(a) - stockoutRank(b)
     )
     .map((row) => ({ row, cost: row.lineTotalKes ?? 0, urgency: row.urgency }));
 

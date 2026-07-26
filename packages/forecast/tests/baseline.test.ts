@@ -7,6 +7,7 @@ import {
   effectiveWindowDays,
   hasStockoutGap,
   daysOfStockRemaining,
+  NO_STOCKOUT_DAYS,
   kingsSafetyStock,
   reorderPoint,
   standardDeviation,
@@ -109,9 +110,14 @@ describe("hasStockoutGap", () => {
 });
 
 describe("inventory primitives", () => {
-  it("daysOfStockRemaining: no rate → 999 (never divide by ~0)", () => {
-    expect(daysOfStockRemaining(50, 0)).toBe(999);
+  it("daysOfStockRemaining: no rate → the sentinel (never divide by ~0)", () => {
+    expect(daysOfStockRemaining(50, 0)).toBe(NO_STOCKOUT_DAYS);
+    expect(daysOfStockRemaining(50, 0.00005)).toBe(NO_STOCKOUT_DAYS);
     expect(daysOfStockRemaining(50, 2)).toBe(25);
+  });
+
+  it("NO_STOCKOUT_DAYS names the sentinel so consumers never test a bare 999", () => {
+    expect(NO_STOCKOUT_DAYS).toBe(999);
   });
 
   it("kingsSafetyStock buffers both demand and lead-time variability", () => {

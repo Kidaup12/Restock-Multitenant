@@ -285,7 +285,9 @@ function BudgetTable({
               <TableCell className="hidden md:table-cell">{row.supplierName ?? "—"}</TableCell>
               <TableCell numeric className="hidden md:table-cell">{row.runRatePerDay}</TableCell>
               <TableCell numeric>
-                {row.onHandUnits <= 0 ? "—" : `${row.daysUntilStockout}d`}
+                {row.onHandUnits <= 0 || row.daysUntilStockout == null
+                  ? "—"
+                  : `${row.daysUntilStockout}d`}
               </TableCell>
               <TableCell className="hidden md:table-cell">
                 {overdue ? (

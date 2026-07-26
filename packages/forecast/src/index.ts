@@ -7,6 +7,7 @@ export {
   effectiveWindowDays,
   hasStockoutGap,
   daysOfStockRemaining,
+  NO_STOCKOUT_DAYS,
   kingsSafetyStock,
   reorderPoint,
   standardDeviation,
@@ -107,6 +108,7 @@ export {
   leadStdFor,
   coverDaysFor,
   ORDER_REVIEW_DAYS,
+  ASSUMED_LEAD_DAYS,
   type ProductLeadFacts,
   type SupplierLeadFacts,
 } from "./lead-time";

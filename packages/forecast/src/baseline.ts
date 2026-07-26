@@ -217,8 +217,13 @@ export function effectiveWindowDays(
   return Math.max(inStock, floor);
 }
 
+/** Cover returned when the run rate is ~zero: "effectively forever", not a day
+ *  count. It is a sentinel — screens and exports must translate it, never print
+ *  it, so read-time consumers test against this rather than a bare 999. */
+export const NO_STOCKOUT_DAYS = 999;
+
 export function daysOfStockRemaining(currentStock: number, dailyRate: number): number {
-  if (dailyRate <= 0.0001) return 999;
+  if (dailyRate <= 0.0001) return NO_STOCKOUT_DAYS;
   return Math.floor(currentStock / dailyRate);
 }
 

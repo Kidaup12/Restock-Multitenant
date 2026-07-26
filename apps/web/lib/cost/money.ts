@@ -73,7 +73,7 @@ export type MoneyRow = {
   priceKes: number;
   sellableOnHand: number;
   coverDays: number | null;
-  /** Resolved lead time (product override → supplier → 30d default). */
+  /** Resolved lead time (product override → supplier → ASSUMED_LEAD_DAYS). */
   leadDays: number;
   revenue30dKes: number;
   /** cost × max(0, sellable) — from the metric engine. */

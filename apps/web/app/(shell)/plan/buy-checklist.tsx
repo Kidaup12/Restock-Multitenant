@@ -278,7 +278,9 @@ function ExcludedSection({
                       </td>
                       <td className={cn(TD, "hidden md:table-cell")}>{row.supplierName ?? "—"}</td>
                       <td className={TD_NUM}>
-                        {row.onHandUnits <= 0 ? "—" : `${row.daysUntilStockout}d`}
+                        {row.onHandUnits <= 0 || row.daysUntilStockout == null
+                          ? "—"
+                          : `${row.daysUntilStockout}d`}
                       </td>
                       <td className={cn(TD_NUM, "hidden md:table-cell")}>{row.recommendedQty}</td>
                       <td className={TD_NUM}>
@@ -617,7 +619,9 @@ export function BuyChecklist({
                           <td className={cn(TD_NUM, "hidden lg:table-cell")}>{row.leadDays}d</td>
                           <td className={cn(TD_NUM, "hidden md:table-cell")}>{row.runRatePerDay}</td>
                           <td className={TD_NUM}>
-                            {row.onHandUnits <= 0 ? "—" : `${row.daysUntilStockout}d`}
+                            {row.onHandUnits <= 0 || row.daysUntilStockout == null
+                              ? "—"
+                              : `${row.daysUntilStockout}d`}
                           </td>
                           <td className={cn(TD, "hidden md:table-cell")}>
                             {overdue ? (
