@@ -31,7 +31,7 @@ export type TodayMetrics = {
   revenuePrev30dKes: number;
   /** Active products in the catalogue. */
   trackedProducts: number;
-  /** Active products whose InventoryLevel rows sum to zero on-hand. */
+  /** Active products with no sellable on-hand (Product.currentStock <= 0). */
   stockedOutProducts: number;
   /** Stock on the shelf with no sale inside the window: SKU count + cost tied
    *  up. Cost is null when the caller can't view costs. */

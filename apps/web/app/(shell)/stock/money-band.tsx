@@ -79,9 +79,9 @@ export function MoneyBand({
         tone="neutral"
       />
       <Tile
-        label="Sitting dead / overstocked"
+        label="Cash in slow-moving stock"
         value={<CostValue amount={band.deadOverstockKes} canViewCosts={canViewCosts} compact />}
-        sub={`${formatNumber(band.deadOverstockCount)} products, cover past 90d`}
+        sub={`${formatNumber(band.deadOverstockCount)} products, 90+ days of cover or no sales`}
         tone="warning"
         onClick={toggle("dead_overstock")}
       />

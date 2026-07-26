@@ -40,7 +40,7 @@ export const HEALTH_FLAG_LABELS: Record<HealthFlag, string> = {
   dup_sku: "Duplicate SKU",
   negative: "Negative stock",
   new: "New",
-  dead: "Dead stock",
+  dead: "Not selling",
 };
 
 /** Run rate at or below this counts as "not selling" for the dead flag —
