@@ -1,8 +1,13 @@
 # web
 
-The Wezesha Restock web app: Next.js (App Router), installable PWA. The
-operator-facing shell — Today, Stock, Plan, Orders, Sales, Insights, Settings —
-plus API routes as they land.
+The Wezesha Restock web app: Next.js (App Router), installable PWA.
+
+The shell's primary destinations come from `components/shell/nav-config.tsx` (one
+list, so the sidebar, the mobile tab bar and the `/more` overflow can't disagree):
+Today, Plan, Orders, Stock, Costs, Suppliers, Sales data, Insights, Settings. Off
+the nav: `/profile`, `/workspaces/new` (create a workspace), the Settings
+sub-pages (connections, team, locations), and `/admin`, which 404s unless the
+signed-in email is listed in `ADMIN_EMAILS`. API routes live under `app/api`.
 
 ## Development
 
@@ -27,3 +32,8 @@ assets are cache-first, other static assets stale-while-revalidate.
 Deploys to Vercel with root directory `apps/web`; install/build commands come
 from `vercel.json`. Environments and variables: `deploy/ENVIRONMENT.md` at the
 repo root; first-deploy steps: `deploy/RUNBOOK.md`.
+
+The build itself fails without `SERVICE_DATABASE_URL`, `DATABASE_URL`,
+`BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` — the app imports `@wezesha/db` and
+initializes Better Auth while collecting page data. `.env.example` lists the full
+local set.

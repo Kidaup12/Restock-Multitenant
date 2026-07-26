@@ -20,6 +20,10 @@ The `sync` queue dispatches on `data.source`:
 - anything else — the demo processor (3 progress phases + done) kept for
   pipeline smoke tests.
 
+Alongside the sync it runs six cron groups, each registered only when its
+variable is set to `1` — so a worker started with none of them set does nothing
+but serve the `sync` queue.
+
 | Env | Default | |
 |---|---|---|
 | `REDIS_URL` | `redis://localhost:6380` | queues + event publishing |
@@ -27,6 +31,15 @@ The `sync` queue dispatches on `data.source`:
 | `SERVICE_DATABASE_URL` | — | the sync's writes (service role) |
 | `TOKEN_ENCRYPTION_KEY` | — | decrypts stored Shopify tokens |
 | `SHOPIFY_APP_URL` | unset (skips webhook registration) | public web origin |
+| `POS_FEED_SECRET` | unset (no `Authorization` header) | bearer sent when pulling a tenant's POS feed URL |
+| `FORECAST_CRON` | off | `1` = nightly forecast run + monthly backtest |
+| `SNAPSHOT_CRON` | off | `1` = nightly on-hand snapshot (stock history) |
+| `COST_CRONS` | off | `1` = nightly cost-moved check |
+| `POS_CRONS` | off | `1` = daily POS sales-gap check |
+| `OPS_CRONS` | off | `1` = daily plan-limit check |
+| `EMAIL_CRONS` | off | `1` = weekly summary email |
+| `BREVO_API_KEY` / `EMAIL_FROM` | unset | outbound mail; unset logs to the console |
+| `SENTRY_DSN` | unset | error tracking; unset is a complete no-op |
 
 ```
 docker compose up -d db redis
