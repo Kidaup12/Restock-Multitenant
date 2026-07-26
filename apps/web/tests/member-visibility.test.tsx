@@ -5,9 +5,11 @@ import { prismaService } from "@wezesha/db";
 import { seedDev, type SeedResult } from "../../../packages/db/scripts/seed-dev";
 import { hasPermission } from "../lib/auth/permissions";
 import { MoneyGate } from "../components/money-gate";
+import { formatCompact } from "../components/ui/cost-value";
 import { getReorderNeeded, getTodayMetrics } from "../lib/data/today";
 import { getStockByLocation, getStockCatalogue } from "../lib/data/stock";
 import { getBuyList, redactBudgetSplit, splitByBudget, type BuyListRow } from "../lib/data/plan";
+import { getInsightsOverview } from "../lib/data/insights";
 
 // ReorderTable links to /stock; next/link needs an app-router context that a
 // bare renderToStaticMarkup doesn't provide — a plain anchor is equivalent here.
@@ -23,6 +25,7 @@ import { CatalogueTable } from "../app/(shell)/stock/catalogue-table";
 import { CatalogueView } from "../app/(shell)/stock/catalogue-view";
 import { LocationView } from "../app/(shell)/stock/location-view";
 import { catalogueExportColumns } from "../app/(shell)/stock/catalogue-export";
+import { ShelfHealth } from "../app/(shell)/insights/shelf-health";
 
 /**
  * Money-blindness proof for the live screens, at two depths:
@@ -52,6 +55,8 @@ const REVENUE_KEYS = new Set([
   "revenue30dKes",
   "revenuePrev30dKes",
   "budgetKes",
+  // price x run rate — what an empty shelf costs in sales, not a cost figure.
+  "missedSalesKes",
 ]);
 
 /** Every numeric non-revenue `*Kes` leaf in a payload, as "path=value". For a
@@ -311,6 +316,37 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     const ownerTree = await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true });
     const ownerView = findElements(ownerTree, CatalogueView)[0] as { props: unknown };
     expect(costNumbers(ownerView.props).length).toBeGreaterThan(0);
+  });
+
+  it("insights masks every cost figure for a member while keeping the sales ones", async () => {
+    // Insights shows both kinds of money: cash tied up in stock (a cost, must
+    // mask) and the sales an empty shelf is losing (price x run rate, which a
+    // member may see, like revenue). So "no KES on screen" is the wrong test —
+    // the test is that no OWNER-ONLY figure appears in the member's markup.
+    const [ownerData, member, owner] = await Promise.all([
+      getInsightsOverview(seeded.tenantId, { canViewCosts: true }),
+      ShelfHealth({ tenantId: seeded.tenantId, canViewCosts: false }).then(renderToStaticMarkup),
+      ShelfHealth({ tenantId: seeded.tenantId, canViewCosts: true }).then(renderToStaticMarkup),
+    ]);
+
+    const costFigures = [ownerData.cashTotalKes, ...ownerData.cashRows.map((r) => r.cashKes)]
+      .filter((v): v is number => v != null && v > 0)
+      .map((v) => formatCompact(v));
+    expect(costFigures.length).toBeGreaterThan(0); // the test would be vacuous otherwise
+
+    for (const figure of costFigures) {
+      expect(owner).toContain(figure); // the owner really does see them...
+      expect(member).not.toContain(`KES ${figure}`); // ...and the member does not
+    }
+    expect(member).toContain(MASK);
+    expect(owner).not.toContain(MASK);
+  });
+
+  it("keeps every cost out of the insights payload, not just out of the markup", async () => {
+    const member = await getInsightsOverview(seeded.tenantId, { canViewCosts: false });
+    expect(costNumbers(member)).toEqual([]);
+    const owner = await getInsightsOverview(seeded.tenantId, { canViewCosts: true });
+    expect(costNumbers(owner).length).toBeGreaterThan(0);
   });
 });
 
