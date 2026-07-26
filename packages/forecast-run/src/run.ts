@@ -38,6 +38,10 @@ import { publishEvent } from "@wezesha/realtime";
  * borrowed, never a silent zero), the borrowed-from proxy, the owner-prior
  * chip, and the reproducible reorder breakdown (explainParts).
  *
+ * The run also appends to ForecastRecommendation — the history Prediction cannot
+ * be, since it is replaced wholesale here. That is what makes "how much of what
+ * we asked for did the owner actually buy?" a measurement rather than a guess.
+ *
  * Everything — reads AND writes — goes through the RLS-enforced tenant client:
  * the run is a single-tenant path, so the service client has no business here.
  * The delete-then-create replacement runs inside one tenant transaction.
@@ -51,6 +55,15 @@ const HISTORY_DAYS = 365;
  *  "recommend nothing" behaviour and never borrows a shape (spec §6/§11:
  *  dead-stock is "new vs old dud"). Age comes from shopifyCreatedAt. */
 const COLD_START_MAX_AGE_DAYS = 60;
+/** How long the recommendation history stays queryable. A year plus five weeks:
+ *  long enough that "this week vs the same week last year" still has last year's
+ *  row, short enough that the table never grows without bound. */
+const RECOMMENDATION_RETENTION_DAYS = 400;
+/** Urgencies kept in the history even when the run asked for nothing — the case
+ *  worth auditing later is exactly "it was about to run out and we still
+ *  recommended zero" (too new, no cost, capped). Everything else with a zero ask
+ *  carries no adherence signal and is not written. */
+const KEPT_ZERO_QTY_URGENCIES = new Set(["critical", "high"]);
 
 function isGenuinelyNew(shopifyCreatedAt: Date | null, now: Date): boolean {
   if (shopifyCreatedAt == null) return true; // no age signal — a history-less row reads as new
@@ -372,10 +385,40 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
     };
   });
 
+  // The durable half of the run. Keyed on the run DAY, so a manual "Re-run now"
+  // on top of the nightly cron refines the live plan without rewriting what the
+  // owner was already shown — the day's first ask stands, and an adherence figure
+  // computed last week cannot change this week.
+  const runDay = new Date(`${runDateKey}T00:00:00.000Z`);
+  const onHandById = new Map(products.map((p) => [p.id, p.currentStock]));
+  const historyRows = rows
+    .filter((row) => row.recommendedQty > 0 || KEPT_ZERO_QTY_URGENCIES.has(row.urgency))
+    .map((row) => ({
+      tenantId,
+      productId: row.productId,
+      runDate: runDay,
+      recommendedQty: row.recommendedQty,
+      finalForecast30d: row.finalForecast30d,
+      daysUntilStockout: row.daysUntilStockout,
+      urgency: row.urgency,
+      confidenceWord: row.confidenceWord,
+      coldStart: row.coldStart,
+      onHandAtRun: onHandById.get(row.productId) ?? 0,
+      abcClass: abcByProduct[row.productId] ?? null,
+    }));
+  const retentionCutoff = new Date(runDay.getTime() - RECOMMENDATION_RETENTION_DAYS * DAY_MS);
+
   // Replace, atomically: this run is the tenant's current forecast.
   await prismaForTenantTx(tenantId, async (tx) => {
     await tx.prediction.deleteMany({});
     if (rows.length > 0) await tx.prediction.createMany({ data: rows });
+    // History only ever grows forward: skipDuplicates makes a same-day re-run a
+    // no-op instead of a unique-key error, and the only rows that ever leave are
+    // the ones past the retention window.
+    if (historyRows.length > 0) {
+      await tx.forecastRecommendation.createMany({ data: historyRows, skipDuplicates: true });
+    }
+    await tx.forecastRecommendation.deleteMany({ where: { runDate: { lt: retentionCutoff } } });
   });
 
   await publishForecastDone(tenantId, forecastRunId, rows.length);

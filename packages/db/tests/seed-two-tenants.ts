@@ -136,6 +136,16 @@ export const builders: Record<string, Builder> = {
     tenant: { connect: { id: tenantId } },
     product: { create: { tenantId, sku: `sku-pr-${key}`, title: `Product pr-${key}` } },
   }),
+  ForecastRecommendation: (tenantId, key) => ({
+    runDate: new Date("2026-01-01T00:00:00Z"),
+    recommendedQty: 5,
+    finalForecast30d: 10,
+    daysUntilStockout: 30,
+    urgency: "low",
+    onHandAtRun: 4,
+    tenant: { connect: { id: tenantId } },
+    product: { create: { tenantId, sku: `sku-fr-${key}`, title: `Product fr-${key}` } },
+  }),
   BacktestRun: (tenantId) => ({
     tenantId,
     mae: 1,

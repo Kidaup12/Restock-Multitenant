@@ -101,29 +101,30 @@ model Tenant {
   planLimits    Json?
   createdAt     DateTime @default(now())
 
-  memberships           Membership[]
-  tenantConfig          TenantConfig?
-  products              Product[]
-  suppliers             Supplier[]
-  locations             Location[]
-  inventorySnapshots    InventorySnapshot[]
-  warehouseLocationMaps WarehouseLocationMap[]
-  ignoreRules           IgnoreRule[]
-  savedFilters          SavedFilter[]
-  salesHistory          SalesHistory[]
-  posSales              PosSale[]
-  monthlyContext        MonthlyContext[]
-  promos                Promo[]
-  predictions           Prediction[]
-  ownerPriors           OwnerPrior[]
-  orders                Order[]
-  purchaseOrders        PurchaseOrder[]
-  distributionPlans     DistributionPlan[]
-  shopifyConnection     ShopifyConnection?
-  ingestCursors         IngestCursor[]
-  notifications         Notification[]
-  locationClosures      LocationClosure[]
-  productPlanOverrides  ProductPlanOverride[]
+  memberships             Membership[]
+  tenantConfig            TenantConfig?
+  products                Product[]
+  suppliers               Supplier[]
+  locations               Location[]
+  inventorySnapshots      InventorySnapshot[]
+  warehouseLocationMaps   WarehouseLocationMap[]
+  ignoreRules             IgnoreRule[]
+  savedFilters            SavedFilter[]
+  salesHistory            SalesHistory[]
+  posSales                PosSale[]
+  monthlyContext          MonthlyContext[]
+  promos                  Promo[]
+  predictions             Prediction[]
+  ownerPriors             OwnerPrior[]
+  orders                  Order[]
+  purchaseOrders          PurchaseOrder[]
+  distributionPlans       DistributionPlan[]
+  shopifyConnection       ShopifyConnection?
+  ingestCursors           IngestCursor[]
+  notifications           Notification[]
+  locationClosures        LocationClosure[]
+  productPlanOverrides    ProductPlanOverride[]
+  forecastRecommendations ForecastRecommendation[]
 }
 
 enum Role {
@@ -247,14 +248,15 @@ model Product {
   costMovedPct      Float? // last detected synced-cost jump, signed % (e.g. 18, -22); null = no active alert
   costMovedAt       DateTime? // when that jump was detected (drives the attention row + "since" copy); null = none
 
-  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  supplier           Supplier?           @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  inventoryLevels    InventoryLevel[]
-  inventorySnapshots InventorySnapshot[]
-  salesHistory       SalesHistory[]
-  predictions        Prediction[]
-  posSaleLines       PosSaleLine[]
-  purchaseOrderLines PurchaseOrderLine[]
+  tenant                  Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier                Supplier?                @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  inventoryLevels         InventoryLevel[]
+  inventorySnapshots      InventorySnapshot[]
+  salesHistory            SalesHistory[]
+  predictions             Prediction[]
+  forecastRecommendations ForecastRecommendation[]
+  posSaleLines            PosSaleLine[]
+  purchaseOrderLines      PurchaseOrderLine[]
 
   @@unique([tenantId, shopifyProductId])
   @@unique([tenantId, source, externalId])
@@ -572,6 +574,48 @@ model Prediction {
   @@index([productId, runDate])
   @@index([tenantId, productId, runDate])
   @@index([tenantId, forecastRunId])
+}
+
+// Append-only record of what the plan ASKED FOR, run by run. Prediction is wiped
+// and recreated by every forecast run, so only the latest recommendation exists —
+// there is no way to ask "of everything we recommended over the last two months,
+// how much did the owner actually buy?". This table is that history: a run adds
+// rows, never deletes them, so plan-adherence is measured rather than guessed.
+//
+// runDate is the run's UTC DAY (midnight), not the clock time — with the unique
+// key that makes a same-day re-run an upsert instead of a duplicate day.
+//
+// Kept proportional to the catalogue, not to time: the run writes only rows worth
+// keeping (a real recommendation, or an urgent shortfall it recommended nothing
+// for) and prunes past the retention window in the same pass.
+model ForecastRecommendation {
+  id        String   @id @default(cuid())
+  tenantId  String
+  productId String
+  runDate   DateTime @default(now())
+
+  recommendedQty    Float
+  finalForecast30d  Float
+  daysUntilStockout Int
+  urgency           String
+  // The honesty word this number carried on the day: "sure" | "fairly_sure" |
+  // "guessing" (spec §6) — adherence to a "guessing" ask reads differently.
+  confidenceWord    String?
+  // Cold-start state on the day ("too_new" | "borrowed" | null), same vocabulary
+  // as Prediction.coldStart.
+  coldStart         String?
+  // On-hand the run saw when it made the call. Product.currentStock moves with
+  // every sync, so without this snapshot the "why did it ask for that?" is lost.
+  onHandAtRun       Float
+  // ABC class held on the day — adherence is read per class (A misses cost most).
+  abcClass          String?
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, productId, runDate])
+  @@index([tenantId, runDate])
+  @@index([tenantId, productId, runDate])
 }
 
 // Stored forecast-accuracy run — the monthly walk-forward backtest cron writes

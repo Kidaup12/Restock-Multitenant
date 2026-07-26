@@ -54,6 +54,7 @@ export const EXPORTED_MODELS: ReadonlyArray<{
   { model: "Promo", delegate: "promo" },
   { model: "OwnerPrior", delegate: "ownerPrior" },
   { model: "Prediction", delegate: "prediction" },
+  { model: "ForecastRecommendation", delegate: "forecastRecommendation" },
   { model: "BacktestRun", delegate: "backtestRun" },
   { model: "SpotCheck", delegate: "spotCheck" },
   { model: "Order", delegate: "order" },

@@ -42,7 +42,9 @@ in-store POS ───┘        (Product.currentStock = on-hand)        │    
   the single on-hand source.
 - **The engine** (`packages/forecast`) turns history into a per-product recommended quantity with an
   explain breakdown and a plain-language confidence word (`sure` / `fairly sure` / `guessing`). The
-  worker runs it nightly (`FORECAST_CRON`) and writes `Prediction` rows.
+  worker runs it nightly (`FORECAST_CRON`) and writes `Prediction` rows — replaced wholesale each run —
+  plus an append-only `ForecastRecommendation` row per keepable ask, which is what plan-adherence over
+  past weeks is measured from.
 - **The worker** also runs cost-moved detection (`COST_CRONS`), POS sales-gap detection, and plan-limit
   checks, and performs Shopify OAuth sync. Realtime events flow web ⇄ ws-gateway ⇄ worker via Redis.
 - **On-hand history.** A nightly snapshot (`SNAPSHOT_CRON`, 01:00, ahead of the forecast) writes one
