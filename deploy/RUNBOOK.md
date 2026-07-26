@@ -57,18 +57,24 @@ Verify (substitute the ports from your `.env.staging`):
 docker compose --env-file .env.staging \
   -f docker-compose.yml -f docker-compose.staging.yml ps    # five services, gateway/web healthy
 
-curl -sSI http://localhost:${WEB_PORT}/today | head -1      # HTTP/1.1 200 OK
+curl -sS http://localhost:${WS_GATEWAY_PORT}/healthz        # {"uptime":...,"connections":...}
+curl -sSI http://localhost:${WEB_PORT}/today | head -1      # 200, or 307 to /login
 
-# fail-closed auth: wrong token must close with 4401
-npx wscat -c "ws://localhost:${WS_GATEWAY_PORT}/?token=wrong:smoke-tenant"
+# fail-closed auth: a bogus credential must close with 4401
+npx wscat -c "ws://localhost:${WS_GATEWAY_PORT}/?token=definitely-not-a-session"
 
-# full pipeline: queue -> worker -> redis pub/sub -> gateway -> socket
-REDIS_URL=redis://localhost:${REDIS_PORT} \
-WS_URL=ws://localhost:${WS_GATEWAY_PORT} \
-WS_TOKEN=${WS_DEV_TOKEN}:smoke-tenant \
-npx tsx deploy/scripts/smoke-enqueue.ts
-# expect three sync.progress events, then "smoke: sync.done received — pipeline OK"
+# queue -> worker leg (no socket): enqueues one demo job, worker logs it completed
+REDIS_URL=redis://localhost:${REDIS_PORT} npx tsx deploy/scripts/smoke-enqueue.ts
 ```
+
+**The socket leg under compose needs a real session.** The gateway image runs with
+`NODE_ENV=production` (`apps/ws-gateway/Dockerfile`), and the gateway ignores
+`WS_DEV_TOKEN` under that setting — so the smoke script's `WS_URL`/`WS_TOKEN`
+round-trip does *not* work against the composed gateway, even though `.env.staging`
+carries a dev token. Exercise the socket end-to-end either by signing in to the web
+service at `http://localhost:${WEB_PORT}` and watching a sync update the page live, or
+by running the gateway outside the image (`npm run -w @wezesha/ws-gateway dev`, which
+leaves `NODE_ENV` unset) and pointing the script at it.
 
 Tear down:
 
@@ -186,14 +192,24 @@ second.
      build use `apps/ws-gateway/Dockerfile` with the repo root as context; leave Root
      Directory unset).
    - Variables: `REDIS_URL = ${{Redis.REDIS_URL}}` (prefer the private-URL reference
-     if the plugin exposes one), `WS_DEV_TOKEN = <generated secret from vault>`.
+     if the plugin exposes one), plus `DATABASE_URL` and `SERVICE_DATABASE_URL` — the
+     gateway authorizes each socket against the caller's session and resolves the
+     tenant through `Membership`, so it needs database access. Leave `WS_DEV_TOKEN`
+     unset in production; the gateway ignores it there anyway.
    - Settings → Networking → **Generate Domain** (public). Note it: the browser and
-     smoke tests connect to `wss://<gateway-domain>`.
+     smoke tests connect to `wss://<gateway-domain>`, and it is the value of web's
+     `NEXT_PUBLIC_WS_URL` in section 5.
    - Deploy branch: `main` for production. (A second environment tracking `develop`
      is optional; add later.)
 4. **worker service:** Create → GitHub Repo → same repo.
    - Settings → **Config File Path** → `apps/worker/railway.json`.
-   - Variables: `REDIS_URL = ${{Redis.REDIS_URL}}` (same reference).
+   - Variables: `REDIS_URL = ${{Redis.REDIS_URL}}` (same reference), `DATABASE_URL`,
+     `SERVICE_DATABASE_URL`, `TOKEN_ENCRYPTION_KEY` and `SHOPIFY_APP_URL`.
+   - **Decide the schedules here.** Every cron group is off unless set to `1`:
+     `FORECAST_CRON`, `COST_CRONS`, `POS_CRONS`, `OPS_CRONS`, `EMAIL_CRONS`,
+     `SNAPSHOT_CRON`. A worker deployed with none of them set runs no nightly work —
+     no forecast, no on-hand snapshots, so no stockout-rate or dead-stock trend. Set
+     the ones this environment should run. Full list: `deploy/ENVIRONMENT.md`.
    - No public networking — the worker listens on nothing.
 5. **Shared variables:** if Railway offers project-level Shared Variables in the
    current UI, put nothing secret at project scope yet — with only `REDIS_URL` shared
@@ -212,30 +228,50 @@ second.
    (`cd ../.. && npm ci` so the workspace root installs; `next build`).
 4. Settings → Git → **Production Branch: `main`**. Every other branch — including
    `develop` — deploys as a Preview automatically.
-5. Environment variables per `deploy/ENVIRONMENT.md` (today: none required for the
-   static shell on `develop`; DB + AUTH vars arrive with the auth branch — set them
-   for Production and Preview separately, previews never get prod credentials).
-6. Deploy; confirm the production URL renders.
+5. Environment variables per `deploy/ENVIRONMENT.md`, set for Production and Preview
+   separately — previews never get prod credentials. **The build fails without these
+   four**, so set them before the first deploy:
+   - `SERVICE_DATABASE_URL` and `DATABASE_URL` — web imports `@wezesha/db`, and the
+     db package throws at module load when the service URL is missing.
+   - `BETTER_AUTH_SECRET` (generate per environment: `openssl rand -base64 32`) and
+     `BETTER_AUTH_URL` (that environment's public origin, no trailing slash).
+
+   Then the rest as the environment needs them: `REDIS_URL`, `NEXT_PUBLIC_WS_URL`
+   (`wss://<gateway-domain>` from section 4 — without it the app never opens a socket),
+   the Shopify credentials, `TOKEN_ENCRYPTION_KEY` (same value as the worker),
+   `BREVO_API_KEY` / `EMAIL_FROM`, `ADMIN_EMAILS`, `SENTRY_DSN`. Do not set
+   `NEXT_OUTPUT` — it is for the Docker image only.
+6. Deploy; confirm the production URL renders and `/api/health` returns `db: true`.
 
 ## 6. Smoke tests
 
-Gateway reachability (expect an open socket, no immediate 4401 close; Ctrl-C to exit):
+**Which socket tests run where.** The dev-token round-trip below only works against a
+gateway running outside production: `apps/ws-gateway/src/index.ts` ignores
+`WS_DEV_TOKEN` when `NODE_ENV=production`, so a production gateway accepts nothing but
+a real Better Auth session token. Run the full token-based pipeline test on the local
+staging stack or a staging Railway environment; against production, verify the socket
+path by signing in to the deployed app and watching a sync update the UI live.
+
+Fail-closed check — safe and meaningful against production, expect an immediate `4401`:
 
 ```sh
-npx wscat -c "wss://<gateway-domain>/?token=<WS_DEV_TOKEN>:smoke-tenant"
+npx wscat -c "wss://<gateway-domain>/?token=definitely-not-a-session"
 ```
 
-A rejected token closes with `4401` — verifies fail-closed auth too (try once with a
-wrong token).
+Gateway process health, against production:
+
+```sh
+curl -sS https://<gateway-domain>/healthz     # {"uptime":...,"connections":...}
+```
 
 Full pipeline (queue → worker → Redis pub/sub → gateway → socket) with the repo's
-smoke script — needs a Redis URL reachable from your machine (the Redis service's
-public/proxy URL; if only private networking is enabled, run it from a one-off
-Railway shell instead):
+smoke script — **staging/non-production only**, and needs a Redis URL reachable from
+your machine (the Redis service's public/proxy URL; if only private networking is
+enabled, run it from a one-off Railway shell instead):
 
 ```sh
 REDIS_URL='<redis public url>' \
-WS_URL='wss://<gateway-domain>' \
+WS_URL='wss://<staging gateway domain>' \
 WS_TOKEN='<WS_DEV_TOKEN>:smoke-tenant' \
 npx tsx deploy/scripts/smoke-enqueue.ts
 ```
@@ -244,18 +280,39 @@ Expect three `sync.progress` events (fetch/transform/load), then
 `smoke: sync.done received — pipeline OK`; exit code 0. (Same script and expected
 output as the local staging rehearsal above — deploy day should hold no surprises.)
 
-Web:
+Cross-tenant spot check, same environment: connect a second socket as a different
+tenant and confirm it receives nothing during a smoke run:
 
 ```sh
-curl -sSI https://<vercel-domain>/ | head -1     # expect HTTP/2 200
+npx wscat -c "wss://<staging gateway domain>/?token=<WS_DEV_TOKEN>:other-tenant"
 ```
 
-Cross-tenant spot check: connect a second socket as a different tenant and confirm it
-receives nothing during a smoke run:
+Web, against production:
 
 ```sh
-npx wscat -c "wss://<gateway-domain>/?token=<WS_DEV_TOKEN>:other-tenant"
+curl -sSI https://<vercel-domain>/ | head -1            # expect HTTP/2 200
+curl -sS https://<vercel-domain>/api/health             # ok:true, db:true, worker:true
 ```
+
+## Per-tenant onboarding — POS ingest secrets
+
+Not a deploy-day step, but the first thing a new shop with a till needs. There is no
+global POS credential: `POST /api/pos/ingest` authenticates against a secret stored per
+tenant (hashed) on `TenantConfig`, and **a tenant with none issued is closed** — every
+call answers 401.
+
+Issue one from `packages/pos`, with the environment's `SERVICE_DATABASE_URL` in the
+shell:
+
+```sh
+cd packages/pos
+npx tsx scripts/provision-ingest-secret.ts <tenant-slug>
+```
+
+It prints the secret once and stores only its SHA-256. Put the value into the POS
+bridge's credential store immediately — it cannot be read back, only rotated, and
+re-running the script kills the previous secret. Rotating means coordinating with
+whoever runs the bridge, or that shop's sales stop flowing.
 
 ## Uptime monitoring (external pingers)
 
@@ -336,8 +393,8 @@ lives.
 - **Dump-and-restore to a scratch project (the drill, and the fallback when PITR
   can't help).** Proves the data is recoverable end-to-end without touching prod.
 
-**Restore drill — REQUIRED M10 exercise, executable once the Supabase account
-exists. Until it has been run once, treat restore as UNVERIFIED.**
+**Restore drill — run this once, as soon as the Supabase project exists. Until it has
+been run and the log below filled in, treat "we can restore" as an untested claim.**
 
 1. Record the start time. Create a scratch project: Console → New project →
    `wezesha-restore-drill`, any strong password (vault not required — it dies with
@@ -388,8 +445,12 @@ ______ · dump size ______ · surprises ______
 - **Error tracking DSNs:** all three services init the tracker only when
   `SENTRY_DSN` is set. Creating the Sentry org/projects and setting the DSNs is
   an owner action; no code change needed when they arrive.
-- **Restore drill:** section 8's drill is a required M10 exercise — run it once
-  the Supabase project exists and fill in the drill log.
+- **Restore drill:** section 8's drill has to be run once the Supabase project
+  exists, with the drill log filled in. Nothing in the repo can do it — it needs a
+  live project and a scratch project to restore into.
+- **POS ingest secrets:** each tenant whose till posts to `/api/pos/ingest` needs its
+  own secret issued (see "Per-tenant onboarding"). Until then that tenant's ingest is
+  closed.
 
 ## 10. Owner-only actions (cannot be prepared in the repo)
 
@@ -402,7 +463,9 @@ Everything above assumes these accounts/switches, which only the account owner c
 3. Vercel: import repo, set Root Directory, set Production Branch, set env vars.
 4. GitHub: no new secrets needed for CI today (the db job uses a service container);
    Railway/Vercel connect via their own GitHub apps.
-5. Vault: store owner DB password, two role passwords, three URLs, `WS_DEV_TOKEN`.
+5. Vault: store the owner DB password, the two role passwords, the three URLs, each
+   environment's `BETTER_AUTH_SECRET`, the shared `TOKEN_ENCRYPTION_KEY`, and every
+   per-tenant POS ingest secret handed to a bridge.
 6. Sentry (or compatible): create the org + project(s), copy the DSN(s), set
    `SENTRY_DSN` on Vercel and both Railway services.
 7. UptimeRobot or Upptime: create the monitors per the "Uptime monitoring"

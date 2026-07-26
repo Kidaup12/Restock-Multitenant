@@ -1,11 +1,11 @@
 # Quickstart — run it locally
 
-Works on Windows, macOS, and Linux. Prerequisites: **Node 20+**, **npm**, and **Docker Desktop**
-(running).
+Works on Windows, macOS, and Linux. Prerequisites: **Node 22** (what CI and the Docker images
+run), **npm**, and **Docker Desktop** (running).
 
 > **On WSL (Ubuntu):** also enable Docker Desktop → **Settings → Resources → WSL Integration** →
 > toggle your distro **on** → *Apply & Restart* (otherwise `docker` isn't available inside the distro).
-> Install Node 20 in the distro if missing (`curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs`).
+> Install Node 22 in the distro if missing (`curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs`).
 
 ## One command
 
@@ -50,6 +50,17 @@ Seeded sign-ins (same shop, three roles): **owner** `owner@wezesha.test` / `Owne
 | `npm run db:up` / `npm run db:down` | Start / stop Postgres + Redis |
 | `npm run migrate` | Apply DB migrations |
 | `npm run seed` | Reload the demo tenant (rebuilds it each run) |
+
+To exercise `POST /api/pos/ingest` locally, issue that tenant a secret first — the seed
+doesn't, and a tenant without one is closed (every call answers 401):
+
+```bash
+cd packages/pos && npx tsx scripts/provision-ingest-secret.ts amara-beauty
+```
+
+It prints the secret once (only the hash is stored) and the POS bridge sends it as
+`Authorization: Bearer <secret>`. Re-running rotates it and kills the old one; so does
+`npm run seed`, which rebuilds the demo tenant from scratch.
 
 ## Manual setup (if you don't want the one command)
 

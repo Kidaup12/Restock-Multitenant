@@ -13,43 +13,76 @@ it embeds a password).
 
 | Variable | Read at | Service(s) | Set by / on | Class | Local default |
 |---|---|---|---|---|---|
-| `DATABASE_URL` | `packages/db/prisma/schema.prisma` (datasource `url`) | any consumer of `@wezesha/db` (web, once wired); Prisma CLI | Vercel (web); CI; local `.env` | url (secret) | `postgresql://wezesha_app:wezesha_app_dev@localhost:5434/wezesha` |
-| `SERVICE_DATABASE_URL` | `packages/db/src/client.ts` (`prismaService`) | any consumer of `@wezesha/db` needing the BYPASSRLS client | Vercel (web); CI; local `.env` | url (secret) | `postgresql://wezesha_service:wezesha_service_dev@localhost:5434/wezesha` |
+| `DATABASE_URL` | `packages/db/prisma/schema.prisma` (datasource `url`) | web, worker, ws-gateway (all import `@wezesha/db`); Prisma CLI | Vercel (web); Railway (worker, ws-gateway); CI; local `.env` | url (secret) | `postgresql://wezesha_app:wezesha_app_dev@localhost:5434/wezesha` |
+| `SERVICE_DATABASE_URL` | `packages/db/src/client.ts` (`prismaService`) | web, worker, ws-gateway — the BYPASSRLS client | Vercel (web); Railway (worker, ws-gateway); CI; local `.env` | url (secret) | `postgresql://wezesha_service:wezesha_service_dev@localhost:5434/wezesha` |
 | `DIRECT_URL` | `packages/db/prisma/schema.prisma` (datasource `directUrl`) | Prisma CLI only (`migrate deploy`); RLS test suite | wherever migrations run (ops machine or CI); never a runtime platform | url (secret) | `postgresql://postgres:postgres@localhost:5434/wezesha` |
+| `BETTER_AUTH_SECRET` | Better Auth reads it from the environment (`apps/web/lib/auth.ts` passes no explicit secret); `apps/web/lib/admin/impersonation.ts` also signs the admin workspace cookie with it | web | Vercel | secret | `change-me` in `apps/web/.env.example` — generate a real one per environment (`openssl rand -base64 32`) |
+| `BETTER_AUTH_URL` | `apps/web/app/layout.tsx` (`metadataBase` for canonical/OG URLs); `apps/web/lib/auth/invites.ts` (invite links — throws when unset); Better Auth's own base URL | web | Vercel | url (config) | `http://localhost:3000` |
 | `PORT` | `apps/ws-gateway/src/index.ts` | ws-gateway | Railway (injected automatically) | config | `8081` |
-| `REDIS_URL` | `apps/ws-gateway/src/index.ts`; `apps/worker/src/index.ts` | ws-gateway, worker | Railway (reference to the Redis service, see below) | url (secret) | `redis://localhost:6380` |
-| `WS_DEV_TOKEN` | `apps/ws-gateway/src/index.ts` | ws-gateway | Railway | secret | unset (gateway rejects all connections when unset — fail closed) |
-| `NODE_ENV` | `apps/web/components/sw-register.tsx`; `packages/db/src/client.ts` | web; db consumers | set by Vercel/Next and the Dockerfiles automatically — never set by hand | config | `development` |
+| `REDIS_URL` | `apps/ws-gateway/src/index.ts`; `apps/worker/src/index.ts`; `apps/web/lib/shopify/queue.ts`, `apps/web/lib/pos/queue.ts`, `apps/web/app/api/health/route.ts` | web, worker, ws-gateway | Vercel (web); Railway (reference to the Redis service, see below) | url (secret) | `redis://localhost:6380` |
+| `NEXT_PUBLIC_WS_URL` | `apps/web/app/api/realtime-token/route.ts` | web | Vercel | url (config) | unset (the token route returns `url: null` and the realtime client hooks stay idle — the app works, it just doesn't live-update) |
+| `WS_DEV_TOKEN` | `apps/ws-gateway/src/index.ts` | ws-gateway, **non-production only** | Railway (staging/preview environments only) | secret | unset (no dev tokens accepted; real sessions still authorize) |
+| `NEXT_OUTPUT` | `apps/web/next.config.ts` | web, **build time only** | set to `standalone` by `apps/web/Dockerfile`; leave unset on Vercel | config | unset (default Next output) |
+| `NODE_ENV` | `apps/web/components/sw-register.tsx`; `packages/db/src/client.ts`; `apps/ws-gateway/src/index.ts` (gates the dev token) | web, ws-gateway; db consumers | set by Vercel/Next and the Dockerfiles automatically — never set by hand | config | `development` |
 | `SHOPIFY_API_KEY` | `apps/web/lib/shopify/env.ts` | web | Vercel | secret | unset (Shopify flows 500 with a clear message) |
 | `SHOPIFY_API_SECRET` | `apps/web/lib/shopify/env.ts`; `apps/web/app/api/webhooks/shopify/route.ts` | web | Vercel | secret | unset |
 | `SHOPIFY_APP_URL` | `apps/web/lib/shopify/env.ts`; `apps/worker/src/shopify-sync.ts` | web (OAuth redirect URI); worker (webhook registration) | Vercel; Railway | url (config) | `http://localhost:3000` (OAuth/webhooks need a public tunnel locally) |
 | `TOKEN_ENCRYPTION_KEY` | `packages/shopify/src/crypto.ts` (via web callback + worker sync) | web, worker | Vercel; Railway — SAME value on both | secret | unset (token store/read throws) |
-| `EMAIL_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` in environments that should send scheduled email) | config | unset (no cron schedules registered — dev/CI stay quiet) |
+| `POS_FEED_SECRET` | `apps/worker/src/pos-sync.ts` (passed to `packages/pos/src/feed.ts`) | worker | Railway | secret | unset (the feed GET goes out with no `Authorization` header — only matters for tenants that have `TenantConfig.posFeedUrl` set) |
+| `EMAIL_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` to send the weekly summaries) | config | unset — schedule OFF |
+| `OPS_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` to run the daily plan-limit check) | config | unset — schedule OFF |
+| `POS_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` to run the daily POS sales-gap check) | config | unset — schedule OFF |
+| `FORECAST_CRON` | `apps/worker/src/index.ts` | worker | Railway (`1` to run the nightly forecast + monthly backtest) | config | unset — schedule OFF |
+| `COST_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` to run the nightly cost-moved check) | config | unset — schedule OFF |
+| `SNAPSHOT_CRON` | `apps/worker/src/index.ts` (gates `apps/worker/src/snapshot-cron.ts`) | worker | Railway (`1` everywhere on-hand history is wanted — stockout-rate and dead-stock trends read off it) | config | unset — schedule OFF |
 | `BREVO_API_KEY` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | secret | unset (mail is logged to the console, never sent — dev/CI/tests stay offline) |
 | `EMAIL_FROM` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | config | unset (only read when `BREVO_API_KEY` is set; sender as `Name <address>` or a bare address) |
 | `ADMIN_EMAILS` | `apps/web/lib/admin/gate.ts` | web | Vercel | config (sensitive — names the operator accounts) | unset (the `/admin` console 404s for everyone — fail closed) |
-| `OPS_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` in environments that should run the daily plan-limit check) | config | unset (no ops schedules registered — dev/CI stay quiet) |
-| `SNAPSHOT_CRON` | `apps/worker/src/index.ts` | worker | Railway (`1` everywhere on-hand history is wanted — stockout-rate and dead-stock trends read off it) | config | unset (no snapshot schedule registered — dev/CI stay quiet) |
 | `SENTRY_DSN` | `packages/observability/src/index.ts` (via each service's init) | web (`apps/web/instrumentation.ts`) | Vercel | secret | unset (error tracking disabled — complete no-op) |
 | `SENTRY_DSN` | same | worker (`apps/worker/src/index.ts`) | Railway | secret | unset (no-op) |
 | `SENTRY_DSN` | same | ws-gateway (`apps/ws-gateway/src/index.ts`) | Railway | secret | unset (no-op) |
 | `SENTRY_ENVIRONMENT` | `packages/observability/src/index.ts` | web, worker, ws-gateway | Vercel; Railway (e.g. `production` / `preview`) | config | unset (falls back to `NODE_ENV`) |
 | `SENTRY_RELEASE` | `packages/observability/src/index.ts` | web, worker, ws-gateway | optional — set by the deploy pipeline if release tagging is wanted | config | unset |
 
+One read site is deliberately left out: `NEXT_RUNTIME`, which Next injects and
+`apps/web/instrumentation.ts` branches on. Nothing sets it by hand.
+
 Notes:
 
-- **`WS_DEV_TOKEN` is interim.** It backs the dev auth stub
-  (`apps/ws-gateway/src/auth.ts`, token format `<secret>:<tenantId>`). The auth branch
-  replaces this seam with session-backed socket auth; expect this variable to be
-  retired then.
-- **web reads no other env today.** On the current `develop`, `apps/web` does not yet
-  import `@wezesha/db`, so the three DB URLs are listed for web as *forthcoming* — set
-  them when the web app wires the db package (the auth branch does this).
-- **web also needs `REDIS_URL`** since the Shopify branch: OAuth callback, sync-now,
-  and webhook routes enqueue worker jobs (`apps/web/lib/shopify/queue.ts`).
-- **worker needs the DB URLs** since the Shopify branch: the sync writes through the
-  service client, so set `SERVICE_DATABASE_URL` + `DATABASE_URL` (client construction)
-  alongside `REDIS_URL`, `TOKEN_ENCRYPTION_KEY`, and `SHOPIFY_APP_URL` on Railway.
+- **Sockets authorize against real sessions.** `apps/ws-gateway/src/auth.ts` exports
+  `sessionAuthorizeSocket`, which validates the caller's Better Auth session token
+  against the `Session` table and resolves the tenant through `Membership` — so the
+  gateway needs `SERVICE_DATABASE_URL` (and `DATABASE_URL` for client construction).
+  `WS_DEV_TOKEN` is the non-production convenience only: `apps/ws-gateway/src/index.ts`
+  ignores it entirely when `NODE_ENV=production`. Setting it on a production service
+  does nothing; leave it off there.
+- **web needs the DB URLs.** `apps/web` depends on `@wezesha/db` (see its
+  `package.json` and the `serverExternalPackages: ["@wezesha/db"]` entry in
+  `apps/web/next.config.ts`); pages such as `/settings/connections` import
+  `prismaForTenant`. `packages/db/src/client.ts` throws at module load when
+  `SERVICE_DATABASE_URL` is unset, so a build or a request fails without it — this is
+  not optional.
+- **web needs the auth variables.** `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` are
+  required, not nice-to-have: the build evaluates route modules that initialize Better
+  Auth, which is why both CI (`.github/workflows/ci.yml`) and `apps/web/Dockerfile` set
+  build-only placeholders. Deploy without them and the build fails. Generate a distinct
+  secret per environment and never share one between preview and production;
+  `BETTER_AUTH_URL` is that environment's public origin, no trailing slash.
+- **web also needs `REDIS_URL`**: OAuth callback, sync-now, webhook and POS routes
+  enqueue worker jobs (`apps/web/lib/shopify/queue.ts`, `apps/web/lib/pos/queue.ts`).
+- **worker needs the DB URLs**: the sync writes through the service client, so set
+  `SERVICE_DATABASE_URL` + `DATABASE_URL` (client construction) alongside `REDIS_URL`,
+  `TOKEN_ENCRYPTION_KEY`, and `SHOPIFY_APP_URL` on Railway.
+- **Every scheduled job is off unless switched on.** `EMAIL_CRONS`, `OPS_CRONS`,
+  `POS_CRONS`, `FORECAST_CRON`, `COST_CRONS` and `SNAPSHOT_CRON` each register their
+  schedules only when the value is exactly `"1"` (`apps/worker/src/index.ts`). Unset is
+  the default everywhere, which keeps dev and CI quiet — and means a production worker
+  that should run the nightly forecast, cost checks and on-hand snapshots does nothing
+  until those are set to `1` on Railway. Decide this deliberately per environment.
+- **Realtime needs `NEXT_PUBLIC_WS_URL` on web.** The gateway can be up and reachable
+  and the app will still never connect: `/api/realtime-token` returns `url: null` when
+  the variable is unset. Point it at the gateway's `wss://` origin once the Railway
+  domain exists.
 - **`TOKEN_ENCRYPTION_KEY` is one key, two services.** The web callback encrypts the
   store token; the worker decrypts it per sync. Rotating it invalidates stored
   connections (stores must reconnect) — treat rotation as an offboarding-grade event.
@@ -60,7 +93,8 @@ Notes:
   with its own `service` tag, so one shared DSN works — but separate Sentry projects
   per service (three DSNs) keep alert routing cleaner. Either way, no DSN = tracking
   is a complete no-op (the SDK is not even loaded); nothing else changes. When DSNs
-  arrive, set them and redeploy — no code change needed (M9 acceptance closes then).
+  arrive, set them and redeploy — no code change needed, and error tracking is only
+  considered live once a deployed service has reported into the Sentry project.
 - **`/api/health` (web) also reads `REDIS_URL`** to report the worker's heartbeat
   key (`ops:worker:heartbeat`); with no `REDIS_URL` the endpoint still works and
   reports `worker: null` (unknown).
@@ -68,6 +102,33 @@ Notes:
   env: they are session-guarded (OWNER + manage_settings) and resolve the tenant
   from the membership. The delete route stays test-tenants-only until the owner
   signs off (see the loud comment in the route and the production-safety rule).
+
+## POS ingest — a per-tenant secret, not an environment variable
+
+`POST /api/pos/ingest` is how a shop's till pushes physical sales in. It has no
+session, so the credential is a bearer secret — but that secret is **per tenant and
+lives in the database**, not in the platform's environment. `packages/pos/src/auth.ts`
+verifies the presented secret against `TenantConfig.posIngestSecretHash` for the tenant
+the request's `slug` resolved to, so a bridge holding one shop's secret can never write
+another shop's sales. Only the SHA-256 is stored.
+
+Consequences an operator has to plan for:
+
+- **A tenant with no secret provisioned is closed.** There is no process-wide fallback
+  credential to inherit — every ingest call for that tenant answers 401. Provisioning
+  is a per-tenant onboarding step, not a deploy step.
+- **Issue or rotate a secret** from `packages/pos`, against the environment's database
+  (the script reads `SERVICE_DATABASE_URL`):
+
+  ```sh
+  npx tsx scripts/provision-ingest-secret.ts <tenant-slug>
+  ```
+
+  It prints the secret **once** and stores only the hash — a lost secret is rotated,
+  never recovered. Re-running kills the previous one, so coordinate with whoever runs
+  the bridge. Put the value straight into the bridge's credential store.
+- **`POS_FEED_SECRET` is the opposite direction** and unrelated: it is the token the
+  worker *sends outbound* when it pulls a provider's feed URL. Do not confuse the two.
 
 ## The three-URL database model (Supabase)
 
@@ -112,14 +173,22 @@ Supabase specifics that are easy to get wrong:
 |---|---|---|---|
 | `DATABASE_URL` | prod value | staging/branch DB value — never prod | local |
 | `SERVICE_DATABASE_URL` | prod value | staging/branch DB value — never prod | local |
+| `BETTER_AUTH_SECRET` | prod secret | separate preview secret — never prod's | local |
+| `BETTER_AUTH_URL` | prod origin | preview origin | `http://localhost:3000` |
 | `REDIS_URL` | prod Redis | staging Redis — never prod | local |
+| `NEXT_PUBLIC_WS_URL` | `wss://<prod gateway domain>` | `wss://<staging gateway domain>` or unset | `ws://localhost:8081` or unset |
 | `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` | prod app | dev app — never the prod app | dev app |
 | `SHOPIFY_APP_URL` | prod origin | preview origin | tunnel origin |
 | `TOKEN_ENCRYPTION_KEY` | prod key (= worker's) | preview key (= staging worker's) | local key |
 | `SENTRY_DSN` | prod DSN (when provisioned) | preview DSN or unset | unset |
 | `BREVO_API_KEY` | prod key (= worker's) | preview key or unset (console fallback) | unset |
 | `EMAIL_FROM` | prod sender | preview sender | unset |
-| AUTH vars (below) | prod values | preview values | local |
+| `ADMIN_EMAILS` | named operators only | named operators or unset | unset |
+
+The first four rows are the ones a deploy fails without: `SERVICE_DATABASE_URL` is read
+at module load and `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` are needed for the build to
+evaluate route modules. Do not set `NEXT_OUTPUT` on Vercel — it exists for the Docker
+image only.
 
 `develop` deploys as Preview (Production Branch is `main`), so Preview values are what
 `develop` runs with. Point Preview at a separate Supabase project or branch database —
@@ -129,8 +198,11 @@ previews must never hold prod credentials.
 
 - `REDIS_URL` = `${{Redis.REDIS_URL}}` (service reference to the Redis service; use the
   private-network variant if available so traffic stays inside the project)
-- `WS_DEV_TOKEN` = generated secret (vault)
+- `DATABASE_URL`, `SERVICE_DATABASE_URL` — same DB values as web for the environment;
+  the gateway resolves sessions and memberships through them
 - `PORT` — do not set; Railway injects it and the app reads it
+- `WS_DEV_TOKEN` — staging/preview only; the gateway ignores it under
+  `NODE_ENV=production`
 - `SENTRY_DSN` — when provisioned; unset keeps tracking a no-op
 
 **Railway (worker)** — service variables:
@@ -139,28 +211,28 @@ previews must never hold prod credentials.
 - `DATABASE_URL`, `SERVICE_DATABASE_URL` — same DB values as web for the environment
 - `TOKEN_ENCRYPTION_KEY` — same value as web for the environment
 - `SHOPIFY_APP_URL` — the web origin for the environment (webhook registration)
-- `EMAIL_CRONS` / `OPS_CRONS` — `1` in environments that should run the schedules
+- `EMAIL_CRONS`, `OPS_CRONS`, `POS_CRONS`, `FORECAST_CRON`, `COST_CRONS`,
+  `SNAPSHOT_CRON` — `1` for each schedule this environment should actually run. All
+  six are off by default; a production worker with none of them set runs no nightly
+  work at all
+- `POS_FEED_SECRET` — only when a tenant's POS feed URL is polled by the worker
 - `BREVO_API_KEY` — same key as web for the environment; unset makes the worker
   log alerts/summaries to the console instead of sending them
 - `EMAIL_FROM` — same sender as web for the environment
 - `SENTRY_DSN` — when provisioned; unset keeps tracking a no-op
 
-**CI** (`.github/workflows/ci.yml`, db job) — already wired to the throwaway Postgres
-service container with dev-only credentials; nothing to provision.
+**CI** (`.github/workflows/ci.yml`) — nothing to provision. Nine jobs run on Node 22:
+`db` (migrate + RLS isolation/coverage suites), `web-tests`, `worker-tests`,
+`package-tests-db` (ws-gateway, pos, forecast-run), `package-tests-redis` (realtime,
+queue), `lint`, `web-build` (typecheck + `next build`), `services-typecheck`, and
+`docker-build` (all three images). The DB-backed jobs use throwaway Postgres/Redis
+service containers with dev-only credentials; `web-tests` and `web-build` set
+placeholder `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` values so module init succeeds.
 
 **Local staging** (`docker-compose.staging.yml`) — variables come from
 `.env.staging` (copy of `.env.staging.example`; dev defaults, no secrets). Inside the
 compose network services address each other by name (`redis:6379`); the host-port
-variables only exist to dodge collisions with other local stacks.
-
-## AUTH (placeholder — lands with the auth branch)
-
-The in-progress auth branch adds Better Auth. Reserve this section; fill in exact
-names/read-sites when that branch merges. Expected shape:
-
-| Variable | Service(s) | Set on | Class | Notes |
-|---|---|---|---|---|
-| `BETTER_AUTH_SECRET` | web | Vercel | secret | signing secret (Better Auth reads it from env by convention); generate per environment, never shared between preview and prod |
-| `BETTER_AUTH_URL` | web | Vercel | url (config) | canonical app URL per environment |
-| `BREVO_API_KEY` / `EMAIL_FROM` | web, worker | Vercel; Railway | secret / config | Brevo transactional email — see the matrix above. The seam (`apps/web/lib/email.ts`, `apps/worker/src/email.ts`) falls back to console logging when `BREVO_API_KEY` is unset |
-| (gateway session auth) | ws-gateway | Railway | — | the branch disables `WS_DEV_TOKEN` when `NODE_ENV=production` and authorizes sockets against sessions instead — expect gateway DB access and its own env additions |
+variables only exist to dodge collisions with other local stacks. The compose file
+falls back to dev-only defaults for `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL`, which
+`.env.staging.example` does not list — add them to your `.env.staging` if the rehearsal
+should serve on a port other than 3000.

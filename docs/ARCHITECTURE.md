@@ -9,7 +9,7 @@ the guide for reviewing and running the repo.
 ```
 apps/
   web/         Next.js (App Router) — all screens + server actions + API routes
-  worker/      BullMQ worker — nightly crons (forecast, cost-moved, POS gap, limits) + Shopify sync
+  worker/      BullMQ worker — nightly crons (forecast, snapshot, cost-moved, POS gap, limits, email) + Shopify sync
   ws-gateway/  WebSocket gateway for realtime updates
 packages/
   db/          Prisma schema + client, the tenant-scoped resolver, RLS roles/policies, seed
@@ -99,8 +99,9 @@ Vitest throughout, unit and integration. DB-backed suites (`packages/db`, parts 
 `worker`) need Docker Postgres up; worker cron tests need `REDIS_URL` + `SERVICE_DATABASE_URL`
 exported or they skip locally. In CI that skip is a hard failure instead — a suite that asserts
 nothing must not report green (`scripts/test-infra-guard.ts`). CI (`.github/workflows/ci.yml`) runs
-the db, web, worker, package, lint and typecheck jobs plus a `next build` and all three Docker image
-builds on Node 22.
+nine jobs on Node 22: `db`, `web-tests`, `worker-tests`, `package-tests-db`,
+`package-tests-redis`, `lint`, `web-build` (typecheck + `next build`), `services-typecheck`, and
+`docker-build` (all three images).
 Security-critical suites to run first: `packages/db` (isolation + RLS) and `web` money-blind
 (`member-visibility`, `orders-money-blind`). **There are no end-to-end/UI tests yet** — nav or
 render regressions aren't caught by the current suites.
@@ -130,7 +131,7 @@ render regressions aren't caught by the current suites.
 - **Planner depth.** `/plan` works (checklist + budget modes, per-line "why", CSV/PDF, money-blind)
   but the richer buy-list from the reference build is in progress — cover-horizon sizing, scope
   filters, exclude-already-ordered + double-order warnings, MOQ rounding, supplier-grouped draft POs,
-  sales-target mode, a supply calendar. See `.claude`-tracked planner target.
+  sales-target mode, a supply calendar.
 - **Signals (promo / closure normalization).** Stockout gaps are removed from the run-rate; **past
   promo spikes and shop-closure days are not yet excluded**, and there's no UI yet for an owner to
   declare a promo/closure. Late/backdated data does reconcile (date-keyed history + re-run).
