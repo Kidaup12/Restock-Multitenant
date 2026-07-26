@@ -36,13 +36,21 @@ these three exist out of the box.)
 - Sign in / out; wrong password rejected; sign-in-with-code path.
 - **Expected:** clean auth; landing on Today after login.
 
+### 2b. Creating a workspace (new — no invite needed)
+- Sign up as a brand-new email, with no invite waiting. From the empty Today screen (or the
+  workspace switcher) create a workspace, then create a second one from the switcher.
+- Try a name someone else has already used, and double-click the create button.
+- **Expected:** you land in the new workspace as its owner with an empty catalogue; a name already
+  in use still works and quietly gets its own address; a double-click leaves one workspace, not two;
+  nothing from any other shop is visible inside it.
+
 ### 3. SECURITY — tenant isolation (critical)
 - With two workspaces, confirm you only ever see the active shop's products/sales/costs/suppliers.
 - **Expected:** no data from another shop appears anywhere; switching workspace fully swaps the data.
 
 ### 4. SECURITY — money-blind / staff (critical)
-- As a **member**, visit Today, Stock, Costs, Plan, Orders, a PO and its print view, Suppliers, Sales,
-  Reports.
+- As a **member**, visit Today, Stock, Costs, Plan (all three modes), Orders, a PO and its print
+  view, Suppliers, Sales data.
 - **Expected:** **no cost or profit/margin figure appears anywhere** — cost fields show a mask
   (`KES •••`). Selling prices and revenue are fine (staff may see those). The supplier PO *email* is
   the only place cost is intentionally present (it goes to the supplier, not shown to the member).
@@ -67,18 +75,30 @@ these three exist out of the box.)
 - **Expected:** lead time drives order timing + safety stock; receiving doesn't silently overwrite a
   typed lead time.
 
-### 9. Plan (buy list)
-- Two modes: checklist (order today / this week / can wait) and budget allocator; per-line "why"
-  (the arithmetic); funded vs deferred; CSV/PDF export.
-- **Expected:** quantities have a visible reason; changing the budget rebuilds the list; export works.
+### 9. Plan (buy list) — newest code, test it hardest
+- Three modes off the Plan landing: **checklist** (order today / this week / can wait), **budget
+  allocator** (funded vs deferred; a Growth-plan feature — Starter sees it locked), and the
+  **supply calendar** (the next few months of order-by dates grouped by supplier, with the cash
+  each month needs).
+- Checklist depth to exercise: the decision header (can't-wait count, cash for the critical lines,
+  sales at risk, products in view); the scope bar (ABC / category / supplier / lead-band, saveable
+  and reloadable); per-line "why" (the arithmetic); the MOQ floor note (`N → M (MOQ)`); the
+  "Held off the list" section (already on an order, unplannable, slow mover); the cover-days lens
+  and the sales-push what-if; the owner quantity override; CSV / copy / Save-PDF export.
+- **Expected:** every quantity has a visible reason; changing the budget, the cover lens or the
+  sales push rebuilds the list; the header totals track the scope on screen; an export contains
+  exactly the rows currently visible; a member sees the same rows with every cost figure masked.
 
 ### 10. Orders & receiving
 - Draft a PO → (email to supplier) → receive; on-hand updates on receipt.
 - **Expected:** received quantities update stock; costs redacted for members.
 
 ### 11. Sales / POS reconciliation
-- Unmatched-SKU queue (match a till SKU to a product), "not a product" ignore, sales-gap list.
-- **Expected:** unmatched till sales are surfaced (never silently dropped); matching back-fills history.
+- Unmatched-SKU queue (match a till SKU to a product), "not a product" ignore, sales-gap list and
+  its two dismissals ("shop was closed" vs a missing feed).
+- **Expected:** unmatched till sales are surfaced (never silently dropped); matching back-fills
+  history; a day dismissed as closed stops being reported as a gap and stops counting against the
+  run rate on the next forecast.
 
 ### 12. Forecast (engine)
 - Run the forecast; check recommended quantities on Today/Plan.
@@ -91,14 +111,17 @@ these three exist out of the box.)
 - **Forecast "trust" screens not rendered** — confidence words, cold-start queue, backtest accuracy,
   Insights proof, "tell the forecast" are built in the engine but have no UI yet. Insights is a
   placeholder.
-- **Planner depth in progress** — cover-days sizing, scope filters, exclude-already-ordered warnings,
-  MOQ rounding, supplier-grouped draft POs, sales-target mode, supply calendar are not in `/plan` yet.
-- **Signals not built** — no way yet to declare a promo / shop closure; and **past promo spikes and
-  closed-day gaps are not yet removed from the run-rate** (a known bug being fixed — expect some
-  over/under-ordering around promos/closures). Stockout gaps *are* handled.
-- **Live Shopify not connected** — the demo runs on seeded data, not the live store's 276 orders
+- **No way to declare a promotion** — a shop closure *can* be recorded (Sales → sales-gap list →
+  "Shop was closed"), and once a promo window or a closure day exists the forecast leaves those days
+  out of the run rate. But nothing in the UI creates a promo window yet, so a past promotion still
+  inflates the rate until one does. Stockout gaps are handled.
+- **The plan doesn't raise the PO itself** — ticking lines adds them to the Orders queue, and that
+  queue is where they group by supplier and become a purchase order. There's no supplier-grouped
+  draft straight off `/plan`.
+- **Live Shopify not connected** — the demo runs on seeded data, not a live store's order history
   (that's the hosted/OAuth step).
-- **Emails are console-only** — team invites / codes / alerts are logged, not delivered yet.
+- **Emails are console-only** — team invites / codes / alerts are logged to the server console
+  rather than delivered, until a Brevo API key is set.
 - **No end-to-end/UI tests** — so please click broadly.
 
 ## Lower-priority items already known (dev-side)

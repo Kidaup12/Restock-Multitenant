@@ -42,21 +42,28 @@ in-store POS ───┘        (Product.currentStock = on-hand)        │    
   the single on-hand source.
 - **The engine** (`packages/forecast`) turns history into a per-product recommended quantity with an
   explain breakdown and a plain-language confidence word (`sure` / `fairly sure` / `guessing`). The
-  worker runs it nightly (`FORECAST_CRON`) and writes `Prediction` rows — replaced wholesale each run —
-  plus an append-only `ForecastRecommendation` row per keepable ask, which is what plan-adherence over
-  past weeks is measured from.
-- **The worker** also runs cost-moved detection (`COST_CRONS`), POS sales-gap detection, and plan-limit
-  checks, and performs Shopify OAuth sync. Realtime events flow web ⇄ ws-gateway ⇄ worker via Redis.
-- **On-hand history.** A nightly snapshot (`SNAPSHOT_CRON`, 01:00, ahead of the forecast) writes one
+  worker runs it at 02:00 daily and writes `Prediction` rows — replaced wholesale each run — plus an
+  append-only `ForecastRecommendation` row per keepable ask, which is what plan-adherence over past
+  weeks is measured from.
+- **The worker** also runs cost-moved detection, POS sales-gap detection, plan-limit checks and the
+  weekly summary email, and performs Shopify OAuth sync. Realtime events flow web ⇄ ws-gateway ⇄
+  worker via Redis.
+- **On-hand history.** A nightly snapshot (01:00, ahead of the forecast) writes one
   `InventorySnapshot` row per active product per UTC day from `Product.currentStock`, pruned to ~400
   days. Stockout rate and dead stock week over week are read off it; nothing else records on-hand
   over time, so it has to be running before those trends can exist.
+- **Every cron group is off unless switched on.** `FORECAST_CRON`, `COST_CRONS`, `POS_CRONS`,
+  `OPS_CRONS`, `EMAIL_CRONS` and `SNAPSHOT_CRON` each register their schedules only when set to `1`
+  (`apps/worker/src/index.ts`), so dev and CI stay quiet — a deployed environment that wants the
+  nightly forecast has to set `FORECAST_CRON=1`. Until then the **Run forecast** button is the only
+  thing that produces predictions. See `deploy/ENVIRONMENT.md`.
 
 ## Multi-tenant isolation (security)
 
-- **Postgres Row-Level Security is the enforcement**, not just app code. Every tenant-owned table
-  (29 of them) has RLS enabled with a fail-closed policy
-  (`USING tenantId = current_setting('app.tenant_id')`).
+- **Postgres Row-Level Security is the enforcement**, not just app code. Every table carrying a
+  `tenantId` has RLS enabled with a fail-closed policy
+  (`USING tenantId = current_setting('app.tenant_id')`). The count isn't tracked by hand — the
+  coverage census enumerates the live schema and fails CI on any table that ships without a policy.
 - The app connects as a **restricted role** (`wezesha_app`, no BYPASSRLS). All tenant data goes
   through one sanctioned resolver, `prismaForTenant(tenantId)` (`packages/db/src/client.ts`), which
   sets the tenant GUC transaction-locally. Tenant is resolved **server-side from session → membership**,
@@ -78,16 +85,22 @@ The supplier PO email carries cost by design (it goes to the supplier).
 
 ## Branch model & workflow
 
-`feature/*` → **`develop`** (integration) → a **testing branch** (QA on a production-like deploy) →
-**`main`** (go-live). Commits are atomic and conventional (`feat`/`fix`/`refactor`/`chore`/`docs`/
-`test`). Test on production-like infra, not just local. Deploy targets: **Vercel** (web), **Supabase**
-(Postgres), **Railway** (worker + Redis); Dockerfiles + `docker-compose.staging.yml` for rehearsal.
-See `deploy/RUNBOOK.md` + `deploy/ENVIRONMENT.md`.
+`feature/*` (and `fix/*`, `chore/*`, `docs/*`) → **`develop`** (integration, merged `--no-ff`) →
+**`main`** (go-live). Those two are the only long-lived branches on the remote. QA happens on the
+`develop` deploy, which Vercel publishes as a Preview — `main` is the Production Branch. Commits are
+atomic and conventional (`feat`/`fix`/`refactor`/`chore`/`docs`/`test`). Test on production-like
+infra, not just local. Deploy targets: **Vercel** (web), **Supabase** (Postgres), **Railway**
+(worker + ws-gateway + Redis); Dockerfiles + `docker-compose.staging.yml` for rehearsal. See
+`deploy/RUNBOOK.md` + `deploy/ENVIRONMENT.md`.
 
 ## Testing / QA
 
-~96 vitest suites (unit + integration). DB-backed suites (`packages/db`, parts of `web`) need Docker
-Postgres up; worker cron tests need `REDIS_URL` + `SERVICE_DATABASE_URL` exported or they skip.
+Vitest throughout, unit and integration. DB-backed suites (`packages/db`, parts of `web` and
+`worker`) need Docker Postgres up; worker cron tests need `REDIS_URL` + `SERVICE_DATABASE_URL`
+exported or they skip locally. In CI that skip is a hard failure instead — a suite that asserts
+nothing must not report green (`scripts/test-infra-guard.ts`). CI (`.github/workflows/ci.yml`) runs
+the db, web, worker, package, lint and typecheck jobs plus a `next build` and all three Docker image
+builds on Node 22.
 Security-critical suites to run first: `packages/db` (isolation + RLS) and `web` money-blind
 (`member-visibility`, `orders-money-blind`). **There are no end-to-end/UI tests yet** — nav or
 render regressions aren't caught by the current suites.
@@ -97,7 +110,7 @@ render regressions aren't caught by the current suites.
 | Area | Route(s) | State |
 |---|---|---|
 | Today (money picture, reorder list) | `/today` | Surfaced |
-| Restock plan / buy list | `/plan` | Surfaced (depth in progress — see below) |
+| Restock plan / buy list — checklist, budget allocator, supply calendar | `/plan` | Surfaced |
 | Orders & receiving | `/orders`, `/orders/[id]` | Surfaced |
 | Stock catalogue + money band | `/stock` | Surfaced |
 | Costs & coverage (money-blind) | `/costs` | Surfaced |
@@ -105,6 +118,8 @@ render regressions aren't caught by the current suites.
 | Sales / POS reconciliation | `/sales` | Surfaced |
 | Connections (Shopify/QB/POS) | `/settings/connections` | Surfaced (from Settings) |
 | Locations & roles, Team | `/settings/locations`, `/settings/team` | Surfaced |
+| Own profile; mobile nav overflow | `/profile`, `/more` | Surfaced |
+| Cross-tenant operator console (audit log, per-tenant view) | `/admin`, `/admin/audit`, `/admin/tenant/[id]` | Surfaced, but 404s unless the signed-in email is in `ADMIN_EMAILS` |
 | Insights (proof/accuracy) | `/insights` | **Placeholder — deferred** |
 | Forecast trust surfaces (confidence render, cold-start queue, "tell the forecast", receipts, what-changed) | — | **Built + tested in the engine; UI deferred** |
 
