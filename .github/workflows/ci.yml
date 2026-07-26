@@ -166,6 +166,117 @@ jobs:
       - name: Tests (apps/worker — seeded db + redis)
         run: npm run -w @wezesha/worker test
 
+  package-tests-db:
+    name: packages — ws-gateway, pos, forecast-run (real db)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wezesha
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d wezesha"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://wezesha_app:wezesha_app_dev@localhost:5434/wezesha
+      SERVICE_DATABASE_URL: postgresql://wezesha_service:wezesha_service_dev@localhost:5434/wezesha
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5434/wezesha
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run -w @wezesha/db db:generate
+
+      - name: Apply migrations (roles, tables, policies)
+        run: npm run -w @wezesha/db db:migrate:deploy
+
+      # Socket authorization against the real session/membership tables — the
+      # unit suite fakes the store, only this one proves the gateway's tenant bind.
+      - name: Tests @wezesha/ws-gateway (auth, gateway, db-backed session auth)
+        run: npm run -w @wezesha/ws-gateway test
+
+      # Pure ingest planners plus the DB contract the planners can't prove:
+      # set-semantics idempotency, ignore rules, tenant-timezone day boundary.
+      - name: Tests @wezesha/pos (planners + ingest integration)
+        run: npm run -w @wezesha/pos test
+
+      # The only automated proof that the walk-forward backtest writes rows,
+      # plus cold-start borrow and the owner-prior overrides.
+      - name: Tests @wezesha/forecast-run (backtest, cold start, owner priors)
+        run: npm run -w @wezesha/forecast-run test
+
+  package-tests-redis:
+    name: packages — realtime, queue (real redis)
+    runs-on: ubuntu-latest
+
+    # Redis only: neither suite touches Postgres, so this job skips the database
+    # container and the migration steps entirely.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      REDIS_URL: redis://localhost:6380
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Event contract, the browser-bundle export boundary, the client against a
+      # real ws server, and the redis → gateway → client end-to-end path.
+      - name: Tests @wezesha/realtime (contract, client, gateway e2e)
+        run: npm run -w @wezesha/realtime test
+
+      # The no-overlap enqueue guard: one tenant+source can never hold two sync
+      # jobs. Only provable against real Redis.
+      - name: Tests @wezesha/queue (deterministic job ids + no-overlap)
+        run: npm run -w @wezesha/queue test
+
+  lint:
+    name: web — eslint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint (apps/web)
+        run: npm run -w web lint
+
   web-build:
     name: web — next build
     runs-on: ubuntu-latest
@@ -189,6 +300,11 @@ jobs:
 
       - name: Generate Prisma client
         run: npm run -w @wezesha/db db:generate
+
+      # next build reports type errors only for what it compiles; this covers the
+      # whole app tsconfig, tests included.
+      - name: Typecheck (apps/web)
+        run: npm run -w web typecheck
 
       - name: Build (apps/web)
         run: npm run -w web build
@@ -220,6 +336,12 @@ jobs:
 
       - name: Typecheck @wezesha/queue
         run: npm run -w @wezesha/queue typecheck
+
+      - name: Typecheck @wezesha/pos
+        run: npm run -w @wezesha/pos typecheck
+
+      - name: Typecheck @wezesha/forecast-run
+        run: npm run -w @wezesha/forecast-run typecheck
 
       - name: Typecheck @wezesha/shopify
         run: npm run -w @wezesha/shopify typecheck
