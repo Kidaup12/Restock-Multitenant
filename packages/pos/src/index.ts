@@ -18,8 +18,12 @@ export type {
 export { detectSalesGaps } from "./gap";
 export type { GapFact, SalesGap } from "./gap";
 export {
+  authenticatePosFeed,
+  generatePosIngestSecret,
+  hashPosIngestSecret,
+} from "./auth";
+export {
   ingestPosSales,
-  resolvePosFeedTenant,
   writeDerivedPosSalesHistory,
 } from "./ingest";
 export type { PosIngestResult } from "./ingest";

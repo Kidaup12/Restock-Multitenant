@@ -163,10 +163,14 @@ model TenantConfig {
   tenantId String @unique
 
   // Integrations
-  posFeedUrl  String? // POS feed base URL (e.g. Dellwest)
-  posFeedSlug String? // ingest slug (defaults to tenant slug)
-  alertEmail  String? // where forecast-health / digest alerts go
-  notifyPrefs Json? // { phantomPo, lowStockDigest, syncFailure, weeklySpotCheck: bool }
+  posFeedUrl          String? // POS feed base URL (e.g. Dellwest)
+  posFeedSlug         String? // ingest slug (defaults to tenant slug)
+  // SHA-256 (hex) of THIS tenant's POS ingest bearer secret. The plaintext is
+  // shown once at provisioning and never stored. null = POS ingest is closed
+  // for this tenant — the endpoint has no other credential to fall back to.
+  posIngestSecretHash String?
+  alertEmail          String? // where forecast-health / digest alerts go
+  notifyPrefs         Json? // { phantomPo, lowStockDigest, syncFailure, weeklySpotCheck: bool }
 
   // Curated forecast knobs (null = code default)
   serviceLevelZA   Float? // overrides A z
