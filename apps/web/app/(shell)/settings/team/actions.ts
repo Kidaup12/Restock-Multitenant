@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prismaForTenant, type Role } from "@wezesha/db";
+import type { Role } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import {
   cancelInvite,
@@ -10,12 +10,8 @@ import {
   type InviteRole,
 } from "@/lib/auth/invites";
 import { hasPermission } from "@/lib/auth/permissions";
-import {
-  canChangeRole,
-  canRemoveMember,
-  invitableRoles,
-  type TeamActor,
-} from "@/lib/auth/team-guards";
+import { invitableRoles, type TeamActor } from "@/lib/auth/team-guards";
+import { changeMemberRoleGuarded, removeMemberGuarded } from "@/lib/auth/team-mutations";
 
 /**
  * Team management actions. Every action re-resolves the caller's active
@@ -97,24 +93,13 @@ export async function changeMemberRole(input: {
   const ctx = await actorContext();
   if (!ctx) return err("You're not in a workspace.");
   if (!isRole(input.role)) return err("Unknown role.");
-  const db = prismaForTenant(ctx.membership.tenantId);
-  const target = await db.membership.findUnique({
-    where: { id: input.membershipId },
-    select: { id: true, role: true },
-  });
-  if (!target) return err("That member no longer exists.");
-  const ownerCount = await db.membership.count({ where: { role: "OWNER" } });
-  const guard = canChangeRole(
+  const guard = await changeMemberRoleGuarded(
+    ctx.membership.tenantId,
     ctx.actor,
-    { membershipId: target.id, role: target.role },
+    input.membershipId,
     input.role,
-    ownerCount,
   );
   if (!guard.ok) return err(guard.reason);
-  await db.membership.update({
-    where: { id: target.id },
-    data: { role: input.role },
-  });
   revalidatePath("/settings/team");
   return { ok: true };
 }
@@ -124,20 +109,12 @@ export async function removeMember(input: {
 }): Promise<TeamActionResult> {
   const ctx = await actorContext();
   if (!ctx) return err("You're not in a workspace.");
-  const db = prismaForTenant(ctx.membership.tenantId);
-  const target = await db.membership.findUnique({
-    where: { id: input.membershipId },
-    select: { id: true, role: true },
-  });
-  if (!target) return err("That member no longer exists.");
-  const ownerCount = await db.membership.count({ where: { role: "OWNER" } });
-  const guard = canRemoveMember(
+  const guard = await removeMemberGuarded(
+    ctx.membership.tenantId,
     ctx.actor,
-    { membershipId: target.id, role: target.role },
-    ownerCount,
+    input.membershipId,
   );
   if (!guard.ok) return err(guard.reason);
-  await db.membership.delete({ where: { id: target.id } });
   // Removing yourself changes what the whole shell should show.
   revalidatePath("/", "layout");
   return { ok: true };

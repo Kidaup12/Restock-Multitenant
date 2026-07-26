@@ -13,6 +13,9 @@ export type CreatePoResult =
   | { ok: true; poId: string; poNumber: string }
   | { ok: false; reason: "no_orders" | "mixed_suppliers" | "no_supplier" };
 
+/** Thrown when the queue rows were claimed by another create (see below). */
+class QueueClaimed extends Error {}
+
 export async function createPoFromOrders(
   tenantId: string,
   orderIds: string[],
@@ -65,6 +68,19 @@ export async function createPoFromOrders(
     // Serialise PO creation per tenant: max+1 numbering is race-free only when
     // no two transactions read the max concurrently. Released at commit.
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`po-number:${tenantId}`}, 0))`;
+
+    // Claim the queue rows here, not on the read above: that read committed
+    // before this transaction opened, so two tabs submitting the same queue
+    // both saw every row pending and both built a full PO — one of them a live,
+    // sendable orphan the supplier would ship against a second time. Only the
+    // create that still finds every row pending may proceed.
+    const now = new Date();
+    const claimed = await tx.order.updateMany({
+      where: { id: { in: orders.map((o) => o.id) }, status: "pending" },
+      data: { status: "ordered", orderedAt: now },
+    });
+    if (claimed.count !== orders.length) throw new QueueClaimed();
+
     const [existing, tenant] = await Promise.all([
       tx.purchaseOrder.findMany({ select: { poNumber: true } }),
       tx.tenant.findUnique({ where: { id: tenantId }, select: { poNumberFloor: true } }),
@@ -88,20 +104,23 @@ export async function createPoFromOrders(
       select: { id: true, poNumber: true },
     });
 
-    const now = new Date();
     for (const order of orders) {
       await tx.order.update({
         where: { id: order.id },
         data: {
-          status: "ordered",
           purchaseOrderId: po.id,
-          orderedAt: now,
           stockAtOrder: stockByProduct.get(order.product!.id) ?? null,
         },
       });
     }
     return po;
+  }).catch((error: unknown) => {
+    if (error instanceof QueueClaimed) return null;
+    throw error;
   });
+  // Rolled back with nothing created — the queue rows are already on someone
+  // else's purchase order.
+  if (!created) return { ok: false, reason: "no_orders" };
 
   // Audit trail rides on the service client so no tenant role can filter it.
   await prismaService.auditEvent.create({
