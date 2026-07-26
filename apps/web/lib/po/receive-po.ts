@@ -36,6 +36,15 @@ export async function receivePoLines(
   if (receipts.length === 0) return { ok: false, reason: "empty" };
 
   const result = await prismaForTenantTx(tenantId, async (tx): Promise<ReceivePoResult> => {
+    // Serialise receipts against this PO. Everything below is decided from the
+    // read that follows — the outstanding-quantity guard, the per-line running
+    // total, the finished/partial status — and READ COMMITTED gives two
+    // concurrent receipts no consistent view of it. Two staff submitting the
+    // same delivery both read receivedQty = 0, both clear the over-receipt
+    // guard, both write the same absolute receivedQty and both increment stock:
+    // 100 units in, 200 on the shelf, PO reading "all in". Released at commit.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`po-receive:${poId}`}, 0))`;
+
     const po = await tx.purchaseOrder.findFirst({
       where: { id: poId, deletedAt: null },
       select: {
