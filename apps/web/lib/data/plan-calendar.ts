@@ -108,10 +108,12 @@ export async function getSupplyCalendar(
 ): Promise<SupplyCalendar> {
   const db = prismaForTenant(tenantId);
 
-  // The buy list already redacts lineTotalKes to null for a money-blind caller,
-  // so pass the same flag straight through.
+  // Build on real costs whatever the caller can see: supplier groups are ordered
+  // by cash, so a redacted buy list would sort every group at zero and hand a
+  // money-blind member a different running order. redactCalendar nulls the money
+  // on the way out instead.
   const [buyList, openPos, openOrderLines] = await Promise.all([
-    getBuyList(tenantId, { canViewCosts }),
+    getBuyList(tenantId, { canViewCosts: true }),
     db.purchaseOrder.findMany({
       where: { status: { in: OPEN_PO_STATUSES }, deletedAt: null },
       select: { subtotalKes: true, vendor: true, supplier: { select: { name: true } } },

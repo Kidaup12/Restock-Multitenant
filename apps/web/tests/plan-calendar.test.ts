@@ -143,6 +143,27 @@ describe.skipIf(!runnable)("supply calendar (seeded local db)", () => {
     });
   });
 
+  it("orders suppliers by cash for both roles, not just the one that can see it", async () => {
+    // Regression: the calendar used to build on a redacted buy list, so every
+    // group summed to zero cash for a member and the sort fell through to
+    // count-then-name. Both roles must walk the suppliers in the same order,
+    // and that order must be the cash ranking — otherwise staff and owner work
+    // a restock list with different priorities.
+    const now = new Date();
+    const [owner, member] = await Promise.all([
+      getSupplyCalendar(seeded.tenantId, { canViewCosts: true, now, horizonMonths: HORIZON }),
+      getSupplyCalendar(seeded.tenantId, { canViewCosts: false, now, horizonMonths: HORIZON }),
+    ]);
+
+    for (const [i, ob] of owner.buckets.entries()) {
+      const cash = ob.suppliers.map((s) => s.cashKes ?? 0);
+      expect(cash).toEqual([...cash].sort((a, b) => b - a));
+      expect(member.buckets[i]!.suppliers.map((s) => s.supplierName)).toEqual(
+        ob.suppliers.map((s) => s.supplierName)
+      );
+    }
+  });
+
   it("scopes to the tenant: another tenant's calendar is empty", async () => {
     const probe = await prismaService.tenant.create({
       data: { name: "Calendar Probe", slug: "plan-calendar-probe" },
