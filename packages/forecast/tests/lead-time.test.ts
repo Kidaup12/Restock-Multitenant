@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { leadDaysFor, leadStdFor, coverDaysFor, ORDER_REVIEW_DAYS } from "../src/lead-time";
+import {
+  ASSUMED_LEAD_DAYS,
+  coverDaysFor,
+  leadDaysFor,
+  leadStdFor,
+  ORDER_REVIEW_DAYS,
+} from "../src/lead-time";
 
 describe("leadDaysFor precedence", () => {
   it("per-product override wins over the supplier average", () => {
@@ -39,5 +45,19 @@ describe("coverDaysFor (item lead time + review cycle, no hard-coded policy)", (
   it("no lead data covers the review cycle only — no guess", () => {
     expect(coverDaysFor({})).toBe(ORDER_REVIEW_DAYS);
     expect(coverDaysFor({ leadTimeDays: null }, null)).toBe(ORDER_REVIEW_DAYS);
+  });
+  it("the urgency assumption never leaks into the order size", () => {
+    expect(coverDaysFor({ leadTimeDays: null }, null)).toBeLessThan(ASSUMED_LEAD_DAYS);
+  });
+});
+
+describe("ASSUMED_LEAD_DAYS (the one urgency fallback)", () => {
+  it("is a real waiting time, so an unknown lead never reads as same-day", () => {
+    expect(ASSUMED_LEAD_DAYS).toBeGreaterThan(0);
+  });
+  it("is slow enough to sit outside the this-week tier", () => {
+    // A tier boundary of 7 days: assuming anything faster would still tell the
+    // owner they have a week in hand for a supplier they have never timed.
+    expect(ASSUMED_LEAD_DAYS).toBeGreaterThan(ORDER_REVIEW_DAYS);
   });
 });

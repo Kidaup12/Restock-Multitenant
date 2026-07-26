@@ -1,5 +1,5 @@
 import { prismaForTenant, roleOf, type LocationRole } from "@wezesha/db";
-import { leadDaysFor, urgencyFromDays, type AbcCategory } from "@wezesha/forecast";
+import { ASSUMED_LEAD_DAYS, leadDaysFor, urgencyFromDays, type AbcCategory } from "@wezesha/forecast";
 import { getCatalogueMetrics } from "@/lib/metrics";
 import { buildFacetItems, type FacetItem, type FacetSourceRow } from "@/lib/facets";
 import {
@@ -72,8 +72,8 @@ export type CatalogueRow = {
   /** Owner-marked tester/display/damaged: stays in the catalogue, out of
    *  sellable cover / money band / buy list. */
   notForSale: boolean;
-  /** Resolved lead time (product override → supplier → 30d default) — feeds the
-   *  cover verdict and the "below lead" revenue-at-risk tile. */
+  /** Resolved lead time (product override → supplier → ASSUMED_LEAD_DAYS) —
+   *  feeds the cover verdict and the "below lead" revenue-at-risk tile. */
   leadDays: number;
   /** Cover verdict pill; null for a not-for-sale row (no sellable judgement). */
   verdict: VerdictKind | null;
@@ -170,7 +170,7 @@ export async function getStockCatalogue(
     // row is out of sellable stock, so its cover verdict and cost/supplier health
     // flags go quiet (spec §2).
     const cost = resolveCost({ costKes: p.costKes, costSource: p.costSource, priceKes: p.priceKes });
-    const leadDays = leadDaysFor(p, p.supplier) ?? 30;
+    const leadDays = leadDaysFor(p, p.supplier) ?? ASSUMED_LEAD_DAYS;
 
     return {
       productId: p.id,

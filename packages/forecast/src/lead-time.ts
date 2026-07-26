@@ -18,12 +18,28 @@ const FALLBACK_LEAD_STD_DAYS = 7;
  *  reorder path protects the same cycle. */
 export const ORDER_REVIEW_DAYS = 7;
 
+/**
+ * The one lead time a screen may assume when there is no measured value.
+ *
+ * Sizing an order on a guessed lead over-orders, so `coverDaysFor` still falls
+ * back to the review cycle alone. But the URGENCY lens — "how late can I place
+ * this?" — has no such escape: a screen that shows no lead time at all is
+ * telling the owner the restock arrives instantly, and they place the order on
+ * the day the shelf empties. Every urgency caller resolves through this single
+ * value so the Plan and Stock screens can never reach opposite verdicts on the
+ * same product, and it is deliberately slow: ordering too early costs cash,
+ * ordering too late costs the sale.
+ */
+export const ASSUMED_LEAD_DAYS = 30;
+
 export type ProductLeadFacts = { leadTimeDays?: number | null };
 export type SupplierLeadFacts = { leadTimeAvgDays?: number | null; leadTimeStdDays?: number | null };
 
 /**
  * Lead-time precedence: per-product override -> supplier average -> NULL.
- * Null means "no real lead data" — callers must not invent one.
+ * Null means "no real lead data" — callers must not invent one of their own.
+ * Sizing paths keep the null (see `coverDaysFor`); urgency paths resolve it
+ * through the shared `ASSUMED_LEAD_DAYS`.
  */
 export function leadDaysFor(
   product: ProductLeadFacts,

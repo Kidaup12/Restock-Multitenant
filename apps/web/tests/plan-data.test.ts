@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prismaForTenant, prismaService } from "@wezesha/db";
-import { coverDaysFor, leadDaysFor, recommendedQty } from "@wezesha/forecast";
+import { ASSUMED_LEAD_DAYS, coverDaysFor, leadDaysFor, recommendedQty } from "@wezesha/forecast";
 import {
   DEAD_SKUS,
   STOCKOUT_SKUS,
@@ -105,7 +105,7 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       // Owner category rides through unredacted — a scope-bar facet, not money.
       expect(row.category).toBe(p.product.customCategory);
       expect(row.moq).toBe(p.product.supplier?.moq ?? 1);
-      const leadDays = p.product.leadTimeDays ?? p.product.supplier?.leadTimeAvgDays ?? 0;
+      const leadDays = p.product.leadTimeDays ?? p.product.supplier?.leadTimeAvgDays ?? ASSUMED_LEAD_DAYS;
       expect(row.leadDays).toBe(leadDays);
       // Run/day derives from the persisted forecast, never a re-derivation.
       expect(row.runRatePerDay).toBeCloseTo(Math.round((p.finalForecast30d / 30) * 10) / 10, 5);
@@ -126,7 +126,11 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       const rankDelta = URGENCY_RANK[curr.urgency]! - URGENCY_RANK[prev.urgency]!;
       expect(rankDelta).toBeGreaterThanOrEqual(0);
       if (rankDelta === 0) {
-        expect(curr.daysUntilStockout).toBeGreaterThanOrEqual(prev.daysUntilStockout);
+        // "No stockout in sight" (null) sorts last, so rank it as infinitely far off.
+        const rank = (d: number | null) => d ?? Number.POSITIVE_INFINITY;
+        expect(rank(curr.daysUntilStockout)).toBeGreaterThanOrEqual(
+          rank(prev.daysUntilStockout)
+        );
       }
     }
 
@@ -268,8 +272,10 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
 
     for (const row of buyList!.rows) {
       const product = bySku.get(row.sku)!;
-      const leadDays = product.leadTimeDays ?? product.supplier?.leadTimeAvgDays ?? 0;
-      const daysLeft = row.daysUntilStockout - leadDays;
+      const leadDays = product.leadTimeDays ?? product.supplier?.leadTimeAvgDays ?? ASSUMED_LEAD_DAYS;
+      // Every seeded row sells, so each has a real cover to subtract the lead from.
+      expect(row.daysUntilStockout, row.sku).not.toBeNull();
+      const daysLeft = row.daysUntilStockout! - leadDays;
       expect(row.daysLeftToOrder).toBe(daysLeft);
       const expectedTier =
         row.urgency === "critical" || daysLeft <= 0
