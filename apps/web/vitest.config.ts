@@ -9,6 +9,7 @@ export default defineConfig({
   test: {
     environment: "node",
     setupFiles: ["tests/setup-env.ts"],
+    globalSetup: ["tests/require-infra.ts"],
     // The auth flow suite signs up real users in one local database; password
     // hashing makes individual steps slow, more so on a loaded machine.
     fileParallelism: false,
