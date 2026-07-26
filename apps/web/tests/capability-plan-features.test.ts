@@ -31,6 +31,13 @@ describe("planAllows", () => {
     expect(planAllows("scale", "budget_planner")).toBe(true);
   });
 
+  it("locks insights on Starter and opens it at Growth+", () => {
+    expect(planAllows("starter", "insights")).toBe(false);
+    expect(planAllows(null, "insights")).toBe(false); // null = entry tier
+    expect(planAllows("growth", "insights")).toBe(true);
+    expect(planAllows("scale", "insights")).toBe(true);
+  });
+
   it("locks Scale features until Scale", () => {
     expect(planAllows("growth", "team_depth")).toBe(false);
     expect(planAllows("scale", "team_depth")).toBe(true);
