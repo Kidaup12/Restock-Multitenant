@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
+import Link from "next/link";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -32,7 +33,15 @@ export default async function TodayPage() {
         <PageHeader title="Today" description="Your replenishment picture this morning" />
         <EmptyState
           title="No workspace yet"
-          description="Ask an admin to invite you to a workspace to see its replenishment picture."
+          description="Create your shop's workspace to start, or ask an admin to invite you to theirs."
+          action={
+            <Link
+              href="/workspaces/new"
+              className="flex h-10 items-center justify-center rounded-md bg-accent px-4 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong"
+            >
+              Create a workspace
+            </Link>
+          }
         />
       </div>
     );

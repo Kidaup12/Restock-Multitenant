@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { switchWorkspace } from "@/lib/auth-actions";
@@ -180,21 +181,20 @@ export function WorkspaceSwitcher({
           </div>
           <div className="mx-1.5 border-t border-edge" />
           <div className="py-1">
-            {/* Placeholder until self-serve workspace creation ships. */}
-            <button
-              type="button"
+            <Link
+              href="/workspaces/new"
               role="menuitem"
-              disabled
-              className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium text-ink-faint"
+              onClick={() => setOpen(false)}
+              className={cn(
+                "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium text-ink",
+                "outline-none hover:bg-surface-2 focus-visible:bg-surface-2",
+              )}
             >
-              <span className="grid size-7 shrink-0 place-items-center rounded-md border border-dashed border-edge-strong">
+              <span className="grid size-7 shrink-0 place-items-center rounded-md border border-dashed border-edge-strong text-ink-muted">
                 <PlusIcon className="size-3.5" />
               </span>
               Create workspace
-              <span className="ml-auto text-[10px] tracking-wider uppercase">
-                Soon
-              </span>
-            </button>
+            </Link>
           </div>
         </div>
       )}

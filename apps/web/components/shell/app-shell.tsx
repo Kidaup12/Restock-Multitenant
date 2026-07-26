@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { Role } from "@wezesha/db";
 import { cn } from "@/lib/cn";
 import { ChevronsLeftIcon, DotsIcon } from "@/components/icons";
@@ -148,7 +149,19 @@ export function AppShell({
                   {workspace ? workspace.name : "No workspace"}
                 </div>
                 <div className="truncate text-xs text-ink-muted">
-                  {workspace ? workspace.roleLabel : "Ask an admin for an invite"}
+                  {workspace ? (
+                    workspace.roleLabel
+                  ) : (
+                    <>
+                      <Link
+                        href="/workspaces/new"
+                        className="font-medium text-accent-ink hover:underline"
+                      >
+                        Create one
+                      </Link>{" "}
+                      or ask for an invite
+                    </>
+                  )}
                 </div>
               </div>
             </div>
