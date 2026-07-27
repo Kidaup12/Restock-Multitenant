@@ -248,6 +248,46 @@ describe("bucketSalesByProductDay", () => {
     ];
     expect(bucketSalesByProductDay(bare, coreMap, utcDay).get("local-1|2026-06-05")?.quantity).toBe(1);
   });
+
+  it("attributes a sale to the VARIANT's row, not an arbitrary sibling", () => {
+    // Two shades of one product: the product map can only point at one of them,
+    // so a product-keyed lookup would file both shades' sales on the same row.
+    const variantMap = new Map<string, string>([
+      ["11", "local-shade-a"],
+      ["12", "local-shade-b"],
+    ]);
+    const sameProduct: ShopifyOrderNode[] = [
+      {
+        id: "o7",
+        createdAt: "2026-06-06T08:00:00Z",
+        lineItems: [
+          {
+            quantity: 2,
+            product: { id: "gid://shopify/Product/1" },
+            variant: { id: "gid://shopify/ProductVariant/12" },
+            originalUnitPriceSet: { shopMoney: { amount: "100" } },
+          },
+        ],
+      },
+    ];
+    const buckets = bucketSalesByProductDay(sameProduct, coreMap, utcDay, undefined, variantMap);
+    expect(buckets.get("local-shade-b|2026-06-06")?.quantity).toBe(2);
+    expect(buckets.has("local-1|2026-06-06")).toBe(false);
+  });
+
+  it("falls back to the product map for a line with no variant", () => {
+    const noVariant: ShopifyOrderNode[] = [
+      {
+        id: "o8",
+        createdAt: "2026-06-07T08:00:00Z",
+        lineItems: [
+          { quantity: 1, product: { id: "gid://shopify/Product/1" }, originalUnitPriceSet: { shopMoney: { amount: "100" } } },
+        ],
+      },
+    ];
+    const buckets = bucketSalesByProductDay(noVariant, coreMap, utcDay, undefined, new Map());
+    expect(buckets.get("local-1|2026-06-07")?.quantity).toBe(1);
+  });
 });
 
 describe("computeWindowStart", () => {
