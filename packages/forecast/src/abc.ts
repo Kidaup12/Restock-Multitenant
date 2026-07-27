@@ -20,10 +20,14 @@ export function assignAbc(productsWithValue: AbcInput[]): Record<string, AbcCate
   let cumulative = 0;
   const map: Record<string, AbcCategory> = {};
   for (const p of sorted) {
+    // Cut on the share ABOVE this product, not including it. Counting itself
+    // first meant a shop whose best seller is most of its value scored that
+    // product against its own share and filed the top earner under C — where
+    // the tail's lean-cash min/max sizing then took over its ordering.
+    const above = total > 0 ? cumulative / total : 1;
     cumulative += p.revenue;
-    const pct = total > 0 ? cumulative / total : 1;
-    if (pct <= 0.7) map[p.id] = "A";
-    else if (pct <= 0.9) map[p.id] = "B";
+    if (above < 0.7) map[p.id] = "A";
+    else if (above < 0.9) map[p.id] = "B";
     else map[p.id] = "C";
   }
   return map;
