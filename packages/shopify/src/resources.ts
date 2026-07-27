@@ -49,7 +49,15 @@ export type ShopifyOrderNode = {
   // When the sale actually happened. Differs from createdAt for imported /
   // back-dated / POS-channel orders — createdAt is just the API insertion time.
   processedAt?: string;
+  /** Set when the order was cancelled — it never became a sale. */
+  cancelledAt?: string | null;
+  /** Returns against this order. Netted off the sale so the run rate reflects
+   *  what the shop actually kept selling, not what left the counter once. */
+  refunds?: Array<{
+    refundLineItems?: Array<{ quantity?: number; lineItem?: { id?: string } }>;
+  }>;
   lineItems?: Array<{
+    id?: string;
     quantity?: number;
     sku?: string;
     product?: { id?: string };
@@ -124,10 +132,11 @@ export async function fetchOrdersSince(client: ShopifyClient, sinceIso: string):
       query: `query($after: String, $q: String!) {
         orders(first: ${PAGE}, after: $after, query: $q) {
           edges { node {
-            id name createdAt processedAt
+            id name createdAt processedAt cancelledAt
             fulfillments(first: 10) { location { id } }
+            refunds { refundLineItems(first: 50) { edges { node { quantity lineItem { id } } } } }
             lineItems(first: 50) { edges { node {
-              quantity sku product { id } variant { id }
+              id quantity sku product { id } variant { id }
               originalUnitPriceSet { shopMoney { amount currencyCode } }
             } } }
           } }
@@ -139,6 +148,9 @@ export async function fetchOrdersSince(client: ShopifyClient, sinceIso: string):
     (d: any) => ({
       nodes: d.orders.edges.map((e: any) => ({
         ...e.node,
+        refunds: (e.node.refunds ?? []).map((r: any) => ({
+          refundLineItems: (r.refundLineItems?.edges ?? []).map((rl: any) => rl.node),
+        })),
         lineItems: e.node.lineItems.edges.map((l: any) => l.node),
       })),
       pageInfo: d.orders.pageInfo,

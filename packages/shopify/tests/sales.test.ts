@@ -90,6 +90,97 @@ describe("bucketSalesByProductDay", () => {
     });
   });
 
+  it("nets returned units off the day they were sold", () => {
+    // Two sold, one handed back. The shop moved one, so the run rate must see
+    // one — otherwise the forecast replaces stock that walked back in.
+    const withRefund: ShopifyOrderNode[] = [
+      {
+        id: "gid://shopify/Order/9100",
+        processedAt: "2026-06-10T09:00:00Z",
+        refunds: [
+          { refundLineItems: [{ quantity: 1, lineItem: { id: "gid://shopify/LineItem/1" } }] },
+        ],
+        lineItems: [
+          {
+            id: "gid://shopify/LineItem/1",
+            quantity: 2,
+            product: { id: "gid://shopify/Product/1" },
+            originalUnitPriceSet: { shopMoney: { amount: "100" } },
+          },
+        ],
+      } as ShopifyOrderNode,
+    ];
+    expect(bucketSalesByProductDay(withRefund, coreMap, utcDay).get("local-1|2026-06-10")).toMatchObject({
+      quantity: 1,
+      revenue: 100,
+    });
+  });
+
+  it("drops a line returned in full rather than recording a zero sale", () => {
+    const fullyReturned: ShopifyOrderNode[] = [
+      {
+        id: "gid://shopify/Order/9101",
+        processedAt: "2026-06-11T09:00:00Z",
+        refunds: [
+          { refundLineItems: [{ quantity: 3, lineItem: { id: "gid://shopify/LineItem/2" } }] },
+        ],
+        lineItems: [
+          {
+            id: "gid://shopify/LineItem/2",
+            quantity: 3,
+            product: { id: "gid://shopify/Product/1" },
+            originalUnitPriceSet: { shopMoney: { amount: "100" } },
+          },
+        ],
+      } as ShopifyOrderNode,
+    ];
+    expect(bucketSalesByProductDay(fullyReturned, coreMap, utcDay).size).toBe(0);
+  });
+
+  it("ignores a cancelled order entirely — it never became a sale", () => {
+    const cancelled: ShopifyOrderNode[] = [
+      {
+        id: "gid://shopify/Order/9102",
+        processedAt: "2026-06-12T09:00:00Z",
+        cancelledAt: "2026-06-12T10:00:00Z",
+        lineItems: [
+          {
+            id: "gid://shopify/LineItem/3",
+            quantity: 5,
+            product: { id: "gid://shopify/Product/1" },
+            originalUnitPriceSet: { shopMoney: { amount: "100" } },
+          },
+        ],
+      } as ShopifyOrderNode,
+    ];
+    expect(bucketSalesByProductDay(cancelled, coreMap, utcDay).size).toBe(0);
+  });
+
+  it("nets partial returns across several refunds on one line", () => {
+    const twice: ShopifyOrderNode[] = [
+      {
+        id: "gid://shopify/Order/9103",
+        processedAt: "2026-06-13T09:00:00Z",
+        refunds: [
+          { refundLineItems: [{ quantity: 1, lineItem: { id: "gid://shopify/LineItem/4" } }] },
+          { refundLineItems: [{ quantity: 2, lineItem: { id: "gid://shopify/LineItem/4" } }] },
+        ],
+        lineItems: [
+          {
+            id: "gid://shopify/LineItem/4",
+            quantity: 10,
+            product: { id: "gid://shopify/Product/1" },
+            originalUnitPriceSet: { shopMoney: { amount: "50" } },
+          },
+        ],
+      } as ShopifyOrderNode,
+    ];
+    expect(bucketSalesByProductDay(twice, coreMap, utcDay).get("local-1|2026-06-13")).toMatchObject({
+      quantity: 7,
+      revenue: 350,
+    });
+  });
+
   it("skips a sale whose timestamp cannot be read as an instant", () => {
     const broken: ShopifyOrderNode[] = [
       {
