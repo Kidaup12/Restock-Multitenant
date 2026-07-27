@@ -1,5 +1,6 @@
 import type { Role } from "@wezesha/db";
 import { activeMembership, listMemberships, requireSession } from "@/lib/auth";
+import { isAdminEmail } from "@/lib/admin/gate";
 import { getUnreadCount } from "@/lib/notifications/data";
 import { AppShell } from "@/components/shell/app-shell";
 
@@ -43,6 +44,9 @@ export default async function ShellLayout({
       }))}
       tourAutoStart={membership !== null && membership.welcomedAt === null}
       unreadNotifications={unreadNotifications}
+      /* Operator allow-list, resolved server-side: ADMIN_EMAILS never reaches
+         the client, and a non-admin's shell carries no trace of /admin. */
+      isPlatformAdmin={isAdminEmail(session.user.email)}
     >
       {children}
     </AppShell>

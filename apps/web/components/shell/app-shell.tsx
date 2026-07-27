@@ -53,6 +53,7 @@ export function AppShell({
   workspaces,
   tourAutoStart,
   unreadNotifications,
+  isPlatformAdmin,
   children,
 }: {
   user: ShellUser;
@@ -62,6 +63,8 @@ export function AppShell({
   tourAutoStart: boolean;
   /* Server-rendered seed for the bell badge; live updates take over client-side. */
   unreadNotifications: number;
+  /* Caller is on the operator allow-list — the only thing that reveals /admin. */
+  isPlatformAdmin: boolean;
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -175,6 +178,7 @@ export function AppShell({
                 name={user.name}
                 email={user.email}
                 roleLabel={workspace ? workspace.roleLabel : "No workspace"}
+                isPlatformAdmin={isPlatformAdmin}
               />
             </div>
           </header>

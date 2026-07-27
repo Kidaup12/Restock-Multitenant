@@ -8,7 +8,6 @@ import {
   LayersIcon,
   UsersIcon,
 } from "@/components/icons";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 
@@ -17,6 +16,12 @@ export const metadata: Metadata = {
 };
 
 const sections = [
+  {
+    href: "/settings/workspace",
+    icon: <GearIcon />,
+    title: "Workspace",
+    description: "Name, trading day, alert email, dead stock, and how you buy.",
+  },
   {
     href: "/settings/locations",
     icon: <BoxIcon />,
@@ -40,14 +45,6 @@ const sections = [
     icon: <CalendarIcon />,
     title: "Promotions & closures",
     description: "Days that weren't normal trading — so a giveaway doesn't inflate every order after it.",
-  },
-];
-
-const upcoming = [
-  {
-    icon: <GearIcon />,
-    title: "Workspace",
-    description: "Name, currency, and forecast preferences.",
   },
 ];
 
@@ -76,25 +73,6 @@ export default function SettingsPage() {
             </div>
             <ChevronRightIcon className="size-4 shrink-0 text-ink-faint" />
           </Link>
-        ))}
-        {upcoming.map((section) => (
-          <div
-            key={section.title}
-            className="flex items-center gap-3 border-t border-edge px-5 py-4 opacity-70"
-          >
-            <div className="grid size-9 shrink-0 place-items-center rounded-md bg-surface-2 text-ink-muted [&_svg]:size-4.5">
-              {section.icon}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-ink-secondary">
-                {section.title}
-              </div>
-              <div className="truncate text-xs text-ink-muted">
-                {section.description}
-              </div>
-            </div>
-            <Badge>Coming soon</Badge>
-          </div>
         ))}
       </Card>
     </div>
