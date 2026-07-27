@@ -7,7 +7,8 @@ import { hasPermission, type PermissionKey } from "@/lib/auth/permissions";
 
 /**
  * Catalogue row-editor writes: the manual cost pin (and its release back to the
- * synced cost), the not-for-sale toggle, and category assign / rename / delete.
+ * synced cost), the typed selling price, archive / restore / keep-active, the
+ * not-for-sale toggle, and category assign / rename / delete.
  *
  * Every action re-resolves the caller's membership server-side and re-checks the
  * required permission; the tenant id comes from the membership, never the client.
@@ -53,6 +54,9 @@ function audit(
 function revalidateCatalogue() {
   revalidatePath("/stock");
   revalidatePath("/costs");
+  // Archiving a SKU, or fixing its cost, changes what the buy list contains —
+  // leaving the plan cached would show it ordering something just retired.
+  revalidatePath("/plan");
 }
 
 // ── Manual cost pin ──────────────────────────────────────────────────────────
@@ -136,6 +140,116 @@ export async function clearCostPinAction(input: {
     ok: true,
     message: synced != null ? `${product.title} back to the synced cost.` : `${product.title} pin cleared — awaiting a synced cost.`,
   };
+}
+
+// ── Selling price ────────────────────────────────────────────────────────────
+
+/**
+ * Type the shop's selling price.
+ *
+ * Deliberately NOT pinned the way cost is. A pinned cost is right because the
+ * shop's real landed cost lives on a supplier invoice the store never sees; the
+ * selling price is the opposite — the store and the till are what actually
+ * charge the customer, and a price only this app believes would put margin and
+ * revenue-at-risk out of step with the money the shop takes. So the catalogue
+ * sync stays the source of record and the next pull brings the store's price
+ * back; the editor says so in as many words rather than letting the owner find
+ * out when the number reverts. On a row the sync doesn't own (no Shopify
+ * variant — an imported or till-only product) nothing overwrites it, so a typed
+ * price simply stands.
+ *
+ * Gated exactly like the cost pin: price feeds margin, and margin is the
+ * money-blind boundary.
+ */
+export async function setPriceAction(input: {
+  productId: string;
+  priceKes: number;
+}): Promise<CatalogueActionResult> {
+  const ctx = await actorContext(["view_costs", "manage_settings"]);
+  if (!ctx) return err("You don't have price-editing access in this workspace.");
+
+  const price = Number(input.priceKes);
+  if (!Number.isFinite(price) || price < 0) return err("Enter a price of zero or more.");
+  const rounded = Math.round(price * 100) / 100;
+
+  const db = prismaForTenant(ctx.tenantId);
+  const product = await db.product.findFirst({
+    where: { id: input.productId },
+    select: { id: true, title: true, priceKes: true, shopifyVariantId: true },
+  });
+  if (!product) return err("That product no longer exists.");
+
+  await db.product.update({ where: { id: product.id }, data: { priceKes: rounded } });
+  await audit(ctx.tenantId, product.id, "price_changed", ctx.actor, {
+    field: "priceKes",
+    from: product.priceKes,
+    to: rounded,
+  });
+  revalidateCatalogue();
+  return {
+    ok: true,
+    message: product.shopifyVariantId
+      ? `${product.title} price set to KES ${rounded.toLocaleString("en-KE")} — the next store sync will bring the store's price back.`
+      : `${product.title} price set to KES ${rounded.toLocaleString("en-KE")}.`,
+  };
+}
+
+// ── Archive / restore / keep active ──────────────────────────────────────────
+
+/** What the owner is doing to a SKU's life, independent of the store's status. */
+export type ProductActiveMode = "archive" | "restore" | "keep_active";
+
+const ACTIVE_MODES: Record<ProductActiveMode, { active: boolean; activeOverride: boolean }> = {
+  // Archiving clears any earlier pin: keeping the sync locked out of a row the
+  // owner just retired would leave two contradictory owner decisions on it.
+  archive: { active: false, activeOverride: false },
+  restore: { active: true, activeOverride: false },
+  keep_active: { active: true, activeOverride: true },
+};
+
+/**
+ * Archive / restore / keep-active — the owner's own switch on a SKU.
+ *
+ * `active` is one half of the buy-list predicate, so archiving drops the row off
+ * the buy list and out of the default (selling) catalogue view the moment it is
+ * written; it keeps its stock, cash and history, under the archived scope.
+ * "Keep active" additionally pins `activeOverride`, which is what stops the next
+ * catalogue sync pushing the row back out — see the product upsert in the worker.
+ */
+export async function setProductActiveAction(input: {
+  productId: string;
+  mode: ProductActiveMode;
+}): Promise<CatalogueActionResult> {
+  const ctx = await actorContext(["manage_settings"]);
+  if (!ctx) return err("You don't have settings access in this workspace.");
+
+  const next = ACTIVE_MODES[input.mode];
+  if (!next) return err("Unknown catalogue action.");
+
+  const db = prismaForTenant(ctx.tenantId);
+  const product = await db.product.findFirst({
+    where: { id: input.productId },
+    select: { id: true, title: true, active: true, activeOverride: true },
+  });
+  if (!product) return err("That product no longer exists.");
+
+  await db.product.update({ where: { id: product.id }, data: next });
+  await audit(ctx.tenantId, product.id, "edited", ctx.actor, {
+    field: "active",
+    mode: input.mode,
+    from: product.active,
+    to: next.active,
+    activeOverride: next.activeOverride,
+  });
+  revalidateCatalogue();
+
+  const message =
+    input.mode === "archive"
+      ? `${product.title} archived — off the buy list, still in the archived view.`
+      : input.mode === "keep_active"
+        ? `${product.title} kept active — the store's status won't archive it.`
+        : `${product.title} restored.`;
+  return { ok: true, message };
 }
 
 // ── Not-for-sale toggle ──────────────────────────────────────────────────────

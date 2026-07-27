@@ -30,6 +30,7 @@ import { HealthStrip, type HealthChip } from "./health-strip";
 import { MoneyBand, type MoneyBandFilter } from "./money-band";
 import { ManageCategories } from "./manage-categories";
 import { RowEditor } from "./row-editor";
+import type { OwnerFlags } from "./owner-flags";
 
 /**
  * Interactive catalogue: the money band + health strip read across the catalogue
@@ -152,12 +153,14 @@ export function CatalogueView({
   rows,
   facetOptions,
   categories,
+  ownerFlags,
   canViewCosts,
   canManage,
 }: {
   rows: CatalogueRow[];
   facetOptions: FacetOptions;
   categories: CategoryUsage[];
+  ownerFlags: Record<string, OwnerFlags>;
   canViewCosts: boolean;
   canManage: boolean;
 }) {
@@ -332,6 +335,7 @@ export function CatalogueView({
                     canViewCosts={canViewCosts}
                     canManage={canManage}
                     categoryNames={categoryNames}
+                    flags={ownerFlags[row.productId] ?? { active: true, activeOverride: false }}
                     colCount={colCount}
                   />
                 );
@@ -354,6 +358,7 @@ function RowGroup({
   canViewCosts,
   canManage,
   categoryNames,
+  flags,
   colCount,
 }: {
   row: CatalogueRow;
@@ -363,6 +368,7 @@ function RowGroup({
   canViewCosts: boolean;
   canManage: boolean;
   categoryNames: string[];
+  flags: OwnerFlags;
   colCount: number;
 }) {
   // Margin reveals cost, so it masks for a money-blind member — as a non-KES
@@ -458,7 +464,13 @@ function RowGroup({
       {open && (
         <tr>
           <td colSpan={colCount} className="p-0">
-            <RowEditor row={row} categories={categoryNames} canViewCosts={canViewCosts} canManage={canManage} />
+            <RowEditor
+              row={row}
+              categories={categoryNames}
+              flags={flags}
+              canViewCosts={canViewCosts}
+              canManage={canManage}
+            />
           </td>
         </tr>
       )}
