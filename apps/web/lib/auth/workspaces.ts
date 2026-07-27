@@ -46,11 +46,17 @@ export type CreateWorkspaceResult =
 /** Unique-violation on Tenant.slug — the only P2002 this transaction can raise
  *  (the membership's (userId, tenantId) pair is fresh by construction). */
 function slugTaken(error: unknown): boolean {
-  return (
-    error instanceof Prisma.PrismaClientKnownRequestError &&
-    error.code === "P2002" &&
-    JSON.stringify(error.meta?.target ?? "").includes("slug")
-  );
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {
+    return false;
+  }
+  // Postgres withholds which constraint was violated when row-level security is
+  // in play — naming it would confirm the existence of a row the caller cannot
+  // see. Tenant is scoped, so the slug collision arrives with no target at all.
+  // The only other unique in this transaction is on freshly minted ids, so an
+  // unnamed conflict here is the slug; if it somehow is not, the retry simply
+  // exhausts and the caller is asked for another name.
+  const target = JSON.stringify(error.meta?.target ?? "");
+  return target.includes("slug") || !error.meta?.target;
 }
 
 /**
