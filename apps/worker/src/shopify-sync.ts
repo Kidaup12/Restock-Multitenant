@@ -2,6 +2,7 @@ import { UnrecoverableError, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { guessRoleFromName, prismaService, roleOfType, typeOfRole } from "@wezesha/db";
 import { publishEvent } from "@wezesha/realtime";
+import { tenantDayKey } from "@wezesha/pos";
 import type { SyncJobData } from "@wezesha/queue";
 import type { SendEmail } from "./email";
 import { clearIncident, sendIncidentAlert } from "./incident";
@@ -195,7 +196,22 @@ async function syncOrders(
   productIdByCore: Map<string, string>,
   locationIdByCore: Map<string, string>
 ): Promise<number> {
-  const buckets = [...bucketSalesByProductDay(orders, productIdByCore, locationIdByCore).values()];
+  // The trading day is the tenant's, not UTC — the same rule, and the same
+  // function, the till feed uses, so one day of trade never lands on two dates
+  // depending on which channel it came through.
+  const tenant = await prismaService.tenant.findUnique({
+    where: { id: tenantId },
+    select: { timezone: true },
+  });
+  if (!tenant) return 0;
+  const buckets = [
+    ...bucketSalesByProductDay(
+      orders,
+      productIdByCore,
+      (d) => tenantDayKey(tenant.timezone, d),
+      locationIdByCore
+    ).values(),
+  ];
   if (buckets.length === 0) return 0;
 
   const rows = buckets.map((b) => ({
