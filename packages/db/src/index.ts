@@ -23,6 +23,17 @@ export {
   typeOfRole,
 } from "./roles";
 export type { LocationRole, LocationType } from "./roles";
+export {
+  BUYABLE_PRODUCT_WHERE,
+  LIFECYCLE_LABELS,
+  NOT_SELLING_STATUSES,
+  PRODUCT_STATUSES,
+  heldReason,
+  isBuyable,
+  isProductStatus,
+  productLifecycle,
+} from "./product-lifecycle";
+export type { ProductLifecycle, ProductStatus } from "./product-lifecycle";
 export { Prisma, Role } from "../generated/client";
 export type { Tenant, Membership, TenantConfig } from "../generated/client";
 export type { User, Session, Account, Verification } from "../generated/client";
