@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { Prisma, prismaService } from "@wezesha/db";
-import { verifyWebhookHmac } from "@wezesha/shopify";
+import { numericCore, verifyWebhookHmac } from "@wezesha/shopify";
 import { connectionByShopDomain } from "@/lib/shopify/resolve";
 import { enqueueShopifySync, publishRealtime } from "@/lib/shopify/queue";
 
@@ -15,9 +15,32 @@ import { enqueueShopifySync, publishRealtime } from "@/lib/shopify/queue";
  * Data topics don't parse the payload at all: any product/inventory/order
  * change just means "this tenant's next delta sync should run now". The
  * cursor-overlap window makes a coalesced/missed trigger self-healing.
+ *
+ * products/delete is the one exception: a deleted product is never returned by
+ * a products pull, so no sync — delta or otherwise — can learn about it from
+ * the payload. It is handled inline instead.
  */
 
 const SYNC_TOPICS = new Set(["products/update", "inventory_levels/update", "orders/create"]);
+
+/**
+ * The delete payload carries only the PRODUCT id, usually as a bare number
+ * ({"id": 123}). Rows store the numeric core of the gid, so normalize either
+ * spelling through numericCore before matching or the update silently hits
+ * nothing.
+ */
+function deletedProductId(raw: string): string | null {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const id = (payload as { id?: unknown } | null)?.id;
+  if (typeof id !== "string" && typeof id !== "number") return null;
+  const core = numericCore(String(id)).trim();
+  return core || null;
+}
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   const secret = process.env.SHOPIFY_API_SECRET;
@@ -73,6 +96,25 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       type: "notification.new",
       data: { tenantId, kind: "shopify_uninstalled", title: "Shopify app uninstalled" },
     }).catch(() => {});
+    return NextResponse.json({ ok: true });
+  }
+
+  if (topic === "products/delete") {
+    const shopifyProductId = deletedProductId(raw);
+    if (!shopifyProductId) {
+      // A body we can't read an id out of reads the same on every retry, so a
+      // non-2xx would only burn the retry budget towards a forced unsubscribe.
+      console.error(`webhook: products/delete without a usable id from ${shopDomain}`);
+      return NextResponse.json({ ok: true, ignored: true });
+    }
+    // Never delete the rows: sales history, past POs and the dead-stock view
+    // all hang off them. Stamping mirrors what the full sync's sweep does, and
+    // skipping already-stamped rows keeps the original "gone since" date
+    // through a redelivery or a later sweep.
+    await prismaService.product.updateMany({
+      where: { tenantId, source: "shopify", shopifyProductId, missingFromShopifyAt: null },
+      data: { missingFromShopifyAt: new Date() },
+    });
     return NextResponse.json({ ok: true });
   }
 

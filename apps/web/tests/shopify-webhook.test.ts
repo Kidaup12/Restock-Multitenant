@@ -14,6 +14,9 @@ const runnable = /localhost|127\.0\.0\.1/.test(dbUrl) && Boolean(redisUrl);
 const SECRET = "webhook-test-secret";
 const SLUG = "webhook-test-tenant";
 const SHOP = "webhook-test-store.myshopify.com";
+const DELETE_SLUG = "webhook-test-delete-tenant";
+const DELETE_SHOP = "webhook-test-delete-store.myshopify.com";
+const OTHER_SLUG = "webhook-test-other-tenant";
 const base = "http://webhook.test";
 
 function sign(body: string): string {
@@ -157,5 +160,141 @@ describe.skipIf(!runnable)("shopify webhook route (real db + redis)", () => {
     expect(await queue.getJob(syncJobId({ tenantId, source: "shopify" }))).toBeUndefined();
     await queue.close();
     await connection.quit();
+  });
+});
+
+/**
+ * products/delete is the one topic handled inline: a deleted product never
+ * comes back in a products pull, so the receiver stamps missingFromShopifyAt
+ * itself. Its own tenants keep the connection installed and the catalogue
+ * independent of the suite above.
+ */
+describe.skipIf(!runnable)("shopify webhook products/delete (real db)", () => {
+  let POST: (req: Request) => Promise<Response>;
+  let prismaService: typeof import("@wezesha/db").prismaService;
+  let tenantId: string;
+  let otherTenantId: string;
+  const run = Date.now().toString(36);
+
+  /** Two sibling variants of one product, plus an unrelated product. */
+  async function seedCatalogue(ownerId: string, prefix: string): Promise<void> {
+    await prismaService.product.createMany({
+      data: [
+        { tenantId: ownerId, sku: `${prefix}-A`, title: "Shade 01", shopifyProductId: "9001", shopifyVariantId: `${prefix}-v1` },
+        { tenantId: ownerId, sku: `${prefix}-B`, title: "Shade 02", shopifyProductId: "9001", shopifyVariantId: `${prefix}-v2` },
+        { tenantId: ownerId, sku: `${prefix}-C`, title: "Toner", shopifyProductId: "9002", shopifyVariantId: `${prefix}-v3` },
+      ],
+    });
+  }
+
+  function skuState(ownerId: string, sku: string): Promise<{ missingFromShopifyAt: Date | null } | null> {
+    return prismaService.product.findFirst({
+      where: { tenantId: ownerId, sku },
+      select: { missingFromShopifyAt: true },
+    });
+  }
+
+  beforeAll(async () => {
+    process.env.SHOPIFY_API_SECRET = SECRET;
+    ({ prismaService } = await import("@wezesha/db"));
+    ({ POST } = (await import("../app/api/webhooks/shopify/route")) as unknown as {
+      POST: (req: Request) => Promise<Response>;
+    });
+
+    await prismaService.tenant.deleteMany({ where: { slug: { in: [DELETE_SLUG, OTHER_SLUG] } } });
+    const owner = await prismaService.tenant.create({ data: { name: "Delete Test", slug: DELETE_SLUG } });
+    tenantId = owner.id;
+    const other = await prismaService.tenant.create({ data: { name: "Other Shop", slug: OTHER_SLUG } });
+    otherTenantId = other.id;
+
+    await prismaService.shopifyConnection.create({
+      data: { tenantId, shopDomain: DELETE_SHOP, accessToken: "ciphertext", scopes: "read_products" },
+    });
+    await seedCatalogue(tenantId, "DEL");
+    await seedCatalogue(otherTenantId, "OTH");
+  });
+
+  afterAll(async () => {
+    await prismaService.webhookEvent.deleteMany({ where: { shopDomain: { contains: "webhook-test" } } });
+    await prismaService.tenant.deleteMany({ where: { slug: { in: [DELETE_SLUG, OTHER_SLUG] } } });
+    await prismaService.$disconnect();
+  });
+
+  it("stamps every sibling variant of the deleted product and nobody else's", async () => {
+    const body = JSON.stringify({ id: 9001 });
+    const res = await POST(
+      webhookRequest({ body, topic: "products/delete", webhookId: `${run}-d1`, shop: DELETE_SHOP })
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+
+    expect((await skuState(tenantId, "DEL-A"))?.missingFromShopifyAt).toBeTruthy();
+    expect((await skuState(tenantId, "DEL-B"))?.missingFromShopifyAt).toBeTruthy();
+    // Another product of the same store, and the same product id under another
+    // tenant, are untouched — the update is scoped to the resolved tenant.
+    expect((await skuState(tenantId, "DEL-C"))?.missingFromShopifyAt).toBeNull();
+    expect((await skuState(otherTenantId, "OTH-A"))?.missingFromShopifyAt).toBeNull();
+    expect((await skuState(otherTenantId, "OTH-B"))?.missingFromShopifyAt).toBeNull();
+  });
+
+  it("keeps the first 'gone since' date when the delete is re-sent", async () => {
+    const first = (await skuState(tenantId, "DEL-A"))?.missingFromShopifyAt;
+    expect(first).toBeTruthy();
+
+    const body = JSON.stringify({ id: 9001 });
+    const res = await POST(
+      webhookRequest({ body, topic: "products/delete", webhookId: `${run}-d2`, shop: DELETE_SHOP })
+    );
+    expect(res.status).toBe(200);
+    expect((await skuState(tenantId, "DEL-A"))?.missingFromShopifyAt).toEqual(first);
+  });
+
+  it("matches the stored core id whether the payload sends a gid or a bare number", async () => {
+    const body = JSON.stringify({ id: "gid://shopify/Product/9002" });
+    const res = await POST(
+      webhookRequest({ body, topic: "products/delete", webhookId: `${run}-d3`, shop: DELETE_SHOP })
+    );
+    expect(res.status).toBe(200);
+    expect((await skuState(tenantId, "DEL-C"))?.missingFromShopifyAt).toBeTruthy();
+    expect((await skuState(otherTenantId, "OTH-C"))?.missingFromShopifyAt).toBeNull();
+  });
+
+  it("ignores a payload with no usable id rather than inviting endless retries", async () => {
+    const body = JSON.stringify({ title: "no id here" });
+    const res = await POST(
+      webhookRequest({ body, topic: "products/delete", webhookId: `${run}-d4`, shop: DELETE_SHOP })
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, ignored: true });
+
+    const malformed = await POST(
+      webhookRequest({ body: "not json", topic: "products/delete", webhookId: `${run}-d5`, shop: DELETE_SHOP })
+    );
+    expect(malformed.status).toBe(200);
+    expect(await malformed.json()).toEqual({ ok: true, ignored: true });
+  });
+
+  it("short-circuits a redelivered delete before it reaches the catalogue", async () => {
+    await prismaService.product.updateMany({
+      where: { tenantId, sku: { in: ["DEL-A", "DEL-B"] } },
+      data: { missingFromShopifyAt: null },
+    });
+    const body = JSON.stringify({ id: 9001 });
+    const replay = await POST(
+      webhookRequest({ body, topic: "products/delete", webhookId: `${run}-d1`, shop: DELETE_SHOP })
+    );
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual({ ok: true, duplicate: true });
+    expect((await skuState(tenantId, "DEL-A"))?.missingFromShopifyAt).toBeNull();
+  });
+
+  it("leaves the catalogue alone for an unrelated topic", async () => {
+    const body = JSON.stringify({ id: 9002 });
+    const res = await POST(
+      webhookRequest({ body, topic: "products/update", webhookId: `${run}-d6`, shop: DELETE_SHOP })
+    );
+    expect(res.status).toBe(200);
+    expect((await skuState(tenantId, "DEL-A"))?.missingFromShopifyAt).toBeNull();
+    await removeEnqueuedJob(tenantId); // products/update legitimately enqueues
   });
 });
