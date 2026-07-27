@@ -9,11 +9,11 @@ import {
 
 /**
  * Daily plan-limit check, same shape as the email crons: one repeatable
- * dispatch job fans out into one job per tenant. This wave WARNS only — a
- * tenant over any limit gets a bell Notification (kind "limit_warning",
- * deduped to one per week) and the grace clock starts; nothing is blocked.
- * Enforcement points (checkLimit in the web app) pick up the same state when
- * a later wave turns them on.
+ * dispatch job fans out into one job per tenant. A tenant over any limit gets
+ * a bell Notification (kind "limit_warning", deduped to one per week) and the
+ * grace clock starts. This job never blocks anything itself — it owns the
+ * grace anchor that the web app's enforcement points (checkLimit) read when
+ * they decide whether an action still fits.
  *
  * Queries run on prismaService WITH an explicit tenantId filter — the cron
  * fires with no session, the documented use of the BYPASSRLS client.

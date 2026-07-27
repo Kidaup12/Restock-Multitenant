@@ -9,6 +9,9 @@ const messages = {
   expired: "This invite has expired. Ask for a new invite.",
   email_mismatch:
     "This invite was sent to a different email address. Sign in with the invited account.",
+  // Worded for the person joining, who can't fix it themselves — the owner can.
+  plan_limit:
+    "This workspace already has all the team members its plan includes. Ask an admin there to free up a place or move to a bigger plan, then use this link again.",
 } as const;
 
 /** Join the workspace behind the token, land in it, and start there. */

@@ -16,6 +16,7 @@ import { RealtimeRefresh } from "./realtime-refresh";
 import { ReorderTable } from "./reorder-table";
 import { RevenueTrend } from "./revenue-trend";
 import { RunForecastButton } from "./run-forecast-button";
+import { TodayLimitNotice } from "./today-limit-notice";
 import { TodaySetupStrip } from "./today-setup-strip";
 
 export const metadata: Metadata = {
@@ -50,6 +51,9 @@ export default async function TodayPage() {
   const tenantId = membership.tenantId;
   // Money-blind gate: MEMBERs (without view_costs) see no KES cost figures.
   const canViewCosts = hasPermission(membership, "view_costs");
+  // Plan usage is the owner's decision to act on — staff can't free a place or
+  // change the plan, so they aren't shown the nudge.
+  const canManageTeam = hasPermission(membership, "manage_team");
 
   return (
     <div className="space-y-6">
@@ -69,6 +73,12 @@ export default async function TodayPage() {
       >
         <TodaySetupStrip tenantId={tenantId} />
       </Suspense>
+
+      {canManageTeam ? (
+        <Suspense fallback={null}>
+          <TodayLimitNotice tenantId={tenantId} />
+        </Suspense>
+      ) : null}
 
       <div data-tour="today-metrics">
         <Suspense
