@@ -4,7 +4,9 @@ import {
   weightedDailyRateAdjusted,
   weightedDailyRateCensored,
   censoredDaysInWindow,
+  dampedWindow,
   effectiveWindowDays,
+  inferredStockoutGapDays,
   hasStockoutGap,
   daysOfStockRemaining,
   NO_STOCKOUT_DAYS,
@@ -30,6 +32,91 @@ describe("weightedDailyRate", () => {
     // 30d: 1.0×0.5 + 90d: (30/90)×0.3 + 365d: (30/365)×0.2
     const expected = 1 * 0.5 + (30 / 90) * 0.3 + (30 / 365) * 0.2;
     expect(weightedDailyRate(history, TODAY)).toBeCloseTo(expected, 6);
+  });
+});
+
+describe("spike damping", () => {
+  /** `days` of steady sales ending yesterday. */
+  const steady = (days: number, qty: number) =>
+    Array.from({ length: days }, (_, i) => ({ date: day(i + 1), quantity: qty }));
+
+  it("a two-day promo spike barely moves the rate (the whole point)", () => {
+    const clean = steady(380, 2);
+    const spiked = [...clean];
+    spiked[4] = { date: day(5), quantity: 20 }; // 10x, a giveaway nobody logged
+    spiked[5] = { date: day(6), quantity: 20 };
+
+    const damped = weightedDailyRateAdjusted(spiked, TODAY);
+    expect(damped).toBeLessThan(2 * 1.1); // within 10% of the true 2/day
+    // …and it is the damping doing it: the undamped blend runs away.
+    expect(weightedDailyRate(spiked, TODAY)).toBeGreaterThan(2 * 1.3);
+  });
+
+  it("a slow mover keeps a sensible non-zero rate (a naive daily median would say 0)", () => {
+    // 1 unit every third day = 0.333/day, and 2 of every 3 days sell nothing —
+    // the median DAILY quantity is 0, which would drop it off the buy list.
+    const slow = Array.from({ length: 121 }, (_, i) => ({ date: day(i * 3 + 1), quantity: 1 }));
+    const rate = weightedDailyRateAdjusted(slow, TODAY);
+    expect(rate).toBeGreaterThan(0.25);
+    expect(rate).toBeLessThan(0.4);
+  });
+
+  it("a real sustained step change is still tracked, not smothered", () => {
+    const history = [...steady(30, 3), ...Array.from({ length: 335 }, (_, i) => ({ date: day(i + 31), quantity: 1 }))];
+    const before = weightedDailyRateAdjusted(steady(365, 1), TODAY);
+    const after = weightedDailyRateAdjusted(history, TODAY);
+    expect(after).toBeGreaterThan(before * 1.8); // the 3x month pulls the blend up hard
+  });
+
+  it("nothing is capped below the minimum sale days — three lumpy days keep every unit", () => {
+    const lumpy = [
+      { date: day(2), quantity: 5 },
+      { date: day(9), quantity: 5 },
+      { date: day(16), quantity: 40 }, // one bulk buyer, no distribution to judge it against
+    ];
+    const { units, saleDays } = dampedWindow(lumpy, day(30), TODAY);
+    expect(saleDays).toBe(3);
+    expect(units).toBe(50);
+  });
+
+  it("buckets by DAY, so a two-channel day is one day and not two smaller ones", () => {
+    const twoChannels = [
+      { date: day(1), quantity: 4, channel: "shopify" },
+      { date: day(1), quantity: 6, channel: "pos" },
+    ];
+    const { units, saleDays } = dampedWindow(twoChannels, day(30), TODAY);
+    expect(units).toBe(10);
+    expect(saleDays).toBe(1);
+  });
+
+  it("ignores future-dated rows — a bad sync date can't leak into the numerator", () => {
+    const withFuture = [
+      ...steady(60, 2),
+      { date: new Date(+TODAY + 5 * 864e5), quantity: 500 },
+    ];
+    expect(weightedDailyRateAdjusted(withFuture, TODAY)).toBeCloseTo(
+      weightedDailyRateAdjusted(steady(60, 2), TODAY),
+      10
+    );
+  });
+
+  it("recency still dominates — last month counts for more than the same month a year ago", () => {
+    const lastMonth = steady(30, 4);
+    const yearAgo = Array.from({ length: 30 }, (_, i) => ({ date: day(i + 330), quantity: 4 }));
+    // Same 120 units, only the position in the year differs.
+    expect(weightedDailyRateAdjusted(lastMonth, TODAY)).toBeGreaterThan(
+      weightedDailyRateAdjusted(yearAgo, TODAY) * 3
+    );
+  });
+
+  it("zero history is 0 — never NaN, never Infinity", () => {
+    for (const rate of [
+      weightedDailyRateAdjusted([], TODAY),
+      weightedDailyRateCensored([], [day(1)], TODAY),
+    ]) {
+      expect(rate).toBe(0);
+      expect(Number.isFinite(rate)).toBe(true);
+    }
   });
 });
 
@@ -61,6 +148,67 @@ describe("weightedDailyRateCensored", () => {
     // one sale-day is not a consistent signal → 7-day floor, not 30-28=2
     const rate = weightedDailyRateCensored(history, stockouts, TODAY);
     expect(rate).toBeLessThan((10 / 2) * 0.5 + 1); // far below the un-floored blowup
+  });
+});
+
+describe("in-stock-day denominator (snapshot truth)", () => {
+  // Out 10 of the last 30 days, split into two 5-day stretches — the shape a real
+  // shop actually has. 2/day on the 20 days it was on the shelf.
+  const outDays = [...[7, 8, 9, 10, 11], ...[20, 21, 22, 23, 24]].map(day);
+  const outKeys = new Set(outDays.map((d) => d.getTime()));
+  const history = [
+    { date: day(400), quantity: 1 }, // old anchor: mature product, weighted path
+    ...Array.from({ length: 30 }, (_, i) => day(i + 1))
+      .filter((d) => !outKeys.has(d.getTime()))
+      .map((date) => ({ date, quantity: 2 })),
+  ];
+  const coveredSince = day(365);
+
+  it("gap inference alone misses it — no run is longer than a week", () => {
+    // Two 5-day holes: the >7-day rule subtracts nothing, so the rate divides by
+    // 30 and reads 1.33/day for a product that sells 2/day when it's in stock.
+    expect(inferredStockoutGapDays(history, day(30), TODAY)).toBe(0);
+  });
+
+  it("snapshot days come out of the denominator and the rate reads the truth", () => {
+    const inferred = weightedDailyRateAdjusted(history, TODAY);
+    const censored = weightedDailyRateCensored(history, outDays, TODAY, undefined, coveredSince);
+    // 30d window: 40 units / (30-10) in-stock days = 2/day, versus 40/30 = 1.33.
+    expect(censored).toBeGreaterThan(inferred * 1.3);
+  });
+
+  it("an empty mask WITH coverage means proven in stock — nothing is inferred away", () => {
+    // A dense seller with a 12-day sale gap the snapshots prove was NOT a stockout
+    // (demand dipped, the shelf was full). Inference would shrink the denominator
+    // and over-state the rate; snapshot truth keeps it honest.
+    const gapped = Array.from({ length: 380 }, (_, i) => day(i + 1))
+      .filter((d) => {
+        const n = Math.round((+TODAY - +d) / 864e5);
+        return n < 10 || n > 21;
+      })
+      .map((date) => ({ date, quantity: 5 }));
+    const proven = weightedDailyRateCensored(gapped, [], TODAY, undefined, coveredSince);
+    const inferred = weightedDailyRateAdjusted(gapped, TODAY);
+    expect(proven).toBeLessThan(inferred);
+  });
+
+  it("history older than the snapshots keeps gap inference for the uncovered stretch", () => {
+    // Coverage starts 20 days ago; the 90-day window's older 70 days have no
+    // proof, so a long gap in there is still inferred rather than read as
+    // "in stock the whole time".
+    const removed = new Set([40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]);
+    const gapped = Array.from({ length: 380 }, (_, i) => day(i + 1))
+      .filter((d) => !removed.has(Math.round((+TODAY - +d) / 864e5)))
+      .map((date) => ({ date, quantity: 5 }));
+    const partial = weightedDailyRateCensored(gapped, [], TODAY, undefined, day(20));
+    const full = weightedDailyRateCensored(gapped, [], TODAY, undefined, day(365));
+    expect(partial).toBeGreaterThan(full); // uncovered gap still leaves the denominator
+  });
+
+  it("no coverage date and no mask is exactly the gap-inference variant", () => {
+    expect(weightedDailyRateCensored(history, [], TODAY)).toBe(
+      weightedDailyRateAdjusted(history, TODAY)
+    );
   });
 });
 

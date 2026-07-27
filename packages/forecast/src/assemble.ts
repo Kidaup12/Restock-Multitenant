@@ -47,7 +47,13 @@ export function assembleForecastResult(
 
   // Daily rate: the same stockout-corrected production rate the built-in engine
   // uses; fall back to the demand forecast when history alone shows no rate.
-  const rawRate = runRateDaily(input.history, today, input.stockoutDates);
+  const rawRate = runRateDaily(
+    input.history,
+    today,
+    input.stockoutDates,
+    input.excludedDates,
+    input.snapshotsSince
+  );
   const dailyRate = rawRate > 0 ? rawRate : demand.finalForecast30d / 30;
 
   // Demand std from last 90 days of history.

@@ -12,9 +12,9 @@ import {
 
 /**
  * The one place the shared metric set is computed for a tenant's catalogue.
- * Loads the whole catalogue + 365 days of all-channel sales ONCE, then derives
- * every metric through the pure calc layer. Server-only, RLS-enforced tenant
- * client.
+ * Loads the whole catalogue + 365 days of all-channel sales + the days the
+ * nightly snapshot found an empty shelf ONCE, then derives every metric through
+ * the pure calc layer. Server-only, RLS-enforced tenant client.
  *
  * Products the shop has stopped selling (archived, draft, gone from the store)
  * are loaded too — the stock screen shows them, and it must show real numbers
@@ -39,7 +39,8 @@ export type ProductMetrics = {
   productId: string;
   /** Sellable on-hand — Product.currentStock, the single source. */
   sellableOnHand: number;
-  /** Blended all-channel run rate (engine, recency-weighted, stockout-corrected). */
+  /** Blended all-channel run rate (engine: recency-weighted, spike-damped, over
+   *  in-stock days). */
   runRate: number;
   /** Cover (days left), recomputed live from current stock. */
   coverDays: number;
@@ -59,7 +60,7 @@ export async function getCatalogueMetrics(
   const db = prismaForTenant(tenantId);
   const since = new Date(asOf.getTime() - HISTORY_DAYS * DAY_MS);
 
-  const [products, sales] = await Promise.all([
+  const [products, sales, emptyShelfDays, firstSnapshot] = await Promise.all([
     db.product.findMany({
       select: {
         id: true,
@@ -78,6 +79,16 @@ export async function getCatalogueMetrics(
       where: { date: { gte: since } },
       select: { productId: true, date: true, quantity: true, revenueKes: true, channel: true },
     }),
+    // Days the nightly snapshot recorded an empty shelf — the in-stock-day
+    // denominator behind every run rate. ONE query for the whole catalogue, and
+    // only the empty rows travel; the in-stock majority stays in the database.
+    db.inventorySnapshot.findMany({
+      where: { date: { gte: since }, onHand: { lte: 0 } },
+      select: { productId: true, date: true },
+    }),
+    // How far back that proof reaches. Anything older keeps gap inference rather
+    // than being read as "was in stock".
+    db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
   ]);
 
   const historyByProduct = new Map<string, SalesPoint[]>();
@@ -86,6 +97,14 @@ export async function getCatalogueMetrics(
     if (!list) historyByProduct.set(row.productId, (list = []));
     list.push(row);
   }
+
+  const stockoutsByProduct = new Map<string, Date[]>();
+  for (const row of emptyShelfDays) {
+    let list = stockoutsByProduct.get(row.productId);
+    if (!list) stockoutsByProduct.set(row.productId, (list = []));
+    list.push(row.date);
+  }
+  const snapshotsSince = firstSnapshot?.date ?? undefined;
 
   const abc = abcForCatalogue(
     products
@@ -102,7 +121,7 @@ export async function getCatalogueMetrics(
   const out = new Map<string, ProductMetrics>();
   for (const p of products) {
     const history = historyByProduct.get(p.id) ?? [];
-    const rate = runRate(history, asOf);
+    const rate = runRate(history, asOf, stockoutsByProduct.get(p.id), snapshotsSince);
     out.set(p.id, {
       productId: p.id,
       sellableOnHand: p.currentStock,

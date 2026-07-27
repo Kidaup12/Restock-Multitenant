@@ -34,18 +34,21 @@ export type MetricWindow = (typeof METRIC_WINDOWS)[number];
 
 /**
  * Run rate — blended, all-channel units/day (D3: one denominator). The engine's
- * recency-weighted rate with stockout-gap correction; pass proven out-of-stock
- * day-keys to censor them, otherwise gaps are inferred (matches the forecast
- * run, which runs without a mask). Per-location run rate is derived by
- * allocation at the call site and MUST always be labelled — this blended number
- * is the headline.
+ * recency-weighted, spike-damped rate over IN-STOCK days: pass the product's
+ * proven out-of-stock day-keys from the nightly inventory snapshot plus
+ * `snapshotsSince` (how far back that proof reaches), and days the shelf was
+ * empty leave the denominator. Without them the engine infers stockouts from
+ * sale gaps, which only catches runs longer than a week. Per-location run rate
+ * is derived by allocation at the call site and MUST always be labelled — this
+ * blended number is the headline.
  */
 export function runRate(
   history: SalesPoint[],
   asOf: Date = new Date(),
-  stockoutDates?: Date[]
+  stockoutDates?: Date[],
+  snapshotsSince?: Date
 ): number {
-  return runRateDaily(history, asOf, stockoutDates);
+  return runRateDaily(history, asOf, stockoutDates, undefined, snapshotsSince);
 }
 
 /**

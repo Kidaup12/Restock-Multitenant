@@ -11,7 +11,7 @@
  * Callers pass sales history + existing promo windows; this returns the spike
  * days that aren't already covered by a promo.
  */
-import type { SalesPoint } from "./baseline";
+import { median, type SalesPoint } from "./baseline";
 
 export type SpikePromoWindow = { start: Date; end: Date };
 
@@ -31,13 +31,6 @@ const SPIKE_MIN_UNITS = 8;
 /** Baseline = median of the trailing window's non-zero sale days (robust to the
  *  spike itself and to empty-shelf zeros). */
 const BASELINE_WINDOW_DAYS = 60;
-
-function median(xs: number[]): number {
-  if (xs.length === 0) return 0;
-  const s = [...xs].sort((a, b) => a - b);
-  const mid = Math.floor(s.length / 2);
-  return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
-}
 
 /**
  * Find spike days in the recent history that are NOT already inside a logged
