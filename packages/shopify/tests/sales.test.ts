@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 import { bucketSalesByProductDay, computeWindowStart } from "../src/sales";
 import type { ShopifyOrderNode } from "../src/resources";
 
+/** The day key these fixtures were written against. Real callers pass the
+ *  tenant's zone; the cases below only care that a day is a day. */
+const utcDay = (d: Date): string => d.toISOString().slice(0, 10);
+
+/** The tenant rule, as the worker applies it — same helper the till feed uses. */
+const nairobiDay = (d: Date): string =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Nairobi",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+
 // Keyed by NUMERIC CORE — line items below carry full gids, which
 // bucketSalesByProductDay normalizes via numericCore().
 const coreMap = new Map<string, string>([
@@ -36,27 +49,72 @@ const orders: ShopifyOrderNode[] = [
 
 describe("bucketSalesByProductDay", () => {
   it("sums quantity + revenue per (product, day)", () => {
-    const buckets = bucketSalesByProductDay(orders, coreMap);
+    const buckets = bucketSalesByProductDay(orders, coreMap, utcDay);
     expect(buckets.get("local-1|2026-06-04")).toEqual({
       productId: "local-1", dateKey: "2026-06-04", quantity: 5, revenue: 500, locationId: null,
     });
   });
 
   it("keeps separate products on the same day separate", () => {
-    const buckets = bucketSalesByProductDay(orders, coreMap);
+    const buckets = bucketSalesByProductDay(orders, coreMap, utcDay);
     expect(buckets.get("local-2|2026-06-04")).toEqual({
       productId: "local-2", dateKey: "2026-06-04", quantity: 1, revenue: 50, locationId: null,
     });
   });
 
+  it("files a late-night sale on the shop's day, not the UTC one", () => {
+    // 01:30 on the 5th in Nairobi is still 22:30 on the 4th in UTC. Reading the
+    // timestamp as UTC would book this sale a day early and split one day of
+    // trade across two rows — the till feed keys the same sale to the 5th.
+    const lateNight: ShopifyOrderNode[] = [
+      {
+        id: "gid://shopify/Order/9001",
+        processedAt: "2026-06-04T22:30:00Z",
+        lineItems: [
+          {
+            quantity: 2,
+            product: { id: "gid://shopify/Product/1" },
+            originalUnitPriceSet: { shopMoney: { amount: "100" } },
+          },
+        ],
+      } as ShopifyOrderNode,
+    ];
+
+    expect(bucketSalesByProductDay(lateNight, coreMap, nairobiDay).get("local-1|2026-06-05")).toMatchObject({
+      dateKey: "2026-06-05",
+      quantity: 2,
+    });
+    // The old behaviour, kept visible so the difference is the point.
+    expect(bucketSalesByProductDay(lateNight, coreMap, utcDay).get("local-1|2026-06-04")).toMatchObject({
+      dateKey: "2026-06-04",
+    });
+  });
+
+  it("skips a sale whose timestamp cannot be read as an instant", () => {
+    const broken: ShopifyOrderNode[] = [
+      {
+        id: "gid://shopify/Order/9002",
+        processedAt: "not-a-date",
+        lineItems: [
+          {
+            quantity: 1,
+            product: { id: "gid://shopify/Product/1" },
+            originalUnitPriceSet: { shopMoney: { amount: "100" } },
+          },
+        ],
+      } as ShopifyOrderNode,
+    ];
+    expect(bucketSalesByProductDay(broken, coreMap, nairobiDay).size).toBe(0);
+  });
+
   it("skips line items whose product is not in the catalog", () => {
-    const buckets = bucketSalesByProductDay(orders, coreMap);
+    const buckets = bucketSalesByProductDay(orders, coreMap, utcDay);
     expect([...buckets.keys()].some((k) => k.includes("99"))).toBe(false);
   });
 
   it("is pure — running twice yields identical buckets (idempotent input)", () => {
-    const a = bucketSalesByProductDay(orders, coreMap);
-    const b = bucketSalesByProductDay(orders, coreMap);
+    const a = bucketSalesByProductDay(orders, coreMap, utcDay);
+    const b = bucketSalesByProductDay(orders, coreMap, utcDay);
     expect([...a.entries()]).toEqual([...b.entries()]);
   });
 
@@ -80,7 +138,7 @@ describe("bucketSalesByProductDay", () => {
         ],
       },
     ];
-    const buckets = bucketSalesByProductDay(backdated, coreMap);
+    const buckets = bucketSalesByProductDay(backdated, coreMap, utcDay);
     expect(buckets.get("local-1|2026-05-10")).toEqual({
       productId: "local-1", dateKey: "2026-05-10", quantity: 1, revenue: 100, locationId: null,
     });
@@ -97,7 +155,7 @@ describe("bucketSalesByProductDay", () => {
         lineItems: [{ quantity: 1, product: { id: "1" }, originalUnitPriceSet: { shopMoney: { amount: "10" } } }],
       },
     ];
-    expect(bucketSalesByProductDay(bare, coreMap).get("local-1|2026-06-05")?.quantity).toBe(1);
+    expect(bucketSalesByProductDay(bare, coreMap, utcDay).get("local-1|2026-06-05")?.quantity).toBe(1);
   });
 });
 

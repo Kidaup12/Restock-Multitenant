@@ -42,12 +42,19 @@ function orderLocationId(
 }
 
 /** Aggregate order line items into (product, day) buckets. `productIdByCore`
- *  maps a Shopify product id CORE → local product id. `locationIdByCore` (maps
- *  a Shopify location id CORE → local Location.id) enables per-branch
- *  attribution; omit it to leave every bucket unattributed. */
+ *  maps a Shopify product id CORE → local product id. `dayKeyOf` turns a sale
+ *  instant into the trading day it belongs to — required, and not defaulted to
+ *  UTC, because the sales day is pinned to the TENANT's timezone: an order
+ *  placed at 01:30 in Nairobi is that shop's previous trading day, and slicing
+ *  the UTC string would file it a day early and split one day of trade across
+ *  two rows while the till's sales for the same day key correctly. The POS
+ *  ingest takes the same function, so both channels agree on where a day ends.
+ *  `locationIdByCore` (maps a Shopify location id CORE → local Location.id)
+ *  enables per-branch attribution; omit it to leave every bucket unattributed. */
 export function bucketSalesByProductDay(
   orders: ShopifyOrderNode[],
   productIdByCore: Map<string, string>,
+  dayKeyOf: (saleAt: Date) => string,
   locationIdByCore?: Map<string, string>
 ): Map<string, DayBucket> {
   const buckets = new Map<string, DayBucket>();
@@ -57,7 +64,9 @@ export function bucketSalesByProductDay(
   for (const order of orders) {
     const saleAt = order.processedAt ?? order.createdAt;
     if (!saleAt) continue;
-    const dateKey = saleAt.slice(0, 10); // YYYY-MM-DD
+    const instant = new Date(saleAt);
+    if (Number.isNaN(instant.getTime())) continue;
+    const dateKey = dayKeyOf(instant);
     const loc = locationIdByCore ? orderLocationId(order, locationIdByCore) : null;
     for (const line of order.lineItems ?? []) {
       const gid = line.product?.id;
