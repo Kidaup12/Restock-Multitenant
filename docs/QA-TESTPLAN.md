@@ -120,8 +120,10 @@ these three exist out of the box.)
   draft straight off `/plan`.
 - **Live Shopify not connected** — the demo runs on seeded data, not a live store's order history
   (that's the hosted/OAuth step).
-- **Emails are console-only** — team invites / codes / alerts are logged to the server console
-  rather than delivered, until a Brevo API key is set.
+- **Email needs a key to leave the machine** — invites, sign-in codes, alerts and supplier purchase
+  orders send for real once `RESEND_API_KEY` and `EMAIL_FROM` are set (the sending domain has to be
+  verified with the provider). Without them the message is written to the server console instead, so
+  a fresh clone can still be tested end to end — the invite link is in the terminal, not the inbox.
 - **No end-to-end/UI tests** — so please click broadly.
 
 ## Lower-priority items already known (dev-side)

@@ -35,8 +35,8 @@ it embeds a password).
 | `FORECAST_CRON` | `apps/worker/src/index.ts` | worker | Railway (`1` to run the nightly forecast + monthly backtest) | config | unset — schedule OFF |
 | `COST_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` to run the nightly cost-moved check) | config | unset — schedule OFF |
 | `SNAPSHOT_CRON` | `apps/worker/src/index.ts` (gates `apps/worker/src/snapshot-cron.ts`) | worker | Railway (`1` everywhere on-hand history is wanted — stockout-rate and dead-stock trends read off it) | config | unset — schedule OFF |
-| `BREVO_API_KEY` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | secret | unset (mail is logged to the console, never sent — dev/CI/tests stay offline) |
-| `EMAIL_FROM` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | config | unset (only read when `BREVO_API_KEY` is set; sender as `Name <address>` or a bare address) |
+| `RESEND_API_KEY` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | secret | unset (mail is logged to the console, never sent — dev/CI/tests stay offline) |
+| `EMAIL_FROM` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | config | unset (only read when `RESEND_API_KEY` is set; sender as `Name <address>` or a bare address) |
 | `ADMIN_EMAILS` | `apps/web/lib/admin/gate.ts` | web | Vercel | config (sensitive — names the operator accounts) | unset (the `/admin` console 404s for everyone — fail closed) |
 | `SENTRY_DSN` | `packages/observability/src/index.ts` (via each service's init) | web (`apps/web/instrumentation.ts`) | Vercel | secret | unset (error tracking disabled — complete no-op) |
 | `SENTRY_DSN` | same | worker (`apps/worker/src/index.ts`) | Railway | secret | unset (no-op) |
@@ -181,7 +181,7 @@ Supabase specifics that are easy to get wrong:
 | `SHOPIFY_APP_URL` | prod origin | preview origin | tunnel origin |
 | `TOKEN_ENCRYPTION_KEY` | prod key (= worker's) | preview key (= staging worker's) | local key |
 | `SENTRY_DSN` | prod DSN (when provisioned) | preview DSN or unset | unset |
-| `BREVO_API_KEY` | prod key (= worker's) | preview key or unset (console fallback) | unset |
+| `RESEND_API_KEY` | prod key (= worker's) | preview key or unset (console fallback) | unset |
 | `EMAIL_FROM` | prod sender | preview sender | unset |
 | `ADMIN_EMAILS` | named operators only | named operators or unset | unset |
 
@@ -216,7 +216,7 @@ previews must never hold prod credentials.
   six are off by default; a production worker with none of them set runs no nightly
   work at all
 - `POS_FEED_SECRET` — only when a tenant's POS feed URL is polled by the worker
-- `BREVO_API_KEY` — same key as web for the environment; unset makes the worker
+- `RESEND_API_KEY` — same key as web for the environment; unset makes the worker
   log alerts/summaries to the console instead of sending them
 - `EMAIL_FROM` — same sender as web for the environment
 - `SENTRY_DSN` — when provisioned; unset keeps tracking a no-op
