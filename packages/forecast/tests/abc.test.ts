@@ -3,15 +3,16 @@ import { assignAbc, dailySalesValue } from "../src/abc";
 import { weightedDailyRate, type SalesPoint } from "../src/baseline";
 
 /**
- * Boundary semantics: for each product in revenue-desc order, cumulative share
- * is computed AFTER adding the product. If cumulative <= 0.7 -> A; <= 0.9 -> B;
- * else C.
+ * Boundary semantics: for each product in revenue-desc order, the cut is made
+ * on the share of value ranked ABOVE it, excluding itself. Above < 0.7 -> A;
+ * < 0.9 -> B; else C.
  *
- * Consequence: a single product carrying 100% of revenue lands in C (its
- * cumulative share is 1.0 after the first step). Any product whose own
- * contribution alone pushes cumulative past 0.7 cannot be A. These tests lock
- * that exact behavior — downstream consumers read it as-is, so a future change
- * to the boundary semantics must surface here first.
+ * The share above the first product is always 0, so the best seller is always
+ * A. Counting the product itself first meant a shop whose top SKU carried most
+ * of its value classified that SKU as C, and C is sized by the tail's min/max
+ * rule rather than the forecast — the shop's best earner ordered like a
+ * slow-mover. These tests lock the boundary; downstream consumers read the
+ * classes as-is, so a future change must surface here first.
  */
 
 describe("assignAbc", () => {
@@ -20,7 +21,7 @@ describe("assignAbc", () => {
   });
 
   it("handles all-zero revenue without NaN (everyone becomes C)", () => {
-    // total = 0 -> cumulative/total guard returns 1 -> everyone falls past 0.9 -> C
+    // total = 0 -> the share-above guard returns 1 -> everyone falls past 0.9 -> C
     const out = assignAbc([
       { id: "x", revenue: 0 },
       { id: "y", revenue: 0 },
@@ -31,14 +32,14 @@ describe("assignAbc", () => {
     expect(out.z).toBe("C");
   });
 
-  it("splits a small catalog into A/B/C by cumulative-after-add share", () => {
+  it("splits a small catalog into A/B/C by the share ranked above each product", () => {
     // Sorted by revenue desc internally -> processing order: 50, 20, 15, 10, 5
-    // cumulative after each step:
-    //   50  -> 0.50 <= 0.7 -> A
-    //   70  -> 0.70 <= 0.7 -> A
-    //   85  -> 0.85 <= 0.9 -> B
-    //   95  -> 0.95 >  0.9 -> C
-    //   100 -> 1.00 >  0.9 -> C
+    // share above each step:
+    //   50  -> 0.00 < 0.7 -> A
+    //   20  -> 0.50 < 0.7 -> A
+    //   15  -> 0.70         -> B
+    //   10  -> 0.85 < 0.9 -> B
+    //    5  -> 0.95         -> C
     const out = assignAbc([
       { id: "top1", revenue: 50 },
       { id: "mid1", revenue: 15 },
@@ -49,14 +50,27 @@ describe("assignAbc", () => {
     expect(out.top1).toBe("A");
     expect(out.top2).toBe("A");
     expect(out.mid1).toBe("B");
-    expect(out.tail1).toBe("C");
+    expect(out.tail1).toBe("B");
     expect(out.tail2).toBe("C");
   });
 
-  it("documents the single-product edge case (lands in C, not A)", () => {
-    // cumulative=1.0 after the only product -> C per the boundary semantics.
+  it("puts the only product in a one-product catalogue in A", () => {
+    // Nothing ranks above it, so its share-above is 0. The shop's entire
+    // business cannot be tail stock.
     const out = assignAbc([{ id: "only", revenue: 500 }]);
-    expect(out.only).toBe("C");
+    expect(out.only).toBe("A");
+  });
+
+  it("keeps a dominant best seller in A instead of filing it under the tail", () => {
+    // The case that motivated the change: one SKU is 95% of catalogue value.
+    const out = assignAbc([
+      { id: "hero", revenue: 950 },
+      { id: "small1", revenue: 30 },
+      { id: "small2", revenue: 20 },
+    ]);
+    expect(out.hero).toBe("A");
+    expect(out.small1).toBe("C");
+    expect(out.small2).toBe("C");
   });
 
   it("is order-independent (sorts internally by revenue desc)", () => {
@@ -83,10 +97,10 @@ describe("assignAbc", () => {
       { id: "y", revenue: 35 },
       { id: "z", revenue: 30 },
     ]);
-    // cumulative: 0.35 A, 0.70 A (<= 0.7), 1.0 C
+    // share above: 0.00 A, 0.35 A, 0.70 B
     expect(out.x).toBe("A");
     expect(out.y).toBe("A");
-    expect(out.z).toBe("C");
+    expect(out.z).toBe("B");
   });
 });
 
