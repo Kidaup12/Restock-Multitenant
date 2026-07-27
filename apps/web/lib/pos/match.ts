@@ -1,5 +1,6 @@
 import { Prisma, prismaForTenantTx, prismaService } from "@wezesha/db";
 import { aggregateStoredPosLines, dayMarker, normalizeSku, tenantDayKey } from "@wezesha/pos";
+import { recordClosure } from "@/lib/signals/closures";
 
 /**
  * Owner "downstream fixes" for POS data — the writes behind the Sales fix queue.
@@ -154,50 +155,19 @@ export async function ignorePosSku(
 /**
  * Dismiss a sales gap as "shop was closed": write a LocationClosure the forecast
  * honours later (a real no-trading day, not lost sales). Suppresses the gap on
- * the next read.
+ * the next read. The row goes through the shared closure writer so this and the
+ * Settings declare form can't record the same day differently.
  */
 export async function dismissGapAsClosure(
   tenantId: string,
   input: { locationId: string; dayKey: string },
   actor: Actor
 ): Promise<{ ok: true } | { ok: false; reason: "no_location" | "bad_day" }> {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dayKey)) return { ok: false, reason: "bad_day" };
-
-  const outcome = await prismaForTenantTx(
+  const outcome = await recordClosure(
     tenantId,
-    async (tx): Promise<{ ok: true } | { ok: false; reason: "no_location" }> => {
-      const location = await tx.location.findFirst({
-        where: { id: input.locationId, tenantId },
-        select: { id: true },
-      });
-      if (!location) return { ok: false, reason: "no_location" as const };
-      await tx.locationClosure.upsert({
-        where: { locationId_date: { locationId: input.locationId, date: dayMarker(input.dayKey) } },
-        create: {
-          tenantId,
-          locationId: input.locationId,
-          date: dayMarker(input.dayKey),
-          reason: "closed",
-          createdByUserId: actor.userId,
-        },
-        update: { reason: "closed" },
-      });
-      return { ok: true as const };
-    }
+    { locationId: input.locationId, dayKeys: [input.dayKey] },
+    actor,
+    { action: "sales_gap_closed", meta: { dayKey: input.dayKey } }
   );
-
-  if (outcome.ok) {
-    await prismaService.auditEvent.create({
-      data: {
-        tenantId,
-        entity: "LocationClosure",
-        entityId: input.locationId,
-        action: "sales_gap_closed",
-        actorUserId: actor.userId,
-        actorName: actor.name,
-        meta: { dayKey: input.dayKey },
-      },
-    });
-  }
-  return outcome;
+  return outcome.ok ? { ok: true } : outcome;
 }
