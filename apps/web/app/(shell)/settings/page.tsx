@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import {
   BoxIcon,
+  CalendarIcon,
   ChevronRightIcon,
   GearIcon,
   LayersIcon,
@@ -33,6 +34,12 @@ const sections = [
     icon: <LayersIcon />,
     title: "Connections",
     description: "Shopify, QuickBooks, and the POS feed — connect and check sync health.",
+  },
+  {
+    href: "/settings/signals",
+    icon: <CalendarIcon />,
+    title: "Promotions & closures",
+    description: "Days that weren't normal trading — so a giveaway doesn't inflate every order after it.",
   },
 ];
 
