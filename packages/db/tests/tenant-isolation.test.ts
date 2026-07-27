@@ -77,10 +77,18 @@ describe.each(tenantModels)("RLS isolation — %s", (model) => {
   });
 
   it("A cannot insert a row for B (WITH CHECK)", async () => {
+    // Two refusals are correct here. WITH CHECK rejects the row outright; and
+    // for a model that connects to Tenant, the Tenant policy hides B's tenant
+    // row from A first, so Prisma reports the relation as missing before the
+    // check is reached. Either way nothing is written, which is what the count
+    // below actually proves — the message is incidental.
+    const before = (await delegateFor(prismaForTenant(seeded.b.id), model).findMany()).length;
     const attempt = delegateFor(prismaForTenant(seeded.a.id), model).create({
       data: builders[model]!(seeded.b.id, "xchk"),
     });
-    await expect(attempt).rejects.toThrow(/row-level security/i);
+    await expect(attempt).rejects.toThrow(/row-level security|records .* required but not found/i);
+    const after = (await delegateFor(prismaForTenant(seeded.b.id), model).findMany()).length;
+    expect(after, "no row may reach B's table").toBe(before);
   });
 
   it("fails closed: app role without a tenant GUC sees nothing", async () => {
