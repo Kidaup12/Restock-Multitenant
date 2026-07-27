@@ -34,10 +34,16 @@ important thing on this page.
    |---|---|---|
    | `DIRECT_URL` | `postgres` | Migrations only. Never by app code. |
    | `DATABASE_URL` | `wezesha_app` | Web. RLS applies. |
-   | `SERVICE_DATABASE_URL` | `wezesha_service` | Worker. `BYPASSRLS`, scoped by explicit `tenantId` in every query. |
+   | `SERVICE_DATABASE_URL` | `wezesha_service` | Worker **and web**. `BYPASSRLS`, scoped by explicit `tenantId` in every query. |
 
-   Use the **session pooler** port for `DIRECT_URL` (migrations need a real
-   session); the transaction pooler is fine for the other two.
+   The web app needs all three. Auth runs on the service client, which is
+   constructed when the module loads, so a web deployment without
+   `SERVICE_DATABASE_URL` fails at sign-in rather than at start-up.
+
+   Use the **session pooler** host for every one of them —
+   `aws-0-<region>.pooler.supabase.com:5432`, user `postgres.<project-ref>`. The
+   direct `db.<project-ref>.supabase.co` host resolves over IPv6 only and will
+   not connect from most build and container environments.
 
 4. Apply the schema from your machine, pointed at the new database:
 
@@ -67,8 +73,11 @@ important thing on this page.
    - Build: `npm ci`
    - Start: `npm run -w @wezesha/worker start`
 3. Add a service for the **gateway**:
-   - Build: `npm ci && npm run -w @wezesha/ws-gateway build`
+   - Build: `npm ci`
    - Start: `npm run -w @wezesha/ws-gateway start`
+   - Environment: `REDIS_URL` only. It reads no database, and the platform
+     supplies `PORT`. (The workspace's `build` script bundles for a container
+     image; `start` runs the source directly and does not need it.)
    - Expose it publicly and note the URL — the web app needs it as
      `NEXT_PUBLIC_WS_URL` (use the `wss://` scheme).
 
@@ -83,11 +92,24 @@ POS_FEED_SECRET        bearer token for the POS feed the worker fetches
 RESEND_API_KEY         from Resend
 EMAIL_FROM             e.g. Wezesha Restock <no-reply@yourdomain>
 SENTRY_DSN             optional
+
+FORECAST_CRON          1
+SNAPSHOT_CRON          1
+COST_CRONS             1
+EMAIL_CRONS            1
+OPS_CRONS              1
+POS_CRONS              1
 ```
 
-The cron schedules (`FORECAST_CRON`, `SNAPSHOT_CRON`, `COST_CRONS`,
-`EMAIL_CRONS`, `OPS_CRONS`, `POS_CRONS`) have working defaults. Set them only to
-change timing.
+**Those six are not optional and they have no default.** Each schedule registers
+only when its variable is set to `1`. Leave them out and the worker boots, logs
+nothing unusual and reports healthy, while no forecast ever runs, no inventory
+snapshot is ever written and no email is ever sent. The snapshot one matters
+twice over: the run rate divides by in-stock days, and that history is where the
+out-of-stock days come from.
+
+After the first deploy, read the worker log and confirm it names the schedules
+it registered. No schedule lines means a missing `1`.
 
 ## 3 · Vercel — the web app
 
@@ -98,6 +120,7 @@ Environment:
 
 ```
 DATABASE_URL           the wezesha_app URL — NOT the postgres one
+SERVICE_DATABASE_URL   the wezesha_service URL — auth needs it; sign-in fails without
 DIRECT_URL             from step 1
 BETTER_AUTH_URL        the deployment's own public URL, exactly
 BETTER_AUTH_SECRET     openssl rand -base64 32
