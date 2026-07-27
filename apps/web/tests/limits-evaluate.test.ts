@@ -58,7 +58,9 @@ describe.skipIf(!runnable)("evaluateLimits / checkLimit (local db)", () => {
     const check = await checkLimit(tenantId, "add_product");
     expect(check.over).toBe(true);
     expect(check.allowed).toBe(true);
-    expect(check.message).toContain("grace");
+    expect(check.graceLeftDays).toBe(GRACE_DAYS);
+    // Drifted over (a sync added them), so the message counts down rather than refusing.
+    expect(check.message).toContain(`${GRACE_DAYS} days`);
   });
 
   it("checkLimit disallows once the grace window has fully elapsed", async () => {
@@ -75,6 +77,13 @@ describe.skipIf(!runnable)("evaluateLimits / checkLimit (local db)", () => {
 
   it("an in-plan dimension is unaffected by another's overage", async () => {
     const check = await checkLimit(tenantId, "invite_member");
-    expect(check).toEqual({ allowed: true, over: false, graceLeftDays: null, message: null });
+    expect(check).toEqual({
+      allowed: true,
+      over: false,
+      used: 0,
+      max: 3,
+      graceLeftDays: null,
+      message: null,
+    });
   });
 });

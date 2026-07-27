@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { prismaAuth, prismaForTenant, prismaService } from "@wezesha/db";
 import { sendEmail } from "@/lib/email";
+import { checkLimit } from "@/lib/limits/evaluate";
 
 /**
  * Teammate invites without an invite table: each pending invite is a row in
@@ -97,6 +98,17 @@ export async function createInvite(input: {
     }
   }
 
+  // The seat is checked again on acceptance (that's the write that counts), but
+  // refusing here tells the person doing the inviting now, instead of letting a
+  // teammate discover it on a dead link.
+  const seat = await checkLimit(input.tenantId, "invite_member");
+  if (!seat.allowed) {
+    return {
+      ok: false,
+      error: seat.message ?? "This workspace is at its plan limit for team members.",
+    };
+  }
+
   const identifier = identifierFor(input.tenantId, email);
   const token = randomBytes(24).toString("base64url");
   const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
@@ -133,12 +145,16 @@ export async function getInvite(token: string): Promise<InviteLookup> {
 
 export type AcceptInviteResult =
   | { ok: true; tenantId: string; alreadyMember: boolean }
-  | { ok: false; code: "invalid" | "expired" | "email_mismatch" };
+  | { ok: false; code: "invalid" | "expired" | "email_mismatch" | "plan_limit" };
 
 /**
  * Consume a token for a signed-in user: create the Membership (through the
  * tenant-scoped client, so RLS checks the write) and delete the row. A user
  * who is already a member still consumes the token and lands in the workspace.
+ *
+ * This is the write that moves the member count, so it is the enforcement
+ * point: a refusal leaves the token intact, so the same link works once the
+ * workspace frees a place.
  */
 export async function acceptInvite(input: {
   token: string;
@@ -153,6 +169,16 @@ export async function acceptInvite(input: {
   }
 
   const db = prismaForTenant(invite.tenantId);
+  // Someone who is already a member takes no new place, so the plan check only
+  // applies to a genuinely new membership.
+  const member = await db.membership.findFirst({
+    where: { userId: input.userId },
+    select: { id: true },
+  });
+  if (!member && !(await checkLimit(invite.tenantId, "invite_member")).allowed) {
+    return { ok: false, code: "plan_limit" };
+  }
+
   let alreadyMember = false;
   try {
     await db.membership.create({
