@@ -32,21 +32,47 @@ import { ManageCategories } from "./manage-categories";
 import { RowEditor } from "./row-editor";
 
 /**
- * Interactive catalogue: the money band + health strip read across the whole
- * active catalogue, the metadata facets filter it, the metric columns sort it —
- * all client-side over rows the server already computed through the shared metric
+ * Interactive catalogue: the money band + health strip read across the catalogue
+ * in scope, the metadata facets filter it, the metric columns sort it — all
+ * client-side over rows the server already computed through the shared metric
  * engine and the cost chain. Editing (cost pin, category, not-for-sale) lives in
  * an expanding row editor. Money values ride CostValue, so a money-blind member
  * never sees KES.
+ *
+ * The server sends every product, selling or not. The scope chips decide which
+ * of them the screen is about: "Selling" by default, so the day-to-day view is
+ * not padded with SKUs the shop retired, and the other chips carry their counts
+ * so nothing is silently absent.
  */
 
+export const SCOPES = ["selling", "not_selling", "all"] as const;
+type Scope = (typeof SCOPES)[number];
+
+export const SCOPE_LABELS: Record<Scope, string> = {
+  selling: "Selling",
+  not_selling: "Archived & removed",
+  all: "All products",
+};
+
+/** Exported for tests: which scope a row belongs to. */
+export function inScope(row: CatalogueRow, scope: Scope): boolean {
+  if (scope === "all") return true;
+  return scope === "selling" ? row.buyable : !row.buyable;
+}
+
 function status(row: CatalogueRow): { label: string; tone: "negative" | "warning" | "positive" | "neutral" } {
+  if (!row.buyable) return { label: row.lifecycleLabel, tone: "neutral" };
   if (row.onHandUnits <= 0) return { label: "Stocked out", tone: "negative" };
   if (row.daysCover === null) return { label: "No sales", tone: "neutral" };
   if (row.daysCover < 7) return { label: "Reorder now", tone: "negative" };
   if (row.daysCover < 14) return { label: "Low", tone: "warning" };
   if (row.daysCover > 45) return { label: "Overstocked", tone: "neutral" };
   return { label: "Healthy", tone: "positive" };
+}
+
+/** ETA on inbound stock — same day/month form the rest of the app uses. */
+function formatEta(date: Date): string {
+  return new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
 type SortKey = "title" | "onHandUnits" | "runRate" | "daysCover" | "revenue30dKes" | "abc" | "moneyAtRestKes" | "marginPct";
@@ -68,11 +94,16 @@ function compare(a: CatalogueRow, b: CatalogueRow, key: SortKey): number {
   }
 }
 
-/** The health-chip keys a row carries. Not-for-sale rows go quiet — their cost
- *  and supplier flags are suppressed, leaving only the not-for-sale chip. */
+/** The health-chip keys a row carries. A row the shop no longer sells goes quiet
+ *  on the data-quality flags — a missing cost on an archived SKU is not a job —
+ *  leaving its lifecycle. A sync failure counts either way: a row that stopped
+ *  updating is a problem whatever its status. */
 function rowHealthKeys(row: CatalogueRow): Set<string> {
-  if (row.notForSale) return new Set(["not_for_sale"]);
-  const keys = new Set<string>(row.facet.health);
+  const keys = new Set<string>();
+  if (row.syncError) keys.add("sync_error");
+  if (row.lifecycle !== "active") keys.add(`lifecycle_${row.lifecycle}`);
+  if (!row.buyable) return keys;
+  for (const flag of row.facet.health) keys.add(flag);
   if (row.suspectCost) keys.add("suspect_cost");
   if (row.costMovedPct != null) keys.add("cost_moved");
   return keys;
@@ -80,6 +111,7 @@ function rowHealthKeys(row: CatalogueRow): Set<string> {
 
 const HEALTH_CHIP_META: { key: string; label: string; tone: HealthChip["tone"] }[] = [
   { key: "new", label: "New from Shopify", tone: "accent" },
+  { key: "sync_error", label: "Sync problem", tone: "negative" },
   { key: "missing_cost", label: "Missing cost", tone: "warning" },
   { key: "suspect_cost", label: "Suspect cost", tone: "warning" },
   { key: "cost_moved", label: "Cost moved", tone: "warning" },
@@ -88,15 +120,29 @@ const HEALTH_CHIP_META: { key: string; label: string; tone: HealthChip["tone"] }
   { key: "dup_sku", label: "Duplicate SKU", tone: "warning" },
   { key: "negative", label: "Negative stock", tone: "negative" },
   { key: "dead", label: "Not selling", tone: "neutral" },
-  { key: "not_for_sale", label: "Not for sale", tone: "neutral" },
 ];
+
+/** Lifecycle chips are built from the rows rather than a fixed list, because the
+ *  label travels on the row — the shared vocabulary lives in the db package, and
+ *  importing that here would pull the Prisma client into the browser. */
+function lifecycleChips(rows: CatalogueRow[]): HealthChip[] {
+  const byKey = new Map<string, HealthChip>();
+  for (const row of rows) {
+    if (row.lifecycle === "active") continue;
+    const key = `lifecycle_${row.lifecycle}`;
+    const chip = byKey.get(key);
+    if (chip) chip.count += 1;
+    else byKey.set(key, { key, label: row.lifecycleLabel, count: 1, tone: row.lifecycle === "removed" ? "negative" : "neutral" });
+  }
+  return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
 
 function moneyPredicate(f: Exclude<MoneyBandFilter, null>): (r: CatalogueRow) => boolean {
   switch (f) {
     case "dead_overstock":
-      return (r) => !r.notForSale && r.onHandUnits > 0 && (r.daysCover == null || r.daysCover > OVERSTOCK_COVER_DAYS);
+      return (r) => r.buyable && r.onHandUnits > 0 && (r.daysCover == null || r.daysCover > OVERSTOCK_COVER_DAYS);
     case "revenue_at_risk":
-      return (r) => !r.notForSale && (r.onHandUnits <= 0 || (r.daysCover != null && r.daysCover < r.leadDays));
+      return (r) => r.buyable && (r.onHandUnits <= 0 || (r.daysCover != null && r.daysCover < r.leadDays));
     case "below_cost":
       return (r) => r.marginPct != null && r.marginPct < 0;
   }
@@ -118,15 +164,32 @@ export function CatalogueView({
   const [selection, setSelection] = useState<FacetSelection>({});
   const [sortKey, setSortKey] = useState<SortKey>("title");
   const [desc, setDesc] = useState(false);
+  const [scope, setScope] = useState<Scope>("selling");
   const [healthFilter, setHealthFilter] = useState<string | null>(null);
   const [moneyFilter, setMoneyFilter] = useState<MoneyBandFilter>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const hasWarehouseStock = rows.some((r) => r.warehouseUnits > 0);
   const categoryNames = categories.map((c) => c.name);
 
+  // Everything below the scope chips — counts, money band, table — reads the
+  // scoped catalogue, so switching scope re-frames the whole screen rather than
+  // just hiding rows. The chip counts themselves read the full catalogue.
+  const scoped = useMemo(() => rows.filter((r) => inScope(r, scope)), [rows, scope]);
+  const scopeChips = useMemo<HealthChip[]>(
+    () =>
+      SCOPES.map((key) => ({
+        key,
+        label: SCOPE_LABELS[key],
+        count: rows.filter((r) => inScope(r, key)).length,
+        tone: "neutral" as const,
+      })),
+    [rows],
+  );
+
+  const hasWarehouseStock = scoped.some((r) => r.warehouseUnits > 0);
+
   const band = useMemo(() => {
-    const moneyRows: MoneyRow[] = rows.map((r) => ({
+    const moneyRows: MoneyRow[] = scoped.map((r) => ({
       costKes: r.costKes ?? 0,
       priceKes: r.priceKes,
       sellableOnHand: r.onHandUnits,
@@ -137,24 +200,27 @@ export function CatalogueView({
       notForSale: r.notForSale,
     }));
     return computeMoneyBand(moneyRows);
-  }, [rows]);
+  }, [scoped]);
 
   const chips = useMemo<HealthChip[]>(() => {
     const counts = new Map<string, number>();
-    for (const r of rows) for (const k of rowHealthKeys(r)) counts.set(k, (counts.get(k) ?? 0) + 1);
-    return HEALTH_CHIP_META.map((m) => ({ ...m, count: counts.get(m.key) ?? 0 }));
-  }, [rows]);
+    for (const r of scoped) for (const k of rowHealthKeys(r)) counts.set(k, (counts.get(k) ?? 0) + 1);
+    return [
+      ...HEALTH_CHIP_META.map((m) => ({ ...m, count: counts.get(m.key) ?? 0 })),
+      ...lifecycleChips(scoped),
+    ];
+  }, [scoped]);
 
   const visible = useMemo(() => {
     let filtered = filterByFacets(
-      rows.map((r) => ({ ...r.facet, row: r })),
+      scoped.map((r) => ({ ...r.facet, row: r })),
       selection,
     ).map((f) => f.row);
     if (healthFilter) filtered = filtered.filter((r) => rowHealthKeys(r).has(healthFilter));
     if (moneyFilter) filtered = filtered.filter(moneyPredicate(moneyFilter));
     const sorted = [...filtered].sort((a, b) => compare(a, b, sortKey));
     return desc ? sorted.reverse() : sorted;
-  }, [rows, selection, healthFilter, moneyFilter, sortKey, desc]);
+  }, [scoped, selection, healthFilter, moneyFilter, sortKey, desc]);
 
   const exportRows = visible.map((row) => ({
     title: row.title,
@@ -167,7 +233,9 @@ export function CatalogueView({
     stockValueKes: row.stockValueKes,
   }));
 
-  const colCount = 7 + (hasWarehouseStock ? 1 : 0);
+  // Product · ABC · Cost · Margin · On hand · On order · Sells/day · Cover ·
+  // Cash tied up · Revenue · Verdict, plus the optional warehouse column.
+  const colCount = 11 + (hasWarehouseStock ? 1 : 0);
 
   return (
     <div className="space-y-4">
@@ -194,12 +262,18 @@ export function CatalogueView({
         />
 
         <HealthStrip
-          total={rows.length}
+          total={scoped.length}
           shown={visible.length}
           chips={chips}
           active={healthFilter}
           onToggle={(key) => setHealthFilter((cur) => (cur === key ? null : key))}
           onClear={() => setHealthFilter(null)}
+          scopes={scopeChips}
+          scope={scope}
+          onScope={(key) => {
+            setScope(key as Scope);
+            setHealthFilter(null); // the old chip may not exist in the new scope
+          }}
         />
 
         <FacetFilterBar options={facetOptions} selection={selection} onChange={setSelection} />
@@ -238,6 +312,9 @@ export function CatalogueView({
               <TableHead numeric>Margin</TableHead>
               <TableHead numeric>On hand</TableHead>
               {hasWarehouseStock && <TableHead numeric>In warehouse</TableHead>}
+              <TableHead numeric>On order</TableHead>
+              <TableHead numeric>Sells/day</TableHead>
+              <TableHead numeric>Cover</TableHead>
               <TableHead numeric>Cash tied up</TableHead>
               <TableHead numeric>Rev · 30d (KES)</TableHead>
               <TableHead>Verdict</TableHead>
@@ -304,8 +381,19 @@ function RowGroup({
               </span>
               <span className="block truncate font-mono text-xs text-ink-faint">
                 {row.sku || "no SKU"}
+                {/* Sibling variants share a title — the variant label is what
+                    stops six shades reading as six duplicates. */}
+                {row.variantTitle ? <span className="font-sans text-ink-muted"> · {row.variantTitle}</span> : null}
                 {row.customCategory ? ` · ${row.customCategory}` : ""}
               </span>
+              {/* Why this row is off the buy list, in the owner's words —
+                  otherwise a retired SKU reads as ordinary stock. */}
+              {row.lifecycleReason && (
+                <span className="block truncate text-xs text-ink-muted">{row.lifecycleReason}</span>
+              )}
+              {row.syncError && (
+                <span className="block truncate text-xs text-negative">Sync problem: {row.syncError}</span>
+              )}
             </span>
           </button>
         </TableCell>
@@ -325,6 +413,27 @@ function RowGroup({
             {row.warehouseUnits > 0 ? row.warehouseUnits : "—"}
           </TableCell>
         )}
+        <TableCell numeric className="text-ink-muted">
+          {row.onOrderUnits > 0 ? (
+            <span className="inline-flex flex-col items-end">
+              <span className="text-ink">{row.onOrderUnits}</span>
+              {/* An empty shelf with stock en route is not a re-order — the ETA
+                  is what tells the two apart at a glance. */}
+              <span className="text-xs text-ink-faint">
+                {row.expectedArrivalAt ? formatEta(row.expectedArrivalAt) : "no ETA"}
+              </span>
+            </span>
+          ) : (
+            "—"
+          )}
+        </TableCell>
+        <TableCell numeric className="text-ink-muted">
+          {/* Two decimals: a slow mover at 0.03/day must not read as zero. */}
+          {row.runRate > 0 ? row.runRate.toFixed(2) : "—"}
+        </TableCell>
+        <TableCell numeric className="text-ink-muted">
+          {row.daysCover != null ? `${row.daysCover}d` : "—"}
+        </TableCell>
         <TableCell numeric>
           <CostValue amount={row.moneyAtRestKes} canViewCosts={canViewCosts} compact />
         </TableCell>
@@ -335,11 +444,15 @@ function RowGroup({
           {row.revenue30dKes > 0 ? Math.round(row.revenue30dKes).toLocaleString("en-KE") : "—"}
         </TableCell>
         <TableCell>
-          {row.verdict ? (
-            <Badge tone={VERDICT_TONES[row.verdict]}>{VERDICT_LABELS[row.verdict]}</Badge>
-          ) : (
-            <Badge tone="neutral">Not for sale</Badge>
-          )}
+          <span className="flex flex-wrap items-center gap-1">
+            {row.verdict && <Badge tone={VERDICT_TONES[row.verdict]}>{VERDICT_LABELS[row.verdict]}</Badge>}
+            {/* Lifecycle rides the same badge vocabulary. A row the shop stopped
+                selling has no cover verdict, so this is the only badge it
+                carries; an unlisted row keeps its verdict and gains this. */}
+            {row.lifecycle !== "active" && (
+              <Badge tone={row.lifecycle === "removed" ? "negative" : "neutral"}>{row.lifecycleLabel}</Badge>
+            )}
+          </span>
         </TableCell>
       </TableRow>
       {open && (
@@ -357,6 +470,7 @@ function RowGroup({
  *  editor). Each dot names its issue on hover. */
 function RowDots({ row }: { row: CatalogueRow }) {
   const dots: { title: string; className: string }[] = [];
+  if (row.syncError) dots.push({ title: `Sync problem: ${row.syncError}`, className: "bg-negative" });
   if (row.missingCost) dots.push({ title: "Missing cost", className: "bg-warning" });
   if (row.suspectCost) dots.push({ title: "Suspect cost (≥ price)", className: "bg-warning" });
   if (row.costMovedPct != null) dots.push({ title: `Cost moved ${formatMovePct(row.costMovedPct)}`, className: "bg-warning" });
