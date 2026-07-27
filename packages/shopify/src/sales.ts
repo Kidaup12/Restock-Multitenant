@@ -41,6 +41,21 @@ function orderLocationId(
   return ids.size === 1 ? [...ids][0]! : null;
 }
 
+/** Units returned per line item across every refund on an order. Keyed by line
+ *  item id because that is what carries the price the units were sold at. */
+function refundedQtyByLineItem(order: ShopifyOrderNode): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const refund of order.refunds ?? []) {
+    for (const item of refund.refundLineItems ?? []) {
+      const id = item.lineItem?.id;
+      const qty = item.quantity ?? 0;
+      if (!id || qty <= 0) continue;
+      out.set(id, (out.get(id) ?? 0) + qty);
+    }
+  }
+  return out;
+}
+
 /** Aggregate order line items into (product, day) buckets. `productIdByCore`
  *  maps a Shopify product id CORE → local product id. `dayKeyOf` turns a sale
  *  instant into the trading day it belongs to — required, and not defaulted to
@@ -62,18 +77,26 @@ export function bucketSalesByProductDay(
   // it stays on one branch. "" marks an unattributable contribution.
   const seenLocs = new Map<string, Set<string>>();
   for (const order of orders) {
+    // A cancelled order never became a sale, so it must not create demand the
+    // forecast then tries to replace.
+    if (order.cancelledAt) continue;
     const saleAt = order.processedAt ?? order.createdAt;
     if (!saleAt) continue;
     const instant = new Date(saleAt);
     if (Number.isNaN(instant.getTime())) continue;
     const dateKey = dayKeyOf(instant);
     const loc = locationIdByCore ? orderLocationId(order, locationIdByCore) : null;
+    const refundedByLine = refundedQtyByLineItem(order);
     for (const line of order.lineItems ?? []) {
       const gid = line.product?.id;
       if (!gid) continue;
       const productId = productIdByCore.get(numericCore(gid));
       if (!productId) continue; // product not in the catalog — skip
-      const qty = line.quantity ?? 0;
+      // Returned units come off the day they were sold, not the day they came
+      // back: the shop is asking "how fast does this actually move", and goods
+      // that walked back in never moved. A fully returned line drops out.
+      const sold = line.quantity ?? 0;
+      const qty = sold - (line.id ? (refundedByLine.get(line.id) ?? 0) : 0);
       if (qty <= 0) continue;
       const unit = line.originalUnitPriceSet?.shopMoney?.amount
         ? Number.parseFloat(line.originalUnitPriceSet.shopMoney.amount)
