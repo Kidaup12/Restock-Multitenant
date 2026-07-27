@@ -293,6 +293,11 @@ export async function seedDev(): Promise<SeedResult> {
         priceKes: p.priceKes,
         costKes: p.costKes,
         costSource: "manual",
+        // Seeded stock is what a live, published catalogue looks like: without
+        // this every row reads as unlisted, since an unpublished product is
+        // exactly a null publishedAt.
+        shopifyStatus: "active",
+        publishedAt: utcDay(0),
         // Sellable on-hand is the Sells-location rollup only (matches
         // shopify-sync's invariant); warehouse/Holds stock is not sellable.
         currentStock: shopShare,

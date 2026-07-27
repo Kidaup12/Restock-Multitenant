@@ -216,8 +216,13 @@ model TenantConfig {
 model Product {
   id                String    @id @default(cuid())
   tenantId          String
+  // One row per VARIANT: a six-shade foundation is six rows, because the SKU is
+  // the unit the shop orders, counts and matches on. shopifyProductId is the
+  // grouping key those rows share, not an identity — sibling variants collapse
+  // under it in the catalogue.
   shopifyProductId  String? // nullable: Odoo rows carry externalId+source instead
   shopifyVariantId  String?
+  variantTitle      String? // "Shade 03 / 50ml"; null when the product has a single default variant
   externalId        String? // provider record id (Odoo product.product id, etc.)
   source            String    @default("shopify") // "shopify" | "odoo"
   sku               String
@@ -246,6 +251,23 @@ model Product {
   activeOverride    Boolean   @default(false) // owner pinned active; the QB flagger must never deactivate it
   qbMatchedAt       DateTime? // last time the QB catalogue feed confirmed this product (null = never)
   notForSale        Boolean   @default(false) // tester/display/damaged: visible in catalogue, out of sellable stock, cover and the buy list
+  // What the store says about this SKU's life: "active" | "draft" | "archived".
+  // draft and archived both mean the shop has stopped selling it, so it stays
+  // in the catalogue under its own filter and drops out of the buy list —
+  // deleting it would lose the history. Non-null so the buy-list predicate is a
+  // plain notIn; a source with no status concept reads as active, which is what
+  // "nothing says otherwise" should mean.
+  shopifyStatus     String    @default("active")
+  // Published to a sales channel. null on an otherwise-active product is
+  // Shopify's "unlisted". Recorded and shown, but NOT an exclusion on its own:
+  // a shop that sells in store and keeps Shopify as a stock ledger publishes
+  // nothing, and excluding on this would empty its buy list.
+  publishedAt       DateTime?
+  // First full sync that could not find this SKU in the store. Excluded from
+  // the buy list while set, cleared the moment it reappears.
+  missingFromShopifyAt DateTime?
+  syncError         String? // last per-SKU sync failure, shown on the row; null = last sync was clean
+  syncErrorAt       DateTime?
   costSource        String? // "manual" (pinned, wins) | "qb" | "shopify"; null = missing → held off the buy list
   costUpdatedAt     DateTime? // when costKes last changed (any source) — freshness behind the source label + audit
   lastSyncedCostKes Float? // last SYNCED cost (shopify/qb) the cost-moved check saw; the prior-cost signal for the >20% diff. null = no baseline captured yet
@@ -262,14 +284,17 @@ model Product {
   posSaleLines            PosSaleLine[]
   purchaseOrderLines      PurchaseOrderLine[]
 
-  @@unique([tenantId, shopifyProductId])
+  @@unique([tenantId, shopifyVariantId])
   @@unique([tenantId, source, externalId])
   @@index([tenantId])
   @@index([tenantId, source])
+  @@index([tenantId, shopifyProductId]) // sibling variants of one product
   @@index([tenantId, productType])
   @@index([tenantId, vendor])
   @@index([tenantId, active])
   @@index([tenantId, notForSale])
+  @@index([tenantId, shopifyStatus])
+  @@index([tenantId, missingFromShopifyAt])
   @@index([tenantId, customCategory])
 }
 

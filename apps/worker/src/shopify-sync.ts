@@ -98,8 +98,15 @@ async function syncProducts(tenantId: string, nodes: ShopifyProductNode[]): Prom
     const costParsed = costRaw ? Number.parseFloat(costRaw) : NaN;
     const writeCost = Number.isFinite(costParsed) && !costPinned.has(core);
 
+    // The variant is the identity now, not the product: siblings share
+    // shopifyProductId, so it can no longer be the key. Every Shopify product
+    // carries at least a default variant; one without is unidentifiable, so it
+    // is left alone rather than written under a null key.
+    const variantId = firstVariant?.id ? numericCore(firstVariant.id) : null;
+    if (!variantId) continue;
+
     const common = {
-      shopifyVariantId: firstVariant?.id ? numericCore(firstVariant.id) : null,
+      shopifyProductId: core,
       sku: firstVariant?.sku ?? "",
       title: node.title ?? "(untitled)",
       vendor: node.vendor ?? null,
@@ -110,8 +117,8 @@ async function syncProducts(tenantId: string, nodes: ShopifyProductNode[]): Prom
       ...(node.createdAt ? { shopifyCreatedAt: new Date(node.createdAt) } : {}),
     };
     await prismaService.product.upsert({
-      where: { tenantId_shopifyProductId: { tenantId, shopifyProductId: core } },
-      create: { tenantId, shopifyProductId: core, ...common },
+      where: { tenantId_shopifyVariantId: { tenantId, shopifyVariantId: variantId } },
+      create: { tenantId, shopifyVariantId: variantId, ...common },
       update: { ...common, lastSynced: new Date() },
     });
     written += 1;
