@@ -29,9 +29,12 @@ describe("promo-spike de-spike (excludedDates)", () => {
   history[4]!.quantity = 300; // the point at back(5)
   const spikeDay = back(5);
 
-  it("a past promo spike inflates the plain adjusted rate", () => {
+  it("an UNLOGGED spike is absorbed by the damping, not carried into the rate", () => {
+    // Before spike damping this read >9/day off a 3/day product — one 300-unit
+    // day tripling the baseline until someone remembered to log the promo.
     const included = weightedDailyRateAdjusted(history, asOf);
-    expect(included).toBeGreaterThan(9);
+    expect(included).toBeLessThan(3.2);
+    expect(included).toBeGreaterThan(3); // the day still counts, capped — never erased
   });
 
   it("censoring the spike day drops the rate back to the true baseline", () => {

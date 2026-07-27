@@ -116,7 +116,18 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
   const now = new Date();
   const historySince = new Date(now.getTime() - HISTORY_DAYS * DAY_MS);
 
-  const [products, config, promos, pastPromos, closures, locations, sales, priorRows] = await Promise.all([
+  const [
+    products,
+    config,
+    promos,
+    pastPromos,
+    closures,
+    locations,
+    sales,
+    priorRows,
+    emptyShelfDays,
+    firstSnapshot,
+  ] = await Promise.all([
     db.product.findMany({
       // notForSale (testers/display/damaged) stay visible in the catalogue but
       // never earn a forecast or a buy-list line — same exclusion the cost and
@@ -174,6 +185,18 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
         revokedAt: true,
       },
     }),
+    // The in-stock-day denominator: every product-day the nightly snapshot
+    // recorded an empty shelf. ONE query for the whole catalogue (never a lookup
+    // per product), and only the empty rows travel — the in-stock majority stays
+    // in the database. Indexed on (tenantId, date).
+    db.inventorySnapshot.findMany({
+      where: { date: { gte: historySince }, onHand: { lte: 0 } },
+      select: { productId: true, date: true },
+    }),
+    // How far back the snapshots reach. Older history has no proof either way and
+    // keeps gap inference, so a tenant a week into snapshotting is not read as
+    // having been in stock all year.
+    db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
   ]);
 
   const historyByProduct = new Map<string, SalesPoint[]>();
@@ -182,6 +205,14 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
     if (!list) historyByProduct.set(row.productId, (list = []));
     list.push(row);
   }
+
+  const stockoutsByProduct = new Map<string, Date[]>();
+  for (const row of emptyShelfDays) {
+    let list = stockoutsByProduct.get(row.productId);
+    if (!list) stockoutsByProduct.set(row.productId, (list = []));
+    list.push(row.date);
+  }
+  const snapshotsSince = firstSnapshot?.date ?? undefined;
 
   // Cross-product steps the pure pipeline leaves to the caller.
   const knobs = resolveForecastKnobs(config);
@@ -253,6 +284,8 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
       history,
       activePromos,
       abcCategory,
+      stockoutDates: stockoutsByProduct.get(product.id),
+      snapshotsSince,
       excludedDates: excludedByProduct.get(product.id),
       policy: policyForClass(knobs.methods, abcCategory),
       serviceZ: knobs.serviceZ,
@@ -352,6 +385,8 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
             history,
             activePromos,
             abcCategory,
+            stockoutDates: stockoutsByProduct.get(product.id),
+            snapshotsSince,
             excludedDates: excludedByProduct.get(product.id),
             policy: policyForClass(knobs.methods, abcCategory),
             serviceZ: knobs.serviceZ,

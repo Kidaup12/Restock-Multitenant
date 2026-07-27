@@ -49,6 +49,9 @@ export type ProductForecastInput = {
   history: SalesPoint[];
   /** Proven out-of-stock day-keys (UTC midnight) for censored-demand correction. */
   stockoutDates?: Date[];
+  /** First day the tenant has inventory snapshots for — how far back
+   *  `stockoutDates` is believed before gap inference takes over. */
+  snapshotsSince?: Date;
   /** Past promo-window ∪ full-closure day-keys (UTC midnight) censored from the
    *  run rate so a past spike doesn't over-order and a closed day doesn't deflate
    *  it. Resolved cross-product by the forecast-run (promo table + closures). */
@@ -113,6 +116,7 @@ export function forecastProduct(input: ProductForecastInput): PredictionFields {
     activePromos: input.activePromos ?? [],
     runDateKey: input.runDateKey,
     stockoutDates: input.stockoutDates,
+    snapshotsSince: input.snapshotsSince,
     excludedDates: input.excludedDates,
     serviceZ: input.serviceZ,
     capMultiple: input.capMultiple,
