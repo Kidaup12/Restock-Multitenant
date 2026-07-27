@@ -1,3 +1,8 @@
+// Server entry: the Prisma clients plus the shared domain constants. Client
+// components must not import this root — ./client instantiates PrismaClient and
+// throws on a missing SERVICE_DATABASE_URL the moment the module evaluates.
+// Browser-safe values live behind subpaths (`@wezesha/db/roles`); types are safe
+// from anywhere because `import type` is erased.
 export { prismaAuth, prismaForTenant, prismaForTenantTx, prismaService } from "./client";
 export type { TenantClient } from "./client";
 export {

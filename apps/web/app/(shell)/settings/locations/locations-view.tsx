@@ -6,7 +6,7 @@ import {
   type LocationType,
   roleOfType,
   typeOfRole,
-} from "@wezesha/db";
+} from "@wezesha/db/roles";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";

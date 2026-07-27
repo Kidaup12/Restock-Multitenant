@@ -4,7 +4,8 @@
   "private": true,
   "description": "Prisma schema, migrations, and the tenant-scoped database clients",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./roles": "./src/roles.ts"
   },
   "scripts": {
     "db:generate": "prisma generate",
