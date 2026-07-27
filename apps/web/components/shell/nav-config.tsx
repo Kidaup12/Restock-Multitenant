@@ -8,6 +8,7 @@ import {
   GearIcon,
   HomeIcon,
   InboxIcon,
+  LayersIcon,
 } from "@/components/icons";
 
 export type NavDestination = {
@@ -31,6 +32,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   { href: "/plan", label: "Plan", icon: <CalendarIcon />, tourKey: "nav-plan" },
   { href: "/orders", label: "Orders", icon: <ClipboardIcon />, tourKey: "nav-orders" },
   { href: "/stock", label: "Stock", icon: <BoxIcon />, tourKey: "nav-stock" },
+  { href: "/transfers", label: "Transfers", icon: <LayersIcon />, tourKey: "nav-transfers" },
   { href: "/costs", label: "Costs", icon: <BanknoteIcon />, tourKey: "nav-costs" },
   { href: "/suppliers", label: "Suppliers", icon: <InboxIcon />, tourKey: "nav-suppliers" },
   { href: "/sales", label: "Sales data", icon: <ChartIcon />, tourKey: "nav-sales" },

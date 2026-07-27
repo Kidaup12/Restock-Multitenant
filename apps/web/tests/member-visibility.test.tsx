@@ -10,6 +10,7 @@ import { getReorderNeeded, getTodayMetrics } from "../lib/data/today";
 import { getStockByLocation, getStockCatalogue } from "../lib/data/stock";
 import { getBuyList, redactBudgetSplit, splitByBudget, type BuyListRow } from "../lib/data/plan";
 import { getInsightsOverview } from "../lib/data/insights";
+import { getDistributionProposal } from "../lib/data/transfers";
 
 // ReorderTable links to /stock; next/link needs an app-router context that a
 // bare renderToStaticMarkup doesn't provide — a plain anchor is equivalent here.
@@ -19,6 +20,12 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+// The transfers proposal renders its save bar, a client component that reaches
+// for the router on mount; a static render has no app-router context.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }),
+}));
+
 import { MetricsTiles } from "../app/(shell)/today/metrics-tiles";
 import { ReorderTable } from "../app/(shell)/today/reorder-table";
 import { CatalogueTable } from "../app/(shell)/stock/catalogue-table";
@@ -26,6 +33,8 @@ import { CatalogueView } from "../app/(shell)/stock/catalogue-view";
 import { LocationView } from "../app/(shell)/stock/location-view";
 import { catalogueExportColumns } from "../app/(shell)/stock/catalogue-export";
 import { ShelfHealth } from "../app/(shell)/insights/shelf-health";
+import { ProposalView } from "../app/(shell)/transfers/proposal-view";
+import { transferExportColumns } from "../app/(shell)/transfers/transfers-export";
 
 /**
  * Money-blindness proof for the live screens, at two depths:
@@ -348,6 +357,68 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     const owner = await getInsightsOverview(seeded.tenantId, { canViewCosts: true });
     expect(costNumbers(owner).length).toBeGreaterThan(0);
   });
+
+  it("transfers: the value on the move is masked, the quantities are not", async () => {
+    // The seeded warehouse only backs slow lines the shop is already covered on,
+    // so give a fast mover real backstock — otherwise there is nothing to move
+    // and the test proves nothing.
+    const warehouse = await prismaService.location.findFirstOrThrow({
+      where: { tenantId: seeded.tenantId, locationType: "warehouse" },
+      select: { id: true },
+    });
+    const product = await prismaService.product.findFirstOrThrow({
+      where: { tenantId: seeded.tenantId, sku: "ARI-MJ-90" },
+      select: { id: true },
+    });
+    const before = await prismaService.inventoryLevel.findUniqueOrThrow({
+      where: { locationId_productId: { locationId: warehouse.id, productId: product.id } },
+      select: { onHand: true },
+    });
+    await prismaService.inventoryLevel.update({
+      where: { locationId_productId: { locationId: warehouse.id, productId: product.id } },
+      data: { onHand: 200 },
+    });
+
+    const args = { tenantId: seeded.tenantId, fromLocationId: warehouse.id, coverDays: 14 };
+    const payload = await getDistributionProposal(seeded.tenantId, {
+      fromLocationId: warehouse.id,
+      coverDays: 14,
+      canViewCosts: false,
+    });
+    expect(payload!.lines.length).toBeGreaterThan(0); // the test would be vacuous otherwise
+    expect(payload!.totalValueKes).toBeNull();
+    for (const line of payload!.lines) expect(line.valueKes).toBeNull();
+    expect(costNumbers(payload)).toEqual([]);
+    // Units and run rates are operational facts, not money — they stay.
+    expect(payload!.totalUnits).toBeGreaterThan(0);
+
+    const member = renderToStaticMarkup(
+      await ProposalView({ ...args, canViewCosts: false, canPlan: false })
+    );
+    expect(kesDigits(member)).toHaveLength(0);
+    expect(member).toContain(MASK);
+
+    const owner = renderToStaticMarkup(
+      await ProposalView({ ...args, canViewCosts: true, canPlan: false })
+    );
+    expect(kesDigits(owner).length).toBeGreaterThan(0);
+    expect(owner).not.toContain(MASK);
+
+    // Same plan either way: redaction changes the money, never the decision.
+    const ownerPayload = await getDistributionProposal(seeded.tenantId, {
+      fromLocationId: warehouse.id,
+      coverDays: 14,
+      canViewCosts: true,
+    });
+    expect(payload!.lines.map((l) => `${l.productId}:${l.toLocationId}:${l.qty}`)).toEqual(
+      ownerPayload!.lines.map((l) => `${l.productId}:${l.toLocationId}:${l.qty}`)
+    );
+
+    await prismaService.inventoryLevel.update({
+      where: { locationId_productId: { locationId: warehouse.id, productId: product.id } },
+      data: { onHand: before.onHand },
+    });
+  });
 });
 
 describe("export column gating", () => {
@@ -357,6 +428,19 @@ describe("export column gating", () => {
     const ownerHeaders = catalogueExportColumns(true).map((c) => c.header);
     expect(ownerHeaders).toContain("Unit cost (KES)");
     expect(ownerHeaders).toContain("Stock value (KES)");
+  });
+
+  it("the transfer pick list carries value only for cost viewers", () => {
+    expect(transferExportColumns(false).map((c) => c.header)).toEqual([
+      "Product",
+      "SKU",
+      "To",
+      "Move",
+      "Sells/day",
+      "Cover before",
+      "Cover after",
+    ]);
+    expect(transferExportColumns(true).map((c) => c.header)).toContain("Value (KES)");
   });
 });
 
