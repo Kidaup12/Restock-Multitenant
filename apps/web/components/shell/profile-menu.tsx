@@ -9,6 +9,7 @@ import { useTour } from "@/components/tour/tour-provider";
 import {
   DownloadIcon,
   GearIcon,
+  LayersIcon,
   LogOutIcon,
   PlayCircleIcon,
   UserIcon,
@@ -19,6 +20,10 @@ export type ProfileMenuProps = {
   email: string;
   /* "Owner" / "Admin" / "Member", or "No workspace". */
   roleLabel: string;
+  /* Caller is on the ADMIN_EMAILS allow-list (resolved server-side by
+     lib/admin/gate). False for everyone else, and the operator entry is then
+     never rendered — the console stays unadvertised. */
+  isPlatformAdmin: boolean;
 };
 
 const itemClass = cn(
@@ -27,7 +32,12 @@ const itemClass = cn(
   "[&_svg]:size-4.5 [&_svg]:shrink-0",
 );
 
-export function ProfileMenu({ name, email, roleLabel }: ProfileMenuProps) {
+export function ProfileMenu({
+  name,
+  email,
+  roleLabel,
+  isPlatformAdmin,
+}: ProfileMenuProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -159,6 +169,26 @@ export function ProfileMenu({ name, email, roleLabel }: ProfileMenuProps) {
               </button>
             )}
           </div>
+
+          {/* Cross-tenant operator console. It belongs to the person, not the
+              workspace, so it sits with the other account entries rather than
+              in the workspace nav. */}
+          {isPlatformAdmin && (
+            <>
+              <div className="mx-1.5 border-t border-edge" />
+              <div className="py-1">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => navigate("/admin")}
+                  className={itemClass}
+                >
+                  <LayersIcon />
+                  Operator console
+                </button>
+              </div>
+            </>
+          )}
 
           {canInstall && (
             <>

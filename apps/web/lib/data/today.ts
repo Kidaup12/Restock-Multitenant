@@ -21,8 +21,9 @@ import { moneyAtRest } from "@/lib/metrics";
 const DAY_MS = 86_400_000;
 
 /** No sale in this many days = dead stock, unless the tenant configured its own
- *  window (spec §11 default: 90 days). */
-const DEFAULT_DEAD_STOCK_DAYS = 90;
+ *  window (spec §11 default: 90 days). Exported so the Settings screen shows
+ *  the same number this getter falls back to. */
+export const DEFAULT_DEAD_STOCK_DAYS = 90;
 
 export type TodayMetrics = {
   /** Sum of SalesHistory.revenueKes across all channels, trailing 30 days. */
