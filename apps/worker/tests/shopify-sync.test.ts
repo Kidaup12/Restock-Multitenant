@@ -39,6 +39,7 @@ const products: ShopifyProductNode[] = [
       {
         id: "gid://shopify/ProductVariant/201",
         sku: "ARG-100",
+        title: "Default Title",
         price: "1200",
         inventoryItem: { id: "gid://shopify/InventoryItem/301", unitCost: { amount: "700" } },
       },
@@ -47,7 +48,9 @@ const products: ShopifyProductNode[] = [
   {
     id: "gid://shopify/Product/102",
     title: "Shea Butter 250g",
-    variants: [{ id: "gid://shopify/ProductVariant/202", sku: "SHEA-250", price: "800" }],
+    variants: [
+      { id: "gid://shopify/ProductVariant/202", sku: "SHEA-250", title: "Default Title", price: "800" },
+    ],
   },
   {
     // A live store carries one of these: several denominations, no SKU on any of
@@ -89,11 +92,11 @@ const locations: ShopifyLocationNode[] = [
     inventoryLevels: [
       {
         quantities: [{ name: "on_hand", quantity: 10 }],
-        item: { variant: { product: { id: "gid://shopify/Product/101" } } },
+        item: { variant: { id: "gid://shopify/ProductVariant/201", product: { id: "gid://shopify/Product/101" } } },
       },
       {
         quantities: [{ name: "on_hand", quantity: 3 }],
-        item: { variant: { product: { id: "gid://shopify/Product/102" } } },
+        item: { variant: { id: "gid://shopify/ProductVariant/202", product: { id: "gid://shopify/Product/102" } } },
       },
     ],
   },
@@ -104,7 +107,7 @@ const locations: ShopifyLocationNode[] = [
     inventoryLevels: [
       {
         quantities: [{ name: "on_hand", quantity: 20 }],
-        item: { variant: { product: { id: "gid://shopify/Product/101" } } },
+        item: { variant: { id: "gid://shopify/ProductVariant/201", product: { id: "gid://shopify/Product/101" } } },
       },
     ],
   },
@@ -206,6 +209,9 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     expect(argan.costKes).toBe(700);
     expect(argan.costSource).toBe("shopify");
     expect(argan.shopifyCreatedAt?.toISOString()).toBe("2025-01-15T08:00:00.000Z");
+    // Shopify's placeholder name for an option-less product's only variant never
+    // reaches the row.
+    expect(argan.variantTitle).toBeNull();
 
     // Locations by core; each gets a guessed, assumed role (never confirmed here).
     const locs = await prismaService.location.findMany({ where: { tenantId } });
@@ -332,5 +338,245 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     expect(sent).toHaveLength(2);
 
     await incident.clearIncident(publisher, tenantId, "shopify");
+  });
+});
+
+const LIFECYCLE_SLUG = "shopify-lifecycle-test";
+const LIFECYCLE_SHOP = "lifecycle-test-store.myshopify.com";
+
+/**
+ * The catalogue shapes the old ingest lost silently: a three-shade product that
+ * collapsed into one row carrying another shade's stock, and draft/archived
+ * products the query filtered out of the pull entirely.
+ */
+function lifecycleCatalogue(): ShopifyProductNode[] {
+  return [
+    {
+      id: "gid://shopify/Product/301",
+      title: "Matte Foundation",
+      vendor: "Beauty Co",
+      status: "ACTIVE",
+      publishedAt: "2026-01-05T00:00:00Z",
+      variants: [
+        {
+          id: "gid://shopify/ProductVariant/401",
+          sku: "FND-01",
+          title: "Shade 01",
+          price: "1500",
+          inventoryItem: { id: "gid://shopify/InventoryItem/501", unitCost: { amount: "900" } },
+        },
+        {
+          id: "gid://shopify/ProductVariant/402",
+          sku: "FND-02",
+          title: "Shade 02",
+          price: "1600",
+          inventoryItem: { id: "gid://shopify/InventoryItem/502", unitCost: { amount: "950" } },
+        },
+        {
+          id: "gid://shopify/ProductVariant/403",
+          sku: "FND-03",
+          title: "Shade 03",
+          price: "1600",
+          inventoryItem: { id: "gid://shopify/InventoryItem/503" },
+        },
+      ],
+    },
+    {
+      // Not yet launched: still stocked and still worth showing, just not orderable.
+      id: "gid://shopify/Product/302",
+      title: "Winter Balm",
+      status: "DRAFT",
+      publishedAt: null,
+      variants: [
+        {
+          id: "gid://shopify/ProductVariant/404",
+          sku: "BALM-01",
+          title: "Default Title",
+          price: "400",
+          inventoryItem: { id: "gid://shopify/InventoryItem/504", unitCost: { amount: "200" } },
+        },
+      ],
+    },
+    {
+      id: "gid://shopify/Product/303",
+      title: "Discontinued Toner",
+      status: "ARCHIVED",
+      publishedAt: "2025-03-01T00:00:00Z",
+      variants: [
+        {
+          id: "gid://shopify/ProductVariant/405",
+          sku: "TON-01",
+          title: "Default Title",
+          price: "900",
+          inventoryItem: { id: "gid://shopify/InventoryItem/505", unitCost: { amount: "500" } },
+        },
+      ],
+    },
+  ];
+}
+
+// Two shades of one product, stocked separately at the same branch.
+const lifecycleLocations: ShopifyLocationNode[] = [
+  {
+    id: "gid://shopify/Location/9101",
+    name: "Downtown Shop",
+    isActive: true,
+    inventoryLevels: [
+      {
+        quantities: [{ name: "on_hand", quantity: 5 }],
+        item: { id: "gid://shopify/InventoryItem/501", variant: { id: "gid://shopify/ProductVariant/401", product: { id: "gid://shopify/Product/301" } } },
+      },
+      {
+        quantities: [{ name: "on_hand", quantity: 9 }],
+        item: { id: "gid://shopify/InventoryItem/502", variant: { id: "gid://shopify/ProductVariant/402", product: { id: "gid://shopify/Product/301" } } },
+      },
+    ],
+  },
+];
+
+describe.skipIf(!runnable)("product lifecycle ingest (real db + redis)", () => {
+  let prismaService: typeof import("@wezesha/db").prismaService;
+  let processor: (job: Job<SyncJobData>) => Promise<void>;
+  let publisher: Redis;
+  let tenantId: string;
+  let catalogue = lifecycleCatalogue();
+
+  const bySku = async (sku: string) =>
+    (await prismaService.product.findFirst({ where: { tenantId, sku } }))!;
+
+  /** Drop the products cursor so the next run is a FULL catalogue pull — the
+   *  only mode allowed to decide a SKU has gone from the store. */
+  const forceFullSync = () =>
+    prismaService.ingestCursor.deleteMany({
+      where: { tenantId, source: "shopify", resource: "products" },
+    });
+
+  beforeAll(async () => {
+    process.env.TOKEN_ENCRYPTION_KEY ??= crypto.randomBytes(32).toString("base64");
+    ({ prismaService } = await import("@wezesha/db"));
+    const mod = await import("../src/shopify-sync");
+
+    publisher = new Redis(redisUrl!);
+    processor = mod.createShopifySyncProcessor({
+      publisher,
+      makeApi: () => ({
+        ensureWebhooks: async () => {},
+        products: async () => catalogue,
+        locations: async () => lifecycleLocations,
+        orders: async () => [],
+      }),
+    });
+
+    await prismaService.tenant.deleteMany({ where: { slug: LIFECYCLE_SLUG } });
+    const tenant = await prismaService.tenant.create({
+      data: { name: "Lifecycle Test", slug: LIFECYCLE_SLUG },
+    });
+    tenantId = tenant.id;
+    await prismaService.shopifyConnection.create({
+      data: {
+        tenantId,
+        shopDomain: LIFECYCLE_SHOP,
+        accessToken: encryptToken(TOKEN),
+        scopes: "read_products",
+      },
+    });
+    await processor(jobStub(tenantId)); // first run: no cursor → full sync
+  });
+
+  afterAll(async () => {
+    await prismaService.tenant.deleteMany({ where: { slug: LIFECYCLE_SLUG } });
+    await prismaService.$disconnect();
+    await publisher.quit();
+  });
+
+  it("writes one row per variant, each with its own SKU, price and cost", async () => {
+    const shades = await prismaService.product.findMany({
+      where: { tenantId, shopifyProductId: "301" },
+      orderBy: { sku: "asc" },
+    });
+    expect(shades.map((s) => s.sku)).toEqual(["FND-01", "FND-02", "FND-03"]);
+    expect(shades.map((s) => s.shopifyVariantId)).toEqual(["401", "402", "403"]);
+    expect(shades.map((s) => s.variantTitle)).toEqual(["Shade 01", "Shade 02", "Shade 03"]);
+    expect(shades.map((s) => s.priceKes)).toEqual([1500, 1600, 1600]);
+    expect(shades.map((s) => s.costKes)).toEqual([900, 950, 0]); // no unit cost on Shade 03
+    // Product-level fields are copied onto every sibling.
+    expect(shades.every((s) => s.title === "Matte Foundation" && s.vendor === "Beauty Co")).toBe(true);
+  });
+
+  it("ingests draft and archived products instead of dropping them", async () => {
+    const balm = await bySku("BALM-01");
+    expect(balm.shopifyStatus).toBe("draft");
+    expect(balm.publishedAt).toBeNull(); // never published — Shopify's unlisted
+    expect(balm.variantTitle).toBeNull(); // "Default Title" is plumbing, not a name
+    const toner = await bySku("TON-01");
+    expect(toner.shopifyStatus).toBe("archived");
+    expect(toner.publishedAt?.toISOString()).toBe("2025-03-01T00:00:00.000Z");
+    // They stay in the catalogue but off the buy list; the shades stay on it.
+    const buyable = await prismaService.product.count({
+      where: { tenantId, shopifyStatus: { notIn: ["draft", "archived"] }, missingFromShopifyAt: null },
+    });
+    expect(buyable).toBe(3);
+  });
+
+  it("lands each variant's stock on its own row, not on a sibling", async () => {
+    expect((await bySku("FND-01")).currentStock).toBe(5);
+    expect((await bySku("FND-02")).currentStock).toBe(9);
+    expect((await bySku("FND-03")).currentStock).toBe(0); // stocked nowhere
+  });
+
+  it("never overwrites an owner-pinned cost", async () => {
+    await prismaService.product.updateMany({
+      where: { tenantId, sku: "FND-01" },
+      data: { costKes: 1234, costSource: "manual" },
+    });
+    await processor(jobStub(tenantId));
+    const pinned = await bySku("FND-01");
+    expect(pinned.costKes).toBe(1234);
+    expect(pinned.costSource).toBe("manual");
+    expect((await bySku("FND-02")).costKes).toBe(950); // unpinned rows still follow Shopify
+  });
+
+  it("a FULL sync marks a SKU that has gone from the store", async () => {
+    catalogue = lifecycleCatalogue();
+    catalogue[0]!.variants = catalogue[0]!.variants!.filter((v) => v.sku !== "FND-03");
+    await forceFullSync();
+    await processor(jobStub(tenantId));
+
+    expect((await bySku("FND-03")).missingFromShopifyAt).not.toBeNull();
+    expect((await bySku("FND-01")).missingFromShopifyAt).toBeNull();
+  });
+
+  it("an INCREMENTAL sync never marks anything missing", async () => {
+    // An incremental pull legitimately returns only what changed — treating the
+    // rest as gone would empty the shop's catalogue in one run.
+    catalogue = [{ ...lifecycleCatalogue()[0]!, variants: [lifecycleCatalogue()[0]!.variants![0]!] }];
+    await processor(jobStub(tenantId)); // cursor is set from the previous run
+    expect((await bySku("FND-02")).missingFromShopifyAt).toBeNull();
+    expect((await bySku("TON-01")).missingFromShopifyAt).toBeNull();
+  });
+
+  it("a SKU that comes back clears the missing stamp", async () => {
+    catalogue = lifecycleCatalogue();
+    await forceFullSync();
+    await processor(jobStub(tenantId));
+    expect((await bySku("FND-03")).missingFromShopifyAt).toBeNull();
+  });
+
+  it("records a failing record on its own row and still syncs the rest", async () => {
+    catalogue = lifecycleCatalogue();
+    // A timestamp the store should never send: it fails this row's write only.
+    catalogue[1]!.publishedAt = "not-a-real-date";
+    await processor(jobStub(tenantId));
+
+    const balm = await bySku("BALM-01");
+    expect(balm.syncError).not.toBeNull();
+    expect(balm.syncErrorAt).not.toBeNull();
+    // The rest of the pull went through, and a clean write clears the flag.
+    expect((await bySku("FND-02")).syncError).toBeNull();
+
+    catalogue = lifecycleCatalogue();
+    await processor(jobStub(tenantId));
+    expect((await bySku("BALM-01")).syncError).toBeNull();
+    expect((await bySku("BALM-01")).syncErrorAt).toBeNull();
   });
 });

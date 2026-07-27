@@ -65,12 +65,17 @@ function refundedQtyByLineItem(order: ShopifyOrderNode): Map<string, number> {
  *  two rows while the till's sales for the same day key correctly. The POS
  *  ingest takes the same function, so both channels agree on where a day ends.
  *  `locationIdByCore` (maps a Shopify location id CORE → local Location.id)
- *  enables per-branch attribution; omit it to leave every bucket unattributed. */
+ *  enables per-branch attribution; omit it to leave every bucket unattributed.
+ *  `productIdByVariantCore` (Shopify VARIANT id CORE → local product id) is
+ *  tried first: the catalogue is one row per variant, so a product-id lookup
+ *  can only land on an arbitrary sibling of a multi-variant product. The
+ *  product map stays as the fallback for lines that carry no variant. */
 export function bucketSalesByProductDay(
   orders: ShopifyOrderNode[],
   productIdByCore: Map<string, string>,
   dayKeyOf: (saleAt: Date) => string,
-  locationIdByCore?: Map<string, string>
+  locationIdByCore?: Map<string, string>,
+  productIdByVariantCore?: Map<string, string>
 ): Map<string, DayBucket> {
   const buckets = new Map<string, DayBucket>();
   // Track each bucket's contributing locations so a day is attributed only when
@@ -88,9 +93,11 @@ export function bucketSalesByProductDay(
     const loc = locationIdByCore ? orderLocationId(order, locationIdByCore) : null;
     const refundedByLine = refundedQtyByLineItem(order);
     for (const line of order.lineItems ?? []) {
-      const gid = line.product?.id;
-      if (!gid) continue;
-      const productId = productIdByCore.get(numericCore(gid));
+      const variantGid = line.variant?.id;
+      const productGid = line.product?.id;
+      const productId =
+        (variantGid ? productIdByVariantCore?.get(numericCore(variantGid)) : undefined) ??
+        (productGid ? productIdByCore.get(numericCore(productGid)) : undefined);
       if (!productId) continue; // product not in the catalog — skip
       // Returned units come off the day they were sold, not the day they came
       // back: the shop is asking "how fast does this actually move", and goods

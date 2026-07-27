@@ -1,6 +1,6 @@
 import { UnrecoverableError, type Job } from "bullmq";
 import type { Redis } from "ioredis";
-import { guessRoleFromName, prismaService, roleOfType, typeOfRole } from "@wezesha/db";
+import { guessRoleFromName, isProductStatus, prismaService, roleOfType, typeOfRole } from "@wezesha/db";
 import { publishEvent } from "@wezesha/realtime";
 import { tenantDayKey } from "@wezesha/pos";
 import type { SyncJobData } from "@wezesha/queue";
@@ -73,57 +73,138 @@ async function setCursor(tenantId: string, resource: string, value: Date): Promi
   });
 }
 
-/** Upsert products keyed on (tenantId, core id). Cost only writes when Shopify
- *  supplies one AND the row isn't owner-pinned ("manual" costSource wins). */
-async function syncProducts(tenantId: string, nodes: ShopifyProductNode[]): Promise<number> {
-  if (nodes.length === 0) return 0;
+/** Longest per-SKU failure text kept on the row — enough to name the cause,
+ *  short enough that a bad batch can't bloat the catalogue table. */
+const SYNC_ERROR_MAX = 300;
+
+/** Shopify's ProductStatus enum → the column the buy-list predicate reads.
+ *  Anything unrecognised reads as "active": writing an unknown string there
+ *  would hold a live SKU off every list with no way for the owner to see why. */
+function productStatusOf(raw: string | undefined): string {
+  const status = (raw ?? "").toLowerCase();
+  return isProductStatus(status) ? status : "active";
+}
+
+/** Shopify titles the only variant of an option-less product "Default Title".
+ *  That is API plumbing, not something a shopper-facing row should read. */
+function variantTitleOf(raw: string | null | undefined): string | null {
+  const title = raw?.trim();
+  return !title || title === "Default Title" ? null : title;
+}
+
+/**
+ * Upsert ONE ROW PER VARIANT, keyed on (tenantId, variant core id) — a six-shade
+ * foundation is six rows, because the SKU is what the shop counts and orders.
+ * Product-level fields are copied onto every sibling; price, cost, SKU and the
+ * variant title come from that variant. Cost only writes when Shopify supplies
+ * one AND the row isn't owner-pinned ("manual" costSource wins).
+ *
+ * On a FULL sync (no incremental cursor) any Shopify-sourced row not seen in the
+ * pull is stamped missingFromShopifyAt — it is gone from the store. That must
+ * never run on an incremental sync, which legitimately sees only the products
+ * that changed recently and would otherwise mark the whole catalogue missing.
+ */
+async function syncProducts(
+  tenantId: string,
+  nodes: ShopifyProductNode[],
+  options: { fullSync: boolean }
+): Promise<{ written: number; failed: number }> {
+  // An empty pull is never evidence that the store is empty — a rate-limited or
+  // half-answered run looks exactly the same, so nothing is marked missing.
+  if (nodes.length === 0) return { written: 0, failed: 0 };
   const existing = await prismaService.product.findMany({
-    where: { tenantId, shopifyProductId: { not: null } },
-    select: { shopifyProductId: true, costSource: true },
+    where: { tenantId, shopifyVariantId: { not: null } },
+    select: { shopifyVariantId: true, costSource: true },
   });
   const costPinned = new Set(
-    existing.filter((p) => p.costSource === "manual").map((p) => p.shopifyProductId as string)
+    existing.filter((p) => p.costSource === "manual").map((p) => p.shopifyVariantId as string)
   );
 
+  const seen: string[] = [];
   let written = 0;
+  let failed = 0;
   for (const node of nodes) {
     // A gift card is issued on sale, not stocked: it has no unit cost, no
     // supplier and nothing to reorder, so letting it into the catalogue would
     // put "restock gift cards" on a buy list and skew the shop's product count.
     if (node.isGiftCard) continue;
-    const core = numericCore(node.id);
-    const firstVariant = node.variants?.[0];
-    const price = firstVariant?.price ? Number.parseFloat(firstVariant.price) : 0;
-    const costRaw = firstVariant?.inventoryItem?.unitCost?.amount;
-    const costParsed = costRaw ? Number.parseFloat(costRaw) : NaN;
-    const writeCost = Number.isFinite(costParsed) && !costPinned.has(core);
-
-    // The variant is the identity now, not the product: siblings share
-    // shopifyProductId, so it can no longer be the key. Every Shopify product
-    // carries at least a default variant; one without is unidentifiable, so it
-    // is left alone rather than written under a null key.
-    const variantId = firstVariant?.id ? numericCore(firstVariant.id) : null;
-    if (!variantId) continue;
-
-    const common = {
-      shopifyProductId: core,
-      sku: firstVariant?.sku ?? "",
+    const shared = {
+      shopifyProductId: numericCore(node.id),
       title: node.title ?? "(untitled)",
       vendor: node.vendor ?? null,
       productType: node.productType ?? null,
-      priceKes: Number.isFinite(price) ? price : 0,
-      ...(writeCost ? { costKes: costParsed, costSource: "shopify" } : {}),
       imageUrl: node.featuredImage?.url ?? null,
+      shopifyStatus: productStatusOf(node.status),
+      publishedAt: node.publishedAt ? new Date(node.publishedAt) : null,
       ...(node.createdAt ? { shopifyCreatedAt: new Date(node.createdAt) } : {}),
     };
-    await prismaService.product.upsert({
-      where: { tenantId_shopifyVariantId: { tenantId, shopifyVariantId: variantId } },
-      create: { tenantId, shopifyVariantId: variantId, ...common },
-      update: { ...common, lastSynced: new Date() },
-    });
-    written += 1;
+
+    for (const variant of node.variants ?? []) {
+      // Every Shopify product carries at least a default variant; one without an
+      // id is unidentifiable, so it is left alone rather than written under a
+      // null key.
+      const variantId = variant.id ? numericCore(variant.id) : null;
+      if (!variantId) continue;
+      seen.push(variantId);
+      try {
+        const price = variant.price ? Number.parseFloat(variant.price) : 0;
+        const costRaw = variant.inventoryItem?.unitCost?.amount;
+        const costParsed = costRaw ? Number.parseFloat(costRaw) : NaN;
+        const writeCost = Number.isFinite(costParsed) && !costPinned.has(variantId);
+        const common = {
+          ...shared,
+          sku: variant.sku ?? "",
+          variantTitle: variantTitleOf(variant.title),
+          priceKes: Number.isFinite(price) ? price : 0,
+          ...(writeCost ? { costKes: costParsed, costSource: "shopify" } : {}),
+          // The store just handed it to us, so it is neither missing nor failing.
+          missingFromShopifyAt: null,
+          syncError: null,
+          syncErrorAt: null,
+        };
+        await prismaService.product.upsert({
+          where: { tenantId_shopifyVariantId: { tenantId, shopifyVariantId: variantId } },
+          create: { tenantId, shopifyVariantId: variantId, ...common },
+          update: { ...common, lastSynced: new Date() },
+        });
+        written += 1;
+      } catch (err) {
+        // One malformed record used to abort the whole products phase and cost
+        // the shop every SKU behind it. Pin the failure to the row instead —
+        // the catalogue shows it, and the count below still reaches the operator.
+        failed += 1;
+        await prismaService.product
+          .updateMany({
+            where: { tenantId, shopifyVariantId: variantId },
+            data: {
+              syncError: (err as Error).message.slice(0, SYNC_ERROR_MAX),
+              syncErrorAt: new Date(),
+            },
+          })
+          .catch(() => {});
+      }
+    }
   }
-  return written;
+
+  if (failed > 0) {
+    // Every SKU failing is not a per-record blip — fail the job so the operator
+    // gets the notification + alert instead of a silently empty catalogue.
+    if (written === 0) throw new Error(`Shopify products sync failed for all ${failed} variants`);
+    console.error(`worker: ${failed} of ${failed + written} Shopify variants failed to sync for ${tenantId}`);
+  }
+
+  if (options.fullSync) {
+    await prismaService.product.updateMany({
+      where: {
+        tenantId,
+        source: "shopify",
+        shopifyVariantId: { not: null, notIn: seen },
+        missingFromShopifyAt: null,
+      },
+      data: { missingFromShopifyAt: new Date() },
+    });
+  }
+  return { written, failed };
 }
 
 /**
@@ -140,7 +221,7 @@ async function syncProducts(tenantId: string, nodes: ShopifyProductNode[]): Prom
 async function syncLocationsAndInventory(
   tenantId: string,
   locations: ShopifyLocationNode[],
-  productIdByCore: Map<string, string>
+  productIdByVariantCore: Map<string, string>
 ): Promise<{ locations: number; levels: number }> {
   let levels = 0;
   const sellsByProduct = new Map<string, number>();
@@ -167,10 +248,13 @@ async function syncLocationsAndInventory(
     const role = roleOfType(row.locationType);
 
     for (const level of loc.inventoryLevels ?? []) {
-      const productGid = level.item?.variant?.product?.id;
-      if (!productGid) continue;
-      const productId = productIdByCore.get(numericCore(productGid));
-      if (!productId) continue; // product not ingested (draft/archived) — skip
+      // Stock is held against the VARIANT. Mapping a level by its parent product
+      // piled every sibling shade's on-hand onto one row, while that row's price
+      // and SKU came from a different shade.
+      const variantGid = level.item?.variant?.id;
+      if (!variantGid) continue;
+      const productId = productIdByVariantCore.get(numericCore(variantGid));
+      if (!productId) continue; // variant not in the catalogue (gift card) — skip
       const onHand = level.quantities?.find((q) => q.name === "on_hand")?.quantity ?? 0;
       const incoming = level.quantities?.find((q) => q.name === "incoming")?.quantity ?? 0;
       await prismaService.inventoryLevel.upsert({
@@ -207,7 +291,8 @@ async function syncOrders(
   tenantId: string,
   orders: ShopifyOrderNode[],
   productIdByCore: Map<string, string>,
-  locationIdByCore: Map<string, string>
+  locationIdByCore: Map<string, string>,
+  productIdByVariantCore: Map<string, string>
 ): Promise<number> {
   // The trading day is the tenant's, not UTC — the same rule, and the same
   // function, the till feed uses, so one day of trade never lands on two dates
@@ -222,7 +307,8 @@ async function syncOrders(
       orders,
       productIdByCore,
       (d) => tenantDayKey(tenant.timezone, d),
-      locationIdByCore
+      locationIdByCore,
+      productIdByVariantCore
     ).values(),
   ];
   if (buckets.length === 0) return 0;
@@ -251,12 +337,25 @@ async function syncOrders(
   return rows.length;
 }
 
+/** Shopify product core → local product id. Sibling variants share a product
+ *  core, so this map can only answer "some row of that product" — it is the
+ *  fallback for order lines that carry no variant, never the inventory key. */
 async function loadProductIdByCore(tenantId: string): Promise<Map<string, string>> {
   const products = await prismaService.product.findMany({
     where: { tenantId, shopifyProductId: { not: null } },
     select: { id: true, shopifyProductId: true },
   });
   return new Map(products.map((p) => [p.shopifyProductId as string, p.id]));
+}
+
+/** Shopify variant core → local product id: the one-to-one map, since the
+ *  catalogue is one row per variant. */
+async function loadProductIdByVariantCore(tenantId: string): Promise<Map<string, string>> {
+  const products = await prismaService.product.findMany({
+    where: { tenantId, shopifyVariantId: { not: null } },
+    select: { id: true, shopifyVariantId: true },
+  });
+  return new Map(products.map((p) => [p.shopifyVariantId as string, p.id]));
 }
 
 async function loadLocationIdByCore(tenantId: string): Promise<Map<string, string>> {
@@ -326,13 +425,17 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
             firstRunLookbackDays: 1,
           }).toISOString()
         : null;
-      await syncProducts(tenantId, await api.products(productsSince));
+      // No cursor means a FULL catalogue pull, which is the only run that can
+      // tell a SKU deleted in the store from one that simply didn't change.
+      await syncProducts(tenantId, await api.products(productsSince), {
+        fullSync: productsSince === null,
+      });
       await setCursor(tenantId, "products", runStart);
       await progress("products");
 
       // ── Locations + inventory (full refresh — no cheap delta) ───────────────
-      const productIdByCore = await loadProductIdByCore(tenantId);
-      await syncLocationsAndInventory(tenantId, await api.locations(), productIdByCore);
+      const productIdByVariantCore = await loadProductIdByVariantCore(tenantId);
+      await syncLocationsAndInventory(tenantId, await api.locations(), productIdByVariantCore);
       await setCursor(tenantId, "inventory", runStart);
       await progress("inventory");
 
@@ -345,7 +448,14 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       // Locations exist now (inventory phase ran) — map them for fulfilment
       // attribution of online sales.
       const locationIdByCore = await loadLocationIdByCore(tenantId);
-      await syncOrders(tenantId, await api.orders(ordersSince.toISOString()), productIdByCore, locationIdByCore);
+      const productIdByCore = await loadProductIdByCore(tenantId);
+      await syncOrders(
+        tenantId,
+        await api.orders(ordersSince.toISOString()),
+        productIdByCore,
+        locationIdByCore,
+        productIdByVariantCore
+      );
       await setCursor(tenantId, "orders", runStart);
       await progress("orders");
 

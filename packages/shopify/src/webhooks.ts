@@ -8,6 +8,9 @@ import type { ShopifyClient } from "./client";
 
 export const WEBHOOK_TOPICS = [
   "PRODUCTS_UPDATE",
+  // A deleted product never comes back in a products pull, so without this the
+  // row only drops off the buy list at the next FULL sync.
+  "PRODUCTS_DELETE",
   "INVENTORY_LEVELS_UPDATE",
   "ORDERS_CREATE",
   "APP_UNINSTALLED",
