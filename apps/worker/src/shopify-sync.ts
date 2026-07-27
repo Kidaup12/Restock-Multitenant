@@ -1,6 +1,13 @@
 import { UnrecoverableError, type Job } from "bullmq";
 import type { Redis } from "ioredis";
-import { guessRoleFromName, isProductStatus, prismaService, roleOfType, typeOfRole } from "@wezesha/db";
+import {
+  guessRoleFromName,
+  isProductStatus,
+  NOT_SELLING_STATUSES,
+  prismaService,
+  roleOfType,
+  typeOfRole,
+} from "@wezesha/db";
 import { publishEvent } from "@wezesha/realtime";
 import { tenantDayKey } from "@wezesha/pos";
 import type { SyncJobData } from "@wezesha/queue";
@@ -22,6 +29,7 @@ import {
   type ShopifyOrderNode,
   type ShopifyProductNode,
 } from "@wezesha/shopify";
+import type { ProductStatus } from "@wezesha/db";
 
 /**
  * The real per-tenant Shopify sync: products → locations+inventory → orders,
@@ -80,7 +88,7 @@ const SYNC_ERROR_MAX = 300;
 /** Shopify's ProductStatus enum → the column the buy-list predicate reads.
  *  Anything unrecognised reads as "active": writing an unknown string there
  *  would hold a live SKU off every list with no way for the owner to see why. */
-function productStatusOf(raw: string | undefined): string {
+function productStatusOf(raw: string | undefined): ProductStatus {
   const status = (raw ?? "").toLowerCase();
   return isProductStatus(status) ? status : "active";
 }
@@ -97,7 +105,15 @@ function variantTitleOf(raw: string | null | undefined): string | null {
  * foundation is six rows, because the SKU is what the shop counts and orders.
  * Product-level fields are copied onto every sibling; price, cost, SKU and the
  * variant title come from that variant. Cost only writes when Shopify supplies
- * one AND the row isn't owner-pinned ("manual" costSource wins).
+ * one AND the row isn't owner-pinned ("manual" costSource wins). Price writes
+ * only when the store supplies one — an absent price is not a price of zero, and
+ * writing the zero would wipe whatever the row already carries.
+ *
+ * A row the owner pinned with "keep active" (activeOverride) keeps its stored
+ * shopifyStatus when the store reports draft or archived. The buy-list predicate
+ * reads shopifyStatus as well as active, so without that the store's status
+ * would undo the pin on the very next pull. The pin is a FLOOR, not a freeze: a
+ * store status that still sells writes through as normal.
  *
  * On a FULL sync (no incremental cursor) any Shopify-sourced row not seen in the
  * pull is stamped missingFromShopifyAt — it is gone from the store. That must
@@ -114,10 +130,13 @@ async function syncProducts(
   if (nodes.length === 0) return { written: 0, failed: 0 };
   const existing = await prismaService.product.findMany({
     where: { tenantId, shopifyVariantId: { not: null } },
-    select: { shopifyVariantId: true, costSource: true },
+    select: { shopifyVariantId: true, costSource: true, activeOverride: true },
   });
   const costPinned = new Set(
     existing.filter((p) => p.costSource === "manual").map((p) => p.shopifyVariantId as string)
+  );
+  const keptActive = new Set(
+    existing.filter((p) => p.activeOverride).map((p) => p.shopifyVariantId as string)
   );
 
   const seen: string[] = [];
@@ -134,10 +153,14 @@ async function syncProducts(
       vendor: node.vendor ?? null,
       productType: node.productType ?? null,
       imageUrl: node.featuredImage?.url ?? null,
-      shopifyStatus: productStatusOf(node.status),
       publishedAt: node.publishedAt ? new Date(node.publishedAt) : null,
       ...(node.createdAt ? { shopifyCreatedAt: new Date(node.createdAt) } : {}),
     };
+    // Status is per-variant here only because the owner's keep-active pin is:
+    // the store carries one status for the whole product, but the pin is on the
+    // SKU the shop decided to go on ordering.
+    const shopifyStatus = productStatusOf(node.status);
+    const stopsSelling = NOT_SELLING_STATUSES.includes(shopifyStatus);
 
     for (const variant of node.variants ?? []) {
       // Every Shopify product carries at least a default variant; one without an
@@ -147,15 +170,19 @@ async function syncProducts(
       if (!variantId) continue;
       seen.push(variantId);
       try {
-        const price = variant.price ? Number.parseFloat(variant.price) : 0;
+        const price = variant.price ? Number.parseFloat(variant.price) : NaN;
         const costRaw = variant.inventoryItem?.unitCost?.amount;
         const costParsed = costRaw ? Number.parseFloat(costRaw) : NaN;
         const writeCost = Number.isFinite(costParsed) && !costPinned.has(variantId);
+        // The owner's "keep active" pin blocks exactly the status that would take
+        // the SKU off the buy list; anything else the store says still writes.
+        const holdStatus = stopsSelling && keptActive.has(variantId);
         const common = {
           ...shared,
           sku: variant.sku ?? "",
           variantTitle: variantTitleOf(variant.title),
-          priceKes: Number.isFinite(price) ? price : 0,
+          ...(holdStatus ? {} : { shopifyStatus }),
+          ...(Number.isFinite(price) ? { priceKes: price } : {}),
           ...(writeCost ? { costKes: costParsed, costSource: "shopify" } : {}),
           // The store just handed it to us, so it is neither missing nor failing.
           missingFromShopifyAt: null,
