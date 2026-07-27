@@ -1,4 +1,4 @@
-import { prismaForTenant } from "@wezesha/db";
+import { isBuyable, prismaForTenant } from "@wezesha/db";
 import {
   abcForCatalogue,
   coverDays,
@@ -12,8 +12,15 @@ import {
 
 /**
  * The one place the shared metric set is computed for a tenant's catalogue.
- * Loads active products + 365 days of all-channel sales ONCE, then derives every
- * metric through the pure calc layer. Server-only, RLS-enforced tenant client.
+ * Loads the whole catalogue + 365 days of all-channel sales ONCE, then derives
+ * every metric through the pure calc layer. Server-only, RLS-enforced tenant
+ * client.
+ *
+ * Products the shop has stopped selling (archived, draft, gone from the store)
+ * are loaded too — the stock screen shows them, and it must show real numbers
+ * for the stock and cash still sitting in them. They are left OUT of the ABC
+ * ranking only, because ABC ranks what the shop sells; including them would push
+ * live products down a class.
  *
  * Screens read from this map instead of each running their own aggregate, which
  * is what keeps "one number everywhere" true: on-hand comes from
@@ -54,13 +61,17 @@ export async function getCatalogueMetrics(
 
   const [products, sales] = await Promise.all([
     db.product.findMany({
-      where: { active: true },
       select: {
         id: true,
         currentStock: true,
         costKes: true,
         priceKes: true,
         shopifyCreatedAt: true,
+        active: true,
+        notForSale: true,
+        shopifyStatus: true,
+        publishedAt: true,
+        missingFromShopifyAt: true,
       },
     }),
     db.salesHistory.findMany({
@@ -77,12 +88,14 @@ export async function getCatalogueMetrics(
   }
 
   const abc = abcForCatalogue(
-    products.map((p) => ({
-      id: p.id,
-      history: historyByProduct.get(p.id) ?? [],
-      priceKes: p.priceKes,
-      createdAt: p.shopifyCreatedAt,
-    })),
+    products
+      .filter(isBuyable)
+      .map((p) => ({
+        id: p.id,
+        history: historyByProduct.get(p.id) ?? [],
+        priceKes: p.priceKes,
+        createdAt: p.shopifyCreatedAt,
+      })),
     asOf
   );
 

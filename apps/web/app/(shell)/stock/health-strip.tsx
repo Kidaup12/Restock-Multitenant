@@ -7,6 +7,11 @@ import { cn } from "@/lib/cn";
  * every issue count filters the list to it, and clears by toggling off. Purely
  * presentational; the catalogue view owns the counts (derived from the loaded
  * rows) and the active filter.
+ *
+ * The strip opens with the scope chips (Selling / Archived & removed / All).
+ * They pick WHICH catalogue the rest of the strip is counting, so they read as
+ * one exclusive group and always carry their count — a shop with archived SKUs
+ * can see they exist without leaving the day-to-day view.
  */
 
 export type HealthChipTone = "neutral" | "warning" | "negative" | "accent";
@@ -32,6 +37,9 @@ export function HealthStrip({
   active,
   onToggle,
   onClear,
+  scopes,
+  scope,
+  onScope,
 }: {
   total: number;
   shown: number;
@@ -39,11 +47,40 @@ export function HealthStrip({
   active: string | null;
   onToggle: (key: string) => void;
   onClear: () => void;
+  scopes: HealthChip[];
+  scope: string;
+  onScope: (key: string) => void;
 }) {
   const live = chips.filter((c) => c.count > 0);
 
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-edge px-4 py-3">
+      <div role="group" aria-label="Catalogue scope" className="flex flex-wrap items-center gap-2">
+        {scopes.map((s) => {
+          const on = scope === s.key;
+          return (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => onScope(s.key)}
+              aria-pressed={on}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium transition-colors",
+                on
+                  ? "border-edge-strong bg-accent-soft text-accent-ink"
+                  : "border-edge bg-surface text-ink-muted hover:text-ink",
+              )}
+            >
+              {s.label}
+              <span className={cn("rounded-full px-1.5 text-xs", on ? "bg-surface/60" : "bg-surface-2 text-ink-faint")}>
+                {s.count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <span aria-hidden className="mx-1 h-5 w-px bg-edge" />
+
       <button
         type="button"
         onClick={onClear}

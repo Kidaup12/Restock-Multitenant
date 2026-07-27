@@ -1,4 +1,13 @@
-import { prismaForTenant, roleOf, type LocationRole } from "@wezesha/db";
+import {
+  heldReason,
+  isBuyable,
+  LIFECYCLE_LABELS,
+  prismaForTenant,
+  productLifecycle,
+  roleOf,
+  type LocationRole,
+  type ProductLifecycle,
+} from "@wezesha/db";
 import { ASSUMED_LEAD_DAYS, leadDaysFor, urgencyFromDays, type AbcCategory } from "@wezesha/forecast";
 import { getCatalogueMetrics } from "@/lib/metrics";
 import { buildFacetItems, type FacetItem, type FacetSourceRow } from "@/lib/facets";
@@ -24,6 +33,13 @@ import {
  * Each catalogue row also carries its facet projection (lib/facets) so the
  * filter/sort bar derives its options from the real catalogue.
  *
+ * The catalogue loads EVERY product, including the ones the shop has stopped
+ * selling. Archiving a SKU in Shopify must not make it vanish with no way back —
+ * the owner still has stock and cash in it. Each row carries its lifecycle and,
+ * when it is off the buy list, the reason in plain words; the screen scopes the
+ * default view to what is still selling. Buy-list exclusion is a separate
+ * concern and stays with BUYABLE_PRODUCT_WHERE where the plan is built.
+ *
  * Cost fields are redacted here, not at render: both getters take an explicit
  * `canViewCosts` and return null for unit costs, stock-value-at-cost, and
  * money-at-rest when it is false, so a money-blind member's payload never
@@ -38,6 +54,11 @@ export type CatalogueRow = {
   productId: string;
   sku: string;
   title: string;
+  /** "Shade 03 / 50ml" — null on a single-variant product. Sibling variants share
+   *  one title, so this is what tells six rows apart. */
+  variantTitle: string | null;
+  /** Grouping key sibling variants share; not an identity. */
+  shopifyProductId: string | null;
   vendor: string | null;
   /** Sellable on-hand — Product.currentStock (Sells-only rollup). */
   onHandUnits: number;
@@ -72,6 +93,27 @@ export type CatalogueRow = {
   /** Owner-marked tester/display/damaged: stays in the catalogue, out of
    *  sellable cover / money band / buy list. */
   notForSale: boolean;
+  // ── Lifecycle (packages/db/product-lifecycle — one definition everywhere) ──
+  /** Where this SKU stands with the shop: active / unlisted / draft / archived /
+   *  removed / not_for_sale / deactivated. */
+  lifecycle: ProductLifecycle;
+  /** The lifecycle's display label, resolved here so the client table never
+   *  imports the db package — that pulls the Prisma client into the browser
+   *  bundle and the whole table stops hydrating. */
+  lifecycleLabel: string;
+  /** Whether the buy list would consider it — active and unlisted only. */
+  buyable: boolean;
+  /** Why it is off the buy list, in the owner's words; null when it is on it. */
+  lifecycleReason: string | null;
+  /** Units already ordered and not yet received — an empty shelf with stock en
+   *  route is not a re-order. */
+  onOrderUnits: number;
+  /** When that inbound stock is due; null when nothing is on order or the
+   *  supplier gave no date. */
+  expectedArrivalAt: Date | null;
+  /** Last per-SKU sync failure; null = the last sync was clean. */
+  syncError: string | null;
+  syncErrorAt: Date | null;
   /** Resolved lead time (product override → supplier → ASSUMED_LEAD_DAYS) —
    *  feeds the cover verdict and the "below lead" revenue-at-risk tile. */
   leadDays: number;
@@ -102,11 +144,12 @@ export async function getStockCatalogue(
   const db = prismaForTenant(tenantId);
   const [products, levels, locations, metrics] = await Promise.all([
     db.product.findMany({
-      where: { active: true },
       select: {
         id: true,
         sku: true,
         title: true,
+        variantTitle: true,
+        shopifyProductId: true,
         vendor: true,
         productType: true,
         customCategory: true,
@@ -114,6 +157,14 @@ export async function getStockCatalogue(
         costKes: true,
         costSource: true,
         notForSale: true,
+        active: true,
+        shopifyStatus: true,
+        publishedAt: true,
+        missingFromShopifyAt: true,
+        syncError: true,
+        syncErrorAt: true,
+        onOrder: true,
+        expectedArrivalAt: true,
         costMovedPct: true,
         costMovedAt: true,
         supplierId: true,
@@ -121,7 +172,9 @@ export async function getStockCatalogue(
         shopifyCreatedAt: true,
         supplier: { select: { name: true, leadTimeAvgDays: true } },
       },
-      orderBy: { title: "asc" },
+      // Sibling variants share a title, so the variant label is the tie-break —
+      // shades land in their own order rather than shuffled.
+      orderBy: [{ title: "asc" }, { variantTitle: "asc" }],
     }),
     db.inventoryLevel.groupBy({ by: ["productId", "locationId"], _sum: { onHand: true } }),
     db.location.findMany({ select: { id: true, locationType: true } }),
@@ -166,21 +219,26 @@ export async function getStockCatalogue(
     const cover = m?.coverDays ?? null;
     const daysCover = hasRate ? cover : null;
 
-    // Resolve the cost once (zero-as-missing, suspect, held-off). A not-for-sale
-    // row is out of sellable stock, so its cover verdict and cost/supplier health
-    // flags go quiet (spec §2).
+    // Resolve the cost once (zero-as-missing, suspect, held-off). A row the shop
+    // no longer sells — not-for-sale, archived, removed — is out of sellable
+    // stock, so its cover verdict and cost/supplier health flags go quiet: there
+    // is nothing to re-order, and the reason it is held reads instead.
     const cost = resolveCost({ costKes: p.costKes, costSource: p.costSource, priceKes: p.priceKes });
     const leadDays = leadDaysFor(p, p.supplier) ?? ASSUMED_LEAD_DAYS;
+    const buyable = isBuyable(p);
+    const lifecycle = productLifecycle(p);
 
     return {
       productId: p.id,
       sku: p.sku,
       title: p.title,
+      variantTitle: p.variantTitle,
+      shopifyProductId: p.shopifyProductId,
       vendor: p.vendor,
       onHandUnits: sellable,
       warehouseUnits: warehouse,
-      daysCover: p.notForSale ? null : daysCover,
-      urgency: hasRate && sellable > 0 && cover != null ? urgencyFromDays(cover, rate) : null,
+      daysCover: buyable ? daysCover : null,
+      urgency: buyable && hasRate && sellable > 0 && cover != null ? urgencyFromDays(cover, rate) : null,
       priceKes: p.priceKes,
       runRate: rate,
       revenue30dKes: m?.revenueKes[30] ?? 0,
@@ -191,14 +249,22 @@ export async function getStockCatalogue(
       customCategory: p.customCategory,
       costSource: cost.source,
       notForSale: p.notForSale,
+      lifecycle,
+      lifecycleLabel: LIFECYCLE_LABELS[lifecycle],
+      buyable,
+      lifecycleReason: heldReason(p),
+      onOrderUnits: p.onOrder,
+      expectedArrivalAt: p.expectedArrivalAt,
+      syncError: p.syncError,
+      syncErrorAt: p.syncErrorAt,
       leadDays,
-      verdict: p.notForSale ? null : coverVerdict(sellable, daysCover, leadDays),
+      verdict: buyable ? coverVerdict(sellable, daysCover, leadDays) : null,
       marginPct: canViewCosts && cost.costKes > 0 ? marginPct(cost.costKes, p.priceKes) : null,
-      missingCost: !p.notForSale && cost.suspectReason === "missing",
-      suspectCost: !p.notForSale && suspectCostPresent({ costKes: p.costKes, costSource: p.costSource, priceKes: p.priceKes }),
+      missingCost: buyable && cost.suspectReason === "missing",
+      suspectCost: buyable && suspectCostPresent({ costKes: p.costKes, costSource: p.costSource, priceKes: p.priceKes }),
       heldOffBuyList: cost.heldOffBuyList,
-      costMovedPct: p.notForSale ? null : p.costMovedPct,
-      costMovedAt: p.notForSale ? null : p.costMovedAt,
+      costMovedPct: buyable ? p.costMovedPct : null,
+      costMovedAt: buyable ? p.costMovedAt : null,
       facet: facetById.get(p.id)!,
     };
   });
@@ -209,12 +275,13 @@ export type CategoryUsage = { name: string; count: number };
 /** Owner-defined categories in use (distinct Product.customCategory) with their
  *  product counts — the source for the Manage-categories panel and the row
  *  editor's category picker. Categories live on the product, so this is derived,
- *  never a table. */
+ *  never a table. Counted over the whole catalogue so the number matches the rows
+ *  the category actually filters to, archived ones included. */
 export async function getCustomCategories(tenantId: string): Promise<CategoryUsage[]> {
   const db = prismaForTenant(tenantId);
   const groups = await db.product.groupBy({
     by: ["customCategory"],
-    where: { active: true, customCategory: { not: null } },
+    where: { customCategory: { not: null } },
     _count: { _all: true },
   });
   return groups
