@@ -49,6 +49,18 @@ const products: ShopifyProductNode[] = [
     title: "Shea Butter 250g",
     variants: [{ id: "gid://shopify/ProductVariant/202", sku: "SHEA-250", price: "800" }],
   },
+  {
+    // A live store carries one of these: several denominations, no SKU on any of
+    // them, and no unit cost. It is issued on sale, not stocked, so it must not
+    // reach the catalogue.
+    id: "gid://shopify/Product/103",
+    title: "Gift Card",
+    isGiftCard: true,
+    variants: [
+      { id: "gid://shopify/ProductVariant/203", sku: null, price: "10" },
+      { id: "gid://shopify/ProductVariant/204", sku: null, price: "100" },
+    ],
+  },
 ];
 
 // Three roles: a selling branch, a holding warehouse, and an en-route bucket.
@@ -183,9 +195,11 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
   it("runs the full sync: products, inventory, orders", async () => {
     await processor(jobStub(tenantId));
 
-    // Products stored by NUMERIC CORE, never the gid spelling.
+    // Products stored by NUMERIC CORE, never the gid spelling. 103 is the gift
+    // card and is deliberately absent — nothing to reorder, no cost to track.
     const rows = await prismaService.product.findMany({ where: { tenantId }, orderBy: { sku: "asc" } });
     expect(rows.map((r) => r.shopifyProductId).sort()).toEqual(["101", "102"]);
+    expect(rows.every((r) => r.title !== "Gift Card")).toBe(true);
     const argan = rows.find((r) => r.sku === "ARG-100")!;
     expect(argan.shopifyVariantId).toBe("201");
     expect(argan.priceKes).toBe(1200);

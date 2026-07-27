@@ -85,7 +85,12 @@ async function syncProducts(tenantId: string, nodes: ShopifyProductNode[]): Prom
     existing.filter((p) => p.costSource === "manual").map((p) => p.shopifyProductId as string)
   );
 
+  let written = 0;
   for (const node of nodes) {
+    // A gift card is issued on sale, not stocked: it has no unit cost, no
+    // supplier and nothing to reorder, so letting it into the catalogue would
+    // put "restock gift cards" on a buy list and skew the shop's product count.
+    if (node.isGiftCard) continue;
     const core = numericCore(node.id);
     const firstVariant = node.variants?.[0];
     const price = firstVariant?.price ? Number.parseFloat(firstVariant.price) : 0;
@@ -109,8 +114,9 @@ async function syncProducts(tenantId: string, nodes: ShopifyProductNode[]): Prom
       create: { tenantId, shopifyProductId: core, ...common },
       update: { ...common, lastSynced: new Date() },
     });
+    written += 1;
   }
-  return nodes.length;
+  return written;
 }
 
 /**

@@ -8,7 +8,9 @@ import type { ShopifyClient } from "./client";
 
 export type ShopifyVariantNode = {
   id?: string;
-  sku?: string;
+  /** Genuinely null on real variants — gift-card denominations and any product
+   *  saved without one come back with no SKU at all, not an empty string. */
+  sku?: string | null;
   price?: string;
   inventoryItem?: { id?: string; unitCost?: { amount?: string } };
 };
@@ -20,6 +22,9 @@ export type ShopifyProductNode = {
   productType?: string;
   createdAt?: string; // product-age signal (dead-stock: new vs old dud)
   featuredImage?: { url?: string };
+  /** Gift cards are issued, not stocked — they carry no cost and can't be
+   *  reordered, so the catalogue skips them. */
+  isGiftCard?: boolean;
   variants?: ShopifyVariantNode[];
 };
 
@@ -92,7 +97,7 @@ export async function fetchProducts(client: ShopifyClient, sinceIso: string | nu
       query: `query($after: String, $q: String!) {
         products(first: ${PAGE}, after: $after, query: $q) {
           edges { node {
-            id title vendor productType createdAt
+            id title vendor productType createdAt isGiftCard
             featuredImage { url }
             variants(first: 1) { edges { node { id sku price inventoryItem { id unitCost { amount } } } } }
           } }
