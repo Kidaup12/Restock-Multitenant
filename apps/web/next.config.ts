@@ -7,10 +7,16 @@ const nextConfig: NextConfig = {
   // which bundling would break.
   serverExternalPackages: ["@wezesha/db"],
   // Monorepo: build and trace from the workspace root so the db package is in
-  // scope. The build still logs one NFT warning — the generated Prisma client
-  // carries cwd-relative fallback lookups the tracer flags; harmless, since
-  // the package is external and loaded from disk.
+  // scope.
   outputFileTracingRoot: path.join(__dirname, "../.."),
+  // The query engine is opened by path at runtime, not imported, so tracing
+  // cannot see it and every deployed request failed on a missing engine while
+  // the build reported success. Naming the generated client explicitly puts the
+  // engine in the bundle. The tracer's warning about this package was the
+  // symptom, not noise.
+  outputFileTracingIncludes: {
+    "/**": ["packages/db/generated/client/**"],
+  },
   turbopack: {
     root: path.join(__dirname, "../.."),
   },
