@@ -265,19 +265,97 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     expect(sales.map((s) => s.quantity)).toEqual([2, 1]); // unchanged, not 4/2
   });
 
-  it("publishes progress per phase and a done event", async () => {
-    // Pub/sub delivery is async — wait for both runs' events (2 × 3 progress + 2 × done).
+  it("publishes both edges of every phase, and a done event", async () => {
+    // Pub/sub delivery is async — wait for both runs' events. Each run emits
+    // started + running + finished per phase, then done.
     const deadline = Date.now() + 10_000;
-    while (received.length < 8 && Date.now() < deadline) {
+    while (received.length < 20 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 50));
     }
     const envelopes = received.map((m) => decodeEnvelope(m)).filter((e) => e !== null);
     const types = envelopes.map((e) => e!.type);
     expect(types.filter((t) => t === "sync.done").length).toBeGreaterThanOrEqual(2);
-    const phases = envelopes
+
+    const progress = envelopes
       .filter((e) => e!.type === "sync.progress")
-      .map((e) => (e!.data as { phase: string }).phase);
-    expect(phases.slice(0, 3)).toEqual(["products", "inventory", "orders"]);
+      .map((e) => e!.data as { phase: string; state?: string; done: number; total: number; items?: number; itemsTotal?: number; runId?: string });
+
+    // A phase announces itself before it starts work — that is what turns the
+    // long opening fetch from silence into a visible "fetching products".
+    expect(progress.slice(0, 9).map((p) => [p.phase, p.state])).toEqual([
+      ["products", "started"],
+      ["products", "running"],
+      ["products", "finished"],
+      ["inventory", "started"],
+      ["inventory", "running"],
+      ["inventory", "finished"],
+      ["orders", "started"],
+      ["orders", "running"],
+      ["orders", "finished"],
+    ]);
+
+    // The legacy contract is pinned: done/total on the finishing edge is exactly
+    // what subscribers written before the widening already read.
+    expect(
+      progress.slice(0, 9).filter((p) => p.state === "finished").map((p) => [p.done, p.total])
+    ).toEqual([
+      [1, 3],
+      [2, 3],
+      [3, 3],
+    ]);
+
+    // Intra-phase counts reach the UI: three product nodes, three locations,
+    // three sales day-sets in the fixture.
+    const totals = progress
+      .slice(0, 9)
+      .filter((p) => p.state === "running")
+      .map((p) => p.itemsTotal);
+    expect(totals).toEqual([3, 3, 3]);
+    expect(progress[0]!.runId).toBeTruthy();
+  });
+
+  it("records the run, its phase counts, and closes it ok", async () => {
+    const runs = await prismaService.syncRun.findMany({
+      where: { tenantId, source: "shopify" },
+      orderBy: { startedAt: "asc" },
+    });
+    expect(runs.length).toBeGreaterThanOrEqual(2); // one per processor call above
+    const run = runs[runs.length - 1]!;
+    expect(run.status).toBe("ok");
+    expect(run.finishedAt).not.toBeNull();
+    expect(run.phaseTotal).toBe(3);
+    expect(run.attempt).toBe(2); // jobStub reports one attempt already made
+    expect(run.counts).toMatchObject({
+      products: { written: 2, failed: 0 },
+      inventory: { locations: 3, levels: 4 },
+      orders: { salesDays: 3 },
+    });
+  });
+
+  it("a failed run closes its row with the error, and a retry opens a new one", async () => {
+    const before = await prismaService.syncRun.count({ where: { tenantId } });
+    const authFailApi = { ...fakeApi, products: async () => Promise.reject(new ShopifyAuthError(401, SHOP)) };
+    const mod = await import("../src/shopify-sync");
+    const failing = mod.createShopifySyncProcessor({
+      publisher,
+      makeApi: () => authFailApi,
+      appUrl: "https://app.example",
+    });
+
+    await expect(failing(jobStub(tenantId))).rejects.toBeInstanceOf(UnrecoverableError);
+    await expect(failing(jobStub(tenantId))).rejects.toBeInstanceOf(UnrecoverableError);
+
+    const runs = await prismaService.syncRun.findMany({
+      where: { tenantId },
+      orderBy: { startedAt: "desc" },
+      take: 2,
+    });
+    expect(await prismaService.syncRun.count({ where: { tenantId } })).toBe(before + 2);
+    for (const run of runs) {
+      expect(run.status).toBe("failed");
+      expect(run.finishedAt).not.toBeNull();
+      expect(run.error).toContain("401");
+    }
   });
 
   it("fails unrecoverably when the connection is missing or uninstalled", async () => {

@@ -192,9 +192,30 @@ body {
   }
 }
 
+/* Progress bar with no known total — a sweep, because a bar pinned at zero
+   reads as stuck rather than working. */
+.progress-indeterminate {
+  animation: progress-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(400%);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skeleton {
     background-image: none;
     animation: skeleton-pulse 2.4s ease-in-out infinite;
+  }
+
+  .progress-indeterminate {
+    animation: skeleton-pulse 2.4s ease-in-out infinite;
+    transform: none;
+    width: 100%;
   }
 }

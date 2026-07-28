@@ -4,6 +4,7 @@ import { prismaForTenant } from "@wezesha/db";
 import { PageHeader } from "@/components/ui/page-header";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { canManageConnections } from "@/lib/shopify/membership";
+import { toSyncRunView } from "@/lib/shopify/sync-run";
 import { ShopifyConnectionCard } from "./shopify-connection-card";
 
 export const metadata: Metadata = {
@@ -31,6 +32,11 @@ export default async function ConnectionsPage({
     ? await db.ingestCursor.findMany({ where: { source: "shopify" } })
     : [];
   const cursorByResource = new Map(cursors.map((c) => [c.resource, c.cursor]));
+  // The newest run, rendered server-side: a page loaded cold in the middle of a
+  // sync must show the sync, not "never".
+  const run = connection
+    ? await db.syncRun.findFirst({ where: { source: "shopify" }, orderBy: { startedAt: "desc" } })
+    : null;
   const params = await searchParams;
 
   return (
@@ -63,6 +69,7 @@ export default async function ConnectionsPage({
         })}
         justConnected={params.connected === "1"}
         errorCode={params.error ?? null}
+        syncRun={toSyncRunView(run, new Date())}
       />
     </div>
   );

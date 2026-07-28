@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import type { SyncRunView } from "@/lib/shopify/sync-run";
+import { SyncProgress } from "./sync-progress";
 
 type ConnectionView = {
   shopDomain: string;
@@ -32,16 +34,21 @@ export function ShopifyConnectionCard({
   canManage,
   justConnected,
   errorCode,
+  syncRun,
 }: {
   connection: ConnectionView | null;
   lastSync: LastSyncRow[];
   canManage: boolean;
   justConnected: boolean;
   errorCode: string | null;
+  syncRun: SyncRunView | null;
 }) {
   const router = useRouter();
   const [shop, setShop] = useState("");
   const [busy, setBusy] = useState<"sync" | "disconnect" | null>(null);
+  // Covers the gap between the queue accepting the job and the worker opening
+  // its row — the one moment a run exists but nothing durable says so.
+  const [queued, setQueued] = useState(justConnected);
   const [notice, setNotice] = useState<{ tone: "positive" | "warning" | "negative"; text: string } | null>(
     errorCode
       ? { tone: "negative", text: OAUTH_ERRORS[errorCode] ?? "Connecting the store failed." }
@@ -51,6 +58,7 @@ export function ShopifyConnectionCard({
   );
 
   const live = connection !== null && connection.uninstalledAt === null;
+  const syncing = queued || syncRun?.status === "running";
 
   async function syncNow() {
     setBusy("sync");
@@ -61,6 +69,7 @@ export function ShopifyConnectionCard({
       if (!res.ok) {
         setNotice({ tone: "negative", text: body.error ?? "Sync request failed." });
       } else if (body.enqueued) {
+        setQueued(true);
         setNotice({ tone: "positive", text: "Sync started." });
       } else {
         // The no-overlap guard: one sync per store at a time.
@@ -115,10 +124,16 @@ export function ShopifyConnectionCard({
         action={
           connection === null ? (
             <Badge tone="neutral">Not connected</Badge>
-          ) : live ? (
-            <Badge tone="positive">Connected</Badge>
-          ) : (
+          ) : !live ? (
             <Badge tone="warning">Disconnected</Badge>
+          ) : syncing ? (
+            <Badge tone="accent">Syncing</Badge>
+          ) : syncRun?.status === "failed" ? (
+            <Badge tone="negative">Sync failed</Badge>
+          ) : syncRun?.status === "stalled" ? (
+            <Badge tone="warning">Sync may have stopped</Badge>
+          ) : (
+            <Badge tone="positive">Connected</Badge>
           )
         }
       />
@@ -168,6 +183,8 @@ export function ShopifyConnectionCard({
               </div>
             </dl>
 
+            <SyncProgress initialRun={syncRun} queued={queued} />
+
             <div>
               <h3 className="text-sm font-medium text-ink">Last sync</h3>
               <ul className="mt-1.5 divide-y divide-edge rounded-md border border-edge">
@@ -184,8 +201,14 @@ export function ShopifyConnectionCard({
 
             <div className="flex flex-wrap items-center gap-2">
               {live && (
-                <Button onClick={syncNow} loading={busy === "sync"} disabled={busy !== null}>
-                  Sync now
+                <Button
+                  onClick={syncNow}
+                  loading={busy === "sync"}
+                  disabled={busy !== null || syncing}
+                >
+                  {syncRun?.status === "failed" || syncRun?.status === "stalled"
+                    ? "Retry sync"
+                    : "Sync now"}
                 </Button>
               )}
               {canManage && live && (

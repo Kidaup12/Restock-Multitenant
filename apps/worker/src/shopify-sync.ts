@@ -13,6 +13,7 @@ import { tenantDayKey } from "@wezesha/pos";
 import type { SyncJobData } from "@wezesha/queue";
 import type { SendEmail } from "./email";
 import { clearIncident, sendIncidentAlert } from "./incident";
+import { SyncRunReporter } from "./sync-run";
 import {
   ShopifyAuthError,
   bucketSalesByProductDay,
@@ -47,6 +48,10 @@ const OVERLAP_HOURS = 6;
 // First order pull reaches back a year — sales history is the forecast's fuel.
 const FIRST_RUN_ORDER_LOOKBACK_DAYS = 365;
 const SALES_CHUNK = 500;
+
+/** Reports how far through a phase the writer is. The reporter throttles, so a
+ *  writer may call this per record without thinking about publish volume. */
+type ProgressFn = (done: number, total: number) => Promise<void> | void;
 
 /** The Shopify surface the sync touches, injectable for job tests. */
 export interface ShopifySyncApi {
@@ -123,11 +128,12 @@ function variantTitleOf(raw: string | null | undefined): string | null {
 async function syncProducts(
   tenantId: string,
   nodes: ShopifyProductNode[],
-  options: { fullSync: boolean }
+  options: { fullSync: boolean; onProgress?: ProgressFn }
 ): Promise<{ written: number; failed: number }> {
   // An empty pull is never evidence that the store is empty — a rate-limited or
   // half-answered run looks exactly the same, so nothing is marked missing.
   if (nodes.length === 0) return { written: 0, failed: 0 };
+  await options.onProgress?.(0, nodes.length);
   const existing = await prismaService.product.findMany({
     where: { tenantId, shopifyVariantId: { not: null } },
     select: { shopifyVariantId: true, costSource: true, activeOverride: true },
@@ -142,7 +148,9 @@ async function syncProducts(
   const seen: string[] = [];
   let written = 0;
   let failed = 0;
+  let processed = 0;
   for (const node of nodes) {
+    await options.onProgress?.(++processed, nodes.length);
     // A gift card is issued on sale, not stocked: it has no unit cost, no
     // supplier and nothing to reorder, so letting it into the catalogue would
     // put "restock gift cards" on a buy list and skew the shop's product count.
@@ -248,14 +256,18 @@ async function syncProducts(
 async function syncLocationsAndInventory(
   tenantId: string,
   locations: ShopifyLocationNode[],
-  productIdByVariantCore: Map<string, string>
+  productIdByVariantCore: Map<string, string>,
+  onProgress?: ProgressFn
 ): Promise<{ locations: number; levels: number }> {
   let levels = 0;
+  let processed = 0;
   const sellsByProduct = new Map<string, number>();
   const enrouteByProduct = new Map<string, number>();
   const seenProducts = new Set<string>();
 
+  await onProgress?.(0, locations.length);
   for (const loc of locations) {
+    await onProgress?.(++processed, locations.length);
     const locCore = numericCore(loc.id);
     const existing = await prismaService.location.findUnique({
       where: { tenantId_shopifyLocationId: { tenantId, shopifyLocationId: locCore } },
@@ -319,7 +331,8 @@ async function syncOrders(
   orders: ShopifyOrderNode[],
   productIdByCore: Map<string, string>,
   locationIdByCore: Map<string, string>,
-  productIdByVariantCore: Map<string, string>
+  productIdByVariantCore: Map<string, string>,
+  onProgress?: ProgressFn
 ): Promise<number> {
   // The trading day is the tenant's, not UTC — the same rule, and the same
   // function, the till feed uses, so one day of trade never lands on two dates
@@ -350,8 +363,12 @@ async function syncOrders(
     locationId: b.locationId,
   }));
 
+  // The denominator legitimately changes here: the phase started counting orders
+  // fetched, and finishes counting the day-sets they bucket into.
+  await onProgress?.(0, rows.length);
   for (let i = 0; i < rows.length; i += SALES_CHUNK) {
     const chunk = rows.slice(i, i + SALES_CHUNK);
+    await onProgress?.(i + chunk.length, rows.length);
     await prismaService.salesHistory.deleteMany({
       where: {
         tenantId,
@@ -424,6 +441,17 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       throw new UnrecoverableError(`stored Shopify token unusable: ${(err as Error).message}`);
     }
 
+    // One row per attempt, opened before any work: the Connections screen reads
+    // it, so a run must be visible from the moment it starts, not once its first
+    // phase finishes.
+    const run = await SyncRunReporter.open({
+      publisher: options.publisher,
+      tenantId,
+      source: "shopify",
+      phases: PHASES,
+      attempt: job.attemptsMade + 1,
+    });
+
     try {
       const appUrl = options.appUrl ?? process.env.SHOPIFY_APP_URL;
       if (appUrl) {
@@ -431,20 +459,11 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       }
 
       const runStart = new Date();
-      const progress = async (phase: (typeof PHASES)[number]) => {
-        await publishEvent(options.publisher, {
-          type: "sync.progress",
-          data: {
-            tenantId,
-            source: "shopify",
-            phase,
-            done: PHASES.indexOf(phase) + 1,
-            total: PHASES.length,
-          },
-        });
-      };
 
       // ── Products (delta since cursor; full catalog on first run) ────────────
+      // The phase opens before the fetch, which is the longest silent stretch of
+      // the whole sync and cannot report a total until it returns.
+      await run.phaseStart("products");
       const productsCursor = await getCursor(tenantId, "products");
       const productsSince = productsCursor
         ? computeWindowStart(productsCursor, runStart, {
@@ -454,19 +473,27 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
         : null;
       // No cursor means a FULL catalogue pull, which is the only run that can
       // tell a SKU deleted in the store from one that simply didn't change.
-      await syncProducts(tenantId, await api.products(productsSince), {
+      const products = await syncProducts(tenantId, await api.products(productsSince), {
         fullSync: productsSince === null,
+        onProgress: (done, total) => run.tick(done, total),
       });
       await setCursor(tenantId, "products", runStart);
-      await progress("products");
+      await run.phaseEnd("products", products);
 
       // ── Locations + inventory (full refresh — no cheap delta) ───────────────
+      await run.phaseStart("inventory");
       const productIdByVariantCore = await loadProductIdByVariantCore(tenantId);
-      await syncLocationsAndInventory(tenantId, await api.locations(), productIdByVariantCore);
+      const inventory = await syncLocationsAndInventory(
+        tenantId,
+        await api.locations(),
+        productIdByVariantCore,
+        (done, total) => run.tick(done, total)
+      );
       await setCursor(tenantId, "inventory", runStart);
-      await progress("inventory");
+      await run.phaseEnd("inventory", inventory);
 
       // ── Orders → SalesHistory day sets ──────────────────────────────────────
+      await run.phaseStart("orders");
       const ordersCursor = await getCursor(tenantId, "orders");
       const ordersSince = computeWindowStart(ordersCursor, runStart, {
         overlapHours: OVERLAP_HOURS,
@@ -476,23 +503,24 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       // attribution of online sales.
       const locationIdByCore = await loadLocationIdByCore(tenantId);
       const productIdByCore = await loadProductIdByCore(tenantId);
-      await syncOrders(
+      const salesDays = await syncOrders(
         tenantId,
         await api.orders(ordersSince.toISOString()),
         productIdByCore,
         locationIdByCore,
-        productIdByVariantCore
+        productIdByVariantCore,
+        (done, total) => run.tick(done, total)
       );
       await setCursor(tenantId, "orders", runStart);
-      await progress("orders");
+      await run.phaseEnd("orders", { salesDays });
 
-      await publishEvent(options.publisher, {
-        type: "sync.done",
-        data: { tenantId, source: "shopify", ok: true },
-      });
+      await run.ok();
       // Recovery re-arms the reconnect alert (see incident.ts).
       await clearIncident(options.publisher, tenantId, "shopify");
     } catch (err) {
+      // Close the row on every exit, so a retry opens a fresh one and no attempt
+      // is left reading as "running" for ever.
+      await run.fail(err);
       if (err instanceof ShopifyAuthError) {
         // Token revoked / app uninstalled: retrying is pointless.
         throw new UnrecoverableError(err.message);

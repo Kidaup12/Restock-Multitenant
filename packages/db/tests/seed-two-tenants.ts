@@ -244,6 +244,11 @@ export const builders: Record<string, Builder> = {
     resource: `resource-${key}`,
     cursor: new Date("2026-01-01T00:00:00Z"),
   }),
+  SyncRun: (tenantId, key) => ({
+    tenantId,
+    source: `shopify-${key}`,
+    status: "ok",
+  }),
   Notification: (tenantId, key) => ({
     tenantId,
     kind: "sync_failed",
