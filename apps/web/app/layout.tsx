@@ -21,7 +21,11 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
-const appUrl = process.env.BETTER_AUTH_URL;
+// Link previews break without an absolute base: Next emits relative image URLs
+// and no crawler can resolve them. The deployment's own hostname is the fallback
+// so a preview works before anyone remembers to set the auth URL.
+const vercelUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+const appUrl = process.env.BETTER_AUTH_URL ?? (vercelUrl ? `https://${vercelUrl}` : undefined);
 
 export const metadata: Metadata = {
   title: {
@@ -52,7 +56,8 @@ export const metadata: Metadata = {
     url: appUrl,
   },
   twitter: {
-    card: "summary",
+    // The wide card, not the thumbnail: the generated image carries the pitch.
+    card: "summary_large_image",
     title: "Wezesha Restock",
     description: "Stock replenishment for beauty retailers.",
   },
