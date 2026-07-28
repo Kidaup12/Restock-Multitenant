@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
+    "@wezesha/db": "*",
     "typescript": "^5",
     "vitest": "^4.1.7"
   }

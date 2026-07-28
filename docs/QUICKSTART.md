@@ -64,6 +64,26 @@ clone is still testable end to end. The link you need is in that terminal.
 | `npm run migrate` | Apply DB migrations |
 | `npm run seed` | Reload the demo tenant (rebuilds it each run) |
 
+## A store big enough to judge the forecast
+
+`npm run seed` gives you ~30 products and 90 days of sales — enough to click around, not
+enough to tell whether a run rate is right. For that there's a generator that builds a
+400-SKU catalogue and 15 months of trading:
+
+```bash
+cd packages/shopify && node --env-file=../db/.env --import tsx scripts/seed-sales-history-direct.ts --tenant amara-beauty --dry-run
+```
+
+`--dry-run` prints what it would create — SKU count, sales rows, the ABC split, how much
+is dead, out of stock or missing a cost — so you can see the shape before writing
+anything. Drop the flag to apply, then run the forecast from Today.
+
+The history it writes has weekday and seasonal patterns, promotions, stockout gaps, dead
+stock, brand-new products and some that have never sold, because those are the shapes the
+forecast is supposed to react to. It writes on the `seed` channel, so removing it is one
+delete on that channel and nothing else is touched. It refuses to run against a workspace
+with a live Shopify connection unless you pass `--force`.
+
 To exercise `POST /api/pos/ingest` locally, issue that tenant a secret first — the seed
 doesn't, and a tenant without one is closed (every call answers 401):
 
