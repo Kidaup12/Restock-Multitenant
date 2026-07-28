@@ -1,5 +1,11 @@
 # Testing with your own Shopify store
 
+> **Not possible yet — skip this guide for now.** The Shopify app has no distribution method
+> selected, so a store outside our own Partner organisation cannot install it: Shopify answers
+> "This app can't be installed yet. The app developer needs to select a distribution method first."
+> Until that is set in the Partner dashboard, test against the local build and the store already
+> connected on the deployed app. The rest of this page is what to do once it is unblocked.
+
 You don't need anyone's Shopify password to test this app. Shopify gives away free **development
 stores** — you make your own, fill it with test products, and connect it from the dashboard exactly
 the way a real customer would. That's a better test than borrowing a login, because it exercises the
@@ -70,17 +76,17 @@ and SKU.
 
 ## 5. If the install fails
 
-The app is currently distributed for development, not published on the Shopify app store. Depending
-on how it's configured, it may only install on stores inside our own partner organisation. **This is
-the one step I can't confirm from the code** — it's a setting in the Partner dashboard.
+**"This app can't be installed yet. The app developer needs to select a distribution method first."**
+That's the known blocker at the top of this page, not something you did. Stop there and report it —
+it needs a setting changed in the Partner dashboard, and it affects every store outside our own
+organisation, real customers included.
 
-So if the install refuses, or Shopify tells you the app isn't available for that store: don't fight
-it. Ask to be added to the partner organisation, then create your development store *inside* that
-organisation and try again. That path definitely works.
+The interim path, if you need a store connected sooner: ask to be added to the Partner organisation
+and create your development store *inside* it, which installs the way our own test store did.
 
-Other errors you might see on the Connections screen mean what they say — an expired attempt, a
-store that didn't match what you typed, or a signature that didn't verify. Retry once; if it repeats,
-report it with the exact wording.
+Other errors on the Connections screen mean what they say — an expired attempt, a store that didn't
+match what you typed, or a signature that didn't verify. Retry once; if it repeats, report it with
+the exact wording.
 
 ---
 

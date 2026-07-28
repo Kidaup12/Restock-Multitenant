@@ -51,9 +51,11 @@ never be given one. Two ways in, and **please do both**:
 2. **Invited into the existing shop.** Ask to be invited as a **Member** from Settings → Team. This
    is how you test money-blind (section 4) against real data. Invite emails really send here.
 
-To test the Shopify side end to end, create your **own free development store** and connect it —
-[SHOPIFY-DEV-STORE.md](SHOPIFY-DEV-STORE.md) walks through it. You do not need, and should not be
-given, anyone's Shopify password.
+Connecting **your own** Shopify store is currently blocked — the app has no distribution method set,
+so Shopify refuses the install for any store outside our Partner organisation (see Known gaps). Test
+the Shopify side against the store already connected on the deployed app.
+[SHOPIFY-DEV-STORE.md](SHOPIFY-DEV-STORE.md) covers the your-own-store route for when that is fixed.
+You do not need, and should not be given, anyone's Shopify password.
 
 ### Reporting
 
@@ -194,6 +196,11 @@ downloaded file is a failure.
 ## Known gaps — please don't file these
 
 Verified against the code on 28 July. Anything not on this list is fair game.
+
+**No store but ours can install the app.** The Shopify app has no distribution method selected, so
+any store outside our Partner organisation gets "This app can't be installed yet." That blocks the
+your-own-store test, and it blocks real customers too — it needs a change in the Partner dashboard,
+not in the code.
 
 **Plan tier locks out a new workspace.** A newly created workspace has no plan, which counts as
 *starter*, and there is **no upgrade path in the app**. So Insights, Transfers, the budget
