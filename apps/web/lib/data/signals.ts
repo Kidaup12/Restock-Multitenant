@@ -1,4 +1,4 @@
-import { isSellable, prismaForTenant } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, isSellable, prismaForTenant } from "@wezesha/db";
 import { expandPromoWindowsToDays } from "@wezesha/forecast";
 
 /**
@@ -112,7 +112,7 @@ export async function getDeclaredSignals(
       select: { id: true, name: true, locationType: true },
     }),
     db.product.findMany({
-      where: { active: true },
+      where: { ...BUYABLE_PRODUCT_WHERE },
       orderBy: { title: "asc" },
       select: { sku: true, title: true, vendor: true, productType: true },
     }),

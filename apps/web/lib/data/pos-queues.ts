@@ -1,4 +1,4 @@
-import { prismaForTenant } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import {
   detectSalesGaps,
   normalizeSku,
@@ -134,7 +134,7 @@ export type PosMatchProduct = { id: string; sku: string; title: string };
 /** Compact catalogue list for the Match picker (id/sku/title), title-sorted. */
 export async function getPosMatchProducts(tenantId: string): Promise<PosMatchProduct[]> {
   const rows = await prismaForTenant(tenantId).product.findMany({
-    where: { active: true },
+    where: { ...BUYABLE_PRODUCT_WHERE },
     select: { id: true, sku: true, title: true },
     orderBy: { title: "asc" },
   });
