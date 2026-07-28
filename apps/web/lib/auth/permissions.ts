@@ -16,11 +16,17 @@ export const PERMISSION_KEYS = [
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 
-/** MEMBER is the money-blind operational role: no costs, no team control. */
+/**
+ * MEMBER is the money-blind shop-floor role: no costs, no team control, and no
+ * workspace administration — settings, the supplier book, the product catalogue
+ * and forecast priors all sit behind `manage_settings`. A member still works
+ * the orders they were hired to work (`approve_orders`). Where one member does
+ * need to edit settings, grant it per-membership rather than widening the role.
+ */
 export const ROLE_PRESETS: Record<Role, readonly PermissionKey[]> = {
   OWNER: PERMISSION_KEYS,
   ADMIN: PERMISSION_KEYS,
-  MEMBER: ["manage_settings", "approve_orders"],
+  MEMBER: ["approve_orders"],
 };
 
 /** The membership fields resolution needs — assignable from a Prisma row. */
