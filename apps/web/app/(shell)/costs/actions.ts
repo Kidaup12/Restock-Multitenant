@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prismaForTenant, prismaService } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, prismaForTenant, prismaService } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission, type PermissionKey } from "@/lib/auth/permissions";
 import {
@@ -44,7 +44,7 @@ async function actorContext(need: PermissionKey[]) {
 async function loadMatchProducts(tenantId: string): Promise<MatchProduct[]> {
   const db = prismaForTenant(tenantId);
   const rows = await db.product.findMany({
-    where: { active: true },
+    where: { ...BUYABLE_PRODUCT_WHERE },
     select: { id: true, sku: true, title: true, costSource: true },
   });
   return rows;

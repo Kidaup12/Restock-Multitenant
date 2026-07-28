@@ -1,4 +1,4 @@
-import { prismaForTenant } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { getCatalogueMetrics } from "@/lib/metrics";
 import { getTodayMetrics } from "./today";
 
@@ -92,7 +92,7 @@ export async function getInsightsOverview(
     getTodayMetrics(tenantId, { canViewCosts }),
     getCatalogueMetrics(tenantId),
     db.product.findMany({
-      where: { active: true },
+      where: { ...BUYABLE_PRODUCT_WHERE },
       select: { id: true, sku: true, title: true, priceKes: true, costKes: true, currentStock: true },
     }),
     db.salesHistory.groupBy({ by: ["productId"], _max: { date: true } }),

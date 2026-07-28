@@ -1,4 +1,4 @@
-import { prismaForTenant } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 
 /**
  * Capability gate 1 — setup depth. How much of what the product needs is
@@ -147,7 +147,7 @@ export async function setupDepth(tenantId: string): Promise<SetupDepth> {
     db.tenantConfig.findFirst({ select: { posFeedUrl: true } }),
     db.location.findMany({ select: { locationType: true } }),
     db.product.findMany({
-      where: { active: true },
+      where: { ...BUYABLE_PRODUCT_WHERE },
       select: { id: true, costSource: true, costKes: true, supplierId: true },
     }),
     db.salesHistory.groupBy({

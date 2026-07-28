@@ -1,4 +1,4 @@
-import { computeLimitState, prismaForTenant, type LimitState } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, computeLimitState, prismaForTenant, type LimitState } from "@wezesha/db";
 import { resolvePlanLimits } from "./config";
 
 /**
@@ -22,7 +22,7 @@ export async function evaluateLimits(tenantId: string, now: Date = new Date()): 
       select: { plan: true, planLimits: true },
     }),
     db.tenantConfig.findFirst({ select: { limitsExceededAt: true } }),
-    db.product.count({ where: { active: true } }),
+    db.product.count({ where: { ...BUYABLE_PRODUCT_WHERE } }),
     db.membership.count(),
     db.salesHistory.count({ where: { date: { gte: since } } }),
   ]);

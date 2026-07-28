@@ -93,10 +93,11 @@ export async function snapshotTenantInventory(
 ): Promise<SnapshotResult> {
   const date = utcDayStart(now);
 
-  // Eligible = the `active: true` catalogue Today counts for its stockout and
-  // dead-stock tiles. notForSale (tester/display/damaged) stays in: a reader can
-  // exclude it later by joining Product, but no reader can recover a row that
-  // was never written.
+  // Deliberately broader than the buy list. Every other surface asks what the
+  // shop still sells; this one writes history, and a reader can exclude later
+  // by joining Product while no reader can recover a row that was never
+  // written. Narrowing it would leave a hole in the stockout record of any
+  // product that comes back from archived.
   const products = await prismaService.product.findMany({
     where: { tenantId, active: true },
     select: { id: true, currentStock: true },

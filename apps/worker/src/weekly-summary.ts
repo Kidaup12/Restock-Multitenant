@@ -1,4 +1,4 @@
-import { prismaService } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, prismaService } from "@wezesha/db";
 
 /**
  * Weekly tenant summary: the numbers an owner wants in Monday's inbox.
@@ -33,7 +33,7 @@ export async function buildWeeklySummary(tenantId: string): Promise<WeeklySummar
       where: { tenantId, date: { gte: since } },
     }),
     prismaService.product.findMany({
-      where: { tenantId, active: true },
+      where: { tenantId, ...BUYABLE_PRODUCT_WHERE },
       select: { currentStock: true },
     }),
     prismaService.salesHistory.groupBy({

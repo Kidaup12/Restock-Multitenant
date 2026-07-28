@@ -1,4 +1,4 @@
-import { prismaForTenant } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { computeSupplierScore } from "@/lib/po/supplier-stats";
 import {
   leadTimeDrift,
@@ -146,7 +146,7 @@ export async function getUnassignedByBrand(tenantId: string): Promise<Unassigned
   const [unassigned, assigned, suppliers] = await Promise.all([
     db.product.groupBy({
       by: ["vendor"],
-      where: { supplierId: null, active: true, vendor: { not: null } },
+      where: { supplierId: null, ...BUYABLE_PRODUCT_WHERE, vendor: { not: null } },
       _count: { _all: true },
     }),
     db.product.groupBy({

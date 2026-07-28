@@ -1,11 +1,6 @@
 import { Queue, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
-import {
-  computeLimitState,
-  prismaService,
-  resolvePlanLimits,
-  type LimitState,
-} from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, computeLimitState, prismaService, resolvePlanLimits, type LimitState } from "@wezesha/db";
 
 /**
  * Daily plan-limit check, same shape as the email crons: one repeatable
@@ -82,7 +77,7 @@ export async function checkTenantLimits(
 
   const since = new Date(now.getTime() - 30 * DAY_MS);
   const [products, members, orders30d, config] = await Promise.all([
-    prismaService.product.count({ where: { tenantId, active: true } }),
+    prismaService.product.count({ where: { tenantId, ...BUYABLE_PRODUCT_WHERE } }),
     prismaService.membership.count({ where: { tenantId } }),
     prismaService.salesHistory.count({ where: { tenantId, date: { gte: since } } }),
     prismaService.tenantConfig.findUnique({
