@@ -36,6 +36,11 @@ const PHASE_UNIT: Record<string, string> = {
 /** How often to ask the server when the socket is not carrying events. */
 const POLL_MS = 5000;
 
+/** How long a job may sit between "queued" and the worker opening its run
+ *  before we stop implying something is happening. A worker that is restarting,
+ *  mid-deploy, or simply down otherwise leaves this spinning for ever. */
+const QUEUE_GRACE_MS = 45_000;
+
 type Connection = { url: string | null; token: string | null };
 
 export function SyncProgress({
@@ -43,9 +48,20 @@ export function SyncProgress({
   /** True between pressing Sync now and the worker picking the job up — the one
    *  window where no row exists yet. */
   queued,
+  /** Increments on each enqueue, so a fresh attempt clears a previous give-up. */
+  queueAttempt,
+  /** Whether a sync is genuinely in flight. The card disables "Sync now" on it,
+   *  and only this component can tell — the card's row prop is a server render
+   *  and does not move while a sync progresses. */
+  onActiveChange,
+  /** A run reached a terminal state; the card clears its queued flag. */
+  onSettled,
 }: {
   initialRun: SyncRunView | null;
   queued: boolean;
+  queueAttempt: number;
+  onActiveChange: (active: boolean) => void;
+  onSettled: () => void;
 }) {
   const router = useRouter();
   const [run, setRun] = useState<SyncRunView | null>(initialRun);
@@ -83,10 +99,13 @@ export function SyncProgress({
       if (!res.ok) return;
       const data = (await res.json()) as { run: SyncRunView | null };
       setRun(data.run);
+      // With no socket, polling is the only thing that will ever notice a run
+      // ending — so it has to release the queued flag too.
+      if (data.run && data.run.status !== "running") onSettled();
     } catch {
       // Transient — the next tick tries again.
     }
-  }, []);
+  }, [onSettled]);
 
   useRealtime(
     {
@@ -113,6 +132,7 @@ export function SyncProgress({
         if (event.data.source !== "shopify") return;
         // Re-read the row for the authoritative ending — counts, error text —
         // and refresh the route so the "Last sync" timestamps update too.
+        onSettled();
         void refetch();
         router.refresh();
       },
@@ -121,19 +141,52 @@ export function SyncProgress({
   );
 
   const socket = useRealtimeStatus(connection);
-  const active = run?.status === "running" || queued;
+  const running = run?.status === "running";
+  const waitingForWorker = queued && !running;
+
+  // Nothing picks the job up if the worker is restarting or down, and the queue
+  // cannot tell us that. Time the wait out rather than imply progress for ever.
+  // Sticky, so the warning survives; a fresh attempt clears it.
+  const [gaveUp, setGaveUp] = useState(false);
+  const [seenAttempt, setSeenAttempt] = useState(queueAttempt);
+  if (queueAttempt !== seenAttempt) {
+    setSeenAttempt(queueAttempt);
+    setGaveUp(false);
+  }
+  useEffect(() => {
+    if (!waitingForWorker || gaveUp) return;
+    const timer = setTimeout(() => setGaveUp(true), QUEUE_GRACE_MS);
+    return () => clearTimeout(timer);
+  }, [waitingForWorker, gaveUp]);
+
+  const active = running || (waitingForWorker && !gaveUp);
+  const poll = active || queued;
+  useEffect(() => {
+    onActiveChange(active);
+  }, [active, onActiveChange]);
 
   // Polling is load-bearing, not a nicety: with no gateway configured the socket
   // never opens, and progress would be the same silence as before.
   useEffect(() => {
-    if (!active || socket === "open") return;
+    if (!poll || socket === "open") return;
     const timer = setInterval(() => void refetch(), POLL_MS);
     return () => clearInterval(timer);
-  }, [active, socket, refetch]);
+  }, [poll, socket, refetch]);
+
+  // Nothing picked the job up. Said plainly, and outside the queued check, so
+  // the message survives the card releasing its flag.
+  if (gaveUp && !running) {
+    return (
+      <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">
+        The sync is queued but nothing has picked it up yet. The background worker may be
+        restarting — this page will update on its own once it does.
+      </p>
+    );
+  }
 
   // While queued, any row still on screen belongs to the PREVIOUS run — showing
   // its finish time would read as though the new sync had already completed.
-  if (queued && run?.status !== "running") {
+  if (waitingForWorker) {
     return <p className="text-sm text-ink-muted">Queued — waiting for the sync to start…</p>;
   }
   if (!run) return null;
