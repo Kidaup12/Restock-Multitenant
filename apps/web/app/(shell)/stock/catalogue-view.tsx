@@ -46,10 +46,22 @@ import type { OwnerFlags } from "./owner-flags";
  * of them the screen is about: "Selling" by default, so the day-to-day view is
  * not padded with SKUs the shop retired, and the other chips carry their counts
  * so nothing is silently absent.
+ *
+ * Only the table itself is paged. Counts, chips and exports keep reading the
+ * whole matched catalogue, so paging changes what is on screen and nothing else.
  */
 
 export const SCOPES = ["selling", "not_selling", "all"] as const;
 type Scope = (typeof SCOPES)[number];
+
+/**
+ * Rows rendered at once. Counting, filtering and exporting still read the whole
+ * catalogue — only the table is paged, because a shop with 400–1000 products
+ * pays for every row it puts in the DOM whether or not anyone scrolls to it.
+ * 50 is about two screens of scrolling: enough to scan a category in one go,
+ * small enough that the page cost stops growing with the catalogue.
+ */
+const PAGE_SIZE = 50;
 
 export const SCOPE_LABELS: Record<Scope, string> = {
   selling: "Selling",
@@ -172,8 +184,14 @@ export function CatalogueView({
   const [healthFilter, setHealthFilter] = useState<string | null>(null);
   const [moneyFilter, setMoneyFilter] = useState<MoneyBandFilter>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
 
   const categoryNames = categories.map((c) => c.name);
+
+  // Every control that changes WHICH rows match sends the reader back to the
+  // start: filtering down to eight rows while sitting on page 7 would otherwise
+  // show an empty table.
+  const resetPage = () => setPage(0);
 
   // Everything below the scope chips — counts, money band, table — reads the
   // scoped catalogue, so switching scope re-frames the whole screen rather than
@@ -231,6 +249,16 @@ export function CatalogueView({
     return desc ? sorted.reverse() : sorted;
   }, [scoped, selection, healthFilter, moneyFilter, sortKey, desc]);
 
+  // Page the rendered table, not the matched set. The clamp is what survives a
+  // server refresh (an edit re-renders with fewer rows) landing the reader past
+  // the end.
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageStart = currentPage * PAGE_SIZE;
+  const paged = visible.slice(pageStart, pageStart + PAGE_SIZE);
+
+  // Exports read `visible`, not `paged`: an export is the list the reader has
+  // filtered to, not the fifty rows currently on screen.
   const exportRows = visible.map((row) => ({
     title: row.title,
     sku: row.sku,
@@ -249,7 +277,15 @@ export function CatalogueView({
   return (
     <div className="space-y-4">
       {canViewCosts && (
-        <MoneyBand band={band} canViewCosts={canViewCosts} active={moneyFilter} onSelect={setMoneyFilter} />
+        <MoneyBand
+          band={band}
+          canViewCosts={canViewCosts}
+          active={moneyFilter}
+          onSelect={(next) => {
+            setMoneyFilter(next);
+            resetPage();
+          }}
+        />
       )}
 
       <Card>
@@ -275,23 +311,40 @@ export function CatalogueView({
           shown={visible.length}
           chips={chips}
           active={healthFilter}
-          onToggle={(key) => setHealthFilter((cur) => (cur === key ? null : key))}
-          onClear={() => setHealthFilter(null)}
+          onToggle={(key) => {
+            setHealthFilter((cur) => (cur === key ? null : key));
+            resetPage();
+          }}
+          onClear={() => {
+            setHealthFilter(null);
+            resetPage();
+          }}
           scopes={scopeChips}
           scope={scope}
           onScope={(key) => {
             setScope(key as Scope);
             setHealthFilter(null); // the old chip may not exist in the new scope
+            resetPage();
           }}
         />
 
-        <FacetFilterBar options={facetOptions} selection={selection} onChange={setSelection} />
+        <FacetFilterBar
+          options={facetOptions}
+          selection={selection}
+          onChange={(next) => {
+            setSelection(next);
+            resetPage();
+          }}
+        />
 
         <div className="flex items-center gap-2 px-4 py-2 text-sm text-ink-muted">
           <span>Sort</span>
           <select
             value={sortKey}
-            onChange={(e) => setSortKey(e.target.value as SortKey)}
+            onChange={(e) => {
+              setSortKey(e.target.value as SortKey);
+              resetPage();
+            }}
             className="rounded-md border border-edge bg-surface px-2 py-1 text-ink"
           >
             <option value="title">Product</option>
@@ -305,7 +358,10 @@ export function CatalogueView({
           </select>
           <button
             type="button"
-            onClick={() => setDesc((d) => !d)}
+            onClick={() => {
+              setDesc((d) => !d);
+              resetPage();
+            }}
             className="rounded-md border border-edge bg-surface px-2 py-1 text-ink hover:bg-surface-2"
           >
             {desc ? "Desc ↓" : "Asc ↑"}
@@ -329,7 +385,7 @@ export function CatalogueView({
               <TableHead>Verdict</TableHead>
             </TableHeader>
             <TableBody>
-              {visible.map((row) => {
+              {paged.map((row) => {
                 const open = expandedId === row.productId;
                 return (
                   <RowGroup
@@ -349,8 +405,71 @@ export function CatalogueView({
             </TableBody>
           </Table>
         </CardContent>
+
+        {pageCount > 1 && (
+          <Pager
+            page={currentPage}
+            pageCount={pageCount}
+            from={pageStart + 1}
+            to={pageStart + paged.length}
+            total={visible.length}
+            onPage={setPage}
+          />
+        )}
       </Card>
     </div>
+  );
+}
+
+/** Table pager. Says how much of the matched list is on screen — a shop with
+ *  400+ products must never be left guessing whether the rest is missing or
+ *  merely further down — and the page select is the way to a far page without
+ *  clicking Next eight times. */
+function Pager({
+  page,
+  pageCount,
+  from,
+  to,
+  total,
+  onPage,
+}: {
+  page: number;
+  pageCount: number;
+  from: number;
+  to: number;
+  total: number;
+  onPage: (page: number) => void;
+}) {
+  const step = "rounded-md border border-edge bg-surface px-2 py-1 text-ink hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50";
+  return (
+    <nav
+      aria-label="Catalogue pages"
+      className="flex flex-wrap items-center justify-between gap-2 border-t border-edge px-4 py-3 text-sm text-ink-muted"
+    >
+      <span>
+        Showing {from}–{to} of {total}
+      </span>
+      <span className="flex items-center gap-2">
+        <button type="button" onClick={() => onPage(page - 1)} disabled={page === 0} className={step}>
+          ← Previous
+        </button>
+        <select
+          value={page}
+          onChange={(e) => onPage(Number(e.target.value))}
+          aria-label="Page"
+          className="rounded-md border border-edge bg-surface px-2 py-1 text-ink"
+        >
+          {Array.from({ length: pageCount }, (_, i) => (
+            <option key={i} value={i}>
+              Page {i + 1} of {pageCount}
+            </option>
+          ))}
+        </select>
+        <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pageCount - 1} className={step}>
+          Next →
+        </button>
+      </span>
+    </nav>
   );
 }
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Progress } from "@/components/ui/progress";
 import { useRealtime, useRealtimeStatus } from "@/lib/realtime/use-realtime";
+import { useRealtimeConnection } from "@/components/realtime-connection";
 import type { SyncRunView } from "@/lib/shopify/sync-run";
 
 /**
@@ -41,8 +42,6 @@ const POLL_MS = 5000;
  *  mid-deploy, or simply down otherwise leaves this spinning for ever. */
 const QUEUE_GRACE_MS = 45_000;
 
-type Connection = { url: string | null; token: string | null };
-
 export function SyncProgress({
   initialRun,
   /** True between pressing Sync now and the worker picking the job up — the one
@@ -65,7 +64,8 @@ export function SyncProgress({
 }) {
   const router = useRouter();
   const [run, setRun] = useState<SyncRunView | null>(initialRun);
-  const [connection, setConnection] = useState<Connection>({ url: null, token: null });
+  // Shared with the shell's other realtime consumers — one binding per shell.
+  const connection = useRealtimeConnection();
   // The server prop is authoritative whenever it actually changes — which is
   // after the router.refresh() on sync.done. Adopting it during render (rather
   // than in an effect) means the final state paints in the same pass.
@@ -78,20 +78,6 @@ export function SyncProgress({
     setRun(initialRun);
   }
 
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/realtime-token")
-      .then((res) => (res.ok ? (res.json() as Promise<Connection>) : null))
-      .then((data) => {
-        if (alive && data) setConnection(data);
-      })
-      .catch(() => {
-        // No realtime configured — polling below still keeps this honest.
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   const refetch = useCallback(async () => {
     try {

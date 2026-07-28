@@ -20,6 +20,7 @@ import {
 } from "@/components/shell/workspace-switcher";
 import { TourProvider } from "@/components/tour/tour-provider";
 import { CurrencyProvider } from "@/components/currency-provider";
+import { RealtimeConnectionProvider } from "@/components/realtime-connection";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 /* Desktop rail = every destination; mobile tab bar = the promoted few plus a
@@ -77,6 +78,7 @@ export function AppShell({
 
   return (
     <CurrencyProvider currency={workspace?.currency}>
+    <RealtimeConnectionProvider workspaceId={workspace?.id ?? null}>
     <RouteLoadingProvider>
     <TourProvider
       role={workspace?.role ?? null}
@@ -208,6 +210,7 @@ export function AppShell({
       </div>
     </TourProvider>
     </RouteLoadingProvider>
+    </RealtimeConnectionProvider>
     </CurrencyProvider>
   );
 }

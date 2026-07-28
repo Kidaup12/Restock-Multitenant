@@ -5,18 +5,17 @@ import { cn } from "@/lib/cn";
 import { AlertIcon, BellIcon, BoxIcon, GearIcon } from "@/components/icons";
 import { Spinner } from "@/components/ui/spinner";
 import { useRealtime, useRealtimeStatus } from "@/lib/realtime/use-realtime";
+import { useRealtimeConnection } from "@/components/realtime-connection";
 import { kindTone, relativeTime } from "@/lib/notifications/format";
 import type { NotificationItem } from "@/lib/notifications/data";
 
 /**
  * The header bell: unread badge (server-seeded, then live), a dropdown feed,
- * and a connection-status dot. One /api/realtime-token fetch feeds both the
- * notification.new subscription and the status dot; opening the panel loads a
+ * and a connection-status dot. The realtime binding is shared across the shell
+ * rather than fetched here; opening the panel loads a
  * page of the feed and marks it read (the "new" styling survives locally so
  * just-arrived items stay visually distinct while the panel is open).
  */
-
-type Connection = { url: string | null; token: string | null };
 
 /** Feed row + whether it was unread when it entered the panel. */
 type FeedItem = NotificationItem & { wasUnread: boolean };
@@ -82,29 +81,15 @@ export function NotificationBell({
   const [items, setItems] = useState<FeedItem[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [connection, setConnection] = useState<Connection>({ url: null, token: null });
+  // Shared with the shell's other realtime consumers, and re-bound on a
+  // workspace change. Without it the bell still works from the server-rendered
+  // count.
+  const connection = useRealtimeConnection();
   const containerRef = useRef<HTMLDivElement>(null);
   const openRef = useRef(open);
   useEffect(() => {
     openRef.current = open;
   }, [open]);
-
-  // The token url carries the active workspace, so a workspace change fetches
-  // a fresh binding and the hooks swap sockets.
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/realtime-token")
-      .then((res) => (res.ok ? (res.json() as Promise<Connection>) : null))
-      .then((data) => {
-        if (alive && data) setConnection(data);
-      })
-      .catch(() => {
-        // No realtime — the bell still works from the server-rendered count.
-      });
-    return () => {
-      alive = false;
-    };
-  }, [workspaceId]);
 
   // Workspace switched without a remount: drop the old feed, re-seed the badge.
   const prevWorkspace = useRef(workspaceId);

@@ -1,35 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useRealtime } from "@/lib/realtime/use-realtime";
-
-type Connection = { url: string | null; token: string | null };
+import { useRealtimeConnection } from "@/components/realtime-connection";
 
 /**
  * Invisible bridge: subscribes to this workspace's realtime channel and
  * re-renders the page's server components when a forecast or sync completes.
- * Renders nothing; SSR-safe (no socket until the token fetch resolves in an
- * effect, and the hooks stay idle while url/token are null).
+ * Renders nothing; SSR-safe, since the shared binding starts null and the hooks
+ * stay idle until it resolves.
  */
 export function RealtimeRefresh() {
   const router = useRouter();
-  const [connection, setConnection] = useState<Connection>({ url: null, token: null });
-
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/realtime-token")
-      .then((res) => (res.ok ? (res.json() as Promise<Connection>) : null))
-      .then((data) => {
-        if (alive && data) setConnection(data);
-      })
-      .catch(() => {
-        // No realtime — the screen still works, just without live refresh.
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const connection = useRealtimeConnection();
 
   useRealtime(
     {
