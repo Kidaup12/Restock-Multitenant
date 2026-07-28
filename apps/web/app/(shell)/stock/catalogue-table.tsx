@@ -1,7 +1,6 @@
 import { BoxIcon } from "@/components/icons";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getCustomCategories, getStockCatalogue } from "@/lib/data/stock";
-import { deriveFacetOptions } from "@/lib/facets";
 import { CatalogueView } from "./catalogue-view";
 import { getOwnerFlags } from "./owner-flags";
 
@@ -34,14 +33,10 @@ export async function CatalogueTable({
     );
   }
 
-  // Facet options derived from what the catalogue actually contains (spec §7) —
-  // never a hard-coded list. The interactive view filters + sorts client-side.
-  const facetOptions = deriveFacetOptions(rows.map((r) => r.facet));
 
   return (
     <CatalogueView
       rows={rows}
-      facetOptions={facetOptions}
       categories={categories}
       ownerFlags={ownerFlags}
       canViewCosts={canViewCosts}

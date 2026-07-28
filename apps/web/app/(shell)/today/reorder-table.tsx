@@ -2,7 +2,6 @@ import Link from "next/link";
 import { BulbIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   Table,
@@ -58,8 +57,8 @@ export async function ReorderTable({
         title="Reorder needed"
         subtitle={`${reorder.rows.length} of ${reorder.totalPredicted} forecast products · run ${runDay}`}
         action={
-          <Link href="/stock" className="text-sm font-medium text-accent-ink hover:underline">
-            View all
+          <Link href="/plan" className="text-sm font-medium text-accent-ink hover:underline">
+            Open Restock planner
           </Link>
         }
       />
@@ -77,9 +76,12 @@ export async function ReorderTable({
               <TableHead>Product</TableHead>
               <TableHead numeric>In stock</TableHead>
               <TableHead numeric>Days cover</TableHead>
+              {/* No quantity or order cost here. This screen says what needs
+                  attention; deciding how much to buy is the planner's job,
+                  where the budget and horizon that size an order live. A
+                  number here invites ordering against a figure the shop never
+                  set. */}
               <TableHead>Urgency</TableHead>
-              <TableHead numeric>Reorder qty</TableHead>
-              <TableHead numeric>Order cost</TableHead>
             </TableHeader>
             <TableBody>
               {reorder.rows.map((row) => {
@@ -93,14 +95,6 @@ export async function ReorderTable({
                     </TableCell>
                     <TableCell>
                       <Badge tone={badge.tone}>{badge.label}</Badge>
-                    </TableCell>
-                    <TableCell numeric>{row.recommendedQty || "—"}</TableCell>
-                    <TableCell numeric>
-                      {row.recommendedQty > 0 ? (
-                        <CostValue amount={row.orderCostKes} canViewCosts={canViewCosts} />
-                      ) : (
-                        "—"
-                      )}
                     </TableCell>
                   </TableRow>
                 );
