@@ -1,0 +1,198 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Progress } from "@/components/ui/progress";
+import { useRealtime, useRealtimeStatus } from "@/lib/realtime/use-realtime";
+import type { SyncRunView } from "@/lib/shopify/sync-run";
+
+/**
+ * Live view of the sync the worker is running.
+ *
+ * Seeded from the server-rendered row, so it is already correct before any
+ * socket opens — that is what a reload mid-run, a second tab, and the redirect
+ * straight after connecting a store all depend on. Realtime and polling only
+ * keep it fresh; neither is required for it to be right.
+ */
+
+const PHASE_LABEL: Record<string, string> = {
+  products: "Products",
+  inventory: "Stock and branches",
+  orders: "Sales history",
+};
+
+const PHASE_FETCHING: Record<string, string> = {
+  products: "Fetching products from Shopify…",
+  inventory: "Fetching stock levels from Shopify…",
+  orders: "Fetching sales history from Shopify…",
+};
+
+const PHASE_UNIT: Record<string, string> = {
+  products: "products",
+  inventory: "branches",
+  orders: "sales days",
+};
+
+/** How often to ask the server when the socket is not carrying events. */
+const POLL_MS = 5000;
+
+type Connection = { url: string | null; token: string | null };
+
+export function SyncProgress({
+  initialRun,
+  /** True between pressing Sync now and the worker picking the job up — the one
+   *  window where no row exists yet. */
+  queued,
+}: {
+  initialRun: SyncRunView | null;
+  queued: boolean;
+}) {
+  const router = useRouter();
+  const [run, setRun] = useState<SyncRunView | null>(initialRun);
+  const [connection, setConnection] = useState<Connection>({ url: null, token: null });
+  // The server prop is authoritative whenever it actually changes — which is
+  // after the router.refresh() on sync.done. Adopting it during render (rather
+  // than in an effect) means the final state paints in the same pass.
+  const propKey = initialRun
+    ? `${initialRun.id}:${initialRun.status}:${initialRun.phase}:${initialRun.itemsDone}`
+    : "none";
+  const [seenProp, setSeenProp] = useState(propKey);
+  if (propKey !== seenProp) {
+    setSeenProp(propKey);
+    setRun(initialRun);
+  }
+
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/realtime-token")
+      .then((res) => (res.ok ? (res.json() as Promise<Connection>) : null))
+      .then((data) => {
+        if (alive && data) setConnection(data);
+      })
+      .catch(() => {
+        // No realtime configured — polling below still keeps this honest.
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const refetch = useCallback(async () => {
+    try {
+      const res = await fetch("/api/shopify/sync-status");
+      if (!res.ok) return;
+      const data = (await res.json()) as { run: SyncRunView | null };
+      setRun(data.run);
+    } catch {
+      // Transient — the next tick tries again.
+    }
+  }, []);
+
+  useRealtime(
+    {
+      "sync.progress": (event) => {
+        const d = event.data;
+        if (d.source !== "shopify") return;
+        // A run that starts after this page loaded simply takes over: adopting
+        // the newer id beats ignoring events for a run we haven't heard of.
+        setRun((prev) => ({
+          id: d.runId ?? prev?.id ?? "",
+          status: "running",
+          phase: d.phase,
+          phaseIndex: d.state === "finished" ? d.done : d.done + 1,
+          phaseTotal: d.total,
+          itemsDone: d.items ?? 0,
+          itemsTotal: d.itemsTotal ?? null,
+          summary: prev?.summary ?? null,
+          error: null,
+          finishedAt: null,
+          durationSec: null,
+        }));
+      },
+      "sync.done": (event) => {
+        if (event.data.source !== "shopify") return;
+        // Re-read the row for the authoritative ending — counts, error text —
+        // and refresh the route so the "Last sync" timestamps update too.
+        void refetch();
+        router.refresh();
+      },
+    },
+    connection
+  );
+
+  const socket = useRealtimeStatus(connection);
+  const active = run?.status === "running" || queued;
+
+  // Polling is load-bearing, not a nicety: with no gateway configured the socket
+  // never opens, and progress would be the same silence as before.
+  useEffect(() => {
+    if (!active || socket === "open") return;
+    const timer = setInterval(() => void refetch(), POLL_MS);
+    return () => clearInterval(timer);
+  }, [active, socket, refetch]);
+
+  // While queued, any row still on screen belongs to the PREVIOUS run — showing
+  // its finish time would read as though the new sync had already completed.
+  if (queued && run?.status !== "running") {
+    return <p className="text-sm text-ink-muted">Queued — waiting for the sync to start…</p>;
+  }
+  if (!run) return null;
+
+  if (run.status === "running") {
+    const phase = run.phase ?? "products";
+    const known = run.itemsTotal != null && run.itemsTotal > 0;
+    return (
+      <div className="space-y-2">
+        <div className="flex items-baseline justify-between gap-4 text-sm">
+          <span className="font-medium text-ink">
+            {PHASE_LABEL[phase] ?? phase}
+            <span className="ml-2 text-ink-muted">
+              step {Math.max(1, run.phaseIndex)} of {run.phaseTotal || 3}
+            </span>
+          </span>
+          <span className="text-ink-muted">
+            {known
+              ? `${run.itemsDone.toLocaleString("en-KE")} of ${run.itemsTotal!.toLocaleString("en-KE")} ${PHASE_UNIT[phase] ?? "records"}`
+              : (PHASE_FETCHING[phase] ?? "Working…")}
+          </span>
+        </div>
+        <Progress
+          value={run.itemsDone}
+          max={known ? run.itemsTotal : null}
+          label={`Sync progress — ${PHASE_LABEL[phase] ?? phase}`}
+        />
+      </div>
+    );
+  }
+
+  if (run.status === "stalled") {
+    return (
+      <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">
+        This sync stopped responding and may not have finished. Try running it again.
+      </p>
+    );
+  }
+
+  if (run.status === "failed") {
+    return (
+      <p className="rounded-md bg-negative-soft px-3 py-2 text-sm text-negative">
+        Last sync failed{run.error ? `: ${run.error}` : "."}
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-sm text-ink-muted">
+      Last sync finished{run.finishedAt ? ` ${run.finishedAt}` : ""}
+      {run.summary ? ` · ${run.summary}` : ""}
+      {run.durationSec != null ? ` · took ${formatDuration(run.durationSec)}` : ""}
+    </p>
+  );
+}
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest === 0 ? `${mins}m` : `${mins}m ${rest}s`;
+}
