@@ -13,10 +13,20 @@ export interface RealtimeEventMap {
     tenantId: string;
     source: string;
     phase: string;
+    /** Phases COMPLETED so far. Unchanged meaning — old subscribers still work. */
     done: number;
+    /** Number of phases in the run. */
     total: number;
+    /** Which edge of `phase` this is. Absent means "finished" (older publishers). */
+    state?: "started" | "running" | "finished";
+    /** Records processed inside `phase` so far. */
+    items?: number;
+    /** Records expected in `phase`; absent while the count isn't knowable yet. */
+    itemsTotal?: number;
+    /** The SyncRun this belongs to, so a client can ignore a stale run's tail. */
+    runId?: string;
   };
-  "sync.done": { tenantId: string; source: string; ok: boolean };
+  "sync.done": { tenantId: string; source: string; ok: boolean; runId?: string };
   "forecast.done": { tenantId: string; forecastRunId: string; created: number };
   "pos.ingested": { tenantId: string; salesIngested: number; linesUnmatched: number };
   "notification.new": { tenantId: string; kind: string; title: string };
@@ -65,9 +75,24 @@ const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFin
 const validators: {
   [K in RealtimeEventType]: (d: Record<string, unknown>) => boolean;
 } = {
+  // The optional fields are checked only when present: a publisher that predates
+  // them still validates, and an older gateway forwards the widened payload
+  // untouched because unknown extras are ignored.
   "sync.progress": (d) =>
-    isStr(d.tenantId) && isStr(d.source) && isStr(d.phase) && isNum(d.done) && isNum(d.total),
-  "sync.done": (d) => isStr(d.tenantId) && isStr(d.source) && typeof d.ok === "boolean",
+    isStr(d.tenantId) &&
+    isStr(d.source) &&
+    isStr(d.phase) &&
+    isNum(d.done) &&
+    isNum(d.total) &&
+    (d.state === undefined || d.state === "started" || d.state === "running" || d.state === "finished") &&
+    (d.items === undefined || isNum(d.items)) &&
+    (d.itemsTotal === undefined || isNum(d.itemsTotal)) &&
+    (d.runId === undefined || isStr(d.runId)),
+  "sync.done": (d) =>
+    isStr(d.tenantId) &&
+    isStr(d.source) &&
+    typeof d.ok === "boolean" &&
+    (d.runId === undefined || isStr(d.runId)),
   "forecast.done": (d) => isStr(d.tenantId) && isStr(d.forecastRunId) && isNum(d.created),
   "pos.ingested": (d) => isStr(d.tenantId) && isNum(d.salesIngested) && isNum(d.linesUnmatched),
   "notification.new": (d) => isStr(d.tenantId) && isStr(d.kind) && isStr(d.title),
