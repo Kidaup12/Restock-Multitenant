@@ -137,6 +137,17 @@ it registered. No schedule lines means a missing `1`.
 Import the repo. Framework preset Next.js; leave the root directory at the
 repository root so the workspace packages resolve.
 
+**Run the functions in the database's region.** `apps/web/vercel.json` pins
+`regions: ["dub1"]` (Dublin) to sit alongside Supabase `eu-west-1`. Vercel
+otherwise defaults to `iad1` in Washington, which puts the Atlantic between the
+app and its data — and because every tenant-scoped query is wrapped in a
+transaction to set the RLS GUC, each read costs several round trips, not one.
+Measured on the default region, a health check that does a single database ping
+took about a second, against 0.3s for a static file from the same edge; the
+database itself answers in single-digit milliseconds. If the database ever
+moves, move this with it — the two belong together, and being close to the users
+matters less than being close to the data.
+
 Environment:
 
 ```
