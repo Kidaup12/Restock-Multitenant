@@ -40,10 +40,31 @@ important thing on this page.
    constructed when the module loads, so a web deployment without
    `SERVICE_DATABASE_URL` fails at sign-in rather than at start-up.
 
-   Use the **session pooler** host for every one of them —
-   `aws-0-<region>.pooler.supabase.com:5432`, user `postgres.<project-ref>`. The
-   direct `db.<project-ref>.supabase.co` host resolves over IPv6 only and will
-   not connect from most build and container environments.
+   All three use the pooler host `aws-0-<region>.pooler.supabase.com` with the
+   role name suffixed by the project ref (`wezesha_app.<project-ref>`). The
+   direct `db.<project-ref>.supabase.co` host answers on IPv6 only and will not
+   resolve from most build and container environments.
+
+   **The port differs, and getting it wrong takes the app down under load.**
+
+   | Variable | Port | Suffix |
+   |---|---|---|
+   | `DIRECT_URL` | `5432` session | — |
+   | `DATABASE_URL` | `6543` transaction | `?pgbouncer=true&connection_limit=1` |
+   | `SERVICE_DATABASE_URL` | `6543` transaction | `?pgbouncer=true&connection_limit=1` |
+
+   Session mode allows only 15 clients. Every serverless invocation holds one
+   for its lifetime, so a few page loads exhaust the pool and requests start
+   failing on `max clients reached` — intermittently, on whichever page happens
+   to ask next, which reads like a dozen unrelated bugs rather than one cause.
+   Migrations are the exception: they need a real session, which is what 5432
+   is for. The long-running worker should use the transaction ports too; it
+   otherwise holds connections out of the same small pool all day.
+
+   `pgbouncer=true` stops Prisma using prepared statements, which do not survive
+   transaction pooling. Tenant scope is safe under it because the scope is set
+   transaction-locally inside an explicit transaction — a session-level setting
+   would outlive the request and hand one shop's scope to the next caller.
 
 4. Apply the schema from your machine, pointed at the new database:
 
