@@ -263,8 +263,12 @@ export async function getStockCatalogue(
       missingCost: buyable && cost.suspectReason === "missing",
       suspectCost: buyable && suspectCostPresent({ costKes: p.costKes, costSource: p.costSource, priceKes: p.priceKes }),
       heldOffBuyList: cost.heldOffBuyList,
-      costMovedPct: buyable ? p.costMovedPct : null,
-      costMovedAt: buyable ? p.costMovedAt : null,
+      // Cost-blind to the flag as well as the figure. The catalogue derives a
+      // "cost moved" facet from these, and a chip that filters to exactly the
+      // products whose buying price jumped names them — the percentage is the
+      // smaller half of that disclosure.
+      costMovedPct: buyable && canViewCosts ? p.costMovedPct : null,
+      costMovedAt: buyable && canViewCosts ? p.costMovedAt : null,
       facet: facetById.get(p.id)!,
     };
   });
