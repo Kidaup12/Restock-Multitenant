@@ -177,8 +177,14 @@ const profile = step(
 
 /** OWNER/ADMIN get the full walkthrough; MEMBER a shorter operational set with
  *  cost-related copy dropped (their preset lacks view_costs, and the screens
- *  mask every KES cost figure for them). */
-export function tourStepsForRole(role: Role): TourStep[] {
+ *  mask every KES cost figure for them).
+ *
+ *  `canOpenInsights` drops the Insights step for a workspace whose plan locks
+ *  that screen. Without it the welcome tour walks a brand-new owner — every
+ *  self-serve workspace starts on the entry tier — onto a page they cannot open,
+ *  describing features they cannot use. The nav entry is always rendered, so the
+ *  engine's own "is the target visible" filter cannot catch this one. */
+export function tourStepsForRole(role: Role, canOpenInsights = true): TourStep[] {
   if (role === "MEMBER") {
     return [
       today,
@@ -205,7 +211,7 @@ export function tourStepsForRole(role: Role): TourStep[] {
     stockTabs,
     salesCosts,
     salesOverview,
-    insights,
+    ...(canOpenInsights ? [insights] : []),
     settings,
     workspaces,
     theme,

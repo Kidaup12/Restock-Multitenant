@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { BulbIcon, CheckIcon, ChevronRightIcon } from "@/components/icons";
@@ -11,6 +12,14 @@ import { setupDepth, type SetupSignal } from "@/lib/capabilities/setup-depth";
  * restructure — this is one added card.
  */
 
+/* The screen each nudge sends you to. A POS feed or a second branch has no
+ * single screen to open, so that nudge stays plain text. */
+const NUDGE_HREF: Partial<Record<SetupSignal, string>> = {
+  shopify: "/settings/connections",
+  costs: "/costs",
+  suppliers: "/suppliers",
+};
+
 const SIGNAL_ORDER: { key: SetupSignal; label: string }[] = [
   { key: "shopify", label: "Shopify" },
   { key: "costs", label: "Costs" },
@@ -20,6 +29,18 @@ const SIGNAL_ORDER: { key: SetupSignal; label: string }[] = [
 
 export async function TodaySetupStrip({ tenantId }: { tenantId: string }) {
   const { level, signals, nextUnlock } = await setupDepth(tenantId);
+  const nudgeHref = nextUnlock ? NUDGE_HREF[nextUnlock.signal] : undefined;
+  const nudge = nextUnlock ? (
+    <>
+      <span className="mt-0.5 text-accent-ink [&_svg]:size-4">
+        <BulbIcon />
+      </span>
+      <p className="text-ink-muted">
+        <span className="font-medium text-ink">{nextUnlock.title}</span>{" "}
+        {nextUnlock.detail}
+      </p>
+    </>
+  ) : null;
 
   return (
     <Card className="px-5 py-4">
@@ -54,18 +75,21 @@ export async function TodaySetupStrip({ tenantId }: { tenantId: string }) {
         </div>
 
         {nextUnlock ? (
-          <div className="flex items-start gap-2 text-sm sm:max-w-md sm:justify-end sm:text-right">
-            <span className="mt-0.5 text-accent-ink [&_svg]:size-4">
-              <BulbIcon />
-            </span>
-            <p className="text-ink-muted">
-              <span className="font-medium text-ink">{nextUnlock.title}</span>{" "}
-              {nextUnlock.detail}
-            </p>
-            <span className="mt-0.5 text-ink-muted [&_svg]:size-4">
-              <ChevronRightIcon />
-            </span>
-          </div>
+          nudgeHref ? (
+            <Link
+              href={nudgeHref}
+              className="-mx-2 -my-1 flex items-start gap-2 rounded-md px-2 py-1 text-sm outline-accent transition-colors hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2 sm:max-w-md sm:justify-end sm:text-right"
+            >
+              {nudge}
+              <span className="mt-0.5 text-ink-muted [&_svg]:size-4">
+                <ChevronRightIcon />
+              </span>
+            </Link>
+          ) : (
+            <div className="flex items-start gap-2 text-sm sm:max-w-md sm:justify-end sm:text-right">
+              {nudge}
+            </div>
+          )
         ) : (
           <div className="flex items-center gap-2 text-sm text-positive [&_svg]:size-4">
             <CheckIcon />

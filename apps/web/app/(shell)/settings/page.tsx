@@ -38,7 +38,7 @@ const sections = [
     href: "/settings/connections",
     icon: <LayersIcon />,
     title: "Connections",
-    description: "Shopify, QuickBooks, and the POS feed — connect and check sync health.",
+    description: "Connect your Shopify store and check how recently it synced.",
   },
   {
     href: "/settings/signals",
