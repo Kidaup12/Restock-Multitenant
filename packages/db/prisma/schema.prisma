@@ -1,6 +1,5 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../generated/client"
   // A build machine only emits the engine for its own platform, so a client
   // generated on a developer's laptop — or on a builder whose libc differs from
   // the runtime's — reaches the server with no engine it can load. Naming the

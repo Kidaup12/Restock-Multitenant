@@ -1,4 +1,4 @@
-import { PrismaClient, Prisma } from "../generated/client";
+import { PrismaClient, Prisma } from "@prisma/client";
 
 /**
  * Two-client multi-tenant data layer (RLS enforced from the first migration).

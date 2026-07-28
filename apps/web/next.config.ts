@@ -9,13 +9,12 @@ const nextConfig: NextConfig = {
   // Monorepo: build and trace from the workspace root so the db package is in
   // scope.
   outputFileTracingRoot: path.join(__dirname, "../.."),
-  // The query engine is opened by path at runtime, not imported, so tracing
-  // cannot see it and every deployed request failed on a missing engine while
-  // the build reported success. Naming the generated client explicitly puts the
-  // engine in the bundle. The tracer's warning about this package was the
-  // symptom, not noise.
+  // The client now generates to its default place inside node_modules, which is
+  // where Prisma looks for the engine and where hosting platforms already know
+  // to copy it from. Generating to a path of our own put the engine somewhere
+  // only our own build understood, and every deployed request failed on it.
   outputFileTracingIncludes: {
-    "/**": ["packages/db/generated/client/**"],
+    "/**": ["node_modules/.prisma/client/**"],
   },
   turbopack: {
     root: path.join(__dirname, "../.."),
