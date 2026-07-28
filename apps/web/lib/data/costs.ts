@@ -1,4 +1,4 @@
-import { prismaForTenant } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { getCatalogueMetrics } from "@/lib/metrics";
 import { resolveCost, type CostSource } from "@/lib/cost";
 
@@ -37,7 +37,7 @@ export async function getCostCoverage(
   const db = prismaForTenant(tenantId);
   const [products, metrics] = await Promise.all([
     db.product.findMany({
-      where: { active: true, notForSale: false },
+      where: { ...BUYABLE_PRODUCT_WHERE },
       select: { id: true, costKes: true, costSource: true, priceKes: true },
     }),
     getCatalogueMetrics(tenantId),
@@ -89,7 +89,7 @@ export async function getCostMovedAlerts(
 ): Promise<CostMovedAlert[]> {
   const db = prismaForTenant(tenantId);
   const rows = await db.product.findMany({
-    where: { active: true, notForSale: false, costMovedPct: { not: null } },
+    where: { ...BUYABLE_PRODUCT_WHERE, costMovedPct: { not: null } },
     select: { id: true, sku: true, title: true, costMovedPct: true, costMovedAt: true, costKes: true, priceKes: true },
   });
 

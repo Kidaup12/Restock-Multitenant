@@ -1,4 +1,4 @@
-import { prismaForTenant, isSellable, type LocationRole, roleOf } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, isSellable, prismaForTenant, roleOf, type LocationRole } from "@wezesha/db";
 import { getCatalogueMetrics } from "@/lib/metrics";
 
 /**
@@ -367,7 +367,7 @@ export async function getDistributionProposal(
 
   const [products, levels, attributed, metrics] = await Promise.all([
     db.product.findMany({
-      where: { active: true, notForSale: false },
+      where: { ...BUYABLE_PRODUCT_WHERE },
       select: { id: true, sku: true, title: true, costKes: true },
       orderBy: { title: "asc" },
     }),

@@ -1,6 +1,6 @@
 import { Queue, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
-import { prismaService } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, prismaService } from "@wezesha/db";
 import { publishEvent } from "@wezesha/realtime";
 
 /**
@@ -73,7 +73,7 @@ export async function checkTenantCostMoves(
   now: Date = new Date(),
 ): Promise<CostMovedResult> {
   const products = await prismaService.product.findMany({
-    where: { tenantId, active: true, notForSale: false, costSource: { in: ["shopify", "qb"] } },
+    where: { tenantId, ...BUYABLE_PRODUCT_WHERE, costSource: { in: ["shopify", "qb"] } },
     select: { id: true, title: true, costKes: true, lastSyncedCostKes: true },
   });
 
