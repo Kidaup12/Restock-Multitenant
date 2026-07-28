@@ -279,6 +279,35 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
       .toBeGreaterThan(0);
   });
 
+  it("the catalogue's cost-moved flag is hidden from a member, not just its figure", async () => {
+    // The catalogue builds a "Cost moved" facet chip and a row dot from these
+    // fields. Filtering by that chip names the products whose buying price
+    // jumped, so the flag discloses more than the percentage does.
+    const product = await prismaService.product.findFirst({
+      where: { tenantId: seeded.tenantId, ...BUYABLE_PRODUCT_WHERE },
+      select: { id: true },
+    });
+    await prismaService.product.update({
+      where: { id: product!.id },
+      data: { costMovedPct: 37.5, costMovedAt: new Date() },
+    });
+
+    const member = await getStockCatalogue(seeded.tenantId, { canViewCosts: false });
+    for (const row of member) {
+      expect(row.costMovedPct).toBeNull();
+      expect(row.costMovedAt).toBeNull();
+    }
+
+    // The owner still sees it — this is a redaction, not a removal.
+    const owner = await getStockCatalogue(seeded.tenantId, { canViewCosts: true });
+    expect(owner.some((r) => r.costMovedPct === 37.5)).toBe(true);
+
+    await prismaService.product.update({
+      where: { id: product!.id },
+      data: { costMovedPct: null, costMovedAt: null },
+    });
+  });
+
   it("buy-list payload (what PlanView serializes) carries no cost numbers for a member", async () => {
     const buyList = await getBuyList(seeded.tenantId, { canViewCosts: false });
     expect(buyList!.rows.length).toBeGreaterThan(0);
