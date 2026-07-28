@@ -180,18 +180,21 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     expect(owner).not.toContain(MASK);
   });
 
-  it("Today reorder table: order costs masked", async () => {
-    const html = renderToStaticMarkup(
-      await ReorderTable({ tenantId: seeded.tenantId, canViewCosts: false })
-    );
-    expect(html).toContain("Reorder needed");
-    expect(kesDigits(html)).toHaveLength(0);
-    expect(html).toContain(MASK);
-
-    const owner = renderToStaticMarkup(
-      await ReorderTable({ tenantId: seeded.tenantId, canViewCosts: true })
-    );
-    expect(kesDigits(owner).length).toBeGreaterThan(0);
+  it("Today reorder table: no order money for anyone, owner included", async () => {
+    // Stronger than masking. The dashboard names what needs attention; how much
+    // to buy and what it costs belong to the planner, where the budget and
+    // horizon that size an order live. So there is no order cost to mask — for
+    // the owner either — and the row sends you to the planner instead.
+    for (const canViewCosts of [false, true]) {
+      const html = renderToStaticMarkup(
+        await ReorderTable({ tenantId: seeded.tenantId, canViewCosts })
+      );
+      expect(html).toContain("Reorder needed");
+      expect(kesDigits(html), "no order cost belongs on the dashboard").toHaveLength(0);
+      expect(html).not.toContain("Reorder qty");
+      expect(html).not.toContain("Order cost");
+      expect(html).toContain("/plan");
+    }
   });
 
   it("Stock catalogue: cost + cash-tied-up masked on every row, revenue stays", async () => {

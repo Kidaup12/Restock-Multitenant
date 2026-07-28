@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { filterByFacets, type FacetOptions, type FacetSelection } from "@/lib/facets";
+import { deriveFacetOptions, filterByFacets, type FacetSelection } from "@/lib/facets";
 import {
   computeMoneyBand,
   formatMovePct,
@@ -151,14 +151,12 @@ function moneyPredicate(f: Exclude<MoneyBandFilter, null>): (r: CatalogueRow) =>
 
 export function CatalogueView({
   rows,
-  facetOptions,
   categories,
   ownerFlags,
   canViewCosts,
   canManage,
 }: {
   rows: CatalogueRow[];
-  facetOptions: FacetOptions;
   categories: CategoryUsage[];
   ownerFlags: Record<string, OwnerFlags>;
   canViewCosts: boolean;
@@ -204,6 +202,11 @@ export function CatalogueView({
     }));
     return computeMoneyBand(moneyRows);
   }, [scoped]);
+
+  // Derived from the SAME scoped rows the health chips count. Deriving these
+  // server-side over the whole catalogue put two controls with identical
+  // labels and different numbers on one screen.
+  const facetOptions = useMemo(() => deriveFacetOptions(scoped.map((r) => r.facet)), [scoped]);
 
   const chips = useMemo<HealthChip[]>(() => {
     const counts = new Map<string, number>();
