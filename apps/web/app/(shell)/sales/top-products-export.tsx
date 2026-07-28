@@ -2,6 +2,7 @@
 
 import type { TopProduct } from "@/lib/data/sales";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
+import { useCurrency } from "@/components/currency-provider";
 
 /**
  * Export controls for the top-products table. Client-side because ExportBar
@@ -10,19 +11,20 @@ import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
  * no gated columns here.
  */
 
-const columns: ExportColumn<TopProduct>[] = [
+const columns = (currency: string): ExportColumn<TopProduct>[] => [
   { header: "Product", cell: (r) => r.title },
   { header: "SKU", cell: (r) => r.sku },
   { header: "Units", cell: (r) => r.unitsSold },
-  { header: "Revenue (KES)", cell: (r) => r.revenueKes },
+  { header: `Revenue (${currency})`, cell: (r) => r.revenueKes },
   { header: "Run rate (units/day)", cell: (r) => Math.round(r.runRate * 10) / 10 },
 ];
 
 export function TopProductsExportBar({ rows }: { rows: TopProduct[] }) {
+  const currency = useCurrency();
   return (
     <ExportBar
       rows={rows}
-      columns={columns}
+      columns={columns(currency)}
       filename="sales-top-products"
       document={{
         title: "Top products, 30 days",

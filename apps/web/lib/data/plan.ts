@@ -182,6 +182,29 @@ const stockoutDaysLeft = (days: number): number | null =>
 const stockoutRank = (r: { daysUntilStockout: number | null }): number =>
   r.daysUntilStockout ?? Number.POSITIVE_INFINITY;
 
+/** The shared head of every buy-list ordering: most urgent first, then whatever
+ *  empties soonest. Neither key is money. */
+const byUrgencyThenStockout = (a: BuyListRow, b: BuyListRow): number =>
+  (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
+  stockoutRank(a) - stockoutRank(b);
+
+/** Cost viewer's ordering: within a tie-group, the biggest line first. */
+const byUrgencyCostAware = (a: FullBuyListRow, b: FullBuyListRow): number =>
+  byUrgencyThenStockout(a, b) || b.lineTotalKes - a.lineTotalKes;
+
+/**
+ * Money-blind ordering: a cost never enters the sort, the same rule the transfer
+ * proposal follows. Redaction nulls the line total but not the position it put
+ * the row in — inside a tie-group that position IS the cost order, and since
+ * `recommendedQty` stays visible, unit cost follows from it. So a money-blind
+ * caller gets a deterministic order built from what they can already see:
+ * the larger order first, then SKU to break the remaining ties.
+ */
+const byUrgencyCostFree = (a: BuyListRow, b: BuyListRow): number =>
+  byUrgencyThenStockout(a, b) ||
+  b.recommendedQty - a.recommendedQty ||
+  a.sku.localeCompare(b.sku);
+
 function tierFor(urgency: string, daysLeftToOrder: number): BuyTier {
   if (urgency === "critical" || daysLeftToOrder <= 0) return "order_today";
   if (daysLeftToOrder <= 7) return "this_week";
@@ -201,8 +224,10 @@ function excludedReasonFor(
 }
 
 /** The latest run's buy list, or null when no forecast has run yet. Rows are
- *  built (and sorted) on full costs, then redacted, so ordering is identical
- *  whichever way the flag lands.
+ *  built on full costs and then redacted, but the ORDER follows the flag too:
+ *  the cost tiebreak is a cost viewer's, a money-blind caller is ranked on
+ *  cost-free keys (`byUrgencyCostFree`). Same rows either way, and the urgency /
+ *  stockout ordering that decides what to buy first is unchanged.
  *
  *  `coverDays` and `demandUplift` are optional what-ifs on the same engine.
  *  Absent (uplift absent or 1), every quantity is the persisted plan and every
@@ -424,10 +449,9 @@ export async function getBuyList(
     else activeRows.push(row);
   }
 
-  const byUrgency = (a: FullBuyListRow, b: FullBuyListRow) =>
-    (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
-    stockoutRank(a) - stockoutRank(b) ||
-    b.lineTotalKes - a.lineTotalKes;
+  // The ordering follows the flag: a money-blind caller's rows are ranked on
+  // cost-free keys, so the sequence they receive says nothing about cost.
+  const byUrgency = canViewCosts ? byUrgencyCostAware : byUrgencyCostFree;
   activeRows.sort(byUrgency);
   excludedRows.sort(byUrgency);
 
@@ -449,15 +473,20 @@ export async function getBuyList(
 }
 
 /** Null out every KES figure in a buy list for a money-blind caller — the row
- *  list and counts survive, the money does not. Mirrors `redactBudgetSplit`;
- *  reuses the same `redactRow`, so an action can fetch a buy list with costs and
- *  redact on the way out to the caller's own cost visibility. */
+ *  list and counts survive, the money does not. Reuses the same `redactRow`, so
+ *  an action can fetch a buy list with costs and redact on the way out to the
+ *  caller's own cost visibility.
+ *
+ *  Re-sorts as well as redacts. A list fetched with costs visible came back in
+ *  the cost-aware order, and that order outlives the nulled fields — so it is
+ *  rebuilt on the cost-free keys, leaving the caller exactly what `getBuyList`
+ *  would have handed them directly. */
 export function redactBuyList(buyList: BuyList, canViewCosts: boolean): BuyList {
   if (canViewCosts) return buyList;
   return {
     ...buyList,
-    rows: buyList.rows.map(redactRow),
-    excluded: buyList.excluded.map(redactExcluded),
+    rows: buyList.rows.map(redactRow).sort(byUrgencyCostFree),
+    excluded: buyList.excluded.map(redactExcluded).sort(byUrgencyCostFree),
     totalCostKes: null,
   };
 }
@@ -528,6 +557,11 @@ export type BudgetSplit = {
   leftoverKes: number | null;
   /** Criticals are non-negotiable: a budget below their cost overflows by this much. */
   overBudgetKes: number | null;
+  /** True when the split was withheld from a money-blind caller: the three row
+   *  lists are empty and every figure is null, because the split itself reads
+   *  costs out. Absent otherwise. Consumers should say so rather than render an
+   *  empty plan. */
+  withheld?: boolean;
 };
 
 /**
@@ -566,20 +600,34 @@ export function splitByBudget(rows: BuyListRow[], budgetKes: number): BudgetSpli
   };
 }
 
-/** Null out every KES figure in a split for a money-blind caller — the item
- *  lists and counts survive, the money does not. */
+/**
+ * Withhold a budget split from a money-blind caller.
+ *
+ * Nulling the KES aggregates is not enough here, because the funded/deferred
+ * partition is itself the cost figure: which rows fit under a cap is a pure
+ * function of their line totals against a budget the caller chooses, so running
+ * the same list against different budgets narrows every row's cost by bisection.
+ * There is no redacted form of that answer — so a money-blind caller gets no
+ * split at all, flagged `withheld` so the caller can say why rather than show an
+ * empty plan.
+ *
+ * This is the data layer refusing to compute a cost answer for someone who may
+ * not see costs; the caller should not reach it in the first place. A cost
+ * viewer's split passes through untouched.
+ */
 export function redactBudgetSplit(split: BudgetSplit, canViewCosts: boolean): BudgetSplit {
   if (canViewCosts) return split;
   return {
-    ...split,
-    funded: split.funded.map(redactRow),
-    deferred: split.deferred.map(redactRow),
-    checkCost: split.checkCost.map(redactRow),
+    budgetKes: split.budgetKes, // the caller's own input, not an answer
+    funded: [],
+    deferred: [],
+    checkCost: [],
     fundedCostKes: null,
     deferredCostKes: null,
     deferredAtRiskKes: null,
     leftoverKes: null,
     overBudgetKes: null,
+    withheld: true,
   };
 }
 

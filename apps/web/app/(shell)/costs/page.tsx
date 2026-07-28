@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile } from "@/components/ui/stat-tile";
+import { CostValue } from "@/components/ui/cost-value";
 import { SkeletonTableRows } from "@/components/ui/skeleton";
 import { getCostCoverage, getCostMovedAlerts, type CostCoverage } from "@/lib/data/costs";
 import type { CostSource } from "@/lib/cost";
@@ -59,7 +60,7 @@ async function CostsBoard({
         />
         <StatTile
           label="Revenue covered"
-          value={coverage.trustedRevenuePct == null ? "KES •••" : `${coverage.trustedRevenuePct}%`}
+          value={coverage.trustedRevenuePct == null ? <CostValue amount={null} /> : `${coverage.trustedRevenuePct}%`}
           delta={{ label: "of trailing-30d revenue", tone: "neutral" }}
         />
         <StatTile

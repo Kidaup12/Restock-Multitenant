@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
+import { formatMoney, formatNumber } from "@/lib/money";
+import { useCurrency } from "@/components/currency-provider";
 import { cn } from "@/lib/cn";
 import type { BuyList, BuyListRow, BuyTier, ExcludedReason, ExcludedRow } from "@/lib/data/plan";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
@@ -309,6 +311,7 @@ export function BuyChecklist({
   canOverride: boolean;
   backLink: React.ReactNode;
 }) {
+  const currency = useCurrency();
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -422,12 +425,12 @@ export function BuyChecklist({
     { header: "Order by", cell: (r) => dayLabel(r.orderByDate) },
     { header: "Order qty", cell: (r) => r.recommendedQty },
     // Revenue is a sales figure — exported for every role.
-    { header: "Revenue 30d (KES)", cell: (r) => r.revenue30dKes },
+    { header: `Revenue 30d (${currency})`, cell: (r) => r.revenue30dKes },
     // Money-blind members export what they see: no cost columns.
     ...(canViewCosts
       ? ([
-          { header: "Unit cost (KES)", cell: (r) => r.unitCostKes },
-          { header: "Line total (KES)", cell: (r) => r.lineTotalKes },
+          { header: `Unit cost (${currency})`, cell: (r) => r.unitCostKes },
+          { header: `Line total (${currency})`, cell: (r) => r.lineTotalKes },
         ] satisfies ExportColumn<BuyListRow>[])
       : []),
     { header: "Why", cell: (r) => r.reasoning },
@@ -451,7 +454,7 @@ export function BuyChecklist({
             title: "Restock buy list",
             subtitle: `Forecast run ${runDay} · ${rows.length} products`,
             footNote: canViewCosts
-              ? `Full list: KES ${Math.round(view.totalCostKes ?? 0).toLocaleString("en-KE")}`
+              ? `Full list: ${formatMoney(view.totalCostKes ?? 0, currency)}`
               : undefined,
           }}
         />
@@ -557,7 +560,7 @@ export function BuyChecklist({
                     <th scope="col" className={TH_NUM}>Days left</th>
                     <th scope="col" className={cn(TH, "hidden md:table-cell")}>Order by</th>
                     <th scope="col" className={TH_NUM}>Qty</th>
-                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>Rev · 30d (KES)</th>
+                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>Rev · 30d ({currency})</th>
                     <th scope="col" className={TH_NUM}>Line total</th>
                     <th scope="col" className="w-10 px-4 py-3" aria-label="Show reasoning" />
                   </tr>
@@ -638,8 +641,8 @@ export function BuyChecklist({
                           </td>
                           <td className={cn(TD_NUM, "hidden lg:table-cell")}>
                             {/* Revenue is a sales figure — shown to every role as a plain
-                                KES amount (unit in the header), like the Stock catalogue. */}
-                            {row.revenue30dKes > 0 ? Math.round(row.revenue30dKes).toLocaleString("en-KE") : "—"}
+                                amount (unit in the header), like the Stock catalogue. */}
+                            {row.revenue30dKes > 0 ? formatNumber(row.revenue30dKes) : "—"}
                           </td>
                           <td className={TD_NUM}>
                             <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />

@@ -72,13 +72,23 @@ describe.skipIf(!runnable)("insights (seeded local db)", () => {
     expect(missed).toEqual([...missed].sort((a, b) => b - a));
   });
 
-  it("hands a money-blind member the same rows in the same order, without the money", async () => {
-    const [owner, member] = await Promise.all([
+  it("ranks a money-blind member's idle capital on units, never on cash", async () => {
+    const [owner, member, ownerAll] = await Promise.all([
       getInsightsOverview(seeded.tenantId, { canViewCosts: true }),
       getInsightsOverview(seeded.tenantId, { canViewCosts: false }),
+      // The unpaged owner view: every idle row, to check the member's page is a
+      // subset of the same rows and not a different population.
+      getInsightsOverview(seeded.tenantId, { canViewCosts: true, limit: 1000 }),
     ]);
 
-    expect(member.cashRows.map((r) => r.productId)).toEqual(owner.cashRows.map((r) => r.productId));
+    // Cash at rest is on-hand x cost, so ranking on it and cutting to a page
+    // would leak both the order and the membership of the page. The member's
+    // page is ranked on units instead.
+    const units = member.cashRows.map((r) => r.onHandUnits);
+    expect(units).toEqual([...units].sort((a, b) => b - a));
+    const idleIds = new Set(ownerAll.cashRows.map((r) => r.productId));
+    for (const row of member.cashRows) expect(idleIds.has(row.productId)).toBe(true);
+    expect(member.cashRows).toHaveLength(owner.cashRows.length);
     expect(member.cashTotalKes).toBeNull();
     expect(member.deadStock.costKes).toBeNull();
     for (const row of member.cashRows) expect(row.cashKes).toBeNull();

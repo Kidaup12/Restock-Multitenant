@@ -45,6 +45,7 @@ export async function registerOpsCronSchedules(queue: OpsCronQueue): Promise<voi
 
 /** Fan the dispatch out into one job per tenant. Returns the tenant count. */
 export async function dispatchLimitsChecks(queue: OpsCronQueue): Promise<number> {
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every tenant is the job, and the per-tenant work it queues is scoped.
   const tenants = await prismaService.tenant.findMany({ select: { id: true } });
   if (tenants.length > 0) {
     await queue.addBulk(
@@ -69,6 +70,7 @@ export async function checkTenantLimits(
   tenantId: string,
   now: Date = new Date()
 ): Promise<LimitsCheckResult> {
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- reads one tenant by the id the job already carries; the worker has no session, so there is no resolver to route through.
   const tenant = await prismaService.tenant.findUnique({
     where: { id: tenantId },
     select: { plan: true, planLimits: true },

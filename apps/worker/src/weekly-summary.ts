@@ -20,6 +20,7 @@ export interface WeeklySummary {
 }
 
 export async function buildWeeklySummary(tenantId: string): Promise<WeeklySummary | null> {
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- reads one tenant by the id the job already carries; the worker has no session, so there is no resolver to route through.
   const tenant = await prismaService.tenant.findUnique({
     where: { id: tenantId },
     select: { name: true },

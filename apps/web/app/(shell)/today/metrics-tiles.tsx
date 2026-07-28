@@ -4,7 +4,8 @@ import {
   BanknoteIcon,
   LayersIcon,
 } from "@/components/icons";
-import { CostValue, formatCompact, formatNumber } from "@/components/ui/cost-value";
+import { CostValue } from "@/components/ui/cost-value";
+import { formatNumber } from "@/lib/money";
 import { StatTile, type StatDelta } from "@/components/ui/stat-tile";
 import { getTodayMetrics } from "@/lib/data/today";
 
@@ -35,7 +36,7 @@ export async function MetricsTiles({
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <StatTile
         label="Revenue, 30 days"
-        value={`KES ${formatCompact(m.revenue30dKes)}`}
+        value={<CostValue amount={m.revenue30dKes} compact />}
         delta={revenueDelta(m.revenue30dKes, m.revenuePrev30dKes)}
         icon={<BanknoteIcon />}
       />

@@ -148,6 +148,10 @@ describe("realtime client", () => {
           phase: string;
           done: number;
           total: number;
+          state?: "started" | "running" | "finished";
+          items?: number;
+          itemsTotal?: number;
+          runId?: string;
         }>();
         progressSeen.push(envelope.data.done);
       });

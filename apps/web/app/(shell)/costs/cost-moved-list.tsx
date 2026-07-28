@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CostValue } from "@/components/ui/cost-value";
+import { formatMoney } from "@/lib/money";
+import { useCurrency } from "@/components/currency-provider";
 import { formatMovePct } from "@/lib/cost";
 import type { CostMovedAlert } from "@/lib/data/costs";
 import { dismissCostMovedAction } from "./actions";
@@ -22,6 +24,7 @@ export function CostMovedList({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const currency = useCurrency();
   const [pending, start] = useTransition();
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -55,7 +58,7 @@ export function CostMovedList({
                 {a.costKes != null && (
                   <>
                     {" "}
-                    Now <CostValue amount={a.costKes} canViewCosts className="text-ink" /> vs price KES {Math.round(a.priceKes).toLocaleString("en-KE")}.
+                    Now <CostValue amount={a.costKes} canViewCosts className="text-ink" /> vs price {formatMoney(a.priceKes, currency)}.
                   </>
                 )}
               </p>

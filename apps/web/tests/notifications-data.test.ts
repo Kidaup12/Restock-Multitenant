@@ -83,15 +83,23 @@ describe.skipIf(!runnable)("notification feed (local db, RLS client)", () => {
   });
 
   it("pages newest-first with a stable cursor and no overlap or leakage", async () => {
-    const first = await listNotifications(tenantA, { limit: 10 });
+    const first = await listNotifications(tenantA, { limit: 10, canViewCosts: true });
     expect(first.items).toHaveLength(10);
     expect(first.items.map((n) => n.id)).toEqual(idsA.slice(0, 10));
     expect(first.nextCursor).toBe(idsA[9]);
 
-    const second = await listNotifications(tenantA, { cursor: first.nextCursor, limit: 10 });
+    const second = await listNotifications(tenantA, {
+      cursor: first.nextCursor,
+      limit: 10,
+      canViewCosts: true,
+    });
     expect(second.items.map((n) => n.id)).toEqual(idsA.slice(10, 20));
 
-    const third = await listNotifications(tenantA, { cursor: second.nextCursor, limit: 10 });
+    const third = await listNotifications(tenantA, {
+      cursor: second.nextCursor,
+      limit: 10,
+      canViewCosts: true,
+    });
     expect(third.items.map((n) => n.id)).toEqual(idsA.slice(20));
     expect(third.nextCursor).toBeNull();
 

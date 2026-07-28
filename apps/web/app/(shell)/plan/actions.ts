@@ -74,6 +74,15 @@ export async function planBudget(input: {
   const membership = await activeMembership(session.user.id);
   if (!membership) return err("You're not in a workspace.");
 
+  // Refuse before allocating, not after. The caller supplies the budget and the
+  // funded/deferred partition is a pure function of cost against it, so a
+  // money-blind caller could bisect the budget to recover each line's cost from
+  // the shape of the answer even with every figure redacted. There is no
+  // redacted form of this result — only "no".
+  if (!hasPermission(membership, "view_costs")) {
+    return err("Budget planning needs cost access.");
+  }
+
   // Gate 2 (plan) re-checked server-side: the budget allocator is a Growth
   // feature, so a crafted call from a Starter tenant can't bypass the UI lock.
   const plan = await getTenantPlan(membership.tenantId);
@@ -82,7 +91,7 @@ export async function planBudget(input: {
   }
 
   const budget = Number(input.budgetKes);
-  if (!Number.isFinite(budget) || budget < 0) return err("Enter a budget in KES.");
+  if (!Number.isFinite(budget) || budget < 0) return err(`Enter a budget in ${membership.tenant.currency}.`);
 
   // The allocator needs real costs, so the fetch is unredacted; what leaves
   // the server is redacted to the caller's own cost visibility.

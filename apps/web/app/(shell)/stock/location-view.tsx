@@ -2,7 +2,8 @@ import type { LocationRole } from "@wezesha/db";
 import { BoxIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader } from "@/components/ui/card";
-import { CostValue, formatNumber } from "@/components/ui/cost-value";
+import { CostValue } from "@/components/ui/cost-value";
+import { formatNumber } from "@/lib/money";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/cn";
 import {

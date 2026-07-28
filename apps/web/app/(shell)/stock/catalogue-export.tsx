@@ -1,6 +1,8 @@
 "use client";
 
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
+import { useCurrency } from "@/components/currency-provider";
+import { formatMoney } from "@/lib/money";
 
 /**
  * Export controls for the stock catalogue. Client-side because ExportBar
@@ -22,7 +24,8 @@ export type CatalogueExportRow = {
 
 /** Exported for tests: money-blind members get no cost columns. */
 export function catalogueExportColumns(
-  canViewCosts: boolean
+  canViewCosts: boolean,
+  currency: string
 ): ExportColumn<CatalogueExportRow>[] {
   return [
     { header: "Product", cell: (r) => r.title },
@@ -33,8 +36,8 @@ export function catalogueExportColumns(
     { header: "Status", cell: (r) => r.status },
     ...(canViewCosts
       ? ([
-          { header: "Unit cost (KES)", cell: (r) => r.costKes },
-          { header: "Stock value (KES)", cell: (r) => r.stockValueKes },
+          { header: `Unit cost (${currency})`, cell: (r) => r.costKes },
+          { header: `Stock value (${currency})`, cell: (r) => r.stockValueKes },
         ] satisfies ExportColumn<CatalogueExportRow>[])
       : []),
   ];
@@ -47,17 +50,18 @@ export function CatalogueExportBar({
   rows: CatalogueExportRow[];
   canViewCosts: boolean;
 }) {
+  const currency = useCurrency();
   const totalValueKes = rows.reduce((sum, r) => sum + (r.stockValueKes ?? 0), 0);
   return (
     <ExportBar
       rows={rows}
-      columns={catalogueExportColumns(canViewCosts)}
+      columns={catalogueExportColumns(canViewCosts, currency)}
       filename="stock-catalogue"
       document={{
         title: "Stock catalogue",
         subtitle: `${rows.length} products`,
         footNote: canViewCosts
-          ? `Stock value at cost: KES ${Math.round(totalValueKes).toLocaleString("en-KE")}`
+          ? `Stock value at cost: ${formatMoney(totalValueKes, currency)}`
           : undefined,
       }}
     />

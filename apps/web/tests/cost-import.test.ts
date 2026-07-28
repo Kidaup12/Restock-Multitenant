@@ -56,6 +56,50 @@ describe("previewCostImport", () => {
     expect(p.summary.invalid).toBe(2);
   });
 
+  it("rejects a negative cost in any notation, and says so", () => {
+    const p = preview("sku,cost\nCAN-SHE-340,-50\nCAN-SHE-340,(50)\nCAN-SHE-340,50-\nCAN-SHE-340,KES -50");
+    expect(p.summary.invalid).toBe(4);
+    for (const r of p.rows) {
+      expect(r.status).toBe("invalid");
+      expect(r.costKes).toBeNull();
+      expect(r.note).toMatch(/is negative — enter what you pay for one unit, as a positive number\./);
+    }
+    expect(p.rows[0]!.note).toBe(
+      'Cost "-50" is negative — enter what you pay for one unit, as a positive number.',
+    );
+  });
+
+  it("rejects a second decimal point instead of truncating to a believable number", () => {
+    const p = preview("sku,cost\nCAN-SHE-340,1.234.50");
+    expect(p.rows[0]).toMatchObject({ status: "invalid", costKes: null });
+    expect(p.rows[0]!.note).toBe(
+      'Cost "1.234.50" has more than one decimal point — write it like 1,234.50.',
+    );
+  });
+
+  it("rejects comma groups that aren't thousands (European decimal comma)", () => {
+    const p = preview("sku,cost\nCAN-SHE-340,\"1.234,50\"\nCAN-SHE-340,\"1250,50\"");
+    expect(p.summary.invalid).toBe(2);
+    expect(p.rows[1]!.note).toBe(
+      'Cost "1250,50" — use a dot for decimals and commas only for thousands, like 1,234.50.',
+    );
+  });
+
+  it("names blank and zero separately in the invalid note", () => {
+    const p = preview("sku,cost\nCAN-SHE-340,\nCAN-SHE-340,0");
+    expect(p.rows[0]!.note).toBe("No cost given — add a purchase cost for this row.");
+    expect(p.rows[1]!.note).toBe("Cost is zero — enter the real purchase cost.");
+  });
+
+  it("keeps accepting plain, thousands-separated, symbol-prefixed and padded costs", () => {
+    const p = preview(
+      'sku,cost\nCAN-SHE-340,1100\nCAN-SHE-340,"1,234.50"\nCAN-SHE-340,"KES 1,250.50"\nCAN-SHE-340," 900.25 "\nCAN-SHE-340,1234.5',
+    );
+    expect(p.rows.map((r) => r.costKes)).toEqual([1100, 1234.5, 1250.5, 900.25, 1234.5]);
+    expect(p.summary.invalid).toBe(0);
+    expect(p.summary.matched).toBe(5);
+  });
+
   it("marks a matched manual-pinned row as pinned (held back by default)", () => {
     const p = preview("sku,cost\nNL-GLY-750,300");
     expect(p.rows[0]).toMatchObject({ status: "matched", productId: "p2", pinned: true });

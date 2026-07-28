@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { useCurrency } from "@/components/currency-provider";
 import type { CostImportPreview } from "@/lib/cost";
 import { applyCostImportAction, previewCostImportAction, type ApplyResult } from "./actions";
 
@@ -18,6 +19,7 @@ const PLACEHOLDER = "sku,cost\nCAN-SHE-340,1100\nNL-GLY-750,320";
 
 export function CostImport({ canManage }: { canManage: boolean }) {
   const router = useRouter();
+  const currency = useCurrency();
   const [csv, setCsv] = useState("");
   const [preview, setPreview] = useState<CostImportPreview | null>(null);
   const [overwritePinned, setOverwritePinned] = useState(false);
@@ -129,7 +131,7 @@ export function CostImport({ canManage }: { canManage: boolean }) {
                   <tr>
                     <th className="px-3 py-2 text-left">Row</th>
                     <th className="px-3 py-2 text-left">Match</th>
-                    <th className="px-3 py-2 text-right">Cost</th>
+                    <th className="px-3 py-2 text-right">Cost ({currency})</th>
                     <th className="px-3 py-2 text-left">Result</th>
                   </tr>
                 </thead>

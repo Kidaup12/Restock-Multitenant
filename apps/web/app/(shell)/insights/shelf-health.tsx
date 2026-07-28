@@ -3,7 +3,8 @@ import { getInsightsOverview } from "@/lib/data/insights";
 import { AlertIcon, BoxIcon, CheckIcon, TrendDownIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { CostValue, formatCompact, formatNumber } from "@/components/ui/cost-value";
+import { CostValue } from "@/components/ui/cost-value";
+import { formatNumber } from "@/lib/money";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatTile } from "@/components/ui/stat-tile";
 import {
@@ -56,7 +57,7 @@ export async function ShelfHealth({
         />
         <StatTile
           label="Sales going missing"
-          value={`KES ${formatCompact(missedPerDay)}`}
+          value={<CostValue amount={missedPerDay} compact />}
           delta={{ label: "a day, while the shelf is empty", tone: "negative" }}
           icon={<TrendDownIcon />}
         />
@@ -108,7 +109,9 @@ export async function ShelfHealth({
                       <div className="text-xs text-ink-muted">{row.sku}</div>
                     </TableCell>
                     <TableCell numeric>{row.runRatePerDay.toFixed(1)}/day</TableCell>
-                    <TableCell numeric>KES {formatNumber(row.missedSalesKes)}</TableCell>
+                    <TableCell numeric>
+                      <CostValue amount={row.missedSalesKes} />
+                    </TableCell>
                     <TableCell numeric>
                       {row.lastSoldAt ? dayLabel(row.lastSoldAt) : "never"}
                     </TableCell>

@@ -37,6 +37,7 @@ export default async function SalesPage() {
   }
 
   const tenantId = membership.tenantId;
+  const currency = membership.tenant.currency;
   const canFix = membership.role === "OWNER" || membership.role === "ADMIN";
 
   return (
@@ -76,7 +77,7 @@ export default async function SalesPage() {
           </Card>
         }
       >
-        <MonthBars tenantId={tenantId} />
+        <MonthBars tenantId={tenantId} currency={currency} />
       </Suspense>
 
       <Suspense
@@ -86,7 +87,7 @@ export default async function SalesPage() {
           </Card>
         }
       >
-        <TopProducts tenantId={tenantId} />
+        <TopProducts tenantId={tenantId} currency={currency} />
       </Suspense>
     </div>
   );

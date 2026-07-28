@@ -75,12 +75,62 @@ export function normName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
 }
 
-/** Parse a money string ("1,234.50", "KES 250") → a positive number, or null
- *  when unusable. Zero and negatives are rejected (zero-as-missing). */
+/** A cost cell either yields a positive number or a note the owner can act on. */
+type CostCell = { cost: number; note: null } | { cost: null; note: string };
+
+/**
+ * Parse a money cell ("1,234.50", "KES 250", " 900 ") → a positive number, or a
+ * note saying what to fix. Currency symbols/codes and whitespace are ignored;
+ * a comma is a thousands separator and a dot is the decimal point.
+ *
+ * Rejected rather than coerced, because a silently "corrected" cost becomes a
+ * believable-but-wrong margin and buy quantity:
+ *   - zero or blank (zero-as-missing)
+ *   - negatives in any notation: "-50", "50-", "(50)"
+ *   - anything with two decimal points or comma groups that aren't thousands
+ *     ("1.234.50", "1.234,50") — the intended value can't be known.
+ */
+function parseCostCell(raw: string | undefined | null): CostCell {
+  const text = String(raw ?? "").trim();
+  if (text === "") return { cost: null, note: "No cost given — add a purchase cost for this row." };
+  // A cell with no digits at all is missing, not negative — spreadsheets often
+  // write a bare dash for "nothing here", and calling that negative reads as a
+  // different problem than the one the owner has.
+  if (!/[0-9]/.test(text)) return { cost: null, note: `Cost "${text}" isn't a number.` };
+
+  // Sign markers survive currency symbols and spacing ("KES -50", "(50)").
+  if (/[-()]/.test(text.replace(/[^0-9.,()\- ]/g, ""))) {
+    return {
+      cost: null,
+      note: `Cost "${text}" is negative — enter what you pay for one unit, as a positive number.`,
+    };
+  }
+
+  // Drop currency symbols/codes and spaces; keep only the number and its separators.
+  const digits = text.replace(/[^0-9.,]/g, "");
+  if (!/[0-9]/.test(digits)) return { cost: null, note: `Cost "${text}" isn't a number.` };
+  if ((digits.match(/\./g) ?? []).length > 1) {
+    return {
+      cost: null,
+      note: `Cost "${text}" has more than one decimal point — write it like 1,234.50.`,
+    };
+  }
+  if (digits.includes(",") && !/^[0-9]{1,3}(,[0-9]{3})*(\.[0-9]+)?$/.test(digits)) {
+    return {
+      cost: null,
+      note: `Cost "${text}" — use a dot for decimals and commas only for thousands, like 1,234.50.`,
+    };
+  }
+
+  const n = Number.parseFloat(digits.replace(/,/g, ""));
+  if (!Number.isFinite(n)) return { cost: null, note: `Cost "${text}" isn't a number.` };
+  if (n === 0) return { cost: null, note: "Cost is zero — enter the real purchase cost." };
+  return { cost: n, note: null };
+}
+
+/** Positive parsed cost, or null when the cell is unusable (see parseCostCell). */
 export function parseCost(raw: string | undefined | null): number | null {
-  if (raw == null) return null;
-  const n = Number.parseFloat(String(raw).replace(/[^0-9.]/g, ""));
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return parseCostCell(raw).cost;
 }
 
 export type MatchProduct = {
@@ -182,15 +232,16 @@ export function previewCostImport(
     const row = rows[i]!;
     const sku = get(row, "sku") || null;
     const name = get(row, "name") || null;
-    const costKes = parseCost(get(row, "cost"));
+    const cost = parseCostCell(get(row, "cost"));
+    const costKes = cost.cost;
     const rowNumber = i;
     summary.total++;
 
     const base = { rowNumber, sku, name, costKes, productId: null, title: null, pinned: false };
 
-    if (costKes == null) {
+    if (cost.cost == null) {
       summary.invalid++;
-      out.push({ ...base, status: "invalid", note: "No usable cost (blank, zero or negative)." });
+      out.push({ ...base, status: "invalid", note: cost.note });
       continue;
     }
 

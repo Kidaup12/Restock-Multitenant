@@ -24,11 +24,13 @@ import {
   fetchLocationsWithInventory,
   fetchOrdersSince,
   fetchProducts,
+  fetchShopSettings,
   numericCore,
   type ShopifyClient,
   type ShopifyLocationNode,
   type ShopifyOrderNode,
   type ShopifyProductNode,
+  type ShopSettings,
 } from "@wezesha/shopify";
 import type { ProductStatus } from "@wezesha/db";
 
@@ -56,6 +58,7 @@ type ProgressFn = (done: number, total: number) => Promise<void> | void;
 /** The Shopify surface the sync touches, injectable for job tests. */
 export interface ShopifySyncApi {
   ensureWebhooks(callbackUrl: string): Promise<void>;
+  shopSettings(): Promise<ShopSettings>;
   products(sinceIso: string | null): Promise<ShopifyProductNode[]>;
   locations(): Promise<ShopifyLocationNode[]>;
   orders(sinceIso: string): Promise<ShopifyOrderNode[]>;
@@ -64,10 +67,28 @@ export interface ShopifySyncApi {
 export function realShopifySyncApi(client: ShopifyClient): ShopifySyncApi {
   return {
     ensureWebhooks: (callbackUrl) => ensureWebhookSubscriptions(client, callbackUrl),
+    shopSettings: () => fetchShopSettings(client),
     products: (sinceIso) => fetchProducts(client, sinceIso),
     locations: () => fetchLocationsWithInventory(client),
     orders: (sinceIso) => fetchOrdersSince(client, sinceIso),
   };
+}
+
+/** Adopt the store's own currency. The store is the authority — the app used to
+ *  render every figure in shillings whatever the shop actually traded in. Read
+ *  each sync, not just at install, so a connected store fixes itself. */
+async function syncShopCurrency(tenantId: string, api: ShopifySyncApi): Promise<void> {
+  try {
+    const { currencyCode } = await api.shopSettings();
+    if (!currencyCode) return;
+    await prismaService.tenant.updateMany({
+      where: { id: tenantId, currency: { not: currencyCode } },
+      data: { currency: currencyCode },
+    });
+  } catch (err) {
+    // Never fail a sync over a display setting.
+    console.error(`worker: could not read shop settings for ${tenantId}`, err);
+  }
 }
 
 async function getCursor(tenantId: string, resource: string): Promise<Date | null> {
@@ -296,6 +317,7 @@ async function syncLocationsAndInventory(
       if (!productId) continue; // variant not in the catalogue (gift card) — skip
       const onHand = level.quantities?.find((q) => q.name === "on_hand")?.quantity ?? 0;
       const incoming = level.quantities?.find((q) => q.name === "incoming")?.quantity ?? 0;
+      // eslint-disable-next-line tenant-safety/require-tenant-scope -- the unique key is (locationId, productId) and both ids were resolved inside this tenant's sync, so the lookup cannot reach another tenant's row; the created row carries tenantId.
       await prismaService.inventoryLevel.upsert({
         where: { locationId_productId: { locationId: row.id, productId } },
         create: { tenantId, locationId: row.id, productId, onHand, incoming },
@@ -337,6 +359,7 @@ async function syncOrders(
   // The trading day is the tenant's, not UTC — the same rule, and the same
   // function, the till feed uses, so one day of trade never lands on two dates
   // depending on which channel it came through.
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- reads one tenant by the id the job already carries; the worker has no session, so there is no resolver to route through.
   const tenant = await prismaService.tenant.findUnique({
     where: { id: tenantId },
     select: { timezone: true },
@@ -459,6 +482,7 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       }
 
       const runStart = new Date();
+      await syncShopCurrency(tenantId, api);
 
       // ── Products (delta since cursor; full catalog on first run) ────────────
       // The phase opens before the fetch, which is the longest silent stretch of

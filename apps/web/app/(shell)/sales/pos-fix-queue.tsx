@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader } from "@/components/ui/card";
-import { formatNumber } from "@/components/ui/cost-value";
+import { CostValue } from "@/components/ui/cost-value";
 import { getPosMatchProducts, getUnmatchedPosSkus } from "@/lib/data/pos-queues";
 import { UnmatchedRow } from "./unmatched-row";
 
@@ -23,7 +23,7 @@ export async function PosFixQueue({ tenantId, canFix }: { tenantId: string; canF
         subtitle="These physical sales match no product, so they don't count toward run rate yet. Match them or mark them not-a-product."
         action={
           <Badge tone="warning">
-            {rows.length} SKU{rows.length === 1 ? "" : "s"} · KES {formatNumber(totalRevenue)}
+            {rows.length} SKU{rows.length === 1 ? "" : "s"} · <CostValue amount={totalRevenue} />
           </Badge>
         }
       />

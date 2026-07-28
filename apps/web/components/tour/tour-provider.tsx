@@ -63,10 +63,14 @@ const MARGIN = 12;
 export function TourProvider({
   role,
   autoStart,
+  canOpenInsights = true,
   children,
 }: {
   role: Role | null;
   autoStart: boolean;
+  /** False when the workspace's plan locks Insights — the tour must not walk
+   *  someone onto a screen they cannot open. */
+  canOpenInsights?: boolean;
   children: React.ReactNode;
 }) {
   const [steps, setSteps] = useState<TourStep[] | null>(null);
@@ -87,13 +91,15 @@ export function TourProvider({
     // Keep a step if the engine can navigate to its page (STEP_ROUTES) or its
     // target is already on screen — so the walkthrough visits every page, not
     // just the sidebar links visible from Today.
-    const chosen = tourStepsForRole(role).filter((s) => STEP_ROUTES[s.key] || findTarget(s));
+    const chosen = tourStepsForRole(role, canOpenInsights).filter(
+      (s) => STEP_ROUTES[s.key] || findTarget(s)
+    );
     if (chosen.length === 0) return;
     setIndex(0);
     setRect(null);
     setCardStyle(null);
     setSteps(chosen);
-  }, [role]);
+  }, [role, canOpenInsights]);
 
   const finish = useCallback(() => {
     setSteps(null);

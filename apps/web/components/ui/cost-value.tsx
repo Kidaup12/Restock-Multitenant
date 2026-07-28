@@ -1,27 +1,28 @@
+"use client";
+
 import { cn } from "@/lib/cn";
+import { useCurrency } from "@/components/currency-provider";
+import { formatMoney, maskedMoney } from "@/lib/money";
 
 /**
- * Money formatting + the cost-visibility seam.
+ * The cost-visibility seam.
  *
  * CostValue is the single place cost/margin figures render. It reads one dumb
  * `canViewCosts` boolean (default true) and masks either when that is false or
  * when the amount is null — the data layer nulls cost fields for money-blind
  * members, so a redacted payload renders as the mask with no wiring beyond the
  * value itself. Nothing here knows about roles or sessions.
+ *
+ * The currency comes from the workspace via context, not a prop, so a screen
+ * cannot forget to pass it. The formatting itself lives in `lib/money.ts`
+ * because this file is a client module: server components must import the
+ * formatters from there, not from here.
  */
 
-/** Thousands-separated integer, e.g. 1234567 -> "1,234,567". */
-export function formatNumber(value: number): string {
-  return Math.round(value).toLocaleString("en-KE");
-}
-
-/** Compact money magnitude: 1_550_000 -> "1.55M", 214_000 -> "214K", 830 -> "830". */
-export function formatCompact(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(2)}M`;
-  if (abs >= 100_000) return `${Math.round(value / 1_000)}K`;
-  return formatNumber(value);
-}
+// The formatters are deliberately NOT re-exported here. A re-export from a
+// client module is still a client reference, so it would break a server
+// component just as surely as defining it here would — while looking like it
+// works. Import them from "@/lib/money".
 
 export function CostValue({
   amount,
@@ -35,11 +36,10 @@ export function CostValue({
   compact?: boolean;
   className?: string;
 }) {
+  const currency = useCurrency();
   return (
     <span className={cn("tabular-nums", className)}>
-      {canViewCosts && amount != null
-        ? `KES ${compact ? formatCompact(amount) : formatNumber(amount)}`
-        : "KES •••"}
+      {canViewCosts && amount != null ? formatMoney(amount, currency, { compact }) : maskedMoney(currency)}
     </span>
   );
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Prisma, prismaForTenantTx } from "@wezesha/db";
+import { DEFAULT_PLAN, Prisma, prismaForTenantTx } from "@wezesha/db";
 import { listMemberships } from "@/lib/auth";
 
 /**
@@ -14,10 +14,18 @@ import { listMemberships } from "@/lib/auth";
  * pattern stays correct if the Tenant table ever gains an `id = app.tenant_id`
  * policy of its own.
  *
- * TenantConfig is deliberately not seeded: every reader treats a missing row as
- * "all defaults" (lib/data/today.ts, lib/capabilities, lib/limits/evaluate.ts,
- * packages/pos falls back to the tenant's own slug), so an all-null row would
- * be state that means nothing.
+ * Both companion rows are written in that same transaction, so a workspace is
+ * never half-provisioned:
+ *  - Membership, making the caller OWNER.
+ *  - TenantConfig, so every tenant has exactly one settings row from minute
+ *    one. Its columns stay null on purpose — each one documents "null = code
+ *    default", and the readers (lib/data/today.ts, lib/capabilities,
+ *    lib/limits/evaluate.ts, packages/pos) already honour that. Seeding a value
+ *    here would freeze a default that is meant to track the code.
+ *
+ * `plan` is set explicitly rather than left null. Null already resolves to
+ * DEFAULT_PLAN, so this changes no behaviour — it makes the tier a stated fact
+ * on the row instead of an inference the limits layer has to make.
  */
 
 export const WORKSPACE_NAME_MAX = 60;
@@ -44,7 +52,8 @@ export type CreateWorkspaceResult =
   | { ok: false; error: string };
 
 /** Unique-violation on Tenant.slug — the only P2002 this transaction can raise
- *  (the membership's (userId, tenantId) pair is fresh by construction). */
+ *  (the membership's (userId, tenantId) pair and the config's tenantId are both
+ *  fresh by construction). */
 function slugTaken(error: unknown): boolean {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") {
     return false;
@@ -89,10 +98,11 @@ export async function createWorkspace(input: {
     const tenantId = randomUUID();
     try {
       await prismaForTenantTx(tenantId, async (tx) => {
-        await tx.tenant.create({ data: { id: tenantId, name, slug } });
+        await tx.tenant.create({ data: { id: tenantId, name, slug, plan: DEFAULT_PLAN } });
         await tx.membership.create({
           data: { userId: input.userId, tenantId, role: "OWNER" },
         });
+        await tx.tenantConfig.create({ data: { tenantId } });
       });
       return { ok: true, tenantId, slug, created: true };
     } catch (error) {

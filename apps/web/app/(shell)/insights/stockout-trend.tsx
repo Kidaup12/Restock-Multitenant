@@ -1,7 +1,7 @@
 import { getStockoutTrend } from "@/lib/data/insights";
 import { ChartIcon } from "@/components/icons";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { formatNumber } from "@/components/ui/cost-value";
+import { formatNumber } from "@/lib/money";
 import { EmptyState } from "@/components/ui/empty-state";
 
 const weekLabel = (d: Date): string =>

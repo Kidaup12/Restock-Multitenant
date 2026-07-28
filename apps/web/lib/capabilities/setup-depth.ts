@@ -101,7 +101,7 @@ const UNLOCKS: Record<SetupSignal, SetupUnlock> = {
   costs: {
     signal: "costs",
     title: "Add product costs",
-    detail: "Unlock margins, cash tied up, and budget planning in KES.",
+    detail: "Unlock margins, cash tied up, and budget planning.",
   },
   suppliers: {
     signal: "suppliers",

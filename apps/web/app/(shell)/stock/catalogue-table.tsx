@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { BoxIcon } from "@/components/icons";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getCustomCategories, getStockCatalogue } from "@/lib/data/stock";
@@ -28,7 +29,15 @@ export async function CatalogueTable({
       <EmptyState
         icon={<BoxIcon />}
         title="No products yet"
-        description="Products appear here once a catalogue sync or import lands."
+        description="Your products appear here once your Shopify catalogue has synced."
+        action={
+          <Link
+            href="/settings/connections"
+            className="flex h-10 items-center justify-center rounded-md bg-accent px-4 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong"
+          >
+            Connect Shopify
+          </Link>
+        }
       />
     );
   }

@@ -32,6 +32,7 @@ async function actorContext(need: PermissionKey[]) {
   for (const key of need) if (!hasPermission(membership, key)) return null;
   return {
     tenantId: membership.tenantId,
+    currency: membership.tenant.currency,
     actor: {
       userId: session.user.id,
       name: membership.displayName ?? session.user.name ?? session.user.email,
@@ -96,7 +97,7 @@ export async function setManualCostAction(input: {
     previousSource: product.costSource,
   });
   revalidateCatalogue();
-  return { ok: true, message: `Pinned ${product.title} cost to KES ${rounded.toLocaleString("en-KE")}.` };
+  return { ok: true, message: `Pinned ${product.title} cost to ${ctx.currency} ${rounded.toLocaleString("en-KE")}.` };
 }
 
 /**
@@ -189,8 +190,8 @@ export async function setPriceAction(input: {
   return {
     ok: true,
     message: product.shopifyVariantId
-      ? `${product.title} price set to KES ${rounded.toLocaleString("en-KE")} — the next store sync will bring the store's price back.`
-      : `${product.title} price set to KES ${rounded.toLocaleString("en-KE")}.`,
+      ? `${product.title} price set to ${ctx.currency} ${rounded.toLocaleString("en-KE")} — the next store sync will bring the store's price back.`
+      : `${product.title} price set to ${ctx.currency} ${rounded.toLocaleString("en-KE")}.`,
   };
 }
 

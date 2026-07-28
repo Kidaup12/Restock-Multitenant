@@ -1,7 +1,7 @@
 import { hasPermission, type PermissionSource } from "@/lib/auth/permissions";
 
 /**
- * Gate for KES cost/margin figures: renders children only when the viewing
+ * Gate for cost/margin figures: renders children only when the viewing
  * membership has `view_costs`, otherwise a masked placeholder (or the given
  * fallback). No hooks, so it works in server and client components alike.
  * The gate hides display only — callers should also skip the underlying

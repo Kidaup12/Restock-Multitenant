@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { prismaService } from "@wezesha/db";
+import { DEFAULT_PLAN, prismaService } from "@wezesha/db";
 import { createWorkspace, workspaceSlug, WORKSPACE_NAME_MAX } from "../lib/auth/workspaces";
 
 /**
@@ -66,6 +66,49 @@ describe.skipIf(!runnable)("createWorkspace (local db)", () => {
     expect(memberships[0]!.role).toBe("OWNER");
   });
 
+  it("provisions the tenant with a stated plan and its settings row", async () => {
+    const result = await createWorkspace({ userId: ownerId, name: `${NAME_PREFIX} Eta` });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // The tier is written, not inferred: null would resolve to the same tier,
+    // which is exactly why a silent null is easy to mistake for a decision.
+    const tenant = await prismaService.tenant.findUnique({ where: { id: result.tenantId } });
+    expect(tenant?.plan).toBe(DEFAULT_PLAN);
+
+    // Exactly one config row, and it carries no invented settings — every
+    // column stays null so the code defaults keep applying.
+    const configs = await prismaService.tenantConfig.findMany({
+      where: { tenantId: result.tenantId },
+    });
+    expect(configs).toHaveLength(1);
+    expect(configs[0]!.alertEmail).toBeNull();
+    expect(configs[0]!.posFeedSlug).toBeNull();
+    expect(configs[0]!.notifyPrefs).toBeNull();
+    expect(configs[0]!.featureFlags).toBeNull();
+  });
+
+  it("rolls the whole attempt back when the slug is already taken", async () => {
+    const name = `${NAME_PREFIX} Theta`;
+    // Occupy the first-choice slug so creation has to retry with a suffix.
+    const squatter = await prismaService.tenant.create({
+      data: { name: `${name} Squatter`, slug: workspaceSlug(name) },
+    });
+
+    const result = await createWorkspace({ userId: ownerId, name });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.slug).not.toBe(workspaceSlug(name));
+    expect(result.slug.startsWith(workspaceSlug(name))).toBe(true);
+
+    // The abandoned attempt left nothing behind, and the squatter — created
+    // outside this path — is untouched.
+    expect(
+      await prismaService.tenantConfig.count({ where: { tenantId: result.tenantId } }),
+    ).toBe(1);
+    expect(await prismaService.tenantConfig.count({ where: { tenantId: squatter.id } })).toBe(0);
+  });
+
   it("gives two workspaces of the same name different slugs", async () => {
     const name = `${NAME_PREFIX} Beta`;
     const [mine, theirs] = [
@@ -93,6 +136,10 @@ describe.skipIf(!runnable)("createWorkspace (local db)", () => {
 
     const owned = await prismaService.tenant.count({ where: { name } });
     expect(owned).toBe(1);
+    // The second submit re-used the workspace rather than adding a config row.
+    expect(
+      await prismaService.tenantConfig.count({ where: { tenantId: first.tenantId } }),
+    ).toBe(1);
   });
 
   it("survives a genuinely concurrent double submit", async () => {
@@ -105,10 +152,11 @@ describe.skipIf(!runnable)("createWorkspace (local db)", () => {
 
     // The race may legitimately mint two tenants (neither call can see the
     // other's uncommitted row), but each must be a valid workspace the creator
-    // owns — never a tenant with no owner, and never a shared slug.
+    // owns — never a tenant with no owner, never a shared slug, and never one
+    // missing or doubling its config row.
     const tenants = await prismaService.tenant.findMany({
       where: { name },
-      select: { id: true, slug: true },
+      select: { id: true, slug: true, plan: true },
     });
     expect(tenants.length).toBeGreaterThanOrEqual(1);
     expect(new Set(tenants.map((t) => t.slug)).size).toBe(tenants.length);
@@ -117,6 +165,8 @@ describe.skipIf(!runnable)("createWorkspace (local db)", () => {
         where: { tenantId: tenant.id, userId: ownerId, role: "OWNER" },
       });
       expect(owners).toBe(1);
+      expect(tenant.plan).toBe(DEFAULT_PLAN);
+      expect(await prismaService.tenantConfig.count({ where: { tenantId: tenant.id } })).toBe(1);
     }
   });
 

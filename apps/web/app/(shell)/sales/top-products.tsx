@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { formatNumber } from "@/components/ui/cost-value";
+import { formatNumber } from "@/lib/money";
 import {
   Table,
   TableBody,
@@ -12,7 +12,14 @@ import {
 import { getTopProducts } from "@/lib/data/sales";
 import { TopProductsExportBar } from "./top-products-export";
 
-export async function TopProducts({ tenantId }: { tenantId: string }) {
+/** `currency` is a prop because the revenue column header is a plain string. */
+export async function TopProducts({
+  tenantId,
+  currency,
+}: {
+  tenantId: string;
+  currency: string;
+}) {
   const rows = await getTopProducts(tenantId, { days: 30, limit: 10 });
 
   if (rows.length === 0) {
@@ -42,7 +49,7 @@ export async function TopProducts({ tenantId }: { tenantId: string }) {
             <TableHead>Product</TableHead>
             <TableHead>SKU</TableHead>
             <TableHead numeric>Units</TableHead>
-            <TableHead numeric>Revenue (KES)</TableHead>
+            <TableHead numeric>Revenue ({currency})</TableHead>
             <TableHead numeric>Run rate</TableHead>
           </TableHeader>
           <TableBody>

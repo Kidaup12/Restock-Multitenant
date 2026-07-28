@@ -1,5 +1,6 @@
 import { BanknoteIcon, ChartIcon, TrendUpIcon } from "@/components/icons";
-import { formatCompact, formatNumber } from "@/components/ui/cost-value";
+import { CostValue } from "@/components/ui/cost-value";
+import { formatNumber } from "@/lib/money";
 import { StatTile, type StatDelta } from "@/components/ui/stat-tile";
 import { getSalesComparison } from "@/lib/data/sales";
 
@@ -24,7 +25,7 @@ export async function SalesHeadline({ tenantId }: { tenantId: string }) {
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
       <StatTile
         label="Revenue, 30 days"
-        value={`KES ${formatCompact(revenueKes)}`}
+        value={<CostValue amount={revenueKes} compact />}
         delta={delta}
         icon={<BanknoteIcon />}
       />
@@ -36,7 +37,7 @@ export async function SalesHeadline({ tenantId }: { tenantId: string }) {
       />
       <StatTile
         label="Daily average"
-        value={`KES ${formatCompact(revenueKes / 30)}`}
+        value={<CostValue amount={revenueKes / 30} compact />}
         delta={{ label: `${formatNumber(unitsSold / 30)} units/day`, tone: "neutral" }}
         icon={<TrendUpIcon />}
       />

@@ -39,7 +39,15 @@ export async function PoList({
             <EmptyState
               icon={<ClipboardIcon />}
               title="No purchase orders yet"
-              description="Select queued products above and create your first purchase order."
+              description="Select queued products above and create your first purchase order — or start from the buy list."
+              action={
+                <Link
+                  href="/plan"
+                  className="flex h-10 items-center justify-center rounded-md bg-accent px-4 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong"
+                >
+                  Go to the buy list
+                </Link>
+              }
             />
           </CardContent>
         ) : (

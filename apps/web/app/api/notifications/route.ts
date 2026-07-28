@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { activeMembership, getSession } from "@/lib/auth";
+import { hasPermission } from "@/lib/auth/permissions";
 import { clampLimit, getUnreadCount, listNotifications } from "@/lib/notifications/data";
 import { withCapture } from "@/lib/observability/wrap";
 
@@ -22,12 +23,16 @@ export const GET = withCapture(async (request: Request) => {
   }
 
   const params = new URL(request.url).searchParams;
+  // Cost-bearing notifications are filtered to the caller's own permission, so
+  // the page and the badge agree on what this reader may see.
+  const canViewCosts = hasPermission(membership, "view_costs");
   const [page, unread] = await Promise.all([
     listNotifications(membership.tenantId, {
       cursor: params.get("cursor"),
       limit: clampLimit(params.get("limit")),
+      canViewCosts,
     }),
-    getUnreadCount(membership.tenantId),
+    getUnreadCount(membership.tenantId, { canViewCosts }),
   ]);
 
   return NextResponse.json({

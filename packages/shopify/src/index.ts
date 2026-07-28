@@ -31,4 +31,5 @@ export type {
 export { bucketSalesByProductDay, computeWindowStart } from "./sales";
 export type { DayBucket } from "./sales";
 export { WEBHOOK_TOPICS, ensureWebhookSubscriptions } from "./webhooks";
+export { fetchShopSettings, type ShopSettings } from "./shop";
 export type { WebhookTopic } from "./webhooks";

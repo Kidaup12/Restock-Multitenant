@@ -69,6 +69,9 @@ describe.skipIf(!runnable)("owner keep-active pin through the Shopify sync (real
       publisher,
       makeApi: () => ({
         ensureWebhooks: async () => {},
+        // These suites assert catalogue behaviour; the store's currency is not
+        // part of it, so report none and leave the workspace's value alone.
+        shopSettings: async () => ({ currencyCode: null }),
         products: async () => catalogue,
         locations: async () => [],
         orders: async () => [],

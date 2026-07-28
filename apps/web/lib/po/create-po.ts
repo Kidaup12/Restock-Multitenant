@@ -83,7 +83,7 @@ export async function createPoFromOrders(
 
     const [existing, tenant] = await Promise.all([
       tx.purchaseOrder.findMany({ select: { poNumber: true } }),
-      tx.tenant.findUnique({ where: { id: tenantId }, select: { poNumberFloor: true } }),
+      tx.tenant.findUnique({ where: { id: tenantId }, select: { poNumberFloor: true, currency: true } }),
     ]);
     const poNumber = nextPoNumber(
       existing.map((r) => r.poNumber),
@@ -96,6 +96,12 @@ export async function createPoFromOrders(
         supplierId: supplier.id,
         poNumber,
         status: "draft",
+        // The TENANT's currency, not the supplier's: every line is priced from
+        // Product.costKes, which is held in the workspace's own currency. A
+        // supplier who invoices in another one still needs converting, and
+        // stamping their code here would send them a document whose numbers are
+        // in one currency and whose label says another.
+        currency: tenant?.currency ?? "KES",
         subtotalKes: subtotal(lines),
         createdByUserId: actor?.userId ?? null,
         createdByName: actor?.name ?? null,

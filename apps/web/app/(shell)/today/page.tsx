@@ -102,7 +102,7 @@ export default async function TodayPage() {
           </Card>
         }
       >
-        <RevenueTrend tenantId={tenantId} />
+        <RevenueTrend tenantId={tenantId} currency={membership.tenant.currency} />
       </Suspense>
 
       <div data-tour="today-reorder">

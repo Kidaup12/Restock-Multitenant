@@ -1,15 +1,24 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { prismaService } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, prismaService } from "@wezesha/db";
 import { seedDev, type SeedResult } from "../../../packages/db/scripts/seed-dev";
 import { hasPermission } from "../lib/auth/permissions";
 import { MoneyGate } from "../components/money-gate";
-import { formatCompact } from "../components/ui/cost-value";
+import { formatCompact } from "../lib/money";
 import { getReorderNeeded, getTodayMetrics } from "../lib/data/today";
 import { getStockByLocation, getStockCatalogue } from "../lib/data/stock";
-import { getBuyList, redactBudgetSplit, splitByBudget, type BuyListRow } from "../lib/data/plan";
+import {
+  getBuyList,
+  redactBudgetSplit,
+  redactBuyList,
+  splitByBudget,
+  type BuyList,
+  type BuyListRow,
+} from "../lib/data/plan";
 import { getInsightsOverview } from "../lib/data/insights";
+import { getCostMovedAlerts } from "../lib/data/costs";
+import { getUnreadCount, listNotifications } from "../lib/notifications/data";
 import { getDistributionProposal } from "../lib/data/transfers";
 
 // ReorderTable links to /stock; next/link needs an app-router context that a
@@ -33,6 +42,7 @@ import { CatalogueView } from "../app/(shell)/stock/catalogue-view";
 import { LocationView } from "../app/(shell)/stock/location-view";
 import { catalogueExportColumns } from "../app/(shell)/stock/catalogue-export";
 import { ShelfHealth } from "../app/(shell)/insights/shelf-health";
+import { CostMovedList } from "../app/(shell)/costs/cost-moved-list";
 import { ProposalView } from "../app/(shell)/transfers/proposal-view";
 import { transferExportColumns } from "../app/(shell)/transfers/transfers-export";
 
@@ -280,23 +290,58 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     }
     expect(costNumbers(buyList)).toEqual([]);
 
-    // Owner list keeps the numbers, and both flags see the same row order.
+    // Owner list keeps the numbers, and both flags see the same rows — but the
+    // member's ORDER is built without costs (see the ordering row below).
     const ownerList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     expect(costNumbers(ownerList).length).toBeGreaterThan(0);
-    expect(buyList!.rows.map((r) => r.predictionId)).toEqual(
-      ownerList!.rows.map((r) => r.predictionId)
+    expect(new Set(buyList!.rows.map((r) => r.predictionId))).toEqual(
+      new Set(ownerList!.rows.map((r) => r.predictionId))
     );
     // Actual trailing revenue is a sales figure — it STAYS visible for a member
-    // (never nulled), identical to what the owner sees.
-    for (const row of buyList!.rows) expect(typeof row.revenue30dKes).toBe("number");
-    expect(buyList!.rows.map((r) => r.revenue30dKes)).toEqual(
-      ownerList!.rows.map((r) => r.revenue30dKes)
-    );
+    // (never nulled), identical to what the owner sees. Matched by row, since
+    // the two lists are ordered differently.
+    const ownerRevenue = new Map(ownerList!.rows.map((r) => [r.predictionId, r.revenue30dKes]));
+    for (const row of buyList!.rows) {
+      expect(typeof row.revenue30dKes).toBe("number");
+      expect(row.revenue30dKes).toBe(ownerRevenue.get(row.predictionId));
+    }
   });
 
-  it("budget split redacts every KES aggregate before it leaves the server", async () => {
+  it("orders a member's buy list without costs: same rows, cost-free ranking", async () => {
+    // Redaction nulls the line total but not the position it put the row in.
+    // Inside a tie-group (same urgency, same days to stockout) the owner's order
+    // IS the cost order, and recommendedQty is visible to everyone — so a member
+    // could divide one by the other. The member's list is ranked on quantity and
+    // SKU instead, and the urgency/stockout ordering that decides what to buy
+    // first is untouched.
+    const member = await getBuyList(seeded.tenantId, { canViewCosts: false });
+    const rows = member!.rows;
+    expect(rows.length).toBeGreaterThan(1);
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1]!;
+      const row = rows[i]!;
+      const sameGroup =
+        prev.urgency === row.urgency && prev.daysUntilStockout === row.daysUntilStockout;
+      if (!sameGroup) continue;
+      expect(
+        prev.recommendedQty > row.recommendedQty ||
+          (prev.recommendedQty === row.recommendedQty && prev.sku.localeCompare(row.sku) <= 0),
+        `${prev.sku} before ${row.sku}`
+      ).toBe(true);
+    }
+
+    // The same holds for a list fetched WITH costs and redacted on the way out —
+    // the path the cover-horizon and uplift actions take.
+    const ownerList = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const redacted = redactBuyList(ownerList!, false);
+    expect(redacted.rows.map((r) => r.predictionId)).toEqual(rows.map((r) => r.predictionId));
+    expect(costNumbers(redacted)).toEqual([]);
+  });
+
+  it("budget split is withheld from a member, not merely stripped of its figures", async () => {
     const ownerList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     const split = splitByBudget(ownerList!.rows, 100_000);
+    expect(split.funded.length).toBeGreaterThan(0); // the test would be vacuous otherwise
 
     const redacted = redactBudgetSplit(split, false);
     expect(redacted.fundedCostKes).toBeNull();
@@ -306,10 +351,13 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     expect(redacted.overBudgetKes).toBeNull();
     expect(redacted.budgetKes).toBe(100_000); // the member's own input survives
     expect(costNumbers(redacted)).toEqual([]);
-    // Same items, same order — only the money is gone.
-    expect(redacted.funded.map((r) => r.predictionId)).toEqual(
-      split.funded.map((r) => r.predictionId)
-    );
+    // The partition is the leak: which rows fit under a cap answers a question
+    // about their costs, and re-asking with different caps bisects each one. So
+    // no partition comes back at all, flagged for the caller to explain.
+    expect(redacted.withheld).toBe(true);
+    expect(redacted.funded).toEqual([]);
+    expect(redacted.deferred).toEqual([]);
+    expect(redacted.checkCost).toEqual([]);
 
     // canViewCosts passes the split through untouched.
     expect(redactBudgetSplit(split, true)).toBe(split);
@@ -357,8 +405,85 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
   it("keeps every cost out of the insights payload, not just out of the markup", async () => {
     const member = await getInsightsOverview(seeded.tenantId, { canViewCosts: false });
     expect(costNumbers(member)).toEqual([]);
+    // The idle-capital page is ranked and then cut, so the ranking key is part
+    // of the payload: on-hand units for a member, never cash at rest.
+    const units = member.cashRows.map((r) => r.onHandUnits);
+    expect(units).toEqual([...units].sort((a, b) => b - a));
+
     const owner = await getInsightsOverview(seeded.tenantId, { canViewCosts: true });
     expect(costNumbers(owner).length).toBeGreaterThan(0);
+    const cash = owner.cashRows.map((r) => r.cashKes ?? 0);
+    expect(cash).toEqual([...cash].sort((a, b) => b - a)); // the owner's ranking is unchanged
+  });
+
+  it("costs screen: a cost move and its percentage never reach a member", async () => {
+    const product = await prismaService.product.findFirstOrThrow({
+      where: { tenantId: seeded.tenantId, ...BUYABLE_PRODUCT_WHERE },
+      select: { id: true, costMovedPct: true, costMovedAt: true },
+    });
+    await prismaService.product.update({
+      where: { id: product.id },
+      data: { costMovedPct: 30, costMovedAt: new Date() },
+    });
+    try {
+      const owner = await getCostMovedAlerts(seeded.tenantId, { canViewCosts: true });
+      expect(owner.some((a) => a.productId === product.id && a.movedPct === 30)).toBe(true);
+
+      // A signed buying-price delta is a cost figure, and the row's presence is
+      // itself one ("this product's cost jumped past the threshold") — so the
+      // member gets no rows, not rows with one field nulled.
+      const member = await getCostMovedAlerts(seeded.tenantId, { canViewCosts: false });
+      expect(member).toEqual([]);
+
+      const memberHtml = renderToStaticMarkup(<CostMovedList alerts={member} canManage={false} />);
+      expect(memberHtml).not.toContain("30%");
+      expect(memberHtml).not.toContain("rose");
+      const ownerHtml = renderToStaticMarkup(<CostMovedList alerts={owner} canManage={false} />);
+      expect(ownerHtml).toContain("30%");
+    } finally {
+      await prismaService.product.update({
+        where: { id: product.id },
+        data: { costMovedPct: product.costMovedPct, costMovedAt: product.costMovedAt },
+      });
+    }
+  });
+
+  it("notification feed: cost alerts stay off a member's bell, badge included", async () => {
+    const fresh = await prismaService.notification.create({
+      data: {
+        tenantId: seeded.tenantId,
+        kind: "cost_moved",
+        title: "Vitamin C Serum — cost needs a look",
+        body: "A synced cost jumped sharply — margins were recalculated.",
+      },
+    });
+    // A row written before the figure came out of the title: still stored, still
+    // unread. Rewording the writer does nothing for it — the feed filter does.
+    const legacy = await prismaService.notification.create({
+      data: { tenantId: seeded.tenantId, kind: "cost_moved", title: "Vitamin C Serum cost rose +30%" },
+    });
+    try {
+      const owner = await listNotifications(seeded.tenantId, { canViewCosts: true, limit: 50 });
+      const ownerIds = new Set(owner.items.map((n) => n.id));
+      expect(ownerIds.has(fresh.id)).toBe(true);
+      expect(ownerIds.has(legacy.id)).toBe(true);
+
+      const member = await listNotifications(seeded.tenantId, { canViewCosts: false, limit: 50 });
+      expect(member.items.some((n) => n.kind === "cost_moved")).toBe(false);
+      expect(member.items.map((n) => n.title).join(" ")).not.toContain("%");
+
+      // The badge counts what the feed shows, so the two can't contradict.
+      const hiddenUnread = await prismaService.notification.count({
+        where: { tenantId: seeded.tenantId, kind: "cost_moved", readAt: null },
+      });
+      const ownerUnread = await getUnreadCount(seeded.tenantId, { canViewCosts: true });
+      const memberUnread = await getUnreadCount(seeded.tenantId, { canViewCosts: false });
+      expect(ownerUnread - memberUnread).toBe(hiddenUnread);
+    } finally {
+      await prismaService.notification.deleteMany({
+        where: { id: { in: [fresh.id, legacy.id] } },
+      });
+    }
   });
 
   it("transfers: the value on the move is masked, the quantities are not", async () => {
@@ -426,15 +551,17 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
 
 describe("export column gating", () => {
   it("cost columns exist only for cost viewers", () => {
-    const memberHeaders = catalogueExportColumns(false).map((c) => c.header);
+    const memberHeaders = catalogueExportColumns(false, "KES").map((c) => c.header);
     expect(memberHeaders).toEqual(["Product", "SKU", "On hand", "In warehouse", "Days cover", "Status"]);
-    const ownerHeaders = catalogueExportColumns(true).map((c) => c.header);
+    const ownerHeaders = catalogueExportColumns(true, "KES").map((c) => c.header);
     expect(ownerHeaders).toContain("Unit cost (KES)");
     expect(ownerHeaders).toContain("Stock value (KES)");
+    // The workspace's own currency labels the money columns.
+    expect(catalogueExportColumns(true, "USD").map((c) => c.header)).toContain("Unit cost (USD)");
   });
 
   it("the transfer pick list carries value only for cost viewers", () => {
-    expect(transferExportColumns(false).map((c) => c.header)).toEqual([
+    expect(transferExportColumns(false, "KES").map((c) => c.header)).toEqual([
       "Product",
       "SKU",
       "To",
@@ -443,7 +570,8 @@ describe("export column gating", () => {
       "Cover before",
       "Cover after",
     ]);
-    expect(transferExportColumns(true).map((c) => c.header)).toContain("Value (KES)");
+    expect(transferExportColumns(true, "KES").map((c) => c.header)).toContain("Value (KES)");
+    expect(transferExportColumns(true, "USD").map((c) => c.header)).toContain("Value (USD)");
   });
 });
 
@@ -481,30 +609,78 @@ describe("plan buy-list redaction (pure)", () => {
     revenue30dKes,
   });
 
+  const mkList = (rows: BuyListRow[]): BuyList => ({
+    forecastRunId: "run1",
+    runDate: new Date(),
+    rows,
+    excluded: [],
+    totalPredicted: rows.length,
+    totalCostKes: rows.reduce((sum, r) => sum + (r.lineTotalKes ?? 0), 0),
+  });
+
   it("nulls costs for a member but keeps the member-visible trailing revenue", () => {
-    const split = splitByBudget([mkRow(5000)], 100_000);
-    const member = redactBudgetSplit(split, false);
+    const member = redactBuyList(mkList([mkRow(5000)]), false);
     // Cost/margin figures go dark for a member...
-    expect(member.funded[0]!.lineTotalKes).toBeNull();
-    expect(member.funded[0]!.atRiskKes).toBeNull();
+    expect(member.rows[0]!.lineTotalKes).toBeNull();
+    expect(member.rows[0]!.atRiskKes).toBeNull();
+    expect(member.totalCostKes).toBeNull();
     // ...but actual trailing revenue is a sales figure — it stays.
-    expect(member.funded[0]!.revenue30dKes).toBe(5000);
+    expect(member.rows[0]!.revenue30dKes).toBe(5000);
     // Non-money planning fields survive too.
-    expect(member.funded[0]!.runRatePerDay).toBe(1.5);
-    expect(member.funded[0]!.abc).toBe("A");
+    expect(member.rows[0]!.runRatePerDay).toBe(1.5);
+    expect(member.rows[0]!.abc).toBe("A");
     // No non-revenue *Kes cost number leaks (revenue30dKes is allowlisted).
-    expect(costNumbers(member.funded)).toEqual([]);
-    expect(redactBudgetSplit(split, true).funded[0]!.revenue30dKes).toBe(5000);
+    expect(costNumbers(member.rows)).toEqual([]);
+    const ownerList = mkList([mkRow(5000)]);
+    expect(redactBuyList(ownerList, true)).toBe(ownerList);
   });
 
   it("an owner-overridden row keeps its quantity but still hides the line total from a member", () => {
     // The override changes the qty (and therefore the line total). The qty is
     // operational and stays; the money it implies is redacted like any other.
     const row: BuyListRow = { ...mkRow(0), overriddenQty: 8, recommendedQty: 8, lineTotalKes: 800 };
-    const member = redactBudgetSplit(splitByBudget([row], 100_000), false);
-    expect(member.funded[0]!.overriddenQty).toBe(8);
-    expect(member.funded[0]!.recommendedQty).toBe(8);
-    expect(member.funded[0]!.lineTotalKes).toBeNull();
-    expect(costNumbers(member.funded)).toEqual([]);
+    const member = redactBuyList(mkList([row]), false);
+    expect(member.rows[0]!.overriddenQty).toBe(8);
+    expect(member.rows[0]!.recommendedQty).toBe(8);
+    expect(member.rows[0]!.lineTotalKes).toBeNull();
+    expect(costNumbers(member.rows)).toEqual([]);
+  });
+
+  it("re-orders a redacted tie-group on cost-free keys, never on the line total", () => {
+    // Three rows the owner's comparator can only separate by line total: same
+    // urgency, same days to stockout. The owner sees them biggest-line first;
+    // a member must not, because dividing that order by the visible quantities
+    // recovers the unit costs.
+    const tie = (sku: string, qty: number, unitCostKes: number): BuyListRow => ({
+      ...mkRow(0),
+      predictionId: sku,
+      productId: sku,
+      sku,
+      recommendedQty: qty,
+      unitCostKes,
+      lineTotalKes: qty * unitCostKes,
+    });
+    const cheapBig = tie("AAA", 20, 10); // line 200
+    const dearSmall = tie("BBB", 5, 300); // line 1500
+    const middle = tie("CCC", 20, 40); // line 800
+
+    const owner = mkList([cheapBig, dearSmall, middle]);
+    const member = redactBuyList(owner, false);
+    // Quantity desc, then SKU — nothing in this order tracks the line totals.
+    expect(member.rows.map((r) => r.sku)).toEqual(["AAA", "CCC", "BBB"]);
+    expect(costNumbers(member.rows)).toEqual([]);
+  });
+
+  it("withholds the budget partition from a member, but not from a cost viewer", () => {
+    const split = splitByBudget([mkRow(0), { ...mkRow(0), predictionId: "p2", sku: "SKU2" }], 1500);
+    // The owner's split still answers the question in full.
+    expect(split.funded.length + split.deferred.length).toBe(2);
+    // The member's carries no partition to bisect a cost out of.
+    const member = redactBudgetSplit(split, false);
+    expect(member.withheld).toBe(true);
+    expect(member.funded).toEqual([]);
+    expect(member.deferred).toEqual([]);
+    expect(member.fundedCostKes).toBeNull();
+    expect(costNumbers(member)).toEqual([]);
   });
 });

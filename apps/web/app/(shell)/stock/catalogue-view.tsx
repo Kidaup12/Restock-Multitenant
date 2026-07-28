@@ -5,6 +5,8 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
+import { formatNumber } from "@/lib/money";
+import { useCurrency } from "@/components/currency-provider";
 import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
 import {
   Table,
@@ -38,7 +40,7 @@ import type { OwnerFlags } from "./owner-flags";
  * client-side over rows the server already computed through the shared metric
  * engine and the cost chain. Editing (cost pin, category, not-for-sale) lives in
  * an expanding row editor. Money values ride CostValue, so a money-blind member
- * never sees KES.
+ * never sees a cost figure.
  *
  * The server sends every product, selling or not. The scope chips decide which
  * of them the screen is about: "Selling" by default, so the day-to-day view is
@@ -162,6 +164,7 @@ export function CatalogueView({
   canViewCosts: boolean;
   canManage: boolean;
 }) {
+  const currency = useCurrency();
   const [selection, setSelection] = useState<FacetSelection>({});
   const [sortKey, setSortKey] = useState<SortKey>("title");
   const [desc, setDesc] = useState(false);
@@ -322,7 +325,7 @@ export function CatalogueView({
               <TableHead numeric>Sells/day</TableHead>
               <TableHead numeric>Cover</TableHead>
               <TableHead numeric>Cash tied up</TableHead>
-              <TableHead numeric>Rev · 30d (KES)</TableHead>
+              <TableHead numeric>Rev · 30d ({currency})</TableHead>
               <TableHead>Verdict</TableHead>
             </TableHeader>
             <TableBody>
@@ -374,8 +377,8 @@ function RowGroup({
   flags: OwnerFlags;
   colCount: number;
 }) {
-  // Margin reveals cost, so it masks for a money-blind member — as a non-KES
-  // dot mask (it isn't a KES figure), keeping the cost mask distinct.
+  // Margin reveals cost, so it masks for a money-blind member — as a bare dot
+  // mask (margin is a percentage, not money), keeping the cost mask distinct.
   const marginCell = !canViewCosts ? "•••" : row.marginPct == null ? "—" : `${row.marginPct.toFixed(0)}%`;
   return (
     <>
@@ -448,9 +451,9 @@ function RowGroup({
         </TableCell>
         <TableCell numeric className="text-ink-muted">
           {/* Revenue is a sales figure (visible to every role); rendered as a
-              plain KES amount whose unit lives in the header, so it never
-              collides with the cost mask a money-blind member sees. */}
-          {row.revenue30dKes > 0 ? Math.round(row.revenue30dKes).toLocaleString("en-KE") : "—"}
+              plain amount whose unit lives in the header, so it never collides
+              with the cost mask a money-blind member sees. */}
+          {row.revenue30dKes > 0 ? formatNumber(row.revenue30dKes) : "—"}
         </TableCell>
         <TableCell>
           <span className="flex flex-wrap items-center gap-1">
