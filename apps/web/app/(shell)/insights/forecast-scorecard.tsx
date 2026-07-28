@@ -7,7 +7,7 @@ import {
 import { BulbIcon, ClipboardIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { formatNumber } from "@/components/ui/cost-value";
+import { formatNumber } from "@/lib/money";
 import { EmptyState } from "@/components/ui/empty-state";
 
 const dateLabel = (d: Date): string =>

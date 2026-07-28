@@ -6,6 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CostValue } from "@/components/ui/cost-value";
+import { formatMoney } from "@/lib/money";
+import { useCurrency } from "@/components/currency-provider";
 import { formatMovePct, VERDICT_LABELS, VERDICT_TONES } from "@/lib/cost";
 import type { CatalogueRow } from "@/lib/data/stock";
 import {
@@ -48,6 +50,7 @@ export function RowEditor({
   canManage: boolean;
 }) {
   const router = useRouter();
+  const currency = useCurrency();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
   const [costInput, setCostInput] = useState("");
@@ -127,7 +130,7 @@ export function RowEditor({
         {/* ── Selling price ────────────────────────────────────────────────── */}
         <div className="space-y-2">
           <div className="text-xs font-medium tracking-wider text-ink-muted uppercase">Selling price</div>
-          <div className="text-sm text-ink">KES {row.priceKes.toLocaleString("en-KE")}</div>
+          <div className="text-sm text-ink">{formatMoney(row.priceKes, currency)}</div>
           {canManage && canViewCosts ? (
             <div className="space-y-2">
               <div className="flex items-center gap-2">

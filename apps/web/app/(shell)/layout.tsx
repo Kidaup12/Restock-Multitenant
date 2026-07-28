@@ -1,6 +1,8 @@
 import type { Role } from "@wezesha/db";
 import { activeMembership, listMemberships, requireSession } from "@/lib/auth";
 import { isAdminEmail } from "@/lib/admin/gate";
+import { planAllows } from "@/lib/capabilities/plan-features";
+import { hasPermission } from "@/lib/auth/permissions";
 import { getUnreadCount } from "@/lib/notifications/data";
 import { AppShell } from "@/components/shell/app-shell";
 
@@ -20,8 +22,13 @@ export default async function ShellLayout({
     activeMembership(session.user.id),
     listMemberships(session.user.id),
   ]);
+  // Match the badge to the feed the caller can actually open: cost alerts are
+  // filtered out of a money-blind member's list, so counting them here would
+  // leave a badge that never clears.
   const unreadNotifications = membership
-    ? await getUnreadCount(membership.tenantId)
+    ? await getUnreadCount(membership.tenantId, {
+        canViewCosts: hasPermission(membership, "view_costs"),
+      })
     : 0;
 
   return (
@@ -34,6 +41,10 @@ export default async function ShellLayout({
               name: membership.tenant.name,
               roleLabel: roleLabels[membership.role],
               role: membership.role,
+              // Already loaded — activeMembership includes the tenant — so this
+              // costs nothing and every money figure below can read it.
+              currency: membership.tenant.currency,
+              canOpenInsights: planAllows(membership.tenant.plan, "insights"),
             }
           : null
       }

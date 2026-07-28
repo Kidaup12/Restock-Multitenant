@@ -1,4 +1,5 @@
 import { prismaService } from "@wezesha/db";
+import { connectionByShopDomain } from "./resolve";
 
 /**
  * Shopify's three mandatory compliance webhooks. Every public app must answer
@@ -79,7 +80,7 @@ async function record(
  * "wrong" must not mean "wipe a working tenant".
  */
 export async function redactShop(shopDomain: string): Promise<{ erased: boolean; reason?: string }> {
-  const connection = await prismaService.shopifyConnection.findUnique({ where: { shopDomain } });
+  const connection = await connectionByShopDomain(shopDomain);
   if (!connection) {
     // Already gone — offboarded, or never ours. Nothing to erase.
     return { erased: false, reason: "no connection" };
@@ -118,7 +119,7 @@ export async function redactShop(shopDomain: string): Promise<{ erased: boolean;
 /** Nothing shopper-identifying is stored, so this records the request and
  *  reports that there is nothing to hand over. */
 export async function handleCustomerDataRequest(shopDomain: string): Promise<void> {
-  const connection = await prismaService.shopifyConnection.findUnique({ where: { shopDomain } });
+  const connection = await connectionByShopDomain(shopDomain);
   await record(connection?.tenantId ?? null, "customers/data_request", shopDomain, {
     personalDataHeld: false,
     note: "No shopper-identifying data is requested from Shopify or stored.",
@@ -127,7 +128,7 @@ export async function handleCustomerDataRequest(shopDomain: string): Promise<voi
 
 /** Nothing shopper-identifying is stored, so there is nothing to erase. */
 export async function handleCustomerRedact(shopDomain: string): Promise<void> {
-  const connection = await prismaService.shopifyConnection.findUnique({ where: { shopDomain } });
+  const connection = await connectionByShopDomain(shopDomain);
   await record(connection?.tenantId ?? null, "customers/redact", shopDomain, {
     personalDataHeld: false,
     note: "Nothing to erase — no shopper-identifying data is stored.",

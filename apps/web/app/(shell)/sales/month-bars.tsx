@@ -1,11 +1,18 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { formatCompact } from "@/components/ui/cost-value";
+import { formatCompact, formatMoney } from "@/lib/money";
 import { getRevenueByMonth } from "@/lib/data/sales";
 
 /** Revenue by calendar month as simple bars. The current month is partial —
- *  labelled so the shorter bar doesn't read as a slump. */
-export async function MonthBars({ tenantId }: { tenantId: string }) {
+ *  labelled so the shorter bar doesn't read as a slump. The subtitle and the
+ *  bar labels are plain strings, so the currency arrives as a prop. */
+export async function MonthBars({
+  tenantId,
+  currency,
+}: {
+  tenantId: string;
+  currency: string;
+}) {
   const months = await getRevenueByMonth(tenantId, 4);
   const max = Math.max(...months.map((m) => m.revenueKes));
 
@@ -25,7 +32,7 @@ export async function MonthBars({ tenantId }: { tenantId: string }) {
 
   return (
     <Card>
-      <CardHeader title="Revenue by month" subtitle="All channels, KES" />
+      <CardHeader title="Revenue by month" subtitle={`All channels, ${currency}`} />
       <CardContent>
         <div className="flex h-48 items-end gap-4">
           {months.map((m, index) => {
@@ -41,7 +48,7 @@ export async function MonthBars({ tenantId }: { tenantId: string }) {
                   className="w-full rounded-t-md bg-accent"
                   style={{ height: `${heightPct}%`, opacity: partial ? 0.55 : 1 }}
                   role="img"
-                  aria-label={`${m.label}: KES ${formatCompact(m.revenueKes)}${partial ? " so far" : ""}`}
+                  aria-label={`${m.label}: ${formatMoney(m.revenueKes, currency, { compact: true })}${partial ? " so far" : ""}`}
                 />
                 <div className="text-center text-xs text-ink-muted">
                   {m.label}

@@ -3,7 +3,8 @@
 import { useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { formatNumber } from "@/components/ui/cost-value";
+import { formatMoney, formatNumber } from "@/lib/money";
+import { useCurrency } from "@/components/currency-provider";
 import type { PosMatchProduct, UnmatchedPosSku } from "@/lib/data/pos-queues";
 import { ignorePosSkuAction, matchPosSkuAction } from "./actions";
 
@@ -21,6 +22,7 @@ export function UnmatchedRow({
   products: PosMatchProduct[];
   canFix: boolean;
 }) {
+  const currency = useCurrency();
   const [productId, setProductId] = useState(row.suggestion?.productId ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +58,7 @@ export function UnmatchedRow({
       </div>
       <div className="shrink-0 text-right text-xs text-ink-secondary tabular-nums">
         <p>{formatNumber(row.units)} units</p>
-        <p>KES {formatNumber(row.revenueKes)}</p>
+        <p>{formatMoney(row.revenueKes, currency)}</p>
       </div>
 
       {canFix ? (

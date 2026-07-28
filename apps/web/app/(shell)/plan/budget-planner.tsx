@@ -4,7 +4,9 @@ import { useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { CostValue, formatCompact } from "@/components/ui/cost-value";
+import { CostValue } from "@/components/ui/cost-value";
+import { formatCompact, formatMoney, formatNumber } from "@/lib/money";
+import { useCurrency } from "@/components/currency-provider";
 import { Input } from "@/components/ui/input";
 import { StatTile } from "@/components/ui/stat-tile";
 import {
@@ -42,6 +44,7 @@ export function BudgetPlanner({
   canViewCosts: boolean;
   backLink: React.ReactNode;
 }) {
+  const currency = useCurrency();
   const [budget, setBudget] = useState("800000");
   const [split, setSplit] = useState<BudgetSplit | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,12 +75,12 @@ export function BudgetPlanner({
     { header: "Order by", cell: (r) => dayLabel(r.orderByDate) },
     { header: "Order qty", cell: (r) => r.recommendedQty },
     // Revenue is a sales figure — exported for every role.
-    { header: "Revenue 30d (KES)", cell: (r) => r.revenue30dKes },
+    { header: `Revenue 30d (${currency})`, cell: (r) => r.revenue30dKes },
     // Money-blind members export what they see: no cost columns.
     ...(canViewCosts
       ? ([
-          { header: "Line total (KES)", cell: (r) => r.lineTotalKes },
-          { header: "At risk 30d (KES)", cell: (r) => r.atRiskKes },
+          { header: `Line total (${currency})`, cell: (r) => r.lineTotalKes },
+          { header: `At risk 30d (${currency})`, cell: (r) => r.atRiskKes },
         ] satisfies ExportColumn<BuyListRow & { status: string }>[])
       : []),
   ];
@@ -103,7 +106,7 @@ export function BudgetPlanner({
             document={{
               title: "Restock budget plan",
               subtitle: canViewCosts
-                ? `Budget KES ${Math.round(split.budgetKes).toLocaleString("en-KE")} · ${split.funded.length} funded, ${split.deferred.length} deferred`
+                ? `Budget ${formatMoney(split.budgetKes, currency)} · ${split.funded.length} funded, ${split.deferred.length} deferred`
                 : `${split.funded.length} funded, ${split.deferred.length} deferred`,
             }}
           />
@@ -120,7 +123,7 @@ export function BudgetPlanner({
             }}
           >
             <label htmlFor="budget-kes" className="text-sm text-ink-muted">
-              Budget (KES)
+              Budget ({currency})
             </label>
             <Input
               id="budget-kes"
@@ -156,7 +159,7 @@ export function BudgetPlanner({
               value={String(split.funded.length)}
               delta={{
                 label: canViewCosts
-                  ? `KES ${formatCompact(split.fundedCostKes ?? 0)} of the budget`
+                  ? `${formatMoney(split.fundedCostKes ?? 0, currency, { compact: true })} of the budget`
                   : "items bought within budget",
                 tone: "neutral",
               }}
@@ -166,7 +169,7 @@ export function BudgetPlanner({
               value={String(split.deferred.length)}
               delta={{
                 label: canViewCosts
-                  ? `KES ${formatCompact(split.deferredCostKes ?? 0)} to fund fully`
+                  ? `${formatMoney(split.deferredCostKes ?? 0, currency, { compact: true })} to fund fully`
                   : "items held for later",
                 tone: "neutral",
               }}
@@ -257,6 +260,7 @@ function BudgetTable({
   canViewCosts: boolean;
   showAtRisk?: boolean;
 }) {
+  const currency = useCurrency();
   return (
     <Table>
       <TableHeader>
@@ -266,7 +270,7 @@ function BudgetTable({
         <TableHead numeric>Days left</TableHead>
         <TableHead className="hidden md:table-cell">Order by</TableHead>
         <TableHead numeric>Qty</TableHead>
-        <TableHead numeric className="hidden lg:table-cell">Rev · 30d (KES)</TableHead>
+        <TableHead numeric className="hidden lg:table-cell">Rev · 30d ({currency})</TableHead>
         <TableHead numeric>Line total</TableHead>
         {showAtRisk && <TableHead numeric>At risk (30d)</TableHead>}
       </TableHeader>
@@ -298,8 +302,9 @@ function BudgetTable({
               </TableCell>
               <TableCell numeric>{row.recommendedQty}</TableCell>
               <TableCell numeric className="hidden lg:table-cell">
-                {/* Revenue is a sales figure — visible to every role as a plain KES amount. */}
-                {row.revenue30dKes > 0 ? Math.round(row.revenue30dKes).toLocaleString("en-KE") : "—"}
+                {/* Revenue is a sales figure — visible to every role as a plain
+                    amount whose unit lives in the header. */}
+                {row.revenue30dKes > 0 ? formatNumber(row.revenue30dKes) : "—"}
               </TableCell>
               <TableCell numeric>
                 <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />

@@ -13,8 +13,17 @@ const runnable = /localhost|127\.0\.0\.1/.test(url);
 
 const authState = vi.hoisted(() => ({
   session: null as { user: { id: string; name: string | null; email: string } } | null,
+  // Mirrors what resolveActiveMembership actually returns: it includes the
+  // tenant relation, and server actions read tenant.currency off it. A double
+  // that omits it compiles and then fails at run time.
   membership: null as
-    | { tenantId: string; displayName: string | null; role: string; permissions: unknown }
+    | {
+        tenantId: string;
+        displayName: string | null;
+        role: string;
+        permissions: unknown;
+        tenant: { currency: string };
+      }
     | null,
 }));
 
@@ -73,7 +82,7 @@ describe.skipIf(!runnable)("cost + catalogue actions (local db)", () => {
 
   function actAs(tenantId: string, permissions: unknown) {
     authState.session = { user: { id: "actor-1", name: "Owner", email: "owner@example.test" } };
-    authState.membership = { tenantId, displayName: "Owner", role: "OWNER", permissions };
+    authState.membership = { tenantId, displayName: "Owner", role: "OWNER", permissions, tenant: { currency: "KES" } };
   }
 
   // ── Manual cost pin ──────────────────────────────────────────────────────

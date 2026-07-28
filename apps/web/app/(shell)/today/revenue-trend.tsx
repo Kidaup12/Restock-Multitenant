@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { formatCompact } from "@/components/ui/cost-value";
+import { formatMoney } from "@/lib/money";
 import { getSalesComparison, type SalesDay } from "@/lib/data/sales";
 
 /** Revenue sparkline over the trailing 30 days, with the prior 30 as the
@@ -32,7 +32,15 @@ function sparkline(series: SalesDay[]) {
   };
 }
 
-export async function RevenueTrend({ tenantId }: { tenantId: string }) {
+/** `currency` comes from the page's membership: the subtitle is a plain string,
+ *  so it can't read the workspace currency from context the way CostValue does. */
+export async function RevenueTrend({
+  tenantId,
+  currency,
+}: {
+  tenantId: string;
+  currency: string;
+}) {
   const comparison = await getSalesComparison(tenantId, 30);
   const { series, priorRevenueKes: priorTotal } = comparison;
 
@@ -59,7 +67,7 @@ export async function RevenueTrend({ tenantId }: { tenantId: string }) {
     <Card>
       <CardHeader
         title="Sales, last 30 days"
-        subtitle={`KES ${formatCompact(total)} total · KES ${formatCompact(perDay)}/day average`}
+        subtitle={`${formatMoney(total, currency, { compact: true })} total · ${formatMoney(perDay, currency, { compact: true })}/day average`}
         action={
           deltaPct !== null ? (
             <Badge tone={deltaPct >= 0 ? "positive" : "negative"}>

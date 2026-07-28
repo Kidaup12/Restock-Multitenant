@@ -10,7 +10,8 @@ import {
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { CostValue, formatNumber } from "@/components/ui/cost-value";
+import { CostValue } from "@/components/ui/cost-value";
+import { formatNumber } from "@/lib/money";
 import {
   Table,
   TableBody,

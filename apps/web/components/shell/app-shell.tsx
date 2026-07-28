@@ -19,6 +19,7 @@ import {
   type WorkspaceOption,
 } from "@/components/shell/workspace-switcher";
 import { TourProvider } from "@/components/tour/tour-provider";
+import { CurrencyProvider } from "@/components/currency-provider";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 /* Desktop rail = every destination; mobile tab bar = the promoted few plus a
@@ -45,6 +46,11 @@ export type ShellWorkspace = {
   name: string;
   roleLabel: string;
   role: Role;
+  /** Workspace currency; every money figure in the shell renders in it. */
+  currency: string;
+  /** Whether this workspace's plan can open Insights — the tour skips the step
+   *  when it cannot, rather than walking a new owner onto a locked screen. */
+  canOpenInsights: boolean;
 } | null;
 
 export function AppShell({
@@ -70,8 +76,13 @@ export function AppShell({
   const [collapsed, setCollapsed] = useState(false);
 
   return (
+    <CurrencyProvider currency={workspace?.currency}>
     <RouteLoadingProvider>
-    <TourProvider role={workspace?.role ?? null} autoStart={tourAutoStart}>
+    <TourProvider
+      role={workspace?.role ?? null}
+      autoStart={tourAutoStart}
+      canOpenInsights={workspace?.canOpenInsights ?? true}
+    >
       <div className="flex min-h-dvh">
         {/* Desktop sidebar rail */}
         <aside
@@ -197,5 +208,6 @@ export function AppShell({
       </div>
     </TourProvider>
     </RouteLoadingProvider>
+    </CurrencyProvider>
   );
 }

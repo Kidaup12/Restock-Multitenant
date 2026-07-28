@@ -40,6 +40,7 @@ export async function registerEmailCronSchedules(queue: EmailCronQueue): Promise
 /** Fan the dispatch out into one job per tenant. Returns the tenant count.
  *  Tenant enumeration is a cross-tenant system read — prismaService. */
 export async function dispatchWeeklySummaries(queue: EmailCronQueue): Promise<number> {
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every tenant is the job, and the per-tenant work it queues is scoped.
   const tenants = await prismaService.tenant.findMany({ select: { id: true } });
   if (tenants.length > 0) {
     await queue.addBulk(

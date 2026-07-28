@@ -90,8 +90,15 @@ describe.skipIf(!localDb)("cost-moved cron (local db)", () => {
 
     const notes = await prismaService.notification.findMany({ where: { tenantId, kind: "cost_moved" }, orderBy: { title: "asc" } });
     expect(notes).toHaveLength(2);
-    expect(notes.map((n) => n.title)).toContain("Product RISE cost rose +30%");
-    expect(notes.map((n) => n.title)).toContain("Product FALL cost fell -30%");
+    expect(notes.map((n) => n.title)).toContain("Product RISE — cost needs a look");
+    expect(notes.map((n) => n.title)).toContain("Product FALL — cost needs a look");
+    // A notification is read back by paths that don't know the reader's
+    // permissions, so neither the size nor the direction of the move is stored
+    // in the string: no digits, and no "rose"/"fell".
+    for (const note of notes) {
+      expect(note.title).not.toMatch(/\d/);
+      expect(`${note.title} ${note.body ?? ""}`).not.toMatch(/rose|fell|%/);
+    }
   });
 
   it("run 3 does not re-fire the same jump", async () => {

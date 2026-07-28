@@ -73,6 +73,7 @@ async function enqueuePerTenant(
   jobName: string,
   jobId: (tenantId: string) => string
 ): Promise<number> {
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every tenant is the job, and the per-tenant work it queues is scoped.
   const tenants = await prismaService.tenant.findMany({ select: { id: true } });
   for (const tenant of tenants) {
     await queue.add(

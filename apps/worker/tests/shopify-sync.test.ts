@@ -140,6 +140,8 @@ const fakeApi = {
   ensureWebhooks: async (url: string) => {
     webhookCalls.push(url);
   },
+  // The store trades in dollars — the workspace should end up saying so.
+  shopSettings: async () => ({ currencyCode: "USD" }),
   products: async () => products,
   locations: async () => locations,
   orders: async () => orders,
@@ -253,6 +255,11 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
 
     // Webhooks registered against the app origin.
     expect(webhookCalls).toContain("https://app.example/api/webhooks/shopify");
+
+    // The store's own currency wins: the workspace was created with the KES
+    // default and the store trades in dollars.
+    const tenantAfter = await prismaService.tenant.findUnique({ where: { id: tenantId } });
+    expect(tenantAfter?.currency).toBe("USD");
   });
 
   it("re-running is idempotent: day-set writes never double-count", async () => {
@@ -539,6 +546,9 @@ describe.skipIf(!runnable)("product lifecycle ingest (real db + redis)", () => {
       publisher,
       makeApi: () => ({
         ensureWebhooks: async () => {},
+        // These suites assert catalogue behaviour; the store's currency is not
+        // part of it, so report none and leave the workspace's value alone.
+        shopSettings: async () => ({ currencyCode: null }),
         products: async () => catalogue,
         locations: async () => lifecycleLocations,
         orders: async () => [],

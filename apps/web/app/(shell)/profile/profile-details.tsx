@@ -10,12 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-
-const kesFormat = new Intl.NumberFormat("en-KE", {
-  style: "currency",
-  currency: "KES",
-  maximumFractionDigits: 0,
-});
+import { CostValue } from "@/components/ui/cost-value";
 
 export function ProfileDetails({
   name,
@@ -132,7 +127,7 @@ export function ProfileDetails({
                   <dt className="text-ink-muted">Stock value at cost</dt>
                   <dd className="font-mono font-medium tabular-nums text-ink">
                     <MoneyGate membership={workspace}>
-                      {kesFormat.format(stockValueKes ?? 0)}
+                      <CostValue amount={stockValueKes} />
                     </MoneyGate>
                   </dd>
                 </div>
