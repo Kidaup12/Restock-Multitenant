@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
-import { prismaForTenant, prismaForTenantTx, isSellable } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, isSellable, prismaForTenant, prismaForTenantTx } from "@wezesha/db";
 import {
   assignAbc,
   dailySalesValue,
@@ -129,10 +129,11 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
     firstSnapshot,
   ] = await Promise.all([
     db.product.findMany({
-      // notForSale (testers/display/damaged) stay visible in the catalogue but
-      // never earn a forecast or a buy-list line — same exclusion the cost and
-      // stock surfaces apply.
-      where: { active: true, notForSale: false },
+      // One predicate decides what the shop still sells — testers and damaged
+      // stock, anything the store drafted or archived, anything that vanished
+      // from it. They stay visible in the catalogue and earn no forecast, so
+      // nothing the shop stopped selling can reach a buy list.
+      where: { ...BUYABLE_PRODUCT_WHERE },
       select: {
         id: true,
         sku: true,
