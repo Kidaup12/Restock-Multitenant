@@ -42,6 +42,19 @@ Seeded sign-ins (same shop, three roles): **owner** `owner@wezesha.test` / `Owne
 > If auth rejects with "Invalid origin", the serving port must match `BETTER_AUTH_URL` in
 > `apps/web/.env.local`. Serve on that port, or set `BETTER_AUTH_URL` to your port.
 
+## Connecting a real Shopify store
+
+Not locally — Shopify needs a public address to send the install back to, which a machine on
+localhost doesn't have. Connect a store on the deployed app instead. You can create your own free
+development store rather than borrowing anyone's: see `docs/SHOPIFY-DEV-STORE.md`.
+
+Locally, email doesn't leave the machine unless `RESEND_API_KEY` and `EMAIL_FROM` are set — invites,
+sign-in codes and supplier purchase orders are written to the terminal running the app, so a fresh
+clone is still testable end to end. The link you need is in that terminal.
+
+> **After a new version deploys, open a fresh tab.** A tab left open across a deploy posts to a
+> server action that no longer exists and gets a 404 that looks exactly like a broken feature.
+
 ## Handy scripts
 
 | Command | Does |
