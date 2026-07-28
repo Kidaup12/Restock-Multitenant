@@ -15,14 +15,23 @@ const GLOBAL_TABLES = [
   "Tenant",
   "_prisma_migrations",
   // Better Auth tables — users span tenants (Membership is the per-tenant link).
+  // User is readable by the tenant client under its own tenant_visible_users
+  // policy; the other three are unreachable by that role entirely, which the
+  // credential-table test below enforces.
   "User",
   "Session",
   "Account",
   "Verification",
-  // Shopify webhook dedupe ledger — keyed by the delivery id (X-Shopify-Webhook-Id),
-  // which is checked before the tenant is even resolved; rows carry no tenant data.
+  // Shopify webhook dedupe ledger — keyed by the delivery id
+  // (X-Shopify-Webhook-Id), which is checked before the tenant is resolved, so
+  // there is no tenantId to scope on. Rows do name the merchant via shopDomain;
+  // only the service client reads this table.
   "WebhookEvent",
 ];
+
+/** Session tokens, password hashes and OAuth tokens. The request-time role must
+ *  not be able to reach these at all — see the lock_credential_tables migration. */
+const CREDENTIAL_TABLES = ["Session", "Account", "Verification"];
 
 describe("rls coverage census", () => {
   it("every tenantId table has RLS enabled and a two-sided tenant_isolation policy", async () => {
@@ -57,9 +66,52 @@ describe("rls coverage census", () => {
           [table]
         );
         expect(pol.length, `${table}: tenant_isolation policy missing`).toBe(1);
-        expect(pol[0].qual, `${table}: policy must have USING`).toBeTruthy();
-        expect(pol[0].with_check, `${table}: policy must have WITH CHECK`).toBeTruthy();
+        // Not merely "a policy exists" — USING (true) would satisfy that and
+        // isolate nothing. The predicate has to be the tenant GUC.
+        expect(pol[0].qual, `${table}: USING must filter on app.tenant_id`).toContain("app.tenant_id");
+        expect(pol[0].with_check, `${table}: WITH CHECK must filter on app.tenant_id`).toContain(
+          "app.tenant_id"
+        );
       }
+    } finally {
+      await client.end();
+    }
+  });
+
+  it("the request-time role cannot touch the credential tables", async () => {
+    // These carry no tenantId, so the census above skips them — and the role
+    // bootstrap grants every table to wezesha_app by default. That combination
+    // left session tokens, password hashes and OAuth tokens readable by the role
+    // every user request runs as. Assert both halves of the lock, because either
+    // one alone can be undone by a later migration.
+    const client = new Client({ connectionString: process.env.DIRECT_URL });
+    await client.connect();
+    try {
+      for (const table of CREDENTIAL_TABLES) {
+        const { rows: grants } = await client.query<{ privilege_type: string }>(
+          `SELECT privilege_type FROM information_schema.role_table_grants
+            WHERE grantee = 'wezesha_app' AND table_schema = 'public' AND table_name = $1`,
+          [table]
+        );
+        expect(
+          grants.map((g) => g.privilege_type),
+          `${table}: wezesha_app must hold no privileges on it`
+        ).toEqual([]);
+
+        const { rows: sec } = await client.query(
+          `SELECT rowsecurity FROM pg_tables WHERE schemaname = 'public' AND tablename = $1`,
+          [table]
+        );
+        expect(sec[0]?.rowsecurity, `${table}: RLS must be enabled as the second lock`).toBe(true);
+      }
+
+      // User stays readable — the team screen reads member profiles through the
+      // tenant client — but must not be writable by it.
+      const { rows: userGrants } = await client.query<{ privilege_type: string }>(
+        `SELECT privilege_type FROM information_schema.role_table_grants
+          WHERE grantee = 'wezesha_app' AND table_schema = 'public' AND table_name = 'User'`
+      );
+      expect(userGrants.map((g) => g.privilege_type).sort()).toEqual(["SELECT"]);
     } finally {
       await client.end();
     }
