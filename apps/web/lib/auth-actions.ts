@@ -19,6 +19,8 @@ export async function switchWorkspace(
   tenantId: string,
 ): Promise<{ ok: boolean }> {
   const session = await requireSession();
+  // This IS the membership check that authorises the tenant, so it runs on the
+  // service client; the compound key still pins it to the tenant being claimed.
   const membership = await prismaService.membership.findUnique({
     where: { userId_tenantId: { userId: session.user.id, tenantId } },
     select: { id: true },

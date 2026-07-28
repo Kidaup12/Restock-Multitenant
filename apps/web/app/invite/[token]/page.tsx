@@ -109,6 +109,8 @@ export default async function InvitePage({
     );
   }
 
+  // Pre-join check: the visitor has no membership in this tenant yet, so no
+  // scoped client can be built for it. The compound key carries the tenant.
   const existing = await prismaService.membership.findUnique({
     where: {
       userId_tenantId: {

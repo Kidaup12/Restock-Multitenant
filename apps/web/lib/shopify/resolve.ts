@@ -8,5 +8,6 @@ import { prismaService, type ShopifyConnection } from "@wezesha/db";
  * requireSession + activeMembership instead.
  */
 export function connectionByShopDomain(shopDomain: string): Promise<ShopifyConnection | null> {
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- shopDomain IS the tenant key here; there is no tenantId to filter on until this lookup returns one.
   return prismaService.shopifyConnection.findUnique({ where: { shopDomain } });
 }

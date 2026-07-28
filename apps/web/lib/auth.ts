@@ -77,12 +77,15 @@ export async function resolveActiveMembership(
   preferredTenantId: string | null,
 ) {
   if (preferredTenantId) {
+    // Membership resolution is the bootstrap that establishes tenant scope, so
+    // it runs on the service client; the compound key names the tenant.
     const preferred = await prismaService.membership.findUnique({
       where: { userId_tenantId: { userId, tenantId: preferredTenantId } },
       include: { tenant: true },
     });
     if (preferred) return preferred;
   }
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fallback arm of the same bootstrap: pick the user's earliest workspace when no preference is set.
   return prismaService.membership.findFirst({
     where: { userId },
     orderBy: { createdAt: "asc" },
@@ -92,6 +95,7 @@ export async function resolveActiveMembership(
 
 /** All the user's memberships for the workspace switcher, earliest first. */
 export async function listMemberships(userId: string) {
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- the workspace switcher lists the user's own memberships; it spans tenants because the user does.
   return prismaService.membership.findMany({
     where: { userId },
     orderBy: { createdAt: "asc" },

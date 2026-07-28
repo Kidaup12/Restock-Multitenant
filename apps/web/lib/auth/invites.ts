@@ -84,6 +84,7 @@ export async function createInvite(input: {
   }
 
   // Already a member? (User emails are global; membership check is tenant-scoped.)
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- User is a global table with no tenantId; the tenant-scoped membership check on the result is the actual guard.
   const user = await prismaService.user.findFirst({
     where: { email: { equals: email, mode: "insensitive" } },
     select: { id: true },
@@ -135,6 +136,7 @@ export async function getInvite(token: string): Promise<InviteLookup> {
   const invite = toPendingInvite(row);
   if (!invite) return { status: "invalid" };
   if (invite.expiresAt.getTime() <= Date.now()) return { status: "expired" };
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- name lookup for the invite card, keyed by the tenant id carried in the signed token; the invitee has no membership to resolve through yet.
   const tenant = await prismaService.tenant.findUnique({
     where: { id: invite.tenantId },
     select: { name: true },
