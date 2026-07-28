@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -49,6 +49,12 @@ export function ShopifyConnectionCard({
   // Covers the gap between the queue accepting the job and the worker opening
   // its row — the one moment a run exists but nothing durable says so.
   const [queued, setQueued] = useState(justConnected);
+  const [queueAttempt, setQueueAttempt] = useState(justConnected ? 1 : 0);
+  // Whether a sync is actually in flight. It has to come from the progress
+  // component: syncRun is a server render and does not move while a sync runs,
+  // so deriving the button state from it would leave "Sync now" disabled until
+  // the next full page load.
+  const [syncActive, setSyncActive] = useState(syncRun?.status === "running");
   const [notice, setNotice] = useState<{ tone: "positive" | "warning" | "negative"; text: string } | null>(
     errorCode
       ? { tone: "negative", text: OAUTH_ERRORS[errorCode] ?? "Connecting the store failed." }
@@ -58,7 +64,9 @@ export function ShopifyConnectionCard({
   );
 
   const live = connection !== null && connection.uninstalledAt === null;
-  const syncing = queued || syncRun?.status === "running";
+  const syncing = syncActive;
+  const onActiveChange = useCallback((value: boolean) => setSyncActive(value), []);
+  const onSettled = useCallback(() => setQueued(false), []);
 
   async function syncNow() {
     setBusy("sync");
@@ -70,6 +78,7 @@ export function ShopifyConnectionCard({
         setNotice({ tone: "negative", text: body.error ?? "Sync request failed." });
       } else if (body.enqueued) {
         setQueued(true);
+        setQueueAttempt((n) => n + 1);
         setNotice({ tone: "positive", text: "Sync started." });
       } else {
         // The no-overlap guard: one sync per store at a time.
@@ -183,7 +192,13 @@ export function ShopifyConnectionCard({
               </div>
             </dl>
 
-            <SyncProgress initialRun={syncRun} queued={queued} />
+            <SyncProgress
+              initialRun={syncRun}
+              queued={queued}
+              queueAttempt={queueAttempt}
+              onActiveChange={onActiveChange}
+              onSettled={onSettled}
+            />
 
             <div>
               <h3 className="text-sm font-medium text-ink">Last sync</h3>
