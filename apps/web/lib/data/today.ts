@@ -10,7 +10,7 @@ import { moneyAtRest } from "@/lib/metrics";
  * Stocked-out and dead-stock read that number, never a second sum of
  * InventoryLevel — a warehouse-heavy SKU is not "in stock" on the shelf, and the
  * capital-at-rest figure uses the shared moneyAtRest formula so it agrees with
- * the stock and plan screens to the shilling.
+ * the stock and plan screens exactly.
  *
  * Cost fields are redacted here, not at render: every getter takes an explicit
  * `canViewCosts` and returns null for cost figures when it is false, so a

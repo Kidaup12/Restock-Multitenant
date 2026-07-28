@@ -145,14 +145,14 @@ export function PlanView({
             <ModeCard
               icon={<BanknoteIcon />}
               title="I have a budget to keep"
-              description="Tell us the cash you can spend. We put it where it earns most, and show you, in shillings and days, what the items you defer will cost."
+              description="Tell us the cash you can spend. We put it where it earns most, and show you, in money and days, what the items you defer will cost."
               onClick={() => setMode("budget")}
             />
           ) : (
             <LockedModeCard
               icon={<BanknoteIcon />}
               title="I have a budget to keep"
-              description="Tell us the cash you can spend. We put it where it earns most, and show you, in shillings and days, what the items you defer will cost."
+              description="Tell us the cash you can spend. We put it where it earns most, and show you, in money and days, what the items you defer will cost."
               upsell={`Budget planner is on the ${budgetTier} plan.`}
             />
           )}
