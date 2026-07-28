@@ -167,8 +167,29 @@ sync fails to authenticate.
 
 In the Partner dashboard set the app URL and the OAuth callback to the Vercel
 URL, and give the app the read scopes for products, inventory, locations and
-orders. The worker registers its own webhooks on the first successful sync — no
-manual webhook setup.
+orders. The worker registers its own data webhooks on the first successful sync
+— no manual setup for those.
+
+**Distribution.** Until a distribution method is selected, no store outside the
+Partner organisation can install the app: Shopify answers "This app can't be
+installed yet." Public distribution then requires app review before any merchant
+store can install, and our scopes touch protected customer data, which is
+reviewed separately. Development stores inside the organisation can install
+throughout. Treat this as lead time, not a switch.
+
+**Compliance webhooks — set these by hand.** Shopify requires all three, and
+delivers them to URLs configured in the Partner dashboard rather than to
+subscriptions the app creates. All three point at the same receiver:
+
+| Topic | URL |
+|---|---|
+| Customer data request | `https://<app-url>/api/webhooks/shopify` |
+| Customer redaction | `https://<app-url>/api/webhooks/shopify` |
+| Shop redaction | `https://<app-url>/api/webhooks/shopify` |
+
+The receiver verifies the HMAC and dispatches by the topic header; what each one
+does, and why shop redaction keeps the merchant's own records, is documented in
+`apps/web/lib/shopify/compliance.ts`. Leaving these unset fails review.
 
 ## 5 · First run
 

@@ -3,6 +3,12 @@ import { Prisma, prismaService } from "@wezesha/db";
 import { numericCore, verifyWebhookHmac } from "@wezesha/shopify";
 import { connectionByShopDomain } from "@/lib/shopify/resolve";
 import { enqueueShopifySync, publishRealtime } from "@/lib/shopify/queue";
+import {
+  handleCustomerDataRequest,
+  handleCustomerRedact,
+  isComplianceTopic,
+  redactShop,
+} from "@/lib/shopify/compliance";
 
 /**
  * Shopify webhook receiver. Enqueue-only: verify, dedupe, kick a worker job,
@@ -19,6 +25,11 @@ import { enqueueShopifySync, publishRealtime } from "@/lib/shopify/queue";
  * products/delete is the one exception: a deleted product is never returned by
  * a products pull, so no sync — delta or otherwise — can learn about it from
  * the payload. It is handled inline instead.
+ *
+ * The three mandatory compliance topics (customers/data_request,
+ * customers/redact, shop/redact) are also handled here — see lib/shopify/
+ * compliance.ts for what each one does and why. They run before the
+ * connection-required path because shop/redact outlives the connection.
  */
 
 const SYNC_TOPICS = new Set(["products/update", "inventory_levels/update", "orders/create"]);
@@ -69,6 +80,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ ok: true, duplicate: true });
     }
     throw err;
+  }
+
+  // Compliance topics run BEFORE the connection lookup: shop/redact arrives
+  // about 48h after an uninstall, by which time there may be no connection to
+  // find, and "no connection" must not turn a mandatory erasure into a no-op.
+  if (isComplianceTopic(topic)) {
+    try {
+      if (topic === "shop/redact") await redactShop(shopDomain);
+      else if (topic === "customers/redact") await handleCustomerRedact(shopDomain);
+      else await handleCustomerDataRequest(shopDomain);
+    } catch (err) {
+      // Shopify retries a non-2xx and eventually force-unsubscribes, which
+      // would be worse than a logged failure we can replay by hand.
+      console.error(`webhook: ${topic} failed for ${shopDomain}`, err);
+    }
+    return NextResponse.json({ ok: true });
   }
 
   const connection = await connectionByShopDomain(shopDomain);
