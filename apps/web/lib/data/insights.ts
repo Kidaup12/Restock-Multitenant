@@ -11,10 +11,14 @@ import { getTodayMetrics } from "./today";
  * contract — so Insights and Today can never disagree. Anything computed here is
  * a presentation of those numbers, not a second opinion on them.
  *
- * Cost fields are redacted here, not at render: rows are built and sorted on the
- * real numbers, then nulled on the way out when the caller can't view costs, so a
+ * Cost fields are redacted here, not at render: rows are built on the real
+ * numbers, then nulled on the way out when the caller can't view costs, so a
  * money-blind member's payload never carries them. Price × run rate is a sales
  * figure and stays visible.
+ *
+ * Ordering is redacted too. The idle-capital rows are ranked and then cut to a
+ * page, so for a money-blind caller the ranking key must be cost-free — see
+ * `byIdleUnits`.
  */
 
 /** Below this rate the engine's cover is the 999 "effectively forever" sentinel,
@@ -75,6 +79,21 @@ export type InsightsOverview = {
 };
 
 const redactCashRow = (r: CashAsleepRow): CashAsleepRow => ({ ...r, cashKes: null });
+
+/** Cost viewer's ranking of idle capital: most cash frozen first. */
+const byCashAtRest = (a: CashAsleepRow, b: CashAsleepRow): number =>
+  (b.cashKes ?? 0) - (a.cashKes ?? 0) || a.sku.localeCompare(b.sku);
+
+/**
+ * Money-blind ranking: units sitting still, most first. Cash at rest is on-hand
+ * × cost, so ranking on it and then slicing to a page hands a member two cost
+ * facts — the order within the page, and which products made it in at all —
+ * that survive nulling `cashKes`. On-hand is already on every row, so ordering
+ * by it tells a member nothing they cannot read, and still puts the biggest
+ * piles of unsold stock at the top.
+ */
+const byIdleUnits = (a: CashAsleepRow, b: CashAsleepRow): number =>
+  b.onHandUnits - a.onHandUnits || a.sku.localeCompare(b.sku);
 
 /**
  * The Overview tab in one pass: the two headline counts plus the rows behind
@@ -144,8 +163,10 @@ export async function getInsightsOverview(
     });
   }
 
+  // Missed sales are price × run rate — a sales figure, so the shelf ranking is
+  // the same for every role. Idle capital is ranked on cost, so it isn't.
   shelfRows.sort((a, b) => b.missedSalesKes - a.missedSalesKes);
-  cashRows.sort((a, b) => (b.cashKes ?? 0) - (a.cashKes ?? 0));
+  cashRows.sort(canViewCosts ? byCashAtRest : byIdleUnits);
 
   const pagedShelf = shelfRows.slice(0, limit);
   const pagedCash = cashRows.slice(0, limit);

@@ -13,6 +13,8 @@ import { resolveCost, type CostSource } from "@/lib/cost";
  *
  * Cost figures are redacted at this boundary, not at render: getters take an
  * explicit `canViewCosts` and null the KES fields for a money-blind member.
+ * Where a whole row is cost intelligence rather than a KES field on an otherwise
+ * operational row, the row itself is withheld — see `getCostMovedAlerts`.
  */
 
 export type CostCoverage = {
@@ -74,19 +76,31 @@ export type CostMovedAlert = {
   productId: string;
   sku: string;
   title: string;
-  /** Signed percent jump (e.g. 18, -22). */
+  /** Signed percent jump (e.g. 18, -22) — a buying-price delta, so these rows
+   *  only ever reach a cost viewer. */
   movedPct: number;
   movedAt: Date;
-  /** Null when the caller can't view costs. */
+  /** The current cost. Nullable so a consumer still guards it, but a row only
+   *  ever reaches a caller who may see it. */
   costKes: number | null;
   priceKes: number;
 };
 
-/** Active cost-moved attention rows, biggest swing first. */
+/**
+ * Active cost-moved attention rows, biggest swing first. Cost viewers only.
+ *
+ * Nulling `costKes` alone would not make this row money-blind: `movedPct` is a
+ * signed per-product buying-price delta, and even without it the row's presence
+ * says "this product's cost jumped past the threshold". The whole row is the
+ * cost fact, so a money-blind caller gets an empty list rather than a redacted
+ * one — the alert is the owner's margin decision to make.
+ */
 export async function getCostMovedAlerts(
   tenantId: string,
   { canViewCosts }: { canViewCosts: boolean },
 ): Promise<CostMovedAlert[]> {
+  if (!canViewCosts) return [];
+
   const db = prismaForTenant(tenantId);
   const rows = await db.product.findMany({
     where: { ...BUYABLE_PRODUCT_WHERE, costMovedPct: { not: null } },
@@ -102,7 +116,7 @@ export async function getCostMovedAlerts(
       title: r.title,
       movedPct: r.costMovedPct!,
       movedAt: r.costMovedAt!,
-      costKes: canViewCosts ? r.costKes : null,
+      costKes: r.costKes,
       priceKes: r.priceKes,
     }));
 }

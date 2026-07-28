@@ -51,6 +51,7 @@ export async function registerCostCronSchedules(queue: CostCronQueue): Promise<v
 
 /** Fan the dispatch out into one job per tenant. Returns the tenant count. */
 export async function dispatchCostMovedChecks(queue: CostCronQueue): Promise<number> {
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every tenant is the job, and the per-tenant work it queues is scoped.
   const tenants = await prismaService.tenant.findMany({ select: { id: true } });
   if (tenants.length > 0) {
     await queue.addBulk(tenants.map((t) => ({ name: COST_MOVED_TENANT_JOB, data: { tenantId: t.id } })));
@@ -77,8 +78,10 @@ export async function checkTenantCostMoves(
     select: { id: true, title: true, costKes: true, lastSyncedCostKes: true },
   });
 
-  // De-dupe bell notifications: one per (product) within a window. Titles are
-  // deterministic per product, so a prior cost_moved notif means we asked already.
+  // De-dupe bell notifications: one per (product) within a window. The title is
+  // the product name and nothing else, so a prior cost_moved notif means we asked
+  // already — a second move inside the window re-flags the product but does not
+  // ring the bell again.
   const recentSince = new Date(now.getTime() - 30 * DAY_MS);
   const priorTitles = new Set(
     (
@@ -112,7 +115,7 @@ export async function checkTenantCostMoves(
       });
       flagged++;
 
-      const title = costMovedTitle(p.title, rounded);
+      const title = costMovedTitle(p.title);
       if (!priorTitles.has(title)) {
         await prismaService.notification.create({
           data: {
@@ -140,11 +143,15 @@ export async function checkTenantCostMoves(
   return { flagged, rebaselined };
 }
 
-/** "COSRX Serum cost rose +18%". */
-export function costMovedTitle(productTitle: string, roundedPct: number): string {
-  const dir = roundedPct > 0 ? "rose" : "fell";
-  const sign = roundedPct > 0 ? "+" : "";
-  return `${productTitle} cost ${dir} ${sign}${roundedPct}%`;
+/**
+ * "COSRX Serum — cost needs a look". Deliberately carries no percentage and no
+ * direction: a notification row is read back by paths that do not know the
+ * reader's permissions, and the size (or even the sign) of a buying-price move
+ * is a cost figure. The number lives on the product's attention row, which the
+ * Costs screen only hands to a cost viewer.
+ */
+export function costMovedTitle(productTitle: string): string {
+  return `${productTitle} — cost needs a look`;
 }
 
 export interface CostCronWorkerOptions {
