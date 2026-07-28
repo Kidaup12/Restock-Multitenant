@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Prisma, PrismaClient } from "../generated/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { prismaForTenant, prismaService } from "../src/client";
 import { builders, seedTwoTenants, type SeededTenants } from "./seed-two-tenants";
 

@@ -39,9 +39,9 @@ export {
   productLifecycle,
 } from "./product-lifecycle";
 export type { ProductLifecycle, ProductStatus } from "./product-lifecycle";
-export { Prisma, Role } from "../generated/client";
-export type { Tenant, Membership, TenantConfig } from "../generated/client";
-export type { User, Session, Account, Verification } from "../generated/client";
+export { Prisma, Role } from "@prisma/client";
+export type { Tenant, Membership, TenantConfig } from "@prisma/client";
+export type { User, Session, Account, Verification } from "@prisma/client";
 export type {
   Product,
   Supplier,
@@ -52,7 +52,7 @@ export type {
   IgnoreRule,
   LocationClosure,
   SavedFilter,
-} from "../generated/client";
+} from "@prisma/client";
 export type {
   SalesHistory,
   PosSale,
@@ -62,7 +62,7 @@ export type {
   Prediction,
   BacktestRun,
   SpotCheck,
-} from "../generated/client";
+} from "@prisma/client";
 export type {
   Order,
   PurchaseOrder,
@@ -70,10 +70,10 @@ export type {
   DistributionPlan,
   DistributionPlanLine,
   AuditEvent,
-} from "../generated/client";
+} from "@prisma/client";
 export type {
   ShopifyConnection,
   IngestCursor,
   Notification,
   WebhookEvent,
-} from "../generated/client";
+} from "@prisma/client";
