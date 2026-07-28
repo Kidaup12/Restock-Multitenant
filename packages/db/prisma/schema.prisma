@@ -125,6 +125,7 @@ model Tenant {
   distributionPlans       DistributionPlan[]
   shopifyConnection       ShopifyConnection?
   ingestCursors           IngestCursor[]
+  syncRuns                SyncRun[]
   notifications           Notification[]
   locationClosures        LocationClosure[]
   productPlanOverrides    ProductPlanOverride[]
@@ -940,6 +941,46 @@ model IngestCursor {
 
   @@unique([tenantId, source, resource])
   @@index([tenantId])
+}
+
+// One row per sync ATTEMPT (a retry opens a new row). Queue jobs are removed the
+// moment they finish, so this is the only durable record that a sync started:
+// it is what the Connections screen renders on a cold load mid-run, and what
+// answers "did last night's sync finish" afterwards. IngestCursor is the
+// high-water mark; this is the run itself.
+//
+// Written only by the worker (service client, explicit tenantId); read by the
+// app through prismaForTenant. A row left `running` by a crashed worker is
+// detected on the read side via updatedAt, not by a sweeper.
+model SyncRun {
+  id       String @id @default(cuid())
+  tenantId String
+  source   String // "shopify" | "pos"
+  status   String @default("running") // "running" | "ok" | "failed"
+  attempt  Int    @default(1)
+
+  phase      String? // "products" | "inventory" | "orders"
+  phaseIndex Int     @default(0) // 1-based within phaseTotal
+  phaseTotal Int     @default(0)
+
+  // Progress inside the current phase. itemsTotal stays null while the count is
+  // not yet knowable (the Shopify fetch has not returned), so the UI shows an
+  // indeterminate bar instead of inventing a denominator.
+  itemsDone  Int  @default(0)
+  itemsTotal Int?
+
+  // Per-phase results, e.g. {"products":{"written":5310,"failed":2}}.
+  counts Json?
+
+  error      String? // failure message, truncated
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  updatedAt  DateTime  @updatedAt // staleness probe for a worker that died mid-run
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, source, startedAt(sort: Desc)])
+  @@index([tenantId, status])
 }
 
 // Persisted in-app notifications (the bell). readAt null = unread; the index
