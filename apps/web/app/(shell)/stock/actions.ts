@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { Prisma, prismaForTenant, prismaService } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission, type PermissionKey } from "@/lib/auth/permissions";
+import { selectRows, status, type CatalogueQuery } from "@/lib/catalogue";
+import { getStockCatalogue } from "@/lib/data/stock";
+import type { CatalogueExportRow } from "./catalogue-export";
 
 /**
  * Catalogue row-editor writes: the manual cost pin (and its release back to the
@@ -58,6 +61,39 @@ function revalidateCatalogue() {
   // Archiving a SKU, or fixing its cost, changes what the buy list contains —
   // leaving the plan cached would show it ordering something just retired.
   revalidatePath("/plan");
+}
+
+// ── Export ───────────────────────────────────────────────────────────────────
+
+/**
+ * Every row the reader's filters match, for the export — not just the page on
+ * screen. The table only receives one page now, so the browser can no longer
+ * build the file from what it holds; it asks for the full matched list at the
+ * moment the reader clicks.
+ *
+ * `canViewCosts` is re-derived from the caller's own membership, exactly as the
+ * screen does. A money-blind member's export cannot carry costs even if the
+ * request says otherwise — the redaction happens in the getter, at the data
+ * layer, and this path is no exception.
+ */
+export async function exportCatalogueAction(query: CatalogueQuery): Promise<CatalogueExportRow[]> {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+  if (!membership) return [];
+
+  const canViewCosts = hasPermission(membership, "view_costs");
+  const rows = await getStockCatalogue(membership.tenantId, { canViewCosts });
+  return selectRows(rows, query).map((row) => ({
+    title: row.title,
+    sku: row.sku,
+    onHandUnits: row.onHandUnits,
+    warehouseUnits: row.warehouseUnits,
+    // An empty shelf has no cover to report, matching the table.
+    daysCover: row.onHandUnits <= 0 ? null : row.daysCover,
+    status: status(row).label,
+    costKes: row.costKes,
+    stockValueKes: row.stockValueKes,
+  }));
 }
 
 // ── Manual cost pin ──────────────────────────────────────────────────────────

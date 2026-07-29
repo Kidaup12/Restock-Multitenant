@@ -16,7 +16,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { CatalogueTable } from "../app/(shell)/stock/catalogue-table";
-import { inScope, SCOPE_LABELS } from "../app/(shell)/stock/catalogue-view";
+import { DEFAULT_QUERY, inScope, SCOPE_LABELS } from "../lib/catalogue";
 
 /**
  * Product lifecycle on the catalogue screen. The rule the shop cares about is
@@ -127,7 +127,7 @@ describe.skipIf(!runnable)("product lifecycle on the catalogue (seeded local db)
 
   it("the default view excludes them while the scope chips show they exist", async () => {
     const html = renderToStaticMarkup(
-      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true })
+      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true, query: DEFAULT_QUERY })
     );
 
     for (const sku of [ARCHIVED_SKU, DRAFT_SKU, REMOVED_SKU]) {
@@ -143,7 +143,7 @@ describe.skipIf(!runnable)("product lifecycle on the catalogue (seeded local db)
 
   it("renders run rate, days of cover and inbound stock as their own columns", async () => {
     const html = renderToStaticMarkup(
-      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true })
+      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true, query: DEFAULT_QUERY })
     );
     expect(html).toContain("Sells/day");
     expect(html).toContain("Cover");
@@ -168,7 +168,7 @@ describe.skipIf(!runnable)("product lifecycle on the catalogue (seeded local db)
     expect(rowBySku(SYNC_SKU).syncErrorAt).not.toBeNull();
 
     const html = renderToStaticMarkup(
-      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true })
+      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true, query: DEFAULT_QUERY })
     );
     expect(html).toContain(`Sync problem: ${SYNC_MESSAGE}`);
     expect(html).toContain("Sync problem"); // and as a filter chip on the strip
@@ -183,7 +183,7 @@ describe.skipIf(!runnable)("product lifecycle on the catalogue (seeded local db)
     expect(rowBySku(SYNC_SKU).variantTitle).toBeNull();
 
     const html = renderToStaticMarkup(
-      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true })
+      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true, query: DEFAULT_QUERY })
     );
     expect(html).toContain("Shade 03");
     expect(html).toContain("Shade 07");
@@ -199,7 +199,7 @@ describe.skipIf(!runnable)("product lifecycle on the catalogue (seeded local db)
     }
 
     const html = renderToStaticMarkup(
-      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: false })
+      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: false, query: DEFAULT_QUERY })
     );
     // The new columns are units, rates and dates — nothing that reads as money.
     expect(kesDigits(html)).toHaveLength(0);

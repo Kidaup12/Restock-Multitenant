@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { cn } from "@/lib/cn";
 import {
   FACET_KEYS,
@@ -22,16 +23,19 @@ import {
 export function FacetFilterBar({
   options,
   selection,
-  onChange,
+  selectionHref,
 }: {
   options: FacetOptions;
   selection: FacetSelection;
-  onChange: (next: FacetSelection) => void;
+  /** Where a given selection lives. The bar still owns the toggle arithmetic —
+   *  it just resolves to a URL instead of a callback, because filtering is a
+   *  navigation: the server reads the selection and returns the matching page. */
+  selectionHref: (next: FacetSelection) => string;
 }) {
   const activeFacets = FACET_KEYS.filter((key) => options[key].length > 0);
   const activeCount = Object.values(selection).reduce((n, vals) => n + (vals?.length ?? 0), 0);
 
-  function toggle(key: FacetKey, value: string) {
+  function toggled(key: FacetKey, value: string): FacetSelection {
     const current = selection[key] ?? [];
     const next = current.includes(value)
       ? current.filter((v) => v !== value)
@@ -39,7 +43,7 @@ export function FacetFilterBar({
     const out: FacetSelection = { ...selection };
     if (next.length > 0) out[key] = next;
     else delete out[key];
-    onChange(out);
+    return out;
   }
 
   if (activeFacets.length === 0) return null;
@@ -69,10 +73,11 @@ export function FacetFilterBar({
               {options[key].map((opt) => {
                 const on = chosen.includes(opt.value);
                 return (
-                  <button
+                  <Link
                     key={opt.value}
-                    type="button"
-                    onClick={() => toggle(key, opt.value)}
+                    href={selectionHref(toggled(key, opt.value))}
+                    scroll={false}
+                    aria-current={on ? "true" : undefined}
                     className={cn(
                       "rounded-full border px-2 py-0.5 text-xs transition-colors",
                       on
@@ -82,7 +87,7 @@ export function FacetFilterBar({
                   >
                     {opt.label}
                     <span className="ml-1 text-ink-faint">{opt.count}</span>
-                  </button>
+                  </Link>
                 );
               })}
             </div>
@@ -90,13 +95,13 @@ export function FacetFilterBar({
         );
       })}
       {activeCount > 0 && (
-        <button
-          type="button"
-          onClick={() => onChange({})}
+        <Link
+          href={selectionHref({})}
+          scroll={false}
           className="rounded-md px-2 py-1 text-sm text-ink-muted underline-offset-2 hover:text-ink hover:underline"
         >
           Clear ({activeCount})
-        </button>
+        </Link>
       )}
     </div>
   );

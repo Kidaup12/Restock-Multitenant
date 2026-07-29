@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { CostValue } from "@/components/ui/cost-value";
 import { formatNumber } from "@/lib/money";
@@ -19,13 +20,16 @@ function Tile({
   value,
   sub,
   tone,
-  onClick,
+  href,
+  active,
 }: {
   label: string;
   value: React.ReactNode;
   sub: string;
   tone: "neutral" | "warning" | "negative";
-  onClick?: () => void;
+  /** Omitted on a tile with nothing to filter to — it stays a plain figure. */
+  href?: string;
+  active?: boolean;
 }) {
   const ring =
     tone === "negative"
@@ -33,17 +37,8 @@ function Tile({
       : tone === "warning"
         ? "hover:border-warning"
         : "hover:border-edge-strong";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      className={cn(
-        "flex-1 rounded-lg border border-edge bg-surface p-4 text-left shadow-card transition-colors",
-        onClick && ring,
-        !onClick && "cursor-default",
-      )}
-    >
+  const body = (
+    <>
       <div className="text-xs font-medium tracking-wider text-ink-muted uppercase">{label}</div>
       <div
         className={cn(
@@ -54,7 +49,22 @@ function Tile({
         {value}
       </div>
       <div className="mt-1 text-xs text-ink-muted">{sub}</div>
-    </button>
+    </>
+  );
+  const shell = "flex-1 rounded-lg border bg-surface p-4 text-left shadow-card transition-colors";
+
+  if (!href) {
+    return <div className={cn(shell, "border-edge")}>{body}</div>;
+  }
+  return (
+    <Link
+      href={href}
+      scroll={false}
+      aria-current={active ? "true" : undefined}
+      className={cn(shell, active ? "border-edge-strong" : "border-edge", ring)}
+    >
+      {body}
+    </Link>
   );
 }
 
@@ -62,14 +72,16 @@ export function MoneyBand({
   band,
   canViewCosts,
   active,
-  onSelect,
+  tileHref,
 }: {
   band: MoneyBandData;
   canViewCosts: boolean;
   active: MoneyBandFilter;
-  onSelect: (f: MoneyBandFilter) => void;
+  /** Each tile is a shortcut into its filter, so it is a link — clicking the
+   *  active one clears it. */
+  tileHref: (f: MoneyBandFilter) => string;
 }) {
-  const toggle = (f: Exclude<MoneyBandFilter, null>) => () => onSelect(active === f ? null : f);
+  const toggle = (f: Exclude<MoneyBandFilter, null>) => tileHref(active === f ? null : f);
 
   return (
     <div className="flex flex-wrap gap-3">
@@ -84,14 +96,16 @@ export function MoneyBand({
         value={<CostValue amount={band.deadOverstockKes} canViewCosts={canViewCosts} compact />}
         sub={`${formatNumber(band.deadOverstockCount)} products, 90+ days of cover or no sales`}
         tone="warning"
-        onClick={toggle("dead_overstock")}
+        href={toggle("dead_overstock")}
+        active={active === "dead_overstock"}
       />
       <Tile
         label="30-day revenue at risk"
         value={<CostValue amount={band.revenueAtRiskKes} canViewCosts={canViewCosts} compact />}
         sub={`${formatNumber(band.revenueAtRiskCount)} out or below lead time`}
         tone="warning"
-        onClick={toggle("revenue_at_risk")}
+        href={toggle("revenue_at_risk")}
+        active={active === "revenue_at_risk"}
       />
       <Tile
         label="Selling below cost"
@@ -102,7 +116,8 @@ export function MoneyBand({
             : "no margin losers — good"
         }
         tone={band.belowCostCount > 0 ? "negative" : "neutral"}
-        onClick={band.belowCostCount > 0 ? toggle("below_cost") : undefined}
+        href={band.belowCostCount > 0 ? toggle("below_cost") : undefined}
+        active={active === "below_cost"}
       />
     </div>
   );

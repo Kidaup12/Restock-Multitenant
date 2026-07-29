@@ -13,10 +13,31 @@ import { prismaForTenant } from "@wezesha/db";
 
 export type OwnerFlags = { active: boolean; activeOverride: boolean };
 
-/** Keyed by product id, for the client table to hand each row its own pair. */
+/** Keyed by product id, for the client table to hand each row its own pair.
+ *
+ *  Deliberately loads the whole catalogue rather than the page: which ids are on
+ *  the page is only known once the catalogue load has finished, so narrowing the
+ *  query here would put this request behind that one instead of beside it. Two
+ *  booleans per product is a cheap read; a serialised round trip is not. Use
+ *  `forProducts` to keep only the rows that will be rendered. */
 export async function getOwnerFlags(tenantId: string): Promise<Record<string, OwnerFlags>> {
   const rows = await prismaForTenant(tenantId).product.findMany({
     select: { id: true, active: true, activeOverride: true },
   });
   return Object.fromEntries(rows.map((r) => [r.id, { active: r.active, activeOverride: r.activeOverride }]));
+}
+
+/** The subset the table will actually render. Only a rendered row can be edited,
+ *  so sending the switches for every product would put a second copy of the
+ *  catalogue in the payload for no one to use. */
+export function forProducts(
+  flags: Record<string, OwnerFlags>,
+  productIds: string[]
+): Record<string, OwnerFlags> {
+  const out: Record<string, OwnerFlags> = {};
+  for (const id of productIds) {
+    const f = flags[id];
+    if (f) out[id] = f;
+  }
+  return out;
 }

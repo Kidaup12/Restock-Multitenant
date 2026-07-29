@@ -44,25 +44,32 @@ export function catalogueExportColumns(
 }
 
 export function CatalogueExportBar({
-  rows,
+  count,
+  totalValueKes,
+  loadRows,
   canViewCosts,
 }: {
-  rows: CatalogueExportRow[];
+  /** Rows the reader's filters match — the size of the file, not of the page. */
+  count: number;
+  /** Σ stock value across those matched rows; null for a money-blind member. */
+  totalValueKes: number | null;
+  loadRows: () => Promise<CatalogueExportRow[]>;
   canViewCosts: boolean;
 }) {
   const currency = useCurrency();
-  const totalValueKes = rows.reduce((sum, r) => sum + (r.stockValueKes ?? 0), 0);
   return (
     <ExportBar
-      rows={rows}
+      loadRows={loadRows}
+      count={count}
       columns={catalogueExportColumns(canViewCosts, currency)}
       filename="stock-catalogue"
       document={{
         title: "Stock catalogue",
-        subtitle: `${rows.length} products`,
-        footNote: canViewCosts
-          ? `Stock value at cost: ${formatMoney(totalValueKes, currency)}`
-          : undefined,
+        subtitle: `${count} products`,
+        footNote:
+          canViewCosts && totalValueKes != null
+            ? `Stock value at cost: ${formatMoney(totalValueKes, currency)}`
+            : undefined,
       }}
     />
   );
