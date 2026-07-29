@@ -2,7 +2,7 @@
 
 import { prismaForTenant, prismaService } from "@wezesha/db";
 import {
-  activeMembership,
+  listMemberships,
   requireSession,
   setWorkspaceCookie,
 } from "@/lib/auth";
@@ -30,13 +30,32 @@ export async function switchWorkspace(
   return { ok: true };
 }
 
-/** Stamp the active membership as welcomed (tour finished or skipped). */
+/**
+ * Stamp the caller as welcomed (tour finished or skipped).
+ *
+ * Stamps EVERY membership the user holds, not just the active one. The tour
+ * teaches the app, not the workspace, so someone who has already seen it should
+ * not get it again for joining a second shop or switching between them — which
+ * is what a per-membership stamp did. The profile menu still replays it on
+ * demand.
+ *
+ * Written one workspace at a time through the tenant-scoped client rather than
+ * as a single cross-tenant updateMany: the rows span tenants, but each write
+ * stays inside the one it belongs to, so RLS remains the thing enforcing the
+ * boundary. A user belongs to a handful of workspaces, not a page of them.
+ */
 export async function markWelcomed(): Promise<void> {
   const session = await requireSession();
-  const membership = await activeMembership(session.user.id);
-  if (!membership) return;
-  await prismaForTenant(membership.tenantId).membership.updateMany({
-    where: { id: membership.id, userId: session.user.id },
-    data: { welcomedAt: new Date() },
-  });
+  const memberships = await listMemberships(session.user.id);
+  const now = new Date();
+  await Promise.all(
+    memberships
+      .filter((m) => m.welcomedAt === null)
+      .map((m) =>
+        prismaForTenant(m.tenantId).membership.updateMany({
+          where: { id: m.id, userId: session.user.id },
+          data: { welcomedAt: now },
+        })
+      )
+  );
 }
