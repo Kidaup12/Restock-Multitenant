@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
+import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
@@ -16,275 +17,103 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { deriveFacetOptions, filterByFacets, type FacetSelection } from "@/lib/facets";
+import type { FacetSelection } from "@/lib/facets";
+import { formatMovePct, VERDICT_LABELS, VERDICT_TONES } from "@/lib/cost";
 import {
-  computeMoneyBand,
-  formatMovePct,
-  OVERSTOCK_COVER_DAYS,
-  VERDICT_LABELS,
-  VERDICT_TONES,
-  type MoneyRow,
-} from "@/lib/cost";
-import type { CatalogueRow, CategoryUsage } from "@/lib/data/stock";
+  catalogueQueryToSearch,
+  withQuery,
+  type CatalogueQuery,
+  type Scope,
+  type SortKey,
+} from "@/lib/catalogue";
+import type { CatalogueRow, CatalogueScreen, CategoryUsage } from "@/lib/data/stock";
 import { FacetFilterBar } from "./facet-filter-bar";
 import { CatalogueExportBar } from "./catalogue-export";
-import { HealthStrip, type HealthChip } from "./health-strip";
-import { MoneyBand, type MoneyBandFilter } from "./money-band";
+import { HealthStrip } from "./health-strip";
+import { MoneyBand } from "./money-band";
 import { ManageCategories } from "./manage-categories";
 import { RowEditor } from "./row-editor";
+import { exportCatalogueAction } from "./actions";
 import type { OwnerFlags } from "./owner-flags";
 
 /**
  * Interactive catalogue: the money band + health strip read across the catalogue
- * in scope, the metadata facets filter it, the metric columns sort it — all
- * client-side over rows the server already computed through the shared metric
- * engine and the cost chain. Editing (cost pin, category, not-for-sale) lives in
- * an expanding row editor. Money values ride CostValue, so a money-blind member
- * never sees a cost figure.
+ * in scope, the metadata facets filter it, the metric columns sort it. Editing
+ * (cost pin, category, not-for-sale) lives in an expanding row editor. Money
+ * values ride CostValue, so a money-blind member never sees a cost figure.
  *
- * The server sends every product, selling or not. The scope chips decide which
- * of them the screen is about: "Selling" by default, so the day-to-day view is
- * not padded with SKUs the shop retired, and the other chips carry their counts
- * so nothing is silently absent.
+ * The scope chips decide which catalogue the screen is about: "Selling" by
+ * default, so the day-to-day view is not padded with SKUs the shop retired, and
+ * the other chips carry their counts so nothing is silently absent.
  *
- * Only the table itself is paged. Counts, chips and exports keep reading the
- * whole matched catalogue, so paging changes what is on screen and nothing else.
+ * The counting, filtering and sorting all happen on the server now (lib/data/stock
+ * → lib/catalogue), which sends the readings plus ONE page of rows. A shop with
+ * 400–1000 products otherwise pays to serialise every row it owns on every load,
+ * whether or not anyone scrolls to it. So every control here writes to the URL
+ * and the server answers: state that used to live in this component is now the
+ * address bar, which also makes a filtered catalogue linkable and survives the
+ * revalidate after an edit.
  */
-
-export const SCOPES = ["selling", "not_selling", "all"] as const;
-type Scope = (typeof SCOPES)[number];
-
-/**
- * Rows rendered at once. Counting, filtering and exporting still read the whole
- * catalogue — only the table is paged, because a shop with 400–1000 products
- * pays for every row it puts in the DOM whether or not anyone scrolls to it.
- * 50 is about two screens of scrolling: enough to scan a category in one go,
- * small enough that the page cost stops growing with the catalogue.
- */
-const PAGE_SIZE = 50;
-
-export const SCOPE_LABELS: Record<Scope, string> = {
-  selling: "Selling",
-  not_selling: "Archived & removed",
-  all: "All products",
-};
-
-/** Exported for tests: which scope a row belongs to. */
-export function inScope(row: CatalogueRow, scope: Scope): boolean {
-  if (scope === "all") return true;
-  return scope === "selling" ? row.buyable : !row.buyable;
-}
-
-function status(row: CatalogueRow): { label: string; tone: "negative" | "warning" | "positive" | "neutral" } {
-  if (!row.buyable) return { label: row.lifecycleLabel, tone: "neutral" };
-  if (row.onHandUnits <= 0) return { label: "Stocked out", tone: "negative" };
-  if (row.daysCover === null) return { label: "No sales", tone: "neutral" };
-  if (row.daysCover < 7) return { label: "Reorder now", tone: "negative" };
-  if (row.daysCover < 14) return { label: "Low", tone: "warning" };
-  if (row.daysCover > 45) return { label: "Overstocked", tone: "neutral" };
-  return { label: "Healthy", tone: "positive" };
-}
 
 /** ETA on inbound stock — same day/month form the rest of the app uses. */
 function formatEta(date: Date): string {
   return new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-type SortKey = "title" | "onHandUnits" | "runRate" | "daysCover" | "revenue30dKes" | "abc" | "moneyAtRestKes" | "marginPct";
-
-const ABC_RANK: Record<string, number> = { A: 0, B: 1, C: 2 };
-
-function compare(a: CatalogueRow, b: CatalogueRow, key: SortKey): number {
-  switch (key) {
-    case "title":
-      return a.title.localeCompare(b.title);
-    case "abc":
-      return (ABC_RANK[a.abc ?? ""] ?? 9) - (ABC_RANK[b.abc ?? ""] ?? 9);
-    case "daysCover":
-      return (a.daysCover ?? Infinity) - (b.daysCover ?? Infinity);
-    case "marginPct":
-      return (a.marginPct ?? Infinity) - (b.marginPct ?? Infinity);
-    default:
-      return (a[key] ?? 0) - (b[key] ?? 0);
-  }
-}
-
-/** The health-chip keys a row carries. A row the shop no longer sells goes quiet
- *  on the data-quality flags — a missing cost on an archived SKU is not a job —
- *  leaving its lifecycle. A sync failure counts either way: a row that stopped
- *  updating is a problem whatever its status. */
-function rowHealthKeys(row: CatalogueRow): Set<string> {
-  const keys = new Set<string>();
-  if (row.syncError) keys.add("sync_error");
-  if (row.lifecycle !== "active") keys.add(`lifecycle_${row.lifecycle}`);
-  if (!row.buyable) return keys;
-  for (const flag of row.facet.health) keys.add(flag);
-  if (row.suspectCost) keys.add("suspect_cost");
-  if (row.costMovedPct != null) keys.add("cost_moved");
-  return keys;
-}
-
-const HEALTH_CHIP_META: { key: string; label: string; tone: HealthChip["tone"] }[] = [
-  { key: "new", label: "New from Shopify", tone: "accent" },
-  { key: "sync_error", label: "Sync problem", tone: "negative" },
-  { key: "missing_cost", label: "Missing cost", tone: "warning" },
-  { key: "suspect_cost", label: "Suspect cost", tone: "warning" },
-  { key: "cost_moved", label: "Cost moved", tone: "warning" },
-  { key: "no_supplier", label: "No supplier", tone: "warning" },
-  { key: "no_sku", label: "No SKU", tone: "warning" },
-  { key: "dup_sku", label: "Duplicate SKU", tone: "warning" },
-  { key: "negative", label: "Negative stock", tone: "negative" },
-  { key: "dead", label: "Not selling", tone: "neutral" },
-];
-
-/** Lifecycle chips are built from the rows rather than a fixed list, because the
- *  label travels on the row — the shared vocabulary lives in the db package, and
- *  importing that here would pull the Prisma client into the browser. */
-function lifecycleChips(rows: CatalogueRow[]): HealthChip[] {
-  const byKey = new Map<string, HealthChip>();
-  for (const row of rows) {
-    if (row.lifecycle === "active") continue;
-    const key = `lifecycle_${row.lifecycle}`;
-    const chip = byKey.get(key);
-    if (chip) chip.count += 1;
-    else byKey.set(key, { key, label: row.lifecycleLabel, count: 1, tone: row.lifecycle === "removed" ? "negative" : "neutral" });
-  }
-  return [...byKey.values()].sort((a, b) => a.label.localeCompare(b.label));
-}
-
-function moneyPredicate(f: Exclude<MoneyBandFilter, null>): (r: CatalogueRow) => boolean {
-  switch (f) {
-    case "dead_overstock":
-      return (r) => r.buyable && r.onHandUnits > 0 && (r.daysCover == null || r.daysCover > OVERSTOCK_COVER_DAYS);
-    case "revenue_at_risk":
-      return (r) => r.buyable && (r.onHandUnits <= 0 || (r.daysCover != null && r.daysCover < r.leadDays));
-    case "below_cost":
-      return (r) => r.marginPct != null && r.marginPct < 0;
-  }
-}
-
 export function CatalogueView({
-  rows,
+  screen,
+  query,
   categories,
   ownerFlags,
   canViewCosts,
   canManage,
 }: {
-  rows: CatalogueRow[];
+  screen: CatalogueScreen;
+  query: CatalogueQuery;
   categories: CategoryUsage[];
   ownerFlags: Record<string, OwnerFlags>;
   canViewCosts: boolean;
   canManage: boolean;
 }) {
   const currency = useCurrency();
-  const [selection, setSelection] = useState<FacetSelection>({});
-  const [sortKey, setSortKey] = useState<SortKey>("title");
-  const [desc, setDesc] = useState(false);
-  const [scope, setScope] = useState<Scope>("selling");
-  const [healthFilter, setHealthFilter] = useState<string | null>(null);
-  const [moneyFilter, setMoneyFilter] = useState<MoneyBandFilter>(null);
+  // Which row is open is the one piece of state that does NOT change which rows
+  // match, so it stays local — putting it in the URL would make expanding a row
+  // a history entry.
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [page, setPage] = useState(0);
 
+  const { rows, aggregates, pageCount, page, from } = screen;
   const categoryNames = categories.map((c) => c.name);
 
-  // Every control that changes WHICH rows match sends the reader back to the
-  // start: filtering down to eight rows while sitting on page 7 would otherwise
-  // show an empty table.
-  const resetPage = () => setPage(0);
-
-  // Everything below the scope chips — counts, money band, table — reads the
-  // scoped catalogue, so switching scope re-frames the whole screen rather than
-  // just hiding rows. The chip counts themselves read the full catalogue.
-  const scoped = useMemo(() => rows.filter((r) => inScope(r, scope)), [rows, scope]);
-  const scopeChips = useMemo<HealthChip[]>(
-    () =>
-      SCOPES.map((key) => ({
-        key,
-        label: SCOPE_LABELS[key],
-        count: rows.filter((r) => inScope(r, key)).length,
-        tone: "neutral" as const,
-      })),
-    [rows],
-  );
-
-  const hasWarehouseStock = scoped.some((r) => r.warehouseUnits > 0);
-
-  const band = useMemo(() => {
-    const moneyRows: MoneyRow[] = scoped.map((r) => ({
-      costKes: r.costKes ?? 0,
-      priceKes: r.priceKes,
-      sellableOnHand: r.onHandUnits,
-      coverDays: r.daysCover,
-      leadDays: r.leadDays,
-      revenue30dKes: r.revenue30dKes,
-      moneyAtRestKes: r.moneyAtRestKes ?? 0,
-      notForSale: r.notForSale,
-    }));
-    return computeMoneyBand(moneyRows);
-  }, [scoped]);
-
-  // Derived from the SAME scoped rows the health chips count. Deriving these
-  // server-side over the whole catalogue put two controls with identical
-  // labels and different numbers on one screen.
-  const facetOptions = useMemo(() => deriveFacetOptions(scoped.map((r) => r.facet)), [scoped]);
-
-  const chips = useMemo<HealthChip[]>(() => {
-    const counts = new Map<string, number>();
-    for (const r of scoped) for (const k of rowHealthKeys(r)) counts.set(k, (counts.get(k) ?? 0) + 1);
-    return [
-      ...HEALTH_CHIP_META.map((m) => ({ ...m, count: counts.get(m.key) ?? 0 })),
-      ...lifecycleChips(scoped),
-    ];
-  }, [scoped]);
-
-  const visible = useMemo(() => {
-    let filtered = filterByFacets(
-      scoped.map((r) => ({ ...r.facet, row: r })),
-      selection,
-    ).map((f) => f.row);
-    if (healthFilter) filtered = filtered.filter((r) => rowHealthKeys(r).has(healthFilter));
-    if (moneyFilter) filtered = filtered.filter(moneyPredicate(moneyFilter));
-    const sorted = [...filtered].sort((a, b) => compare(a, b, sortKey));
-    return desc ? sorted.reverse() : sorted;
-  }, [scoped, selection, healthFilter, moneyFilter, sortKey, desc]);
-
-  // Page the rendered table, not the matched set. The clamp is what survives a
-  // server refresh (an edit re-renders with fewer rows) landing the reader past
-  // the end.
-  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
-  const currentPage = Math.min(page, pageCount - 1);
-  const pageStart = currentPage * PAGE_SIZE;
-  const paged = visible.slice(pageStart, pageStart + PAGE_SIZE);
-
-  // Exports read `visible`, not `paged`: an export is the list the reader has
-  // filtered to, not the fifty rows currently on screen.
-  const exportRows = visible.map((row) => ({
-    title: row.title,
-    sku: row.sku,
-    onHandUnits: row.onHandUnits,
-    warehouseUnits: row.warehouseUnits,
-    daysCover: row.onHandUnits <= 0 ? null : row.daysCover,
-    status: status(row).label,
-    costKes: row.costKes,
-    stockValueKes: row.stockValueKes,
-  }));
+  /** Every control routes through here. `withQuery` resets to page 1 for
+   *  anything that changes WHICH rows match — filtering down to eight rows while
+   *  sitting on page 7 would otherwise show an empty table.
+   *
+   *  NOT wrapped in startTransition: a transition-wrapped push updates the URL
+   *  but leaves the server component showing the previous query's rows, so the
+   *  filter appears to do nothing. */
+  /** Where a control points. Every control on this screen is a navigation to the
+   *  same route with a different query, so each one is a real link: `router.push`
+   *  changes the URL without re-rendering the server component, which showed the
+   *  URL moving while the rows stood still.
+   *
+   *  `withQuery` resets to page 1 for anything that changes WHICH rows match —
+   *  filtering down to eight rows while sitting on page 7 would otherwise show
+   *  an empty table. */
+  const hrefFor = (patch: Partial<CatalogueQuery>) =>
+    `/stock${catalogueQueryToSearch(withQuery(query, patch))}`;
 
   // Product · ABC · Cost · Margin · On hand · On order · Sells/day · Cover ·
   // Cash tied up · Revenue · Verdict, plus the optional warehouse column.
-  const colCount = 11 + (hasWarehouseStock ? 1 : 0);
+  const colCount = 11 + (aggregates.hasWarehouseStock ? 1 : 0);
 
   return (
     <div className="space-y-4">
-      {canViewCosts && (
+      {canViewCosts && aggregates.band && (
         <MoneyBand
-          band={band}
+          band={aggregates.band}
           canViewCosts={canViewCosts}
-          active={moneyFilter}
-          onSelect={(next) => {
-            setMoneyFilter(next);
-            resetPage();
-          }}
+          active={query.moneyFilter}
+          tileHref={(moneyFilter) => hrefFor({ moneyFilter })}
         />
       )}
 
@@ -301,72 +130,38 @@ export function CatalogueView({
               >
                 Costs &amp; coverage
               </Link>
-              <CatalogueExportBar rows={exportRows} canViewCosts={canViewCosts} />
+              {/* The export is the list the reader filtered to, not the fifty
+                  rows on screen — so it asks the server for the full match. */}
+              <CatalogueExportBar
+                count={aggregates.matchedCount}
+                totalValueKes={aggregates.matchedStockValueKes}
+                loadRows={() => exportCatalogueAction(query)}
+                canViewCosts={canViewCosts}
+              />
             </div>
           }
         />
 
         <HealthStrip
-          total={scoped.length}
-          shown={visible.length}
-          chips={chips}
-          active={healthFilter}
-          onToggle={(key) => {
-            setHealthFilter((cur) => (cur === key ? null : key));
-            resetPage();
-          }}
-          onClear={() => {
-            setHealthFilter(null);
-            resetPage();
-          }}
-          scopes={scopeChips}
-          scope={scope}
-          onScope={(key) => {
-            setScope(key as Scope);
-            setHealthFilter(null); // the old chip may not exist in the new scope
-            resetPage();
-          }}
+          total={aggregates.scopedCount}
+          shown={aggregates.matchedCount}
+          chips={aggregates.healthChips}
+          active={query.healthFilter}
+          chipHref={(key) => hrefFor({ healthFilter: query.healthFilter === key ? null : key })}
+          clearHref={hrefFor({ healthFilter: null })}
+          scopes={aggregates.scopeChips}
+          scope={query.scope}
+          // The old chip may not exist in the new scope, so it clears with it.
+          scopeHref={(key) => hrefFor({ scope: key as Scope, healthFilter: null })}
         />
 
         <FacetFilterBar
-          options={facetOptions}
-          selection={selection}
-          onChange={(next) => {
-            setSelection(next);
-            resetPage();
-          }}
+          options={aggregates.facetOptions}
+          selection={query.selection}
+          selectionHref={(selection: FacetSelection) => hrefFor({ selection })}
         />
 
-        <div className="flex items-center gap-2 px-4 py-2 text-sm text-ink-muted">
-          <span>Sort</span>
-          <select
-            value={sortKey}
-            onChange={(e) => {
-              setSortKey(e.target.value as SortKey);
-              resetPage();
-            }}
-            className="rounded-md border border-edge bg-surface px-2 py-1 text-ink"
-          >
-            <option value="title">Product</option>
-            <option value="onHandUnits">On hand</option>
-            <option value="runRate">Run rate</option>
-            <option value="daysCover">Days cover</option>
-            <option value="revenue30dKes">Revenue (30d)</option>
-            <option value="abc">ABC class</option>
-            {canViewCosts && <option value="marginPct">Margin %</option>}
-            {canViewCosts && <option value="moneyAtRestKes">Cash tied up</option>}
-          </select>
-          <button
-            type="button"
-            onClick={() => {
-              setDesc((d) => !d);
-              resetPage();
-            }}
-            className="rounded-md border border-edge bg-surface px-2 py-1 text-ink hover:bg-surface-2"
-          >
-            {desc ? "Desc ↓" : "Asc ↑"}
-          </button>
-        </div>
+        <SortBar query={query} canViewCosts={canViewCosts} hrefFor={hrefFor} />
 
         <CardContent className="p-0 py-2">
           <Table>
@@ -376,7 +171,7 @@ export function CatalogueView({
               <TableHead numeric>Cost</TableHead>
               <TableHead numeric>Margin</TableHead>
               <TableHead numeric>On hand</TableHead>
-              {hasWarehouseStock && <TableHead numeric>In warehouse</TableHead>}
+              {aggregates.hasWarehouseStock && <TableHead numeric>In warehouse</TableHead>}
               <TableHead numeric>On order</TableHead>
               <TableHead numeric>Sells/day</TableHead>
               <TableHead numeric>Cover</TableHead>
@@ -385,7 +180,7 @@ export function CatalogueView({
               <TableHead>Verdict</TableHead>
             </TableHeader>
             <TableBody>
-              {paged.map((row) => {
+              {rows.map((row) => {
                 const open = expandedId === row.productId;
                 return (
                   <RowGroup
@@ -393,7 +188,7 @@ export function CatalogueView({
                     row={row}
                     open={open}
                     onToggle={() => setExpandedId(open ? null : row.productId)}
-                    hasWarehouseStock={hasWarehouseStock}
+                    hasWarehouseStock={aggregates.hasWarehouseStock}
                     canViewCosts={canViewCosts}
                     canManage={canManage}
                     categoryNames={categoryNames}
@@ -408,12 +203,12 @@ export function CatalogueView({
 
         {pageCount > 1 && (
           <Pager
-            page={currentPage}
+            page={page}
             pageCount={pageCount}
-            from={pageStart + 1}
-            to={pageStart + paged.length}
-            total={visible.length}
-            onPage={setPage}
+            from={from}
+            to={from + rows.length - 1}
+            total={aggregates.matchedCount}
+            pageHref={(next) => hrefFor({ page: next })}
           />
         )}
       </Card>
@@ -421,26 +216,95 @@ export function CatalogueView({
   );
 }
 
+/** Sort control. A dropdown of links rather than a select, for the same reason
+ *  the chips are links: the server does the sorting, so choosing one is a
+ *  navigation. Mirrors the facet bar's details/summary so the two read alike. */
+function SortBar({
+  query,
+  canViewCosts,
+  hrefFor,
+}: {
+  query: CatalogueQuery;
+  canViewCosts: boolean;
+  hrefFor: (patch: Partial<CatalogueQuery>) => string;
+}) {
+  const options: { key: SortKey; label: string; costOnly?: boolean }[] = [
+    { key: "title", label: "Product" },
+    { key: "onHandUnits", label: "On hand" },
+    { key: "runRate", label: "Run rate" },
+    { key: "daysCover", label: "Days cover" },
+    { key: "revenue30dKes", label: "Revenue (30d)" },
+    { key: "abc", label: "ABC class" },
+    { key: "marginPct", label: "Margin %", costOnly: true },
+    { key: "moneyAtRestKes", label: "Cash tied up", costOnly: true },
+  ];
+  const shown = options.filter((o) => canViewCosts || !o.costOnly);
+  const current = shown.find((o) => o.key === query.sortKey) ?? shown[0]!;
+
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 text-sm text-ink-muted">
+      <span>Sort</span>
+      <details className="relative">
+        <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-edge bg-surface px-2.5 py-1 font-medium text-ink">
+          {current.label}
+          <ChevronDownIcon className="size-3.5 text-ink-faint" />
+        </summary>
+        <div className="absolute z-10 mt-1 flex min-w-44 flex-col rounded-lg border border-edge bg-surface p-1 shadow-lg">
+          {shown.map((o) => (
+            <Link
+              key={o.key}
+              href={hrefFor({ sortKey: o.key })}
+              scroll={false}
+              aria-current={o.key === query.sortKey ? "true" : undefined}
+              className={cn(
+                "rounded-md px-2 py-1 text-left",
+                o.key === query.sortKey ? "bg-accent-soft text-accent-ink" : "text-ink-muted hover:bg-surface-2 hover:text-ink",
+              )}
+            >
+              {o.label}
+            </Link>
+          ))}
+        </div>
+      </details>
+      <Link
+        href={hrefFor({ desc: !query.desc })}
+        scroll={false}
+        aria-label={query.desc ? "Sort ascending" : "Sort descending"}
+        className="rounded-md border border-edge bg-surface px-2 py-1 text-ink hover:bg-surface-2"
+      >
+        {query.desc ? "Desc ↓" : "Asc ↑"}
+      </Link>
+    </div>
+  );
+}
+
 /** Table pager. Says how much of the matched list is on screen — a shop with
  *  400+ products must never be left guessing whether the rest is missing or
- *  merely further down — and the page select is the way to a far page without
- *  clicking Next eight times. */
+ *  merely further down — and the numbered links are the way to a far page
+ *  without clicking Next eight times. */
 function Pager({
   page,
   pageCount,
   from,
   to,
   total,
-  onPage,
+  pageHref,
 }: {
   page: number;
   pageCount: number;
   from: number;
   to: number;
   total: number;
-  onPage: (page: number) => void;
+  pageHref: (page: number) => string;
 }) {
-  const step = "rounded-md border border-edge bg-surface px-2 py-1 text-ink hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50";
+  const step = "rounded-md border border-edge bg-surface px-2 py-1 text-ink hover:bg-surface-2";
+  const muted = "rounded-md border border-edge px-2 py-1 text-ink-faint opacity-50";
+  // A window around the current page: a 1000-SKU catalogue is 20 pages, and
+  // twenty numbers in a row is a wall rather than a control.
+  const span = 2;
+  const first = Math.max(0, Math.min(page - span, pageCount - (span * 2 + 1)));
+  const last = Math.min(pageCount - 1, Math.max(page + span, span * 2));
+
   return (
     <nav
       aria-label="Catalogue pages"
@@ -449,25 +313,35 @@ function Pager({
       <span>
         Showing {from}–{to} of {total}
       </span>
-      <span className="flex items-center gap-2">
-        <button type="button" onClick={() => onPage(page - 1)} disabled={page === 0} className={step}>
-          ← Previous
-        </button>
-        <select
-          value={page}
-          onChange={(e) => onPage(Number(e.target.value))}
-          aria-label="Page"
-          className="rounded-md border border-edge bg-surface px-2 py-1 text-ink"
-        >
-          {Array.from({ length: pageCount }, (_, i) => (
-            <option key={i} value={i}>
-              Page {i + 1} of {pageCount}
-            </option>
-          ))}
-        </select>
-        <button type="button" onClick={() => onPage(page + 1)} disabled={page >= pageCount - 1} className={step}>
-          Next →
-        </button>
+      <span className="flex flex-wrap items-center gap-1">
+        {page === 0 ? (
+          <span className={muted}>← Previous</span>
+        ) : (
+          <Link href={pageHref(page - 1)} scroll={false} className={step}>
+            ← Previous
+          </Link>
+        )}
+        {first > 0 && <span className="px-1">…</span>}
+        {Array.from({ length: last - first + 1 }, (_, i) => first + i).map((n) => (
+          <Link
+            key={n}
+            href={pageHref(n)}
+            scroll={false}
+            aria-label={`Page ${n + 1} of ${pageCount}`}
+            aria-current={n === page ? "page" : undefined}
+            className={cn(step, n === page && "border-edge-strong bg-accent-soft text-accent-ink")}
+          >
+            {n + 1}
+          </Link>
+        ))}
+        {last < pageCount - 1 && <span className="px-1">…</span>}
+        {page >= pageCount - 1 ? (
+          <span className={muted}>Next →</span>
+        ) : (
+          <Link href={pageHref(page + 1)} scroll={false} className={step}>
+            Next →
+          </Link>
+        )}
       </span>
     </nav>
   );

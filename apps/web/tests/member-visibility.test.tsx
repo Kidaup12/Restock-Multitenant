@@ -39,6 +39,7 @@ import { MetricsTiles } from "../app/(shell)/today/metrics-tiles";
 import { ReorderTable } from "../app/(shell)/today/reorder-table";
 import { CatalogueTable } from "../app/(shell)/stock/catalogue-table";
 import { CatalogueView } from "../app/(shell)/stock/catalogue-view";
+import { DEFAULT_QUERY } from "../lib/catalogue";
 import { LocationView } from "../app/(shell)/stock/location-view";
 import { catalogueExportColumns } from "../app/(shell)/stock/catalogue-export";
 import { ShelfHealth } from "../app/(shell)/insights/shelf-health";
@@ -209,7 +210,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
 
   it("Stock catalogue: cost + cash-tied-up masked on every row, revenue stays", async () => {
     const html = renderToStaticMarkup(
-      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: false })
+      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: false, query: DEFAULT_QUERY })
     );
     // No cost KES leaks: unit cost and per-row cash-tied-up both mask, revenue is
     // rendered as a bare number (its KES unit is in the header), so nothing
@@ -219,7 +220,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     expect(html.match(new RegExp(MASK, "g"))?.length).toBe(seeded.productCount * 2);
 
     const owner = renderToStaticMarkup(
-      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true })
+      await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true, query: DEFAULT_QUERY })
     );
     // The owner sees real KES cost figures (unit cost + cash tied up per row, plus
     // the money band) and no mask.
@@ -396,13 +397,13 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     // The server table hands the (redacted) rows to the client CatalogueView —
     // that prop boundary is exactly what Next serializes into the client bundle,
     // so a money-blind member's rows must carry no cost numbers.
-    const tree = await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: false });
+    const tree = await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: false, query: DEFAULT_QUERY });
     const views = findElements(tree, CatalogueView);
     expect(views).toHaveLength(1);
     const props = (views[0] as { props: unknown }).props;
     expect(costNumbers(props)).toEqual([]);
 
-    const ownerTree = await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true });
+    const ownerTree = await CatalogueTable({ tenantId: seeded.tenantId, canViewCosts: true, query: DEFAULT_QUERY });
     const ownerView = findElements(ownerTree, CatalogueView)[0] as { props: unknown };
     expect(costNumbers(ownerView.props).length).toBeGreaterThan(0);
   });

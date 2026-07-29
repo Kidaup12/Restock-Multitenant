@@ -1,30 +1,34 @@
 import Link from "next/link";
 import { BoxIcon } from "@/components/icons";
 import { EmptyState } from "@/components/ui/empty-state";
-import { getCustomCategories, getStockCatalogue } from "@/lib/data/stock";
+import { getCatalogueScreen, getCustomCategories } from "@/lib/data/stock";
+import type { CatalogueQuery } from "@/lib/catalogue";
 import { CatalogueView } from "./catalogue-view";
-import { getOwnerFlags } from "./owner-flags";
+import { forProducts, getOwnerFlags } from "./owner-flags";
 
 export async function CatalogueTable({
   tenantId,
   canViewCosts = true,
   canManage = false,
+  query,
 }: {
   tenantId: string;
   canViewCosts?: boolean;
   canManage?: boolean;
+  query: CatalogueQuery;
 }) {
   // canViewCosts flows into the query: unit costs and stock values come back
   // null for a money-blind member, so the figures never reach the payload.
-  // ownerFlags carries the archive / keep-active switches the row editor drives;
-  // they are editor state rather than a catalogue metric, so they ride alongside.
-  const [rows, categories, ownerFlags] = await Promise.all([
-    getStockCatalogue(tenantId, { canViewCosts }),
+  // The screen counts and filters the whole catalogue server-side and returns
+  // one page of rows — the chips still read across everything, only the table
+  // travels.
+  const [screen, categories, allOwnerFlags] = await Promise.all([
+    getCatalogueScreen(tenantId, { canViewCosts, query }),
     getCustomCategories(tenantId),
     getOwnerFlags(tenantId),
   ]);
 
-  if (rows.length === 0) {
+  if (screen.empty) {
     return (
       <EmptyState
         icon={<BoxIcon />}
@@ -42,10 +46,17 @@ export async function CatalogueTable({
     );
   }
 
+  // The archive / keep-active switches the row editor drives: editor state rather
+  // than a catalogue metric, and only for the rows actually on the page.
+  const ownerFlags = forProducts(
+    allOwnerFlags,
+    screen.rows.map((r) => r.productId)
+  );
 
   return (
     <CatalogueView
-      rows={rows}
+      screen={screen}
+      query={query}
       categories={categories}
       ownerFlags={ownerFlags}
       canViewCosts={canViewCosts}

@@ -12,6 +12,14 @@ import { ASSUMED_LEAD_DAYS, leadDaysFor, urgencyFromDays, type AbcCategory } fro
 import { getCatalogueMetrics } from "@/lib/metrics";
 import { buildFacetItems, type FacetItem, type FacetSourceRow } from "@/lib/facets";
 import {
+  buildAggregates,
+  pageBounds,
+  selectRows,
+  PAGE_SIZE,
+  type CatalogueAggregates,
+  type CatalogueQuery,
+} from "@/lib/catalogue";
+import {
   coverVerdict,
   marginPct,
   resolveCost,
@@ -272,6 +280,52 @@ export async function getStockCatalogue(
       facet: facetById.get(p.id)!,
     };
   });
+}
+
+/** The catalogue screen's payload: the readings across the whole catalogue, and
+ *  the one page of rows the table renders. */
+export type CatalogueScreen = {
+  rows: CatalogueRow[];
+  aggregates: CatalogueAggregates;
+  pageCount: number;
+  /** Clamped page actually returned — the requested one may be past the end. */
+  page: number;
+  /** 1-based index of the first returned row, for "showing 51–100 of 312". */
+  from: number;
+  /** Whether the catalogue holds any product at all, which is a different empty
+   *  state from "no row matches these filters". */
+  empty: boolean;
+};
+
+/**
+ * Everything the Stock screen needs, from ONE catalogue load.
+ *
+ * The whole catalogue still has to be read: ABC is a percentile ranking across
+ * it, duplicate-SKU detection needs every SKU, and each chip counts what the
+ * reader has not filtered to yet. What changed is what travels — the aggregates
+ * plus fifty rows, instead of every row the shop owns. At 400 products that is
+ * the difference between a 633 KB document and one that stops growing with the
+ * catalogue.
+ *
+ * Filtering and sorting happen here, through the same predicates the table uses
+ * (lib/catalogue), so a chip's count and the rows it filters to cannot drift.
+ */
+export async function getCatalogueScreen(
+  tenantId: string,
+  { canViewCosts, query }: { canViewCosts: boolean; query: CatalogueQuery }
+): Promise<CatalogueScreen> {
+  const all = await getStockCatalogue(tenantId, { canViewCosts });
+  const matched = selectRows(all, query);
+  const { pageCount, current, start } = pageBounds(matched.length, query.page);
+
+  return {
+    rows: matched.slice(start, start + PAGE_SIZE),
+    aggregates: buildAggregates(all, query, matched, { canViewCosts }),
+    pageCount,
+    page: current,
+    from: start + 1,
+    empty: all.length === 0,
+  };
 }
 
 export type CategoryUsage = { name: string; count: number };

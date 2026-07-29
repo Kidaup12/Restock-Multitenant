@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { cn } from "@/lib/cn";
 
 /**
@@ -35,21 +36,24 @@ export function HealthStrip({
   shown,
   chips,
   active,
-  onToggle,
-  onClear,
+  chipHref,
+  clearHref,
   scopes,
   scope,
-  onScope,
+  scopeHref,
 }: {
   total: number;
   shown: number;
   chips: HealthChip[];
   active: string | null;
-  onToggle: (key: string) => void;
-  onClear: () => void;
+  /** Where a chip points — toggling off is the caller's job, since it owns the
+   *  rest of the query. Links rather than handlers because each one is a real
+   *  navigation: the server reads the filters and decides which rows to send. */
+  chipHref: (key: string) => string;
+  clearHref: string;
   scopes: HealthChip[];
   scope: string;
-  onScope: (key: string) => void;
+  scopeHref: (key: string) => string;
 }) {
   const live = chips.filter((c) => c.count > 0);
 
@@ -59,11 +63,11 @@ export function HealthStrip({
         {scopes.map((s) => {
           const on = scope === s.key;
           return (
-            <button
+            <Link
               key={s.key}
-              type="button"
-              onClick={() => onScope(s.key)}
-              aria-pressed={on}
+              href={scopeHref(s.key)}
+              scroll={false}
+              aria-current={on ? "true" : undefined}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium transition-colors",
                 on
@@ -75,32 +79,32 @@ export function HealthStrip({
               <span className={cn("rounded-full px-1.5 text-xs", on ? "bg-surface/60" : "bg-surface-2 text-ink-faint")}>
                 {s.count}
               </span>
-            </button>
+            </Link>
           );
         })}
       </div>
       <span aria-hidden className="mx-1 h-5 w-px bg-edge" />
 
-      <button
-        type="button"
-        onClick={onClear}
+      <Link
+        href={clearHref}
+        scroll={false}
         className={cn(
           "rounded-md border px-2.5 py-1 text-sm font-medium transition-colors",
           active == null ? "border-edge-strong bg-surface-2 text-ink" : "border-edge bg-surface text-ink-muted hover:text-ink",
         )}
       >
         {shown === total ? `${total} products` : `${shown} of ${total}`}
-      </button>
+      </Link>
 
       {live.map((chip) => {
         const on = active === chip.key;
         const style = toneStyles[chip.tone];
         return (
-          <button
+          <Link
             key={chip.key}
-            type="button"
-            onClick={() => onToggle(chip.key)}
-            aria-pressed={on}
+            href={chipHref(chip.key)}
+            scroll={false}
+            aria-current={on ? "true" : undefined}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium transition-colors",
               on ? style.on : style.off,
@@ -110,7 +114,7 @@ export function HealthStrip({
             <span className={cn("rounded-full px-1.5 text-xs", on ? "bg-surface/60" : "bg-surface-2 text-ink-faint")}>
               {chip.count}
             </span>
-          </button>
+          </Link>
         );
       })}
     </div>
