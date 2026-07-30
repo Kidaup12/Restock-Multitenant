@@ -24,6 +24,7 @@ import { getTodayMetrics, getReorderNeeded } from "@/lib/data/today";
 import { relativeTime } from "@/lib/notifications/format";
 import { enterWorkspace, exitWorkspace } from "../../actions";
 import { SyncButton } from "../../sync-button";
+import { PlanControl } from "./plan-control";
 
 export const metadata: Metadata = {
   title: "Workspace",
@@ -160,6 +161,16 @@ export default async function AdminTenantPage({
             ) : (
               <p className="text-sm text-ink-muted">No Shopify store connected.</p>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Plan"
+            subtitle="What this workspace is entitled to"
+          />
+          <CardContent>
+            <PlanControl tenantId={id} plan={detail.tenant.plan} />
           </CardContent>
         </Card>
 

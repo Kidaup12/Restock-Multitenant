@@ -9,14 +9,24 @@ import type { AdminActor } from "@/lib/admin/gate";
  * any tenant-scoped RLS context, and no tenant role may filter them.
  */
 
-/** entity="AdminSession": workspace entry/exit. entity="AdminSync": sync triggers. */
 export const ADMIN_AUDIT_ACTIONS = [
   "impersonation_start",
   "impersonation_end",
   "admin_sync_trigger",
+  "plan_changed",
 ] as const;
 
 export type AdminAuditAction = (typeof ADMIN_AUDIT_ACTIONS)[number];
+
+/** What each action is *about*, for the ledger's entity column. A map rather
+ *  than a ternary so a new action has to state its subject instead of silently
+ *  inheriting "AdminSession". */
+const ENTITY_BY_ACTION: Record<AdminAuditAction, string> = {
+  impersonation_start: "AdminSession",
+  impersonation_end: "AdminSession",
+  admin_sync_trigger: "AdminSync",
+  plan_changed: "Tenant",
+};
 
 /** One admin-surface audit row. entityId is the tenant acted on; the admin's
  *  identity lands in actorUserId/actorName plus meta.adminEmail. */
@@ -29,7 +39,7 @@ export async function recordAdminEvent(opts: {
   await prismaService.auditEvent.create({
     data: {
       tenantId: opts.tenantId,
-      entity: opts.action === "admin_sync_trigger" ? "AdminSync" : "AdminSession",
+      entity: ENTITY_BY_ACTION[opts.action],
       entityId: opts.tenantId,
       action: opts.action,
       actorUserId: opts.admin.userId,
