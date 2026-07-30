@@ -61,6 +61,13 @@ describe.skipIf(!runnable)("forecast-run trust layer (seeded local db)", () => {
   }, 120_000);
 
   afterAll(async () => {
+    // Remove the two cold-start fixtures. They are added to the SHARED seeded
+    // tenant, so leaving them behind raises its product count for every suite
+    // that runs afterwards — a later run of apps/web then fails on a seeded
+    // count nobody touched, in a workspace this one never loads.
+    await prismaService.product.deleteMany({
+      where: { tenantId, id: { in: [cantuNewId, orphanNewId] } },
+    });
     await prismaService.$disconnect();
   });
 
