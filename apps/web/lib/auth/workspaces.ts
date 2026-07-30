@@ -69,12 +69,18 @@ function slugTaken(error: unknown): boolean {
 }
 
 /**
- * Create a workspace and make the caller its OWNER. Idempotent by (owner, name):
- * re-submitting the same name returns the workspace the user already owns rather
- * than minting a second one, so a double-clicked form is harmless.
+ * Create a workspace owned by `userId`. Idempotent by (owner, name):
+ * re-submitting the same name returns the workspace that user already owns
+ * rather than minting a second one, so a double-clicked form is harmless.
+ *
+ * `userId: null` mints the workspace with NO membership — the operator-led path,
+ * where the person who will own the shop has not signed up yet and becomes OWNER
+ * by accepting an invite. A workspace with no members is unreachable by anyone
+ * (every read is tenant-scoped and there is no membership to resolve through),
+ * so the gap is safe; it closes when the invite is accepted.
  */
 export async function createWorkspace(input: {
-  userId: string;
+  userId: string | null;
   name: string;
 }): Promise<CreateWorkspaceResult> {
   const name = input.name.trim().replace(/\s+/g, " ");
@@ -85,11 +91,17 @@ export async function createWorkspace(input: {
     return { ok: false, error: `Keep the name under ${WORKSPACE_NAME_MAX} characters.` };
   }
 
-  const owned = (await listMemberships(input.userId)).find(
-    (m) => m.role === "OWNER" && m.tenant.name.toLowerCase() === name.toLowerCase(),
-  );
-  if (owned) {
-    return { ok: true, tenantId: owned.tenantId, slug: owned.tenant.slug, created: false };
+  // Idempotency needs an owner to compare against; the memberless path has none,
+  // so a repeated operator submission mints a second workspace rather than
+  // silently returning the first. The console surfaces what it created, which is
+  // the check that belongs with a human rather than in here.
+  if (input.userId) {
+    const owned = (await listMemberships(input.userId)).find(
+      (m) => m.role === "OWNER" && m.tenant.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (owned) {
+      return { ok: true, tenantId: owned.tenantId, slug: owned.tenant.slug, created: false };
+    }
   }
 
   const base = workspaceSlug(name);
@@ -99,9 +111,11 @@ export async function createWorkspace(input: {
     try {
       await prismaForTenantTx(tenantId, async (tx) => {
         await tx.tenant.create({ data: { id: tenantId, name, slug, plan: DEFAULT_PLAN } });
-        await tx.membership.create({
-          data: { userId: input.userId, tenantId, role: "OWNER" },
-        });
+        if (input.userId) {
+          await tx.membership.create({
+            data: { userId: input.userId, tenantId, role: "OWNER" },
+          });
+        }
         await tx.tenantConfig.create({ data: { tenantId } });
       });
       return { ok: true, tenantId, slug, created: true };

@@ -10,7 +10,13 @@ export const metadata: Metadata = {
   title: "Invitation",
 };
 
-const roleLabels = { ADMIN: "Admin", MEMBER: "Member" } as const;
+const roleLabels = { OWNER: "Owner", ADMIN: "Admin", MEMBER: "Member" } as const;
+
+/** "an admin" / "an owner" / "a member" — the label decides, not a role check,
+ *  so a new role reads correctly without another branch here. */
+function article(label: string): string {
+  return /^[AEIOU]/.test(label) ? "an" : "a";
+}
 
 function InviteCard({
   title,
@@ -69,7 +75,7 @@ export default async function InvitePage({
       <InviteCard title={`Join ${tenantName}`}>
         <p className="mt-2 text-sm text-ink-muted">
           You&apos;ve been invited to join <strong>{tenantName}</strong> on
-          Wezesha Restock as {roleLabel === "Admin" ? "an" : "a"}{" "}
+          Wezesha Restock as {article(roleLabel)}{" "}
           {roleLabel.toLowerCase()}. This invite was sent to{" "}
           <strong>{invite.email}</strong>.
         </p>
@@ -133,7 +139,7 @@ export default async function InvitePage({
         ) : (
           <>
             You&apos;ve been invited to join <strong>{tenantName}</strong> as{" "}
-            {roleLabel === "Admin" ? "an" : "a"} {roleLabel.toLowerCase()}.
+            {article(roleLabel)} {roleLabel.toLowerCase()}.
           </>
         )}
       </p>

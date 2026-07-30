@@ -14,6 +14,7 @@ export const ADMIN_AUDIT_ACTIONS = [
   "impersonation_end",
   "admin_sync_trigger",
   "plan_changed",
+  "workspace_provisioned",
 ] as const;
 
 export type AdminAuditAction = (typeof ADMIN_AUDIT_ACTIONS)[number];
@@ -26,6 +27,7 @@ const ENTITY_BY_ACTION: Record<AdminAuditAction, string> = {
   impersonation_end: "AdminSession",
   admin_sync_trigger: "AdminSync",
   plan_changed: "Tenant",
+  workspace_provisioned: "Tenant",
 };
 
 /** One admin-surface audit row. entityId is the tenant acted on; the admin's

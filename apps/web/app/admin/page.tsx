@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { ProvisionForm } from "./provision-form";
 import {
   Table,
   TableBody,
@@ -91,6 +92,8 @@ export default async function AdminFleetPage({
           </div>
         }
       />
+
+      <ProvisionForm />
 
       {rows.length === 0 ? (
         <EmptyState

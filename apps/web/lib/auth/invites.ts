@@ -19,7 +19,17 @@ export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const IDENTIFIER_PREFIX = "invite:";
 
-export type InviteRole = "ADMIN" | "MEMBER";
+/**
+ * Roles an invite can carry.
+ *
+ * OWNER is here for the operator-led path only: an admin provisioning a
+ * workspace for a customer who has not signed up yet has no other way to hand
+ * them the shop. It is deliberately NOT offered inside a workspace —
+ * `invitableRoles` never returns it, and the team action keeps its own narrower
+ * check — because a tenant being able to mint owners is an escalation, not a
+ * feature.
+ */
+export type InviteRole = "OWNER" | "ADMIN" | "MEMBER";
 
 export type PendingInvite = {
   token: string;
@@ -48,7 +58,7 @@ function parseIdentifier(
 }
 
 function isInviteRole(value: string): value is InviteRole {
-  return value === "ADMIN" || value === "MEMBER";
+  return value === "OWNER" || value === "ADMIN" || value === "MEMBER";
 }
 
 function toPendingInvite(row: {
@@ -244,7 +254,8 @@ export async function sendInviteEmail(input: {
     throw new Error("BETTER_AUTH_URL is not set (needed for invite links)");
   }
   const url = `${base.replace(/\/$/, "")}/invite/${input.invite.token}`;
-  const roleLabel = input.invite.role === "ADMIN" ? "an admin" : "a member";
+  const roleLabel =
+    input.invite.role === "OWNER" ? "its owner" : input.invite.role === "ADMIN" ? "an admin" : "a member";
   await sendEmail({
     to: input.invite.email,
     subject: `You've been invited to ${input.tenantName} on Wezesha Restock`,
