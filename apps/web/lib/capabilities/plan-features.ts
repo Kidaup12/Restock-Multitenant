@@ -42,6 +42,17 @@ function rank(plan: string | null | undefined): number {
   return PLAN_ORDER.indexOf(toTier(plan));
 }
 
+/**
+ * A caller-supplied tier, normalised to the canonical key, or null if it is not
+ * a tier at all. For writers: the aliases accept "Essential", but only
+ * "starter" belongs in the column, so a tier that came from a form is resolved
+ * here rather than stored as typed.
+ */
+export function toPlanTier(value: string | null | undefined): PlanTier | null {
+  if (value == null) return null;
+  return PLAN_ALIAS[value.trim().toLowerCase()] ?? null;
+}
+
 export type PlanFeature =
   | "core_ordering"
   | "run_forecast"
