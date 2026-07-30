@@ -19,10 +19,21 @@ export type TeamTarget = { membershipId: string; role: Role };
 const ok: GuardResult = { ok: true };
 const no = (reason: string): GuardResult => ({ ok: false, reason });
 
-/** Roles the actor may put on an invite. */
+/**
+ * Roles the actor may put on an invite.
+ *
+ * Staff only, whoever is asking. A shop owner runs their shop; who else may own
+ * or co-manage it is a platform decision, made by an operator in the admin
+ * console, not something a workspace can grant itself. An owner who could mint
+ * admins could hand out their own level of access, which is the escalation this
+ * closes.
+ *
+ * Staff cannot invite at all — they have no `manage_team` — so the empty list
+ * below is the whole rule for them.
+ */
 export function invitableRoles(actor: PermissionSource): Role[] {
   if (!hasPermission(actor, "manage_team")) return [];
-  return actor.role === "OWNER" ? ["ADMIN", "MEMBER"] : ["MEMBER"];
+  return ["MEMBER"];
 }
 
 export function canChangeRole(
@@ -38,11 +49,13 @@ export function canChangeRole(
     return no("You can't change your own role.");
   }
   if (nextRole === target.role) return no("Already that role.");
-  if (
-    actor.role !== "OWNER" &&
-    (target.role !== "MEMBER" || nextRole !== "MEMBER")
-  ) {
-    return no("Only an owner can manage admin and owner roles.");
+  // Promotion out of staff is the same grant as inviting an admin or an owner,
+  // by another door: closing one without the other just moves the escalation.
+  if (nextRole !== "MEMBER") {
+    return no("Only the platform team can grant admin and owner access.");
+  }
+  if (target.role !== "MEMBER" && actor.role !== "OWNER") {
+    return no("Only an owner can change an admin or owner.");
   }
   if (target.role === "OWNER" && ownerCount <= 1) {
     return no("A workspace needs at least one owner.");

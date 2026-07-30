@@ -15,6 +15,7 @@ import {
   verifyAdminTenant,
 } from "@/lib/admin/impersonation";
 import { tenantExists } from "@/lib/admin/fleet";
+import { provisionWorkspace } from "@/lib/admin/provision";
 
 /**
  * Workspace entry/exit for the admin console. Entering is the audited event:
@@ -35,6 +36,53 @@ export async function enterWorkspace(formData: FormData): Promise<void> {
   });
   await setAdminTenantCookie(tenantId);
   redirect(`/admin/tenant/${tenantId}`);
+}
+
+export type ProvisionActionResult =
+  | { ok: true; tenantId: string; slug: string; message: string }
+  | { ok: false; error: string };
+
+/**
+ * Create a workspace for a customer and hand it to its owner.
+ *
+ * The gap this closes: a shop that has agreed to use the product could only be
+ * set up by someone with database access, because the sole path to a workspace
+ * was a person signing up and making their own. That is also the workaround
+ * while Shopify review gates self-serve installs.
+ *
+ * Audited against the workspace it created, with how the owner was given it —
+ * an operator minting workspaces is exactly the action worth being able to
+ * account for later.
+ */
+export async function provisionWorkspaceAction(formData: FormData): Promise<ProvisionActionResult> {
+  const admin = await requireAdmin();
+  const name = String(formData.get("name") ?? "");
+  const ownerEmail = String(formData.get("ownerEmail") ?? "");
+
+  const result = await provisionWorkspace({ name, ownerEmail });
+  if (!result.ok) return result;
+
+  await recordAdminEvent({
+    tenantId: result.tenantId,
+    action: "workspace_provisioned",
+    admin,
+    meta: {
+      name,
+      ownerEmail: result.owner.status === "member" ? result.owner.email : result.owner.invite.email,
+      ownerStatus: result.owner.status,
+    },
+  });
+
+  revalidatePath("/admin");
+  return {
+    ok: true,
+    tenantId: result.tenantId,
+    slug: result.slug,
+    message:
+      result.owner.status === "member"
+        ? `Created ${result.slug} — the owner already had an account and can use it now.`
+        : `Created ${result.slug} — an owner invite has been emailed. It expires in 7 days.`,
+  };
 }
 
 export type SetPlanResult = { ok: true; plan: string } | { ok: false; error: string };

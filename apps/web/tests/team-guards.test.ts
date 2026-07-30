@@ -24,8 +24,11 @@ const target = (role: Role, membershipId = `target-${role.toLowerCase()}`): Team
 });
 
 describe("invitableRoles", () => {
-  it("lets an OWNER invite admins and members", () => {
-    expect(invitableRoles(actor("OWNER"))).toEqual(["ADMIN", "MEMBER"]);
+  it("limits even an OWNER to inviting staff", () => {
+    // A shop invites its staff. Who else may own or co-manage that shop is a
+    // platform decision, made by an operator — an owner who could mint admins
+    // could hand out their own level of access.
+    expect(invitableRoles(actor("OWNER"))).toEqual(["MEMBER"]);
   });
 
   it("limits an ADMIN to inviting members", () => {
@@ -61,10 +64,12 @@ describe("canChangeRole", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("lets an OWNER move members up and admins down", () => {
-    expect(canChangeRole(actor("OWNER"), target("MEMBER"), "ADMIN", 2).ok).toBe(true);
+  it("lets an OWNER move an admin down, but nobody up", () => {
+    // Promotion is the same grant as an invite, by another door: an owner may
+    // take access away, never hand out their own level of it.
     expect(canChangeRole(actor("OWNER"), target("ADMIN"), "MEMBER", 2).ok).toBe(true);
-    expect(canChangeRole(actor("OWNER"), target("MEMBER"), "OWNER", 1).ok).toBe(true);
+    expect(canChangeRole(actor("OWNER"), target("MEMBER"), "ADMIN", 2).ok).toBe(false);
+    expect(canChangeRole(actor("OWNER"), target("MEMBER"), "OWNER", 1).ok).toBe(false);
   });
 
   it("keeps ADMIN targets and the ADMIN/OWNER grants owner-only", () => {
@@ -74,8 +79,10 @@ describe("canChangeRole", () => {
   });
 
   it("never demotes the last OWNER", () => {
-    expect(canChangeRole(actor("OWNER"), target("OWNER"), "ADMIN", 1).ok).toBe(false);
-    expect(canChangeRole(actor("OWNER"), target("OWNER"), "ADMIN", 2).ok).toBe(true);
+    // Demotion goes to staff now that ADMIN is not grantable, but the rule it
+    // is guarding is unchanged: a workspace always keeps one owner.
+    expect(canChangeRole(actor("OWNER"), target("OWNER"), "MEMBER", 1).ok).toBe(false);
+    expect(canChangeRole(actor("OWNER"), target("OWNER"), "MEMBER", 2).ok).toBe(true);
   });
 });
 
