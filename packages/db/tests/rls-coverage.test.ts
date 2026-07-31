@@ -27,11 +27,16 @@ const GLOBAL_TABLES = [
   // there is no tenantId to scope on. Rows do name the merchant via shopDomain;
   // only the service client reads this table.
   "WebhookEvent",
+  // Who may reach the operator console. Platform-wide by definition, so there is
+  // no tenantId to scope on — it is instead locked away from the request-time
+  // role entirely, which the locked-table test below enforces.
+  "PlatformAdmin",
 ];
 
-/** Session tokens, password hashes and OAuth tokens. The request-time role must
- *  not be able to reach these at all — see the lock_credential_tables migration. */
-const CREDENTIAL_TABLES = ["Session", "Account", "Verification"];
+/** Tables the request-time role must not be able to reach at all: session
+ *  tokens, password hashes and OAuth tokens, plus the list of who can read every
+ *  workspace. See the lock_credential_tables and platform_admin migrations. */
+const LOCKED_TABLES = ["Session", "Account", "Verification", "PlatformAdmin"];
 
 describe("rls coverage census", () => {
   it("every tenantId table has RLS enabled and a two-sided tenant_isolation policy", async () => {
@@ -78,7 +83,7 @@ describe("rls coverage census", () => {
     }
   });
 
-  it("the request-time role cannot touch the credential tables", async () => {
+  it("the request-time role cannot touch the locked tables", async () => {
     // These carry no tenantId, so the census above skips them — and the role
     // bootstrap grants every table to wezesha_app by default. That combination
     // left session tokens, password hashes and OAuth tokens readable by the role
@@ -87,7 +92,7 @@ describe("rls coverage census", () => {
     const client = new Client({ connectionString: process.env.DIRECT_URL });
     await client.connect();
     try {
-      for (const table of CREDENTIAL_TABLES) {
+      for (const table of LOCKED_TABLES) {
         const { rows: grants } = await client.query<{ privilege_type: string }>(
           `SELECT privilege_type FROM information_schema.role_table_grants
             WHERE grantee = 'wezesha_app' AND table_schema = 'public' AND table_name = $1`,

@@ -103,6 +103,11 @@ model Tenant {
   // Per-tenant limit overrides: { maxProducts?, maxMembers?, maxOrders30d? }.
   // null = the plan's code defaults; a set key overrides just that limit.
   planLimits    Json?
+  // Wezesha's own workspace, not a customer's. It exists to anchor audit rows
+  // for platform-level actions (granting admin, step-up) that belong to no
+  // customer, so AuditEvent.tenantId stays a real reference. Memberless and
+  // excluded from the fleet, the crons and every invite path.
+  isSystem      Boolean  @default(false)
   createdAt     DateTime @default(now())
 
   memberships             Membership[]
@@ -1013,6 +1018,37 @@ model WebhookEvent {
   topic       String
   shopDomain  String
   processedAt DateTime @default(now())
+}
+
+// Who may reach the operator console — GLOBAL (allow-listed in the rls-coverage
+// census), and locked away from the request-time role entirely: no SELECT, no
+// INSERT, RLS on with no policy. Any code path that could write this table would
+// reach every workspace's costs and suppliers, so the constraint is the
+// database's, not the application's. Reads and writes go through the service
+// client inside lib/admin/ only.
+//
+// Revocation is a row edit, not a delete: who granted access, when, and when it
+// was taken away is the record the env var never kept. Re-granting a revoked
+// admin clears revokedAt on the same row (userId stays unique).
+model PlatformAdmin {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  // Normalised lowercase, denormalised on purpose: the trail has to still read
+  // as a person after the User row is gone.
+  email           String
+  grantedByUserId String? // null = seeded by the bootstrap script
+  grantedByEmail  String?
+  grantedAt       DateTime  @default(now())
+  revokedAt       DateTime?
+  revokedByUserId String?
+  // Step-up throttle. The counter has to be raised atomically and before the
+  // password is hashed: read-then-write lets concurrent attempts all see the
+  // same count, and hashing first leaves the ~100ms scrypt cost reachable by a
+  // caller who is already locked out.
+  failedStepUps   Int       @default(0)
+  lockedUntil     DateTime?
+
+  @@index([revokedAt])
 }
 
 // Append-only accounting/audit ledger. One row per significant mutation (PO
