@@ -3,6 +3,7 @@ import Link from "next/link";
 import {
   BoxIcon,
   CalendarIcon,
+  ChartIcon,
   ChevronRightIcon,
   GearIcon,
   LayersIcon,
@@ -39,6 +40,12 @@ const sections = [
     icon: <LayersIcon />,
     title: "Connections",
     description: "Connect your Shopify store and check how recently it synced.",
+  },
+  {
+    href: "/settings/pos",
+    icon: <ChartIcon />,
+    title: "Till sales",
+    description: "Send in-store sales to Wezesha, so the forecast sees the whole shop.",
   },
   {
     href: "/settings/signals",

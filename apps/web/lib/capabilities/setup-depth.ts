@@ -144,7 +144,7 @@ export async function setupDepth(tenantId: string): Promise<SetupDepth> {
 
   const [conn, config, locations, products, revenueRows] = await Promise.all([
     db.shopifyConnection.findFirst({ select: { uninstalledAt: true } }),
-    db.tenantConfig.findFirst({ select: { posFeedUrl: true } }),
+    db.tenantConfig.findFirst({ select: { posFeedUrl: true, posIngestSecretHash: true } }),
     db.location.findMany({ select: { locationType: true } }),
     db.product.findMany({
       where: { ...BUYABLE_PRODUCT_WHERE },
@@ -189,7 +189,10 @@ export async function setupDepth(tenantId: string): Promise<SetupDepth> {
     revenue30dTotal,
     revenue30dTrustedCost,
     suppliedProducts,
-    posFeedConfigured: Boolean(config?.posFeedUrl),
+    // Either direction counts. A shop whose till POSTS its sales is sending POS
+    // data just as much as one we pull a feed from — reading only posFeedUrl
+    // left the push path permanently short of this rung.
+    posFeedConfigured: Boolean(config?.posFeedUrl || config?.posIngestSecretHash),
     sellableLocations,
   };
 
