@@ -41,6 +41,24 @@ New tenant table checklist (enforced by the coverage test in CI):
 3. Extend the two-tenant seed fixture; the isolation suite picks the model up
    automatically from the Prisma DMMF.
 
+## Platform admins
+
+Who may reach the operator console lives in the `PlatformAdmin` table, not in an
+env var. The table is revoked from `wezesha_app` and has RLS enabled with no
+policy, so the role every user request runs as cannot read it, let alone grant
+itself a row — see `tests/platform-admin-lock.test.ts`.
+
+Seed the first one (idempotent; a revoked admin is restored and reported as
+such):
+
+```
+npm run bootstrap:admin -- someone@example.com
+```
+
+It refuses an account that signs in with an email code only: platform admins
+re-enter their password before every privileged action, and an account with no
+password would reach a console where every mutation refuses it.
+
 Production roles are pre-created by ops (`prisma/sql/prod-roles.sql`, run once
 as `postgres` before the first `migrate deploy`) — the role-bootstrap
 migration's guards then skip creation.
