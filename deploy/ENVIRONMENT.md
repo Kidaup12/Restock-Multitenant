@@ -37,7 +37,7 @@ it embeds a password).
 | `SNAPSHOT_CRON` | `apps/worker/src/index.ts` (gates `apps/worker/src/snapshot-cron.ts`) | worker | Railway (`1` everywhere on-hand history is wanted — stockout-rate and dead-stock trends read off it) | config | unset — schedule OFF |
 | `RESEND_API_KEY` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | secret | unset (mail is logged to the console, never sent — dev/CI/tests stay offline) |
 | `EMAIL_FROM` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | config | unset (only read when `RESEND_API_KEY` is set; sender as `Name <address>` or a bare address) |
-| `ADMIN_EMAILS` | `apps/web/lib/admin/gate.ts` | web | Vercel | config (sensitive — names the operator accounts) | unset (the `/admin` console 404s for everyone — fail closed) |
+| `ADMIN_EMAILS` | `apps/web/lib/admin/gate.ts` | web | Vercel | config (sensitive — names the operator accounts) | unset. Bootstrap only: it answers who is an admin while the `PlatformAdmin` table has no live row, and goes inert once one does. With both empty the console 404s for everyone — fail closed |
 | `SENTRY_DSN` | `packages/observability/src/index.ts` (via each service's init) | web (`apps/web/instrumentation.ts`) | Vercel | secret | unset (error tracking disabled — complete no-op) |
 | `SENTRY_DSN` | same | worker (`apps/worker/src/index.ts`) | Railway | secret | unset (no-op) |
 | `SENTRY_DSN` | same | ws-gateway (`apps/ws-gateway/src/index.ts`) | Railway | secret | unset (no-op) |
@@ -183,7 +183,7 @@ Supabase specifics that are easy to get wrong:
 | `SENTRY_DSN` | prod DSN (when provisioned) | preview DSN or unset | unset |
 | `RESEND_API_KEY` | prod key (= worker's) | preview key or unset (console fallback) | unset |
 | `EMAIL_FROM` | prod sender | preview sender | unset |
-| `ADMIN_EMAILS` | named operators only | named operators or unset | unset |
+| `ADMIN_EMAILS` | bootstrap operator, until the first `PlatformAdmin` row | same or unset | unset |
 
 The first four rows are the ones a deploy fails without: `SERVICE_DATABASE_URL` is read
 at module load and `BETTER_AUTH_SECRET` / `BETTER_AUTH_URL` are needed for the build to

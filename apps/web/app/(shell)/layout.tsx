@@ -1,6 +1,6 @@
 import type { Role } from "@wezesha/db";
 import { activeMembership, listMemberships, requireSession } from "@/lib/auth";
-import { isAdminEmail } from "@/lib/admin/gate";
+import { isPlatformAdmin } from "@/lib/admin/gate";
 import { planAllows } from "@/lib/capabilities/plan-features";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getUnreadCount } from "@/lib/notifications/data";
@@ -18,9 +18,12 @@ export default async function ShellLayout({
   children: React.ReactNode;
 }) {
   const session = await requireSession();
-  const [membership, memberships] = await Promise.all([
+  const [membership, memberships, platformAdmin] = await Promise.all([
     activeMembership(session.user.id),
     listMemberships(session.user.id),
+    // Alongside the others rather than after them: the admin list is now a
+    // table, and this runs on every authenticated render of every screen.
+    isPlatformAdmin(session),
   ]);
   // Match the badge to the feed the caller can actually open: cost alerts are
   // filtered out of a money-blind member's list, so counting them here would
@@ -55,9 +58,10 @@ export default async function ShellLayout({
       }))}
       tourAutoStart={membership !== null && membership.welcomedAt === null}
       unreadNotifications={unreadNotifications}
-      /* Operator allow-list, resolved server-side: ADMIN_EMAILS never reaches
-         the client, and a non-admin's shell carries no trace of /admin. */
-      isPlatformAdmin={isAdminEmail(session.user.email)}
+      /* Resolved server-side: the admin list never reaches the client, and a
+         non-admin's shell carries no trace of /admin. A hint only — requireAdmin
+         is what actually guards the console. */
+      isPlatformAdmin={platformAdmin}
     >
       {children}
     </AppShell>

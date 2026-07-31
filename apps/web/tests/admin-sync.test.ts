@@ -23,6 +23,7 @@ describe.skipIf(!runnable)("admin sync trigger (real db + redis)", () => {
   let cookie: string;
   let liveTenantId: string;
   let deadTenantId: string;
+  let adminUserId: string;
 
   function syncRequest(tenantId: unknown): Request {
     return new Request(`${base}/api/admin/sync`, {
@@ -88,11 +89,24 @@ describe.skipIf(!runnable)("admin sync trigger (real db + redis)", () => {
     );
     expect(res.status).toBe(200);
     cookie = /better-auth\.session_token=[^;]+/.exec(res.headers.get("set-cookie") ?? "")![0];
-    process.env.ADMIN_EMAILS = ADMIN_EMAIL;
+
+    // Admin through the mechanism, not the bootstrap: ADMIN_EMAILS only answers
+    // while the PlatformAdmin table has no live row, so a suite that relied on
+    // it would pass on an empty database and 404 on a real one.
+    const admin = await prismaService.user.findFirstOrThrow({
+      where: { email: ADMIN_EMAIL },
+      select: { id: true },
+    });
+    adminUserId = admin.id;
+    await prismaService.platformAdmin.create({
+      data: { userId: adminUserId, email: ADMIN_EMAIL },
+    });
   }, 30_000);
 
   afterAll(async () => {
-    delete process.env.ADMIN_EMAILS;
+    if (adminUserId) {
+      await prismaService.platformAdmin.deleteMany({ where: { userId: adminUserId } });
+    }
     if (liveTenantId) await removeJob(liveTenantId);
     // AuditEvent has no tenant FK (append-only ledger) — clear rows explicitly.
     const ids = [liveTenantId, deadTenantId].filter(Boolean);

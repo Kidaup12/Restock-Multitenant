@@ -120,7 +120,7 @@ render regressions aren't caught by the current suites.
 | Connections (Shopify/QB/POS) | `/settings/connections` | Surfaced (from Settings) |
 | Locations & roles, Team | `/settings/locations`, `/settings/team` | Surfaced |
 | Own profile; mobile nav overflow | `/profile`, `/more` | Surfaced |
-| Cross-tenant operator console (audit log, per-tenant view) | `/admin`, `/admin/audit`, `/admin/tenant/[id]` | Surfaced, but 404s unless the signed-in email is in `ADMIN_EMAILS` |
+| Cross-tenant operator console (audit log, per-tenant view) | `/admin`, `/admin/audit`, `/admin/tenant/[id]` | Surfaced, but 404s unless the account holds a live `PlatformAdmin` row (or, while that table is empty, is in `ADMIN_EMAILS`) |
 | Insights (proof/accuracy) | `/insights` | **Placeholder — deferred** |
 | Forecast trust surfaces (confidence render, cold-start queue, "tell the forecast", receipts, what-changed) | — | **Built + tested in the engine; UI deferred** |
 

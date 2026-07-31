@@ -242,6 +242,9 @@ second.
    `RESEND_API_KEY` / `EMAIL_FROM`, `ADMIN_EMAILS`, `SENTRY_DSN`. Do not set
    `NEXT_OUTPUT` — it is for the Docker image only.
 6. Deploy; confirm the production URL renders and `/api/health` returns `db: true`.
+7. Seed the first operator: `npm run bootstrap:admin -- <email>` against the
+   production database. `ADMIN_EMAILS` covers only the window before that row
+   exists; afterwards the console is granted and revoked from `/admin` itself.
 
 ## 6. Smoke tests
 
