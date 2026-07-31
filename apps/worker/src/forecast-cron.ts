@@ -1,6 +1,6 @@
 import { Queue, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
-import { prismaService } from "@wezesha/db";
+import { CUSTOMER_TENANTS_WHERE, prismaService } from "@wezesha/db";
 import { runForecast, runBacktest } from "@wezesha/forecast-run";
 
 /**
@@ -73,8 +73,11 @@ async function enqueuePerTenant(
   jobName: string,
   jobId: (tenantId: string) => string
 ): Promise<number> {
-  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every tenant is the job, and the per-tenant work it queues is scoped.
-  const tenants = await prismaService.tenant.findMany({ select: { id: true } });
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every customer workspace is the job, and the per-tenant work it queues is scoped.
+  const tenants = await prismaService.tenant.findMany({
+    where: CUSTOMER_TENANTS_WHERE,
+    select: { id: true },
+  });
   for (const tenant of tenants) {
     await queue.add(
       jobName,

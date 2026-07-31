@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isStale, sortFleet, STALE_AFTER_MS, type FleetRow } from "../lib/admin/fleet";
+import { PLATFORM_TENANT_ID } from "@wezesha/db/platform-tenant";
 
 /**
  * Fleet dashboard queries against the local database: per-tenant health rows
@@ -167,6 +168,27 @@ describe.skipIf(!runnable)("fleet + audit queries (local db)", () => {
       stalenessMs: null,
       openNotifications: 0,
     });
+  });
+
+  it("keeps the platform workspace out of the fleet, but in the audit filter", async () => {
+    // It is a real Tenant row with no connection and nothing to sync, so an
+    // unfiltered fleet would sort it to the top of the staleness view as the
+    // most neglected shop on the platform.
+    const rows = await fleet.getFleet(now);
+    expect(rows.map((r) => r.tenantId)).not.toContain(PLATFORM_TENANT_ID);
+
+    // The audit filter is the one list it belongs in: the events keyed on it are
+    // exactly what an operator opens this console to review.
+    const forFilter = await fleet.listTenants();
+    expect(forFilter.map((t) => t.id)).toContain(PLATFORM_TENANT_ID);
+  });
+
+  it("refuses the platform workspace as somewhere to enter or re-tier", async () => {
+    // customerWorkspaceExists gates enterWorkspace, setTenantPlan and the sync
+    // trigger. Existence alone would pass all three for a workspace that is ours.
+    expect(await fleet.customerWorkspaceExists(tenantAId)).toBe(true);
+    expect(await fleet.customerWorkspaceExists(PLATFORM_TENANT_ID)).toBe(false);
+    expect(await fleet.getTenantDetail(PLATFORM_TENANT_ID)).toBeNull();
   });
 
   it("getTenantDetail returns the roster with emails; null for unknown ids", async () => {

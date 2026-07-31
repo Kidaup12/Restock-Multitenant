@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Redis } from "ioredis";
 import type { Queue } from "bullmq";
+import { CUSTOMER_TENANTS_WHERE } from "@wezesha/db/platform-tenant";
 
 /**
  * Inventory-snapshot cron. The writer suite runs against the local database:
@@ -195,11 +196,14 @@ describe.skipIf(!runnable)("inventory snapshot cron (real redis + db)", () => {
     await queue.removeJobScheduler(cron.INVENTORY_SNAPSHOT_SCHEDULER);
   });
 
-  it("dispatch fans out one no-overlap job per tenant", async () => {
+  it("dispatch fans out one no-overlap job per customer workspace", async () => {
     const now = new Date();
     const count = await cron.dispatchInventorySnapshots(queue, now);
-    expect(count).toBe(await prismaService.tenant.count());
+    const expected = await prismaService.tenant.count({ where: CUSTOMER_TENANTS_WHERE });
+    expect(count).toBe(expected);
     expect(count).toBeGreaterThan(0);
+    // The platform workspace holds no inventory to snapshot.
+    expect(await prismaService.tenant.count()).toBeGreaterThan(expected);
 
     // Dispatching again for the same day is a no-op per tenant (jobId dedup).
     await cron.dispatchInventorySnapshots(queue, now);

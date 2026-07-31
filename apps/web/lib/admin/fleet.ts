@@ -1,4 +1,4 @@
-import { prismaService } from "@wezesha/db";
+import { CUSTOMER_TENANTS_WHERE, prismaService } from "@wezesha/db";
 
 /**
  * Fleet queries for the admin console — the sanctioned cross-tenant read
@@ -57,12 +57,15 @@ function worstStaleness(
   return worst;
 }
 
-/** Every tenant with its sync health, one row each. */
+/** Every customer workspace with its sync health, one row each. */
 export async function getFleet(now: number = Date.now()): Promise<FleetRow[]> {
   // Cross-tenant on purpose: the fleet view is the whole point of this module
   // (see file header). Four queries total, joined in memory by tenantId.
   const [tenants, cursors, unread, forecastRuns] = await Promise.all([
     prismaService.tenant.findMany({
+      // The platform workspace is ours, not a shop: it has no connection and
+      // never syncs, so it would sit at the top of a list sorted by staleness.
+      where: CUSTOMER_TENANTS_WHERE,
       orderBy: { createdAt: "asc" },
       include: {
         _count: { select: { memberships: true, products: true } },
@@ -137,7 +140,10 @@ export function sortFleet(rows: FleetRow[], sort: FleetSort): FleetRow[] {
 
 /** Lightweight id/name list for filter dropdowns (audit view). */
 export async function listTenants(): Promise<{ id: string; name: string; slug: string }[]> {
-  // Cross-tenant on purpose: the audit filter offers every workspace.
+  // Cross-tenant on purpose: the audit filter offers every workspace — and this
+  // is the one list the platform workspace belongs in, since the events keyed on
+  // it (granting admin, step-up) are exactly what an operator comes here to
+  // review. Filtering it out would leave those rows unfilterable.
   return prismaService.tenant.findMany({
     orderBy: { name: "asc" },
     select: { id: true, name: true, slug: true },
@@ -161,7 +167,7 @@ export type TenantMemberRow = {
  */
 export async function getTenantDetail(tenantId: string) {
   const [tenants, members] = await Promise.all([
-    prismaService.tenant.findMany({ where: { id: tenantId } }),
+    prismaService.tenant.findMany({ where: { id: tenantId, ...CUSTOMER_TENANTS_WHERE } }),
     prismaService.membership.findMany({
       where: { tenantId },
       orderBy: { createdAt: "asc" },
@@ -186,11 +192,18 @@ export async function getTenantDetail(tenantId: string) {
   };
 }
 
-/** Does this tenant exist? Entry validation for impersonation + sync trigger. */
-export async function tenantExists(tenantId: string): Promise<boolean> {
+/**
+ * Is this a customer workspace an operator may act on? Entry validation for
+ * impersonation, the sync trigger and tier changes.
+ *
+ * The platform workspace answers no. It is a real Tenant row, so an id typed
+ * into any of those forms would otherwise pass — and entering it or moving it
+ * between billing tiers is meaningless at best.
+ */
+export async function customerWorkspaceExists(tenantId: string): Promise<boolean> {
   // Existence probe by primary key — scoped to exactly one tenant id.
   const rows = await prismaService.tenant.findMany({
-    where: { id: tenantId },
+    where: { id: tenantId, ...CUSTOMER_TENANTS_WHERE },
     select: { id: true },
   });
   return rows.length > 0;

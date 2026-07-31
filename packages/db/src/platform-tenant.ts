@@ -14,10 +14,6 @@
 export const PLATFORM_TENANT_ID = "platform";
 export const PLATFORM_TENANT_SLUG = "__platform__";
 
-/** How the platform workspace is labelled where it is legitimately shown (the
- *  audit ledger and its filter) — never the raw slug. */
-export const PLATFORM_TENANT_LABEL = "Platform";
-
 /**
  * Prisma `where` fragment for "workspaces that belong to customers".
  *

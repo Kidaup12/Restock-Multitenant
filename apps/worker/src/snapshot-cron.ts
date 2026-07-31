@@ -1,6 +1,6 @@
 import { Queue, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
-import { prismaService } from "@wezesha/db";
+import { CUSTOMER_TENANTS_WHERE, prismaService } from "@wezesha/db";
 
 /**
  * Nightly inventory snapshot — the history behind the two numbers the shop is
@@ -68,8 +68,11 @@ export async function dispatchInventorySnapshots(
   now: Date = new Date()
 ): Promise<number> {
   const runKey = utcDayStart(now).toISOString().slice(0, 10);
-  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every tenant is the job, and the per-tenant work it queues is scoped.
-  const tenants = await prismaService.tenant.findMany({ select: { id: true } });
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every customer workspace is the job, and the per-tenant work it queues is scoped.
+  const tenants = await prismaService.tenant.findMany({
+    where: CUSTOMER_TENANTS_WHERE,
+    select: { id: true },
+  });
   for (const tenant of tenants) {
     await queue.add(
       SNAPSHOT_TENANT_JOB,

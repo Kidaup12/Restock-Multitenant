@@ -1,6 +1,6 @@
 import { Queue, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
-import { isSellable, prismaService } from "@wezesha/db";
+import { CUSTOMER_TENANTS_WHERE, isSellable, prismaService } from "@wezesha/db";
 import { detectSalesGaps, tenantDayKey, type SalesGap } from "@wezesha/pos";
 import { publishEvent } from "@wezesha/realtime";
 
@@ -46,8 +46,11 @@ export async function registerPosCronSchedules(queue: PosCronQueue): Promise<voi
 
 /** Fan the dispatch out into one job per tenant. Returns the tenant count. */
 export async function dispatchGapChecks(queue: PosCronQueue): Promise<number> {
-  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every tenant is the job, and the per-tenant work it queues is scoped.
-  const tenants = await prismaService.tenant.findMany({ select: { id: true } });
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every customer workspace is the job, and the per-tenant work it queues is scoped.
+  const tenants = await prismaService.tenant.findMany({
+    where: CUSTOMER_TENANTS_WHERE,
+    select: { id: true },
+  });
   if (tenants.length > 0) {
     await queue.addBulk(tenants.map((t) => ({ name: GAP_TENANT_JOB, data: { tenantId: t.id } })));
   }

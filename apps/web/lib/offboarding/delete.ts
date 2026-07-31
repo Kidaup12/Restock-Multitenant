@@ -1,4 +1,4 @@
-import { prismaForTenant, prismaService } from "@wezesha/db";
+import { isPlatformTenantId, prismaForTenant, prismaService } from "@wezesha/db";
 import { createShopifyClient, decryptToken } from "@wezesha/shopify";
 import { EXPORT_FRESHNESS_HOURS } from "./export";
 
@@ -66,6 +66,13 @@ async function removeShopifyWebhooks(tenantId: string): Promise<void> {
 
 export async function deleteTenant(request: DeleteTenantRequest): Promise<DeleteTenantResult> {
   const { tenantId, confirmSlug, exportConfirmed, actorUserId, actorName } = request;
+
+  // Deleting the platform workspace would cascade away every platform-level
+  // audit row with it — who was granted admin, by whom, and when. Reaching here
+  // needs a membership and it has none, so this is belt to that braces.
+  if (isPlatformTenantId(tenantId)) {
+    return { ok: false, status: 404, error: "workspace not found" };
+  }
 
   const tenant = await prismaForTenant(tenantId).tenant.findUnique({
     where: { id: tenantId },

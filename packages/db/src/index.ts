@@ -42,7 +42,6 @@ export type { ProductLifecycle, ProductStatus } from "./product-lifecycle";
 export {
   CUSTOMER_TENANTS_WHERE,
   PLATFORM_TENANT_ID,
-  PLATFORM_TENANT_LABEL,
   PLATFORM_TENANT_SLUG,
   isPlatformTenantId,
 } from "./platform-tenant";

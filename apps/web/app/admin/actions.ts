@@ -14,7 +14,7 @@ import {
   setAdminTenantCookie,
   verifyAdminTenant,
 } from "@/lib/admin/impersonation";
-import { tenantExists } from "@/lib/admin/fleet";
+import { customerWorkspaceExists } from "@/lib/admin/fleet";
 import { provisionWorkspace } from "@/lib/admin/provision";
 
 /**
@@ -26,7 +26,7 @@ import { provisionWorkspace } from "@/lib/admin/provision";
 export async function enterWorkspace(formData: FormData): Promise<void> {
   const admin = await requireAdmin();
   const tenantId = String(formData.get("tenantId") ?? "");
-  if (!tenantId || !(await tenantExists(tenantId))) notFound();
+  if (!tenantId || !(await customerWorkspaceExists(tenantId))) notFound();
 
   await recordAdminEvent({
     tenantId,
@@ -97,7 +97,7 @@ export type SetPlanResult = { ok: true; plan: string } | { ok: false; error: str
  * database access.
  *
  * The tenant id comes from input here — it has to, since an operator acts on
- * someone else's workspace — so `tenantExists` is the guard, and the write goes
+ * someone else's workspace — so `customerWorkspaceExists` is the guard, and the write goes
  * through that tenant's own scoped client. Tenant carries no RLS policy of its
  * own, so the id scope IS the isolation and it is never taken on trust.
  */
@@ -106,7 +106,7 @@ export async function setTenantPlan(formData: FormData): Promise<SetPlanResult> 
   const tenantId = String(formData.get("tenantId") ?? "");
   const plan = String(formData.get("plan") ?? "");
 
-  if (!tenantId || !(await tenantExists(tenantId))) notFound();
+  if (!tenantId || !(await customerWorkspaceExists(tenantId))) notFound();
   // Normalised, not taken as typed: the tier aliases accept "Essential" but only
   // the canonical key belongs in the column.
   const tier = toPlanTier(plan);
