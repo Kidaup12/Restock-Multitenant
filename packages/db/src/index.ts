@@ -39,8 +39,15 @@ export {
   productLifecycle,
 } from "./product-lifecycle";
 export type { ProductLifecycle, ProductStatus } from "./product-lifecycle";
+export {
+  CUSTOMER_TENANTS_WHERE,
+  PLATFORM_TENANT_ID,
+  PLATFORM_TENANT_LABEL,
+  PLATFORM_TENANT_SLUG,
+  isPlatformTenantId,
+} from "./platform-tenant";
 export { Prisma, Role } from "@prisma/client";
-export type { Tenant, Membership, TenantConfig } from "@prisma/client";
+export type { Tenant, Membership, TenantConfig, PlatformAdmin } from "@prisma/client";
 export type { User, Session, Account, Verification } from "@prisma/client";
 export type {
   Product,
