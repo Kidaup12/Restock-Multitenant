@@ -11,6 +11,7 @@
     "db:up": "docker compose up -d db redis",
     "db:down": "docker compose down",
     "migrate": "npm run -w @wezesha/db db:migrate:deploy",
-    "seed": "cd packages/db && npx tsx scripts/seed-dev.ts"
+    "seed": "cd packages/db && npx tsx scripts/seed-dev.ts",
+    "bootstrap:admin": "cd packages/db && npx tsx scripts/bootstrap-platform-admin.ts"
   }
 }
