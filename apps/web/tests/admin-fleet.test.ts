@@ -204,7 +204,7 @@ describe.skipIf(!runnable)("fleet + audit queries (local db)", () => {
   });
 
   it("listAuditEvents filters by tenant and action, and paginates by cursor", async () => {
-    const admin = { userId: "admin-1", email: "ops@example.test", name: "Ops" };
+    const admin = { userId: "admin-1", email: "ops@example.test", name: "Ops", viaFallback: false };
     await audit.recordAdminEvent({ tenantId: tenantAId, action: "impersonation_start", admin });
     await audit.recordAdminEvent({ tenantId: tenantAId, action: "impersonation_end", admin });
     await audit.recordAdminEvent({ tenantId: tenantBId, action: "admin_sync_trigger", admin });

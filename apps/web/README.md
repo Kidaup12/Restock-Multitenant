@@ -7,7 +7,7 @@ list, so the sidebar, the mobile tab bar and the `/more` overflow can't disagree
 Today, Plan, Orders, Stock, Costs, Suppliers, Sales data, Insights, Settings. Off
 the nav: `/profile`, `/workspaces/new` (create a workspace), the Settings
 sub-pages (connections, team, locations), and `/admin`, which 404s unless the
-signed-in email is listed in `ADMIN_EMAILS`. API routes live under `app/api`.
+account holds a live `PlatformAdmin` row. API routes live under `app/api`.
 
 ## Development
 

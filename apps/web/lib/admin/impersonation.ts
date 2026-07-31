@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import type { AppSession } from "@/lib/auth";
-import { isAdminEmail } from "@/lib/admin/gate";
+import { isPlatformAdmin } from "@/lib/admin/gate";
 
 /**
  * Admin workspace entry ("impersonation") — membership-free, time-boxed, and
@@ -15,7 +15,9 @@ import { isAdminEmail } from "@/lib/admin/gate";
  * forged workspace grant requires the same break as a forged session.
  * Verification is timing-safe and fails closed on any malformed, expired, or
  * tampered value. The cookie is a grant, not an identity: every read
- * additionally re-checks the session against the ADMIN_EMAILS allow-list.
+ * additionally re-checks that the session still holds platform admin, so
+ * revoking someone ends their workspace access on their next request rather
+ * than when the cookie happens to expire.
  */
 
 export const ADMIN_TENANT_COOKIE = "wz-admin-tenant";
@@ -104,7 +106,7 @@ export async function clearAdminTenantCookie(): Promise<void> {
 export async function resolveAdminWorkspace(
   session: AppSession | null
 ): Promise<{ tenantId: string } | null> {
-  if (!session || !isAdminEmail(session.user.email)) return null;
+  if (!(await isPlatformAdmin(session))) return null;
   const value = (await cookies()).get(ADMIN_TENANT_COOKIE)?.value;
   const tenantId = verifyAdminTenant(value);
   return tenantId ? { tenantId } : null;

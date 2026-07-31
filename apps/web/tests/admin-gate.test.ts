@@ -1,11 +1,15 @@
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { isAdminEmail, parseAdminEmails } from "../lib/admin/gate";
 
 /**
- * The admin allow-list gate. Parsing is pure; the 404 posture is proven
- * against the real /api/admin/sync handler with real sessions from the local
- * database (same harness as auth-flow) — a non-admin must be indistinguishable
- * from a missing page, whether signed in or not.
+ * The admin gate. Parsing is pure; the 404 posture and the table-versus-env
+ * precedence are proven against the real /api/admin/sync handler with real
+ * sessions from the local database (same harness as auth-flow) — a non-admin
+ * must be indistinguishable from a missing page, whether signed in or not.
+ *
+ * The fallback question ("is the table empty?") is global by design, so this
+ * suite owns that state for its duration: it parks any live rows another suite
+ * or a local bootstrap left behind, and puts them back afterwards.
  */
 
 const dbUrl = process.env.SERVICE_DATABASE_URL ?? "";
@@ -50,10 +54,14 @@ describe("ADMIN_EMAILS parsing", () => {
   });
 });
 
-describe.skipIf(!runnable)("admin route 404 posture (real sessions)", () => {
+describe.skipIf(!runnable)("admin gate posture (real sessions)", () => {
+  let prismaService: typeof import("@wezesha/db").prismaService;
   let syncPost: (req: Request) => Promise<Response>;
   let adminCookie: string;
   let civilianCookie: string;
+  let civilianUserId: string;
+  /** Live rows this suite parked so the table starts empty; restored in afterAll. */
+  let parked: string[] = [];
 
   async function signUp(email: string): Promise<string> {
     const { POST } = await import("../app/api/auth/[...all]/route");
@@ -82,19 +90,43 @@ describe.skipIf(!runnable)("admin route 404 posture (real sessions)", () => {
   }
 
   beforeAll(async () => {
-    const { prismaService } = await import("@wezesha/db");
+    ({ prismaService } = await import("@wezesha/db"));
     await prismaService.user.deleteMany({
       where: { email: { in: [ADMIN_EMAIL, CIVILIAN_EMAIL] } },
     });
     ({ POST: syncPost } = await import("../app/api/admin/sync/route"));
     adminCookie = await signUp(ADMIN_EMAIL);
     civilianCookie = await signUp(CIVILIAN_EMAIL);
-    process.env.ADMIN_EMAILS = ADMIN_EMAIL;
+
+    const civilian = await prismaService.user.findFirstOrThrow({
+      where: { email: CIVILIAN_EMAIL },
+      select: { id: true },
+    });
+    civilianUserId = civilian.id;
+
+    const live = await prismaService.platformAdmin.findMany({
+      where: { revokedAt: null },
+      select: { id: true },
+    });
+    parked = live.map((r) => r.id);
+    await prismaService.platformAdmin.updateMany({
+      where: { id: { in: parked } },
+      data: { revokedAt: new Date() },
+    });
   }, 30_000);
+
+  beforeEach(async () => {
+    process.env.ADMIN_EMAILS = ADMIN_EMAIL;
+    await prismaService.platformAdmin.deleteMany({ where: { userId: civilianUserId } });
+  });
 
   afterAll(async () => {
     delete process.env.ADMIN_EMAILS;
-    const { prismaService } = await import("@wezesha/db");
+    await prismaService.platformAdmin.deleteMany({ where: { userId: civilianUserId } });
+    await prismaService.platformAdmin.updateMany({
+      where: { id: { in: parked } },
+      data: { revokedAt: null },
+    });
     await prismaService.user.deleteMany({
       where: { email: { in: [ADMIN_EMAIL, CIVILIAN_EMAIL] } },
     });
@@ -105,23 +137,46 @@ describe.skipIf(!runnable)("admin route 404 posture (real sessions)", () => {
     expect((await syncPost(syncRequest())).status).toBe(404);
   });
 
-  it("404s for a signed-in user who is not on the allow-list", async () => {
+  it("404s for a signed-in user who is neither in the table nor on the allow-list", async () => {
     expect((await syncPost(syncRequest(civilianCookie))).status).toBe(404);
   });
 
-  it("404s for everyone when ADMIN_EMAILS is unset", async () => {
+  it("404s for everyone when the table is empty and ADMIN_EMAILS is unset", async () => {
+    // Both sources empty is the fail-closed case: no console for anybody.
     delete process.env.ADMIN_EMAILS;
     expect((await syncPost(syncRequest(adminCookie))).status).toBe(404);
-    process.env.ADMIN_EMAILS = ADMIN_EMAIL;
   });
 
-  it("lets an allow-listed admin past the gate (400: bogus tenant, not 404)", async () => {
+  it("falls back to ADMIN_EMAILS while the table is empty (400: bogus tenant, not 404)", async () => {
     expect((await syncPost(syncRequest(adminCookie))).status).toBe(400);
   });
 
-  it("allow-list matching for the gate is case-insensitive", async () => {
+  it("fallback matching is case-insensitive", async () => {
     process.env.ADMIN_EMAILS = ADMIN_EMAIL.toUpperCase();
     expect((await syncPost(syncRequest(adminCookie))).status).toBe(400);
-    process.env.ADMIN_EMAILS = ADMIN_EMAIL;
+  });
+
+  it("a PlatformAdmin row grants access, and makes ADMIN_EMAILS inert", async () => {
+    // The civilian is not on the allow-list; the admin is on it and NOT in the
+    // table. One live row flips both of them — that is the whole point of the
+    // env var being a bootstrap rather than a second, permanent door.
+    await prismaService.platformAdmin.create({
+      data: { userId: civilianUserId, email: CIVILIAN_EMAIL },
+    });
+
+    expect((await syncPost(syncRequest(civilianCookie))).status).toBe(400);
+    expect((await syncPost(syncRequest(adminCookie))).status).toBe(404);
+  });
+
+  it("a revoked row grants nothing, and hands the question back to the env var", async () => {
+    await prismaService.platformAdmin.create({
+      data: { userId: civilianUserId, email: CIVILIAN_EMAIL, revokedAt: new Date() },
+    });
+
+    // Revocation takes effect on the next request, not when a cookie expires.
+    expect((await syncPost(syncRequest(civilianCookie))).status).toBe(404);
+    // And with no LIVE row left, the bootstrap answers again — which is what
+    // stops a revoke-everyone from locking the console permanently.
+    expect((await syncPost(syncRequest(adminCookie))).status).toBe(400);
   });
 });

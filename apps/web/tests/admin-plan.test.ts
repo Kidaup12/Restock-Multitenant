@@ -17,7 +17,12 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 const dbUrl = process.env.SERVICE_DATABASE_URL ?? "";
 const runnable = /localhost|127\.0\.0\.1/.test(dbUrl);
 
-const ADMIN = { userId: "admin-plan-user", email: "plan-admin@example.test", name: "Plan Admin" };
+const ADMIN = {
+  userId: "admin-plan-user",
+  email: "plan-admin@example.test",
+  name: "Plan Admin",
+  viaFallback: false,
+};
 
 vi.mock("@/lib/admin/gate", () => ({
   requireAdmin: async () => ADMIN,

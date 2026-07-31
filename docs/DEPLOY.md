@@ -157,7 +157,8 @@ DIRECT_URL             from step 1
 BETTER_AUTH_URL        the deployment's own public URL, exactly
 BETTER_AUTH_SECRET     openssl rand -base64 32
 NEXT_PUBLIC_WS_URL     wss://<gateway>.up.railway.app
-ADMIN_EMAILS           comma-separated; who reaches the operator console
+ADMIN_EMAILS           comma-separated; bootstrap only — who reaches the
+                       operator console until the first PlatformAdmin row
 SHOPIFY_API_KEY        from the Shopify app
 SHOPIFY_API_SECRET     from the Shopify app
 SHOPIFY_APP_URL        the deployment's own public URL
