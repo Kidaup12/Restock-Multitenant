@@ -18,6 +18,9 @@ const NUDGE_HREF: Partial<Record<SetupSignal, string>> = {
   shopify: "/settings/connections",
   costs: "/costs",
   suppliers: "/suppliers",
+  // Until the till screen existed this rung had nowhere to send anyone, so it
+  // rendered as advice you couldn't act on.
+  posOrMultiLocation: "/settings/pos",
 };
 
 const SIGNAL_ORDER: { key: SetupSignal; label: string }[] = [

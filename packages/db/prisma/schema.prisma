@@ -169,7 +169,11 @@ model TenantConfig {
 
   // Integrations
   posFeedUrl          String? // POS feed base URL (e.g. Dellwest)
-  posFeedSlug         String? // ingest slug (defaults to tenant slug)
+  // Ingest slug (defaults to the tenant slug). UNIQUE because the ingest
+  // resolver looks a feed up by this alone — two workspaces holding the same
+  // one would let it route a till's sales to whichever row it happened to read
+  // first. The database refuses that rather than the application checking for it.
+  posFeedSlug         String? @unique
   // SHA-256 (hex) of THIS tenant's POS ingest bearer secret. The plaintext is
   // shown once at provisioning and never stored. null = POS ingest is closed
   // for this tenant — the endpoint has no other credential to fall back to.
