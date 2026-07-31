@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Redis } from "ioredis";
 import type { Queue } from "bullmq";
+import { CUSTOMER_TENANTS_WHERE } from "@wezesha/db/platform-tenant";
 
 /**
  * Forecast crons against real Redis + the local database: both schedules
@@ -78,12 +79,14 @@ describe.skipIf(!runnable)("forecast crons (real redis + db)", () => {
     await queue.removeJobScheduler(cron.MONTHLY_BACKTEST_SCHEDULER);
   });
 
-  it("dispatch fans out one no-overlap job per tenant", async () => {
+  it("dispatch fans out one no-overlap job per customer workspace", async () => {
     const now = new Date();
     const count = await cron.dispatchForecasts(queue, now);
-    const expected = await prismaService.tenant.count();
+    const expected = await prismaService.tenant.count({ where: CUSTOMER_TENANTS_WHERE });
     expect(count).toBe(expected);
     expect(count).toBeGreaterThan(0);
+    // The platform workspace has no products to forecast and is not a customer.
+    expect(await prismaService.tenant.count()).toBeGreaterThan(expected);
 
     // Dispatching again for the same day is a no-op per tenant (jobId dedup).
     await cron.dispatchForecasts(queue, now);

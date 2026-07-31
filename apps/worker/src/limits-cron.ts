@@ -1,6 +1,6 @@
 import { Queue, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
-import { BUYABLE_PRODUCT_WHERE, computeLimitState, prismaService, resolvePlanLimits, type LimitState } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, CUSTOMER_TENANTS_WHERE, computeLimitState, prismaService, resolvePlanLimits, type LimitState } from "@wezesha/db";
 
 /**
  * Daily plan-limit check, same shape as the email crons: one repeatable
@@ -45,8 +45,11 @@ export async function registerOpsCronSchedules(queue: OpsCronQueue): Promise<voi
 
 /** Fan the dispatch out into one job per tenant. Returns the tenant count. */
 export async function dispatchLimitsChecks(queue: OpsCronQueue): Promise<number> {
-  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every tenant is the job, and the per-tenant work it queues is scoped.
-  const tenants = await prismaService.tenant.findMany({ select: { id: true } });
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every customer workspace is the job, and the per-tenant work it queues is scoped.
+  const tenants = await prismaService.tenant.findMany({
+    where: CUSTOMER_TENANTS_WHERE,
+    select: { id: true },
+  });
   if (tenants.length > 0) {
     await queue.addBulk(
       tenants.map((tenant) => ({ name: LIMITS_TENANT_JOB, data: { tenantId: tenant.id } }))

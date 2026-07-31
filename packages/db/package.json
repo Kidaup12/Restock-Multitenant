@@ -5,7 +5,8 @@
   "description": "Prisma schema, migrations, and the tenant-scoped database clients",
   "exports": {
     ".": "./src/index.ts",
-    "./roles": "./src/roles.ts"
+    "./roles": "./src/roles.ts",
+    "./platform-tenant": "./src/platform-tenant.ts"
   },
   "scripts": {
     "postinstall": "prisma generate",

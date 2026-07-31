@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { prismaAuth, prismaForTenant, prismaService } from "@wezesha/db";
+import { isPlatformTenantId, prismaAuth, prismaForTenant, prismaService } from "@wezesha/db";
 import { sendEmail } from "@/lib/email";
 import { checkLimit } from "@/lib/limits/evaluate";
 
@@ -91,6 +91,15 @@ export async function createInvite(input: {
   const email = normalizeInviteEmail(input.email);
   if (!/^\S+@\S+\.\S+$/.test(email)) {
     return { ok: false, error: "Enter a valid email address." };
+  }
+
+  // The platform workspace is a real Tenant row, so an invite naming it would
+  // otherwise resolve and hand out a membership in it — the one workspace whose
+  // memberlessness is what keeps it unreachable. No path reaches here with that
+  // id today; this is the chokepoint every invite passes through, so it is where
+  // the guarantee belongs.
+  if (isPlatformTenantId(input.tenantId)) {
+    return { ok: false, error: "That workspace does not take invites." };
   }
 
   // Already a member? (User emails are global; membership check is tenant-scoped.)

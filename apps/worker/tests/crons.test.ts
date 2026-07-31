@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Redis } from "ioredis";
 import type { Queue } from "bullmq";
 import type { EmailMessage } from "../src/email";
+import { CUSTOMER_TENANTS_WHERE, PLATFORM_TENANT_ID } from "@wezesha/db/platform-tenant";
 
 /**
  * Email cron scaffold against real Redis + the local database: schedule
@@ -114,15 +115,20 @@ describe.skipIf(!runnable)("email crons (real redis + db)", () => {
     await queue.removeJobScheduler(crons.WEEKLY_SUMMARY_SCHEDULER);
   });
 
-  it("dispatch fans out one job per tenant", async () => {
+  it("dispatch fans out one job per customer workspace, skipping the platform one", async () => {
     const count = await crons.dispatchWeeklySummaries(queue);
-    const expected = await prismaService.tenant.count();
+    const expected = await prismaService.tenant.count({ where: CUSTOMER_TENANTS_WHERE });
     expect(count).toBe(expected);
     expect(count).toBeGreaterThan(0);
+    // The exclusion is only worth asserting if there is something to exclude.
+    expect(await prismaService.tenant.count()).toBeGreaterThan(expected);
 
     const waiting = await queue.getJobs(["waiting", "prioritized"]);
     const fanned = waiting.filter((j) => j.name === crons.TENANT_JOB);
     expect(fanned).toHaveLength(count);
+    expect(
+      fanned.map((j) => (j.data as { tenantId?: string }).tenantId)
+    ).not.toContain(PLATFORM_TENANT_ID);
     expect(fanned.map((j) => (j.data as { tenantId?: string }).tenantId)).toContain(tenantId);
     await queue.drain();
   });
