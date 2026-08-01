@@ -22,6 +22,9 @@ const ADMIN = {
 };
 
 vi.mock("@/lib/admin/gate", () => ({ requireAdmin: async () => ADMIN }));
+// The gate and the step-up grant are each proven on their own suite; here they
+// are held open so the action under test is the only thing being measured.
+vi.mock("@/lib/admin/step-up", () => ({ hasStepUp: async () => true }));
 vi.mock("next/cache", () => ({ revalidatePath: () => {} }));
 // The invite email rides the outbound seam; nothing here needs it to leave.
 vi.mock("@/lib/email", () => ({ sendEmail: async () => {} }));

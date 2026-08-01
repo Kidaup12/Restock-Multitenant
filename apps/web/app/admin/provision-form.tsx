@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { provisionWorkspaceAction } from "./actions";
+import { STEP_UP_REQUIRED } from "@/lib/admin/step-up-contract";
+import { StepUpPrompt } from "./step-up-prompt";
 
 /**
  * Stand up a customer's workspace without a database console.
@@ -20,6 +22,7 @@ export function ProvisionForm() {
   const [ownerEmail, setOwnerEmail] = useState("");
   const [pending, startTransition] = useTransition();
   const [note, setNote] = useState<{ tone: "positive" | "negative"; text: string } | null>(null);
+  const [needsStepUp, setNeedsStepUp] = useState(false);
   const router = useRouter();
 
   function submit() {
@@ -30,10 +33,15 @@ export function ProvisionForm() {
       body.set("ownerEmail", ownerEmail);
       const result = await provisionWorkspaceAction(body);
       if (result.ok) {
+        setNeedsStepUp(false);
         setNote({ tone: "positive", text: result.message });
         setName("");
         setOwnerEmail("");
         router.refresh();
+      } else if (result.error === STEP_UP_REQUIRED) {
+        // Not an error to show — the typed name and email stay where they are
+        // and the prompt finishes the job.
+        setNeedsStepUp(true);
       } else {
         setNote({ tone: "negative", text: result.error });
       }
@@ -90,6 +98,18 @@ export function ProvisionForm() {
           invite and become the owner when they accept it — until then the workspace has no members
           and nobody can open it.
         </p>
+        {needsStepUp && (
+          <div className="mt-3">
+            <StepUpPrompt
+              action="create a workspace"
+              onConfirmed={() => {
+                setNeedsStepUp(false);
+                submit();
+              }}
+              onCancel={() => setNeedsStepUp(false)}
+            />
+          </div>
+        )}
         <div className="mt-3 flex items-center gap-3">
           <Button
             size="sm"
