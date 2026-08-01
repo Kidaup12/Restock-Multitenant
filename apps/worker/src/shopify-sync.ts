@@ -46,6 +46,19 @@ import type { ProductStatus } from "@wezesha/db";
  * stores cores, so bare-id/gid spelling mismatches cannot mint duplicates.
  */
 
+/** What the products phase wrote, plus what the shop should be told about it. */
+export type ProductSyncResult = {
+  written: number;
+  failed: number;
+  /** Variants that did not exist in the catalogue before this run. */
+  created: number;
+  /** Of those, how many arrived with no unit cost — each one is held off the
+   *  buy list until somebody fills it in. */
+  createdWithoutCost: number;
+  /** SKUs this run created that now sit on more than one product. */
+  duplicateSkus: number;
+};
+
 const OVERLAP_HOURS = 6;
 // First order pull reaches back a year — sales history is the forecast's fuel.
 const FIRST_RUN_ORDER_LOOKBACK_DAYS = 365;
@@ -150,10 +163,12 @@ async function syncProducts(
   tenantId: string,
   nodes: ShopifyProductNode[],
   options: { fullSync: boolean; onProgress?: ProgressFn }
-): Promise<{ written: number; failed: number }> {
+): Promise<ProductSyncResult> {
   // An empty pull is never evidence that the store is empty — a rate-limited or
   // half-answered run looks exactly the same, so nothing is marked missing.
-  if (nodes.length === 0) return { written: 0, failed: 0 };
+  if (nodes.length === 0) {
+    return { written: 0, failed: 0, created: 0, createdWithoutCost: 0, duplicateSkus: 0 };
+  }
   await options.onProgress?.(0, nodes.length);
   const existing = await prismaService.product.findMany({
     where: { tenantId, shopifyVariantId: { not: null } },
@@ -166,7 +181,14 @@ async function syncProducts(
     existing.filter((p) => p.activeOverride).map((p) => p.shopifyVariantId as string)
   );
 
+  // Which variants the catalogue already knew. The upsert cannot tell a create
+  // from an update after the fact, and this row set is already loaded for the
+  // cost/active pins — so the arrival of a new product costs no extra query.
+  const known = new Set(existing.map((p) => p.shopifyVariantId as string));
+
   const seen: string[] = [];
+  const created: string[] = [];
+  let createdWithoutCost = 0;
   let written = 0;
   let failed = 0;
   let processed = 0;
@@ -224,6 +246,13 @@ async function syncProducts(
           update: { ...common, lastSynced: new Date() },
         });
         written += 1;
+        if (!known.has(variantId)) {
+          created.push(variantId);
+          // A product the shop cannot buy a decision from: with no unit cost it
+          // is held off the buy list entirely, and nothing on screen says so
+          // until someone goes looking for it.
+          if (!Number.isFinite(costParsed)) createdWithoutCost += 1;
+        }
       } catch (err) {
         // One malformed record used to abort the whole products phase and cost
         // the shop every SKU behind it. Pin the failure to the row instead —
@@ -260,7 +289,36 @@ async function syncProducts(
       data: { missingFromShopifyAt: new Date() },
     });
   }
-  return { written, failed };
+
+  // A duplicate is a SKU that now sits on more than one product. Shopify's
+  // "Duplicate product" is the usual way one appears, and the shop finds out
+  // when two rows compete on the same buy list. Only asked about the SKUs this
+  // run created, so the query stays proportional to what changed.
+  const newSkus = created.length
+    ? (
+        await prismaService.product.findMany({
+          where: { tenantId, shopifyVariantId: { in: created }, sku: { not: "" } },
+          select: { sku: true },
+        })
+      ).map((p) => p.sku)
+    : [];
+  const duplicateSkus = newSkus.length
+    ? (
+        await prismaService.product.groupBy({
+          by: ["sku"],
+          where: { tenantId, sku: { in: newSkus } },
+          _count: { _all: true },
+        })
+      ).filter((g) => g._count._all > 1).length
+    : 0;
+
+  return {
+    written,
+    failed,
+    created: created.length,
+    createdWithoutCost,
+    duplicateSkus,
+  };
 }
 
 /**
@@ -521,6 +579,7 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       });
       await setCursor(tenantId, "products", runStart);
       await run.phaseEnd("products", products);
+      await notifyCatalogueChanges(tenantId, products, options.publisher);
 
       // ── Locations + inventory (full refresh — no cheap delta) ───────────────
       await run.phaseStart("inventory");
@@ -578,6 +637,71 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
  * email the tenant's alert contact (once per incident — see incident.ts), and
  * tell live clients the sync ended. Retry-pending failures stay silent.
  */
+/** How long a catalogue notice suppresses an identical one. A sync runs every
+ *  15 minutes; without this the bell would be unusable inside a day. */
+const CATALOGUE_NOTICE_DEDUP_MS = 12 * 60 * 60 * 1000;
+
+/** The sentence a shop actually needs: what arrived, and what about it needs a
+ *  human. Empty when the run changed nothing worth interrupting anyone for. */
+export function catalogueNoticeTitle(result: ProductSyncResult): string | null {
+  const parts: string[] = [];
+  if (result.created > 0) {
+    parts.push(`${result.created} new ${result.created === 1 ? "product" : "products"}`);
+  }
+  if (result.createdWithoutCost > 0) {
+    parts.push(`${result.createdWithoutCost} with no cost`);
+  }
+  if (result.duplicateSkus > 0) {
+    parts.push(`${result.duplicateSkus} duplicate ${result.duplicateSkus === 1 ? "SKU" : "SKUs"}`);
+  }
+  return parts.length > 0 ? `Catalogue: ${parts.join(", ")}` : null;
+}
+
+/**
+ * Tell the shop what a sync brought in.
+ *
+ * Only the things that need a decision: a product that arrived with no cost is
+ * held off the buy list until someone fills it in, and a duplicated SKU puts two
+ * rows in competition on it. Both were already visible as filters on the Stock
+ * screen, which is no use to anyone who does not know to go looking.
+ *
+ * Deduped on the exact title within a window, the same shape the sales-gap cron
+ * uses — a repeated run that finds the same thing says nothing twice.
+ */
+async function notifyCatalogueChanges(
+  tenantId: string,
+  result: ProductSyncResult,
+  publisher: Redis
+): Promise<void> {
+  const title = catalogueNoticeTitle(result);
+  if (!title) return;
+
+  try {
+    const since = new Date(Date.now() - CATALOGUE_NOTICE_DEDUP_MS);
+    const prior = await prismaService.notification.findFirst({
+      where: { tenantId, kind: "catalogue_review", title, createdAt: { gte: since } },
+      select: { id: true },
+    });
+    if (prior) return;
+
+    await prismaService.notification.create({
+      data: {
+        tenantId,
+        kind: "catalogue_review",
+        title,
+        body: "Check these under Stock — products without a cost stay off the buy list until one is set.",
+      },
+    });
+    await publishEvent(publisher, {
+      type: "notification.new",
+      data: { tenantId, kind: "catalogue_review", title },
+    }).catch(() => {});
+  } catch (err) {
+    // A catalogue notice is never worth failing a sync over.
+    console.error(`worker: could not raise catalogue notice for ${tenantId}`, err);
+  }
+}
+
 export async function handleSyncFailure(
   job: Job<SyncJobData> | undefined,
   err: Error,

@@ -31,6 +31,9 @@ export function kindTone(kind: string): NotificationTone {
     case "shopify_uninstalled":
     case "cost_moved":
     case "accuracy_drop":
+    // A new product with no cost is held off the buy list until someone sets
+    // one, so this is something to act on rather than merely to know.
+    case "catalogue_review":
       return "warning";
     default:
       return "neutral";

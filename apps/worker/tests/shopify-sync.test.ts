@@ -791,3 +791,128 @@ describe.skipIf(!runnable)("on-route without an en-route location (real db + red
     expect(product.onOrder).toBe(0);
   });
 });
+
+describe("catalogue notice wording", () => {
+  const base = { written: 0, failed: 0, created: 0, createdWithoutCost: 0, duplicateSkus: 0 };
+
+  it("says nothing when a run brought in nothing worth interrupting anyone for", async () => {
+    const { catalogueNoticeTitle } = await import("../src/shopify-sync");
+    // The common case by far: a sync every 15 minutes that changed nothing.
+    expect(catalogueNoticeTitle(base)).toBeNull();
+    expect(catalogueNoticeTitle({ ...base, written: 400 })).toBeNull();
+  });
+
+  it("names what arrived and what needs a person", async () => {
+    const { catalogueNoticeTitle } = await import("../src/shopify-sync");
+    expect(catalogueNoticeTitle({ ...base, created: 1 })).toBe("Catalogue: 1 new product");
+    expect(catalogueNoticeTitle({ ...base, created: 4, createdWithoutCost: 2 })).toBe(
+      "Catalogue: 4 new products, 2 with no cost"
+    );
+    expect(
+      catalogueNoticeTitle({ ...base, created: 4, createdWithoutCost: 2, duplicateSkus: 1 })
+    ).toBe("Catalogue: 4 new products, 2 with no cost, 1 duplicate SKU");
+    // A duplicate can turn up with no new product at all — a rename that
+    // collides with an existing SKU, say.
+    expect(catalogueNoticeTitle({ ...base, duplicateSkus: 3 })).toBe(
+      "Catalogue: 3 duplicate SKUs"
+    );
+  });
+});
+
+const NOTICE_SLUG = "shopify-notice-test";
+const NOTICE_SHOP = "notice-test-store.myshopify.com";
+
+/** Two products, one of which Shopify sends with no unit cost. */
+const noticeCatalogue: ShopifyProductNode[] = [
+  {
+    id: "gid://shopify/Product/901",
+    title: "Priced Balm",
+    status: "ACTIVE",
+    variants: [
+      {
+        id: "gid://shopify/ProductVariant/1001",
+        sku: "NOTE-PRICED",
+        price: "1000",
+        inventoryItem: { id: "gid://shopify/InventoryItem/1101", unitCost: { amount: "600" } },
+      },
+    ],
+  },
+  {
+    id: "gid://shopify/Product/902",
+    title: "Costless Balm",
+    status: "ACTIVE",
+    variants: [
+      {
+        id: "gid://shopify/ProductVariant/1002",
+        sku: "NOTE-COSTLESS",
+        price: "1200",
+        inventoryItem: { id: "gid://shopify/InventoryItem/1102" }, // no unitCost
+      },
+    ],
+  },
+];
+
+describe.skipIf(!runnable)("catalogue notices (real db + redis)", () => {
+  let prismaService: typeof import("@wezesha/db").prismaService;
+  let processor: (job: Job<SyncJobData>) => Promise<void>;
+  let publisher: Redis;
+  let tenantId: string;
+
+  const notices = () =>
+    prismaService.notification.findMany({
+      where: { tenantId, kind: "catalogue_review" },
+      orderBy: { createdAt: "asc" },
+    });
+
+  beforeAll(async () => {
+    process.env.TOKEN_ENCRYPTION_KEY ??= crypto.randomBytes(32).toString("base64");
+    ({ prismaService } = await import("@wezesha/db"));
+    const mod = await import("../src/shopify-sync");
+    publisher = new Redis(redisUrl!);
+    processor = mod.createShopifySyncProcessor({
+      publisher,
+      makeApi: () => ({
+        ensureWebhooks: async () => {},
+        shopSettings: async () => ({ currencyCode: null }),
+        products: async () => noticeCatalogue,
+        locations: async () => [],
+        orders: async () => [],
+      }),
+    });
+
+    await prismaService.tenant.deleteMany({ where: { slug: NOTICE_SLUG } });
+    const tenant = await prismaService.tenant.create({
+      data: { name: "Notice Test", slug: NOTICE_SLUG },
+    });
+    tenantId = tenant.id;
+    await prismaService.shopifyConnection.create({
+      data: {
+        tenantId,
+        shopDomain: NOTICE_SHOP,
+        accessToken: encryptToken(TOKEN),
+        scopes: "read_products",
+      },
+    });
+  }, 30_000);
+
+  afterAll(async () => {
+    await prismaService.tenant.deleteMany({ where: { slug: NOTICE_SLUG } });
+    await prismaService.$disconnect();
+    await publisher.quit();
+  });
+
+  it("raises one notice naming the new products and the one with no cost", async () => {
+    await processor(jobStub(tenantId));
+    const raised = await notices();
+    expect(raised).toHaveLength(1);
+    expect(raised[0]!.title).toBe("Catalogue: 2 new products, 1 with no cost");
+  });
+
+  it("says nothing on a second run that brings in nothing new", async () => {
+    // The reason dedup matters at all: this runs every 15 minutes. A notice per
+    // sync would bury the bell within a day.
+    await processor(jobStub(tenantId));
+    await processor(jobStub(tenantId));
+    expect(await notices()).toHaveLength(1);
+  });
+});
