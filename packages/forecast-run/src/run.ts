@@ -455,6 +455,36 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
       await tx.forecastRecommendation.createMany({ data: historyRows, skipDuplicates: true });
     }
     await tx.forecastRecommendation.deleteMany({ where: { runDate: { lt: retentionCutoff } } });
+
+    // Persist the class this run worked from.
+    //
+    // It was computed here, used here for service levels and ordering policy,
+    // and then thrown away — so Product.abcCategory stayed null for every
+    // product ever, and everything reading the stored column (the buy list's
+    // ordering and its class badge) behaved as though nothing had a class.
+    // Written per class rather than per product: three statements, not N.
+    const byClass = new Map<string, string[]>();
+    for (const product of products) {
+      const cls = abcByProduct[product.id] ?? null;
+      if (!cls) continue;
+      const list = byClass.get(cls) ?? [];
+      list.push(product.id);
+      byClass.set(cls, list);
+    }
+    for (const [cls, ids] of byClass) {
+      await tx.product.updateMany({ where: { id: { in: ids } }, data: { abcCategory: cls } });
+    }
+    // Anything the run could not rank loses a stale class rather than keeping
+    // one it no longer earns — a product that stopped selling should not go on
+    // leading the buy list.
+    const ranked = new Set([...byClass.values()].flat());
+    const unranked = products.filter((p) => !ranked.has(p.id)).map((p) => p.id);
+    if (unranked.length > 0) {
+      await tx.product.updateMany({
+        where: { id: { in: unranked }, abcCategory: { not: null } },
+        data: { abcCategory: null },
+      });
+    }
   });
 
   await publishForecastDone(tenantId, forecastRunId, rows.length);
