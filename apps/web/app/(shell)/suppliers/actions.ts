@@ -218,6 +218,125 @@ export async function bulkAssignByBrandAction(input: {
   return { ok: true, message: `Assigned ${result.count} ${vendor} products to ${supplier.name}.` };
 }
 
+/** How many products one call may move. Generous enough for "assign this whole
+ *  brand", small enough that a malformed payload cannot rewrite the catalogue. */
+const ASSIGN_MAX = 500;
+
+/**
+ * Put a chosen set of products under one supplier.
+ *
+ * The counterpart to assigning by brand, and the operation that never existed:
+ * that one only ever filled in a blank, so a product assigned to the wrong
+ * supplier — or one whose supplier changed — could not be moved from anywhere in
+ * the app. This one reassigns, because "these are the things I buy from them" is
+ * how a shop actually thinks about it.
+ *
+ * Products are resolved on the tenant client first, so ids belonging to another
+ * workspace simply do not come back and the write cannot reach them.
+ */
+export async function assignProductsToSupplierAction(input: {
+  supplierId: string;
+  productIds: string[];
+}): Promise<SupplierActionResult> {
+  const ctx = await actorContext();
+  if (!ctx) return err("You don't have settings access in this workspace.");
+
+  const ids = [...new Set((input.productIds ?? []).filter((id) => typeof id === "string" && id))];
+  if (ids.length === 0) return err("Pick at least one product.");
+  if (ids.length > ASSIGN_MAX) {
+    return err(`Assign up to ${ASSIGN_MAX} products at a time.`);
+  }
+
+  const db = prismaForTenant(ctx.tenantId);
+  const supplier = await db.supplier.findFirst({
+    where: { id: input.supplierId, deletedAt: null },
+    select: { id: true, name: true },
+  });
+  if (!supplier) return err("Pick a supplier that still exists.");
+
+  const found = await db.product.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, supplierId: true },
+  });
+  if (found.length === 0) return err("Those products no longer exist.");
+
+  const toMove = found.filter((p) => p.supplierId !== supplier.id);
+  if (toMove.length === 0) {
+    return { ok: true, message: `Already with ${supplier.name}.` };
+  }
+  const reassigned = toMove.filter((p) => p.supplierId !== null).length;
+
+  const result = await db.product.updateMany({
+    where: { id: { in: toMove.map((p) => p.id) } },
+    data: { supplierId: supplier.id },
+  });
+
+  await audit(ctx.tenantId, supplier.id, "edited", ctx.actor, {
+    action: "assign_products",
+    supplierName: supplier.name,
+    products: result.count,
+    // Worth separating in the ledger: filling in a blank is routine, taking
+    // products off another supplier is the change someone may ask about.
+    reassignedFromAnotherSupplier: reassigned,
+  });
+  revalidatePath("/suppliers");
+  revalidatePath("/stock");
+  return {
+    ok: true,
+    message:
+      reassigned > 0
+        ? `Moved ${result.count} products to ${supplier.name} (${reassigned} from another supplier).`
+        : `Assigned ${result.count} products to ${supplier.name}.`,
+  };
+}
+
+/**
+ * Set (or clear) one product's own lead time.
+ *
+ * Lead time is what actually decides when to order, and it does not always
+ * belong to a supplier: a shop may know an item takes three weeks without
+ * wanting to create a supplier record for whoever sends it. Product.leadTimeDays
+ * already outranks the supplier's figure everywhere the forecast reads it —
+ * nothing had ever written it.
+ */
+export async function setProductLeadTimeAction(input: {
+  productId: string;
+  leadTimeDays: number | null;
+}): Promise<SupplierActionResult> {
+  const ctx = await actorContext();
+  if (!ctx) return err("You don't have settings access in this workspace.");
+
+  const lead = normInt(input.leadTimeDays);
+  if (lead != null && (lead < 0 || lead > 365)) {
+    return err("Lead time should be between 0 and 365 days.");
+  }
+
+  const db = prismaForTenant(ctx.tenantId);
+  const product = await db.product.findFirst({
+    where: { id: input.productId },
+    select: { id: true, title: true, leadTimeDays: true },
+  });
+  if (!product) return err("That product no longer exists.");
+  if (product.leadTimeDays === lead) return { ok: true };
+
+  await db.product.update({ where: { id: product.id }, data: { leadTimeDays: lead } });
+
+  await audit(
+    ctx.tenantId,
+    product.id,
+    "edited",
+    ctx.actor,
+    { action: "product_lead_time", title: product.title, from: product.leadTimeDays, to: lead },
+    "Product",
+  );
+  revalidatePath("/suppliers");
+  revalidatePath("/stock");
+  return {
+    ok: true,
+    message: lead == null ? "Back to the supplier's lead time." : `Lead time set to ${lead} days.`,
+  };
+}
+
 /**
  * Soft-delete a supplier: the row is kept (deletedAt) so PO history and its
  * scorecard survive, and its products are unlinked so they fall back to
@@ -260,16 +379,20 @@ export async function deleteSupplierAction(input: {
 
 function audit(
   tenantId: string,
-  supplierId: string,
+  entityId: string,
   action: string,
   actor: { userId: string; name: string | null },
   meta: Prisma.InputJsonObject,
+  /** What the row is about. Defaults to Supplier — the per-product lead-time
+   *  override is the one action here whose subject is the product itself, and
+   *  filing it under Supplier would make the ledger point at the wrong thing. */
+  entity: "Supplier" | "Product" = "Supplier",
 ): Promise<unknown> {
   return prismaService.auditEvent.create({
     data: {
       tenantId,
-      entity: "Supplier",
-      entityId: supplierId,
+      entity,
+      entityId,
       action,
       actorUserId: actor.userId,
       actorName: actor.name,

@@ -229,3 +229,93 @@ export async function getLeadTimeDriftAlerts(tenantId: string): Promise<DriftAle
       direction: r.drift.direction,
     }));
 }
+
+export type PickerProduct = {
+  id: string;
+  title: string;
+  sku: string | null;
+  vendor: string | null;
+  /** The supplier this product sits with today — null when it has none. */
+  supplierId: string | null;
+  supplierName: string | null;
+  /** Per-product lead-time override; null = fall back to the supplier's. */
+  leadTimeDays: number | null;
+};
+
+export type SupplierProductPicker = {
+  supplierId: string;
+  supplierName: string;
+  /** Products already with this supplier, then the rest. */
+  products: PickerProduct[];
+  /** True when the list was cut short — the UI says so rather than implying
+   *  the shop only has this many products. */
+  truncated: boolean;
+};
+
+/** Ceiling on the picker list. A shop with thousands of SKUs narrows with the
+ *  search box rather than scrolling; sending everything would make the page. */
+const PICKER_LIMIT = 300;
+
+/**
+ * The candidate list behind "which products do I buy from this supplier?".
+ *
+ * Deliberately NOT restricted to buyable products: a shop assigning a supplier
+ * is tidying its catalogue, and hiding the drafts and deactivated rows would
+ * leave items it could never fix. Ordered so the supplier's current products
+ * come first — the question is usually "what else", not "what at all".
+ */
+export async function getSupplierProductPicker(
+  tenantId: string,
+  supplierId: string,
+  search?: string,
+): Promise<SupplierProductPicker | null> {
+  const db = prismaForTenant(tenantId);
+  const supplier = await db.supplier.findFirst({
+    where: { id: supplierId, deletedAt: null },
+    select: { id: true, name: true },
+  });
+  if (!supplier) return null;
+
+  const term = search?.trim();
+  const rows = await db.product.findMany({
+    where: term
+      ? {
+          OR: [
+            { title: { contains: term, mode: "insensitive" } },
+            { sku: { contains: term, mode: "insensitive" } },
+            { vendor: { contains: term, mode: "insensitive" } },
+          ],
+        }
+      : {},
+    select: {
+      id: true,
+      title: true,
+      sku: true,
+      vendor: true,
+      supplierId: true,
+      leadTimeDays: true,
+      supplier: { select: { name: true } },
+    },
+    orderBy: [{ title: "asc" }],
+    take: PICKER_LIMIT + 1,
+  });
+
+  const truncated = rows.length > PICKER_LIMIT;
+  const products = rows.slice(0, PICKER_LIMIT).map(
+    (p): PickerProduct => ({
+      id: p.id,
+      title: p.title,
+      sku: p.sku,
+      vendor: p.vendor,
+      supplierId: p.supplierId,
+      supplierName: p.supplier?.name ?? null,
+      leadTimeDays: p.leadTimeDays,
+    }),
+  );
+  products.sort((a, b) => {
+    const mine = Number(b.supplierId === supplier.id) - Number(a.supplierId === supplier.id);
+    return mine || a.title.localeCompare(b.title);
+  });
+
+  return { supplierId: supplier.id, supplierName: supplier.name, products, truncated };
+}

@@ -26,9 +26,11 @@ vi.mock("@/lib/auth", () => ({
 
 import { prismaForTenant, prismaService } from "@wezesha/db";
 import {
+  assignProductsToSupplierAction,
   bulkAssignByBrandAction,
   deleteSupplierAction,
   adoptLearnedLeadAction,
+  setProductLeadTimeAction,
 } from "../app/(shell)/suppliers/actions";
 
 const SLUGS = ["supplier-action-a", "supplier-action-b"];
@@ -252,5 +254,153 @@ describe.skipIf(!runnable)("suppliers actions (local db)", () => {
       where: { entity: "Supplier", entityId: beautyA, action: "deleted" },
     });
     expect((audit!.meta as { productsUnlinked: number }).productsUnlinked).toBe(2);
+  });
+
+  // ── assign chosen products to a supplier ───────────────────────────────────
+
+  /** A supplier of this section's own: the delete case above soft-deletes the
+   *  fixture's, and a deleted supplier is correctly invisible to these actions. */
+  async function makeSupplier(tenantId: string, name: string) {
+    const s = await prismaService.supplier.create({ data: { tenantId, name } });
+    return s.id;
+  }
+
+  /** Fresh products per test — the delete case above unlinks the fixture's. */
+  async function makeProducts(tenantId: string, prefix: string, count: number, supplierId?: string) {
+    const ids: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const p = await prismaService.product.create({
+        data: {
+          tenantId,
+          sku: `${prefix}-${i}`,
+          title: `${prefix} ${i}`,
+          vendor: "House",
+          ...(supplierId ? { supplierId } : {}),
+        },
+      });
+      ids.push(p.id);
+    }
+    return ids;
+  }
+
+  it("moves products onto a supplier, including ones that already had another", async () => {
+    // The gap this closes: assigning by brand only ever fills in a blank, so a
+    // product sitting with the wrong supplier could not be moved from anywhere.
+    actAs(tenantA, null);
+    const target = await makeSupplier(tenantA, "Move Target");
+    const [unassigned] = await makeProducts(tenantA, "MOVE-FREE", 1);
+    const [taken] = await makeProducts(tenantA, "MOVE-TAKEN", 1, guangzhouA);
+
+    const result = await assignProductsToSupplierAction({
+      supplierId: target,
+      productIds: [unassigned!, taken!],
+    });
+    expect(result.ok).toBe(true);
+
+    const rows = await prismaForTenant(tenantA).product.findMany({
+      where: { id: { in: [unassigned!, taken!] } },
+      select: { supplierId: true },
+    });
+    expect(rows.every((r) => r.supplierId === target)).toBe(true);
+
+    const audit = await prismaService.auditEvent.findFirst({
+      where: { tenantId: tenantA, entityId: target },
+      orderBy: { createdAt: "desc" },
+    });
+    const meta = audit!.meta as { action: string; products: number; reassignedFromAnotherSupplier: number };
+    expect(meta.action).toBe("assign_products");
+    expect(meta.products).toBe(2);
+    // Separated in the ledger: taking a product off another supplier is the
+    // half someone may later ask about.
+    expect(meta.reassignedFromAnotherSupplier).toBe(1);
+  });
+
+  it("cannot reach products in another workspace", async () => {
+    actAs(tenantA, null);
+    const mine = await makeSupplier(tenantA, "Cross Tenant Probe");
+    const [foreign] = await makeProducts(tenantB, "FOREIGN", 1);
+
+    const result = await assignProductsToSupplierAction({
+      supplierId: mine,
+      productIds: [foreign!],
+    });
+    expect(result).toEqual({ ok: false, error: "Those products no longer exist." });
+
+    const untouched = await prismaService.product.findUnique({ where: { id: foreign! } });
+    expect(untouched?.supplierId).toBeNull();
+  });
+
+  it("treats an all-already-assigned selection as a no-op, not an error", async () => {
+    actAs(tenantA, null);
+    const settled = await makeSupplier(tenantA, "Settled Supplier");
+    const ids = await makeProducts(tenantA, "ALREADY", 2, settled);
+    const result = await assignProductsToSupplierAction({ supplierId: settled, productIds: ids });
+    // Re-saving an unchanged selection is something a person does; it should
+    // read as "nothing to do", not as a failure.
+    expect(result).toEqual({ ok: true, message: "Already with Settled Supplier." });
+  });
+
+  it("refuses an empty selection and a member without manage_settings", async () => {
+    actAs(tenantA, null);
+    const guarded = await makeSupplier(tenantA, "Guarded Supplier");
+    expect(await assignProductsToSupplierAction({ supplierId: guarded, productIds: [] })).toEqual({
+      ok: false,
+      error: "Pick at least one product.",
+    });
+
+    actAs(tenantA, []);
+    const [p] = await makeProducts(tenantA, "NOPERM", 1);
+    expect(
+      await assignProductsToSupplierAction({ supplierId: guarded, productIds: [p!] }),
+    ).toEqual({ ok: false, error: "You don't have settings access in this workspace." });
+  });
+
+  // ── per-product lead time ──────────────────────────────────────────────────
+
+  it("sets and clears a product's own lead time, and audits it against the product", async () => {
+    // The client's "if we get the lead time without the supplier, we're fine":
+    // this column already outranks the supplier's everywhere the forecast reads
+    // it, and nothing had ever written it.
+    actAs(tenantA, null);
+    const [id] = await makeProducts(tenantA, "LEAD", 1);
+
+    expect(await setProductLeadTimeAction({ productId: id!, leadTimeDays: 21 })).toEqual({
+      ok: true,
+      message: "Lead time set to 21 days.",
+    });
+    expect(
+      (await prismaForTenant(tenantA).product.findUnique({ where: { id: id! } }))?.leadTimeDays,
+    ).toBe(21);
+
+    const audit = await prismaService.auditEvent.findFirst({
+      where: { tenantId: tenantA, entityId: id! },
+      orderBy: { createdAt: "desc" },
+    });
+    // Filed against the product, not the supplier — it is the product's figure.
+    expect(audit?.entity).toBe("Product");
+    expect((audit!.meta as { from: number | null; to: number }).to).toBe(21);
+
+    expect(await setProductLeadTimeAction({ productId: id!, leadTimeDays: null })).toEqual({
+      ok: true,
+      message: "Back to the supplier's lead time.",
+    });
+    expect(
+      (await prismaForTenant(tenantA).product.findUnique({ where: { id: id! } }))?.leadTimeDays,
+    ).toBeNull();
+  });
+
+  it("refuses an out-of-range lead time and a product in another workspace", async () => {
+    actAs(tenantA, null);
+    const [mine] = await makeProducts(tenantA, "LEAD-RANGE", 1);
+    expect(await setProductLeadTimeAction({ productId: mine!, leadTimeDays: 400 })).toEqual({
+      ok: false,
+      error: "Lead time should be between 0 and 365 days.",
+    });
+
+    const [foreign] = await makeProducts(tenantB, "LEAD-FOREIGN", 1);
+    expect(await setProductLeadTimeAction({ productId: foreign!, leadTimeDays: 10 })).toEqual({
+      ok: false,
+      error: "That product no longer exists.",
+    });
   });
 });

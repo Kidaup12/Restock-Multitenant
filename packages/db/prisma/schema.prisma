@@ -310,6 +310,9 @@ model Product {
   @@index([tenantId, shopifyStatus])
   @@index([tenantId, missingFromShopifyAt])
   @@index([tenantId, customCategory])
+  // "Which products does this supplier carry?" — the read behind managing a
+  // supplier's products, and behind resolving lead time for a buy list.
+  @@index([tenantId, supplierId])
 }
 
 model Supplier {

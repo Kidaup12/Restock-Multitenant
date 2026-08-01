@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -249,12 +250,15 @@ export function SuppliersView({
           ) : (
             <Table>
               <TableHeader>
+                {/* Lead time sits directly after the name on purpose: it is the
+                    figure that decides when to reorder, and the one thing a shop
+                    is really choosing a supplier on. */}
                 {sortHead("Supplier", "name")}
-                {sortHead("Group", "group")}
                 {sortHead("Lead (typed)", "leadTyped", true)}
                 {sortHead("Learned", "learned", true)}
-                {sortHead("MOQ", "moq", true)}
                 <TableHead>Speed</TableHead>
+                {sortHead("Group", "group")}
+                {sortHead("MOQ", "moq", true)}
                 {sortHead("Products", "products", true)}
                 <TableHead>Scorecard</TableHead>
                 {canManage && <TableHead>Actions</TableHead>}
@@ -276,13 +280,6 @@ export function SuppliersView({
                       </span>
                       {row.country && (
                         <span className="mt-0.5 block text-xs text-ink-muted">{row.country}</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {row.group ? (
-                        <Badge tone="neutral">{row.group}</Badge>
-                      ) : (
-                        <span className="text-ink-faint">—</span>
                       )}
                     </TableCell>
                     <TableCell numeric>
@@ -325,7 +322,6 @@ export function SuppliersView({
                         <span className="text-ink-faint">learning…</span>
                       )}
                     </TableCell>
-                    <TableCell numeric>{row.moq}</TableCell>
                     <TableCell>
                       {row.speedBand ? (
                         <Badge tone={SPEED_TONE[row.speedBand]}>
@@ -335,7 +331,24 @@ export function SuppliersView({
                         <span className="text-ink-faint">—</span>
                       )}
                     </TableCell>
-                    <TableCell numeric>{row.assignedProductCount}</TableCell>
+                    <TableCell>
+                      {row.group ? (
+                        <Badge tone="neutral">{row.group}</Badge>
+                      ) : (
+                        <span className="text-ink-faint">—</span>
+                      )}
+                    </TableCell>
+                    <TableCell numeric>{row.moq}</TableCell>
+                    <TableCell numeric>
+                      {/* The count is the way in to changing it — a shop looking
+                          at "12 products" is usually about to ask which. */}
+                      <Link
+                        href={`/suppliers/${row.id}/products`}
+                        className="text-accent-ink underline-offset-2 hover:underline"
+                      >
+                        {row.assignedProductCount}
+                      </Link>
+                    </TableCell>
                     <TableCell>
                       <ScoreBadges row={row} />
                     </TableCell>
