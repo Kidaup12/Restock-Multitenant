@@ -24,6 +24,10 @@ describe("kindTone", () => {
     expect(kindTone("sync_failed")).toBe("negative");
     expect(kindTone("shopify_reconnect")).toBe("warning");
     expect(kindTone("shopify_uninstalled")).toBe("warning");
+    // A new product with no cost stays off the buy list until someone sets one,
+    // so this is something to act on — a kind missing from here renders neutral
+    // and reads as news rather than a job.
+    expect(kindTone("catalogue_review")).toBe("warning");
     expect(kindTone("something_else")).toBe("neutral");
   });
 });
