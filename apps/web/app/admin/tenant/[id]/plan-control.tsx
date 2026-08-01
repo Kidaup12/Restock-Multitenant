@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { PLAN_ORDER, PLAN_TIER_LABEL, type PlanTier } from "@/lib/capabilities/plan-features";
 import { setTenantPlan } from "@/app/admin/actions";
+import { STEP_UP_REQUIRED } from "@/lib/admin/step-up-contract";
+import { StepUpPrompt } from "@/app/admin/step-up-prompt";
 
 /**
  * Move a workspace between tiers. The one control on this console that changes
@@ -21,6 +23,7 @@ export function PlanControl({ tenantId, plan }: { tenantId: string; plan: string
   const [choice, setChoice] = useState<PlanTier>(current);
   const [pending, startTransition] = useTransition();
   const [note, setNote] = useState<{ tone: "positive" | "negative"; text: string } | null>(null);
+  const [needsStepUp, setNeedsStepUp] = useState(false);
   const router = useRouter();
 
   function save() {
@@ -31,8 +34,12 @@ export function PlanControl({ tenantId, plan }: { tenantId: string; plan: string
       body.set("plan", choice);
       const result = await setTenantPlan(body);
       if (result.ok) {
+        setNeedsStepUp(false);
         setNote({ tone: "positive", text: `Now on ${PLAN_TIER_LABEL[result.plan as PlanTier]}.` });
         router.refresh();
+      } else if (result.error === STEP_UP_REQUIRED) {
+        // The chosen tier stays selected; confirming carries straight on to it.
+        setNeedsStepUp(true);
       } else {
         setNote({ tone: "negative", text: result.error });
       }
@@ -68,6 +75,16 @@ export function PlanControl({ tenantId, plan }: { tenantId: string; plan: string
           </span>
         )}
       </div>
+      {needsStepUp && (
+        <StepUpPrompt
+          action="change this workspace's tier"
+          onConfirmed={() => {
+            setNeedsStepUp(false);
+            save();
+          }}
+          onCancel={() => setNeedsStepUp(false)}
+        />
+      )}
       <p className="text-xs text-ink-muted">
         The tier decides Insights, Transfers, the budget planner and emailing a purchase order to a
         supplier. A change applies on the workspace&apos;s next page load, and is written to the

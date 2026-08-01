@@ -16,17 +16,32 @@ import {
 } from "@/lib/admin/impersonation";
 import { customerWorkspaceExists } from "@/lib/admin/fleet";
 import { provisionWorkspace } from "@/lib/admin/provision";
+import { hasStepUp } from "@/lib/admin/step-up";
+import { STEP_UP_REQUIRED } from "@/lib/admin/step-up-contract";
 
 /**
  * Workspace entry/exit for the admin console. Entering is the audited event:
  * one impersonation_start row per grant (not per page view — the grant IS the
  * session), one impersonation_end when the admin explicitly leaves.
+ *
+ * Everything here that changes something asks for the password first. Reads do
+ * not: gate the fleet and the audit log too and an admin keeps a grant warm all
+ * day, which is the habit step-up exists to break. The sync trigger is
+ * deliberately outside it — that re-runs a customer's own sync, chooses nothing,
+ * and is audited either way.
  */
 
 export async function enterWorkspace(formData: FormData): Promise<void> {
   const admin = await requireAdmin();
   const tenantId = String(formData.get("tenantId") ?? "");
   if (!tenantId || !(await customerWorkspaceExists(tenantId))) notFound();
+
+  // Void action with a redirect, so there is no result to carry a refusal:
+  // send them to the prompt, which comes back and finishes the job. Both
+  // parameters are ids this action already validated, never raw input.
+  if (!(await hasStepUp(admin))) {
+    redirect(`/admin/step-up?enter=${encodeURIComponent(tenantId)}`);
+  }
 
   await recordAdminEvent({
     tenantId,
@@ -56,6 +71,7 @@ export type ProvisionActionResult =
  */
 export async function provisionWorkspaceAction(formData: FormData): Promise<ProvisionActionResult> {
   const admin = await requireAdmin();
+  if (!(await hasStepUp(admin))) return { ok: false, error: STEP_UP_REQUIRED };
   const name = String(formData.get("name") ?? "");
   const ownerEmail = String(formData.get("ownerEmail") ?? "");
 
@@ -103,6 +119,7 @@ export type SetPlanResult = { ok: true; plan: string } | { ok: false; error: str
  */
 export async function setTenantPlan(formData: FormData): Promise<SetPlanResult> {
   const admin = await requireAdmin();
+  if (!(await hasStepUp(admin))) return { ok: false, error: STEP_UP_REQUIRED };
   const tenantId = String(formData.get("tenantId") ?? "");
   const plan = String(formData.get("plan") ?? "");
 

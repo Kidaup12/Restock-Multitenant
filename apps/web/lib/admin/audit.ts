@@ -15,6 +15,8 @@ export const ADMIN_AUDIT_ACTIONS = [
   "admin_sync_trigger",
   "plan_changed",
   "workspace_provisioned",
+  "step_up_granted",
+  "step_up_failed",
 ] as const;
 
 export type AdminAuditAction = (typeof ADMIN_AUDIT_ACTIONS)[number];
@@ -28,6 +30,11 @@ const ENTITY_BY_ACTION: Record<AdminAuditAction, string> = {
   admin_sync_trigger: "AdminSync",
   plan_changed: "Tenant",
   workspace_provisioned: "Tenant",
+  // Step-up is about the admin, not any customer, so these key on the platform
+  // workspace — the row that exists so platform-level events have somewhere
+  // honest to live.
+  step_up_granted: "AdminSession",
+  step_up_failed: "AdminSession",
 };
 
 /** One admin-surface audit row. entityId is the tenant acted on; the admin's
