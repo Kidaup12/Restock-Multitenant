@@ -182,9 +182,25 @@ const stockoutDaysLeft = (days: number): number | null =>
 const stockoutRank = (r: { daysUntilStockout: number | null }): number =>
   r.daysUntilStockout ?? Number.POSITIVE_INFINITY;
 
-/** The shared head of every buy-list ordering: most urgent first, then whatever
- *  empties soonest. Neither key is money. */
+/** A before B before C; anything unclassified sorts after all three, since a
+ *  product with no class is one the engine has too little history to rank. */
+const ABC_RANK: Record<string, number> = { A: 0, B: 1, C: 2 };
+const abcRank = (r: { abc: string | null }): number => ABC_RANK[r.abc ?? ""] ?? 3;
+
+/**
+ * The shared head of every buy-list ordering: bestsellers first, then most
+ * urgent, then whatever empties soonest. Neither key is money.
+ *
+ * Class leads on the client's instruction — the products that turn over fastest
+ * and earn the most are the ones they want to see at the top of a buy list,
+ * because those are where a stockout costs real money. The consequence is worth
+ * stating plainly: a class-C item running out tomorrow now sits below class-A
+ * items with weeks of cover. The urgency badge and the overdue banner still call
+ * that out, and the budget split still funds criticals first — see splitByBudget,
+ * which deliberately keeps its own ordering.
+ */
 const byUrgencyThenStockout = (a: BuyListRow, b: BuyListRow): number =>
+  abcRank(a) - abcRank(b) ||
   (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
   stockoutRank(a) - stockoutRank(b);
 
@@ -576,6 +592,10 @@ export function splitByBudget(rows: BuyListRow[], budgetKes: number): BudgetSpli
   const checkCost = rows.filter((r) => r.plannable !== "ok");
   const scored = rows
     .filter((r) => r.plannable === "ok" && (r.lineTotalKes ?? 0) > 0)
+    // Deliberately NOT the list's ordering: money is allocated most-urgent
+    // first, whatever the class. The list leads with bestsellers because that
+    // is how a buyer wants to read it, but a budget that spent on class A while
+    // a critical item went unfunded would be a stockout the shop paid for.
     .sort(
       (a, b) =>
         (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||

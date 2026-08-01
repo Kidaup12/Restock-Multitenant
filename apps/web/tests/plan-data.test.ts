@@ -11,9 +11,11 @@ import { runForecast } from "../lib/forecast-run/run";
 import {
   createOrdersForPredictions,
   getBuyList,
+  redactBuyList,
   removePlanOverride,
   splitByBudget,
   upsertPlanOverride,
+  type BuyList,
   type BuyListRow,
 } from "../lib/data/plan";
 import {
@@ -119,10 +121,17 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       5
     );
 
-    // Most urgent first: urgency rank, then imminence.
+    // Bestsellers first, then most urgent, then imminence. Urgency is only
+    // non-decreasing WITHIN a class now — across classes it deliberately is not,
+    // which is the whole point of leading with class A.
+    const abcRank = (abc: string | null) => ({ A: 0, B: 1, C: 2 })[abc ?? ""] ?? 3;
     for (let i = 1; i < buyList!.rows.length; i++) {
       const prev = buyList!.rows[i - 1]!;
       const curr = buyList!.rows[i]!;
+      const classDelta = abcRank(curr.abc) - abcRank(prev.abc);
+      expect(classDelta).toBeGreaterThanOrEqual(0);
+      if (classDelta > 0) continue;
+
       const rankDelta = URGENCY_RANK[curr.urgency]! - URGENCY_RANK[prev.urgency]!;
       expect(rankDelta).toBeGreaterThanOrEqual(0);
       if (rankDelta === 0) {
@@ -146,6 +155,27 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       expect(buyList!.rows.find((r) => r.sku === sku)).toBeUndefined();
       expect(buyList!.excluded.find((r) => r.sku === sku)).toBeUndefined();
     }
+  });
+
+  it("persists the class the run worked from, and leads the list with it", async () => {
+    // The run has always computed ABC and used it for service levels and
+    // ordering policy, then thrown it away — so Product.abcCategory was null for
+    // every product ever written, and anything reading the stored column saw an
+    // unclassified catalogue. Without this the class-first ordering is inert.
+    const classified = await prismaService.product.groupBy({
+      by: ["abcCategory"],
+      where: { tenantId: seeded.tenantId },
+      _count: { _all: true },
+    });
+    const classes = classified.filter((c) => c.abcCategory !== null).map((c) => c.abcCategory);
+    expect(classes.sort()).toEqual(["A", "B", "C"]);
+
+    const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const rows = buyList!.rows;
+    const ranks = rows.map((r) => ({ A: 0, B: 1, C: 2 })[r.abc ?? ""] ?? 3);
+    // Non-decreasing: every A before every B before every C.
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    expect(rows[0]!.abc).toBe("A");
   });
 
   it("holds a product with an open order off the active list, tagged already-ordered", async () => {
@@ -746,6 +776,67 @@ describe("splitByBudget (pure)", () => {
       ...partial,
     };
   }
+
+  /** A BuyList wrapper for the ordering tests — only `rows` matters to them. */
+  function mkBuyList(rows: BuyListRow[]): BuyList {
+    return {
+      forecastRunId: "run-1",
+      runDate: new Date(),
+      rows,
+      excluded: [],
+      totalPredicted: rows.length,
+      totalCostKes: 0,
+    };
+  }
+
+  it("leads the list with class A, even over something more urgent", () => {
+    // The client's instruction: bestsellers first. The consequence is deliberate
+    // and worth pinning down — a class-C item stocking out tomorrow sits below
+    // class-A items that still have weeks of cover, because a stockout on a
+    // bestseller is the one that costs real money.
+    const criticalC = mkRow({ abc: "C", urgency: "critical", daysUntilStockout: 1, sku: "C-CRIT" });
+    const lowA = mkRow({ abc: "A", urgency: "low", daysUntilStockout: 30, sku: "A-LOW" });
+    const criticalA = mkRow({ abc: "A", urgency: "critical", daysUntilStockout: 2, sku: "A-CRIT" });
+    const mediumB = mkRow({ abc: "B", urgency: "medium", daysUntilStockout: 9, sku: "B-MED" });
+    const unclassified = mkRow({ abc: null, urgency: "critical", daysUntilStockout: 1, sku: "N-CRIT" });
+
+    const sorted = redactBuyList(
+      mkBuyList([mediumB, unclassified, lowA, criticalC, criticalA]),
+      false,
+    ).rows;
+
+    expect(sorted.map((r) => r.sku)).toEqual([
+      "A-CRIT", // class first, then urgency inside the class
+      "A-LOW",
+      "B-MED",
+      "C-CRIT",
+      "N-CRIT", // no class at all sorts last — too little history to rank it
+    ]);
+  });
+
+  it("orders a money-blind list exactly as an owner's", () => {
+    // Both sorts share the same head, so a member and an owner read the same
+    // list in the same order — only the money is missing.
+    const rows = [
+      mkRow({ abc: "C", urgency: "critical", sku: "C-1", lineTotalKes: 9000 }),
+      mkRow({ abc: "A", urgency: "low", sku: "A-1", lineTotalKes: 10 }),
+      mkRow({ abc: "B", urgency: "high", sku: "B-1", lineTotalKes: 5000 }),
+    ];
+    const blind = redactBuyList(mkBuyList(rows), false);
+    expect(blind.rows.map((r) => r.sku)).toEqual(["A-1", "B-1", "C-1"]);
+    expect(blind.rows.every((r) => r.lineTotalKes === null)).toBe(true);
+  });
+
+  it("funds the budget by urgency, not by class", () => {
+    // The list leads with bestsellers; the money must not. A budget that bought
+    // class A while a critical item went unfunded is a stockout the shop paid for.
+    const criticalC = mkRow({ abc: "C", urgency: "critical", sku: "C-CRIT", lineTotalKes: 600 });
+    const lowA = mkRow({ abc: "A", urgency: "low", sku: "A-LOW", lineTotalKes: 600 });
+
+    const split = splitByBudget([lowA, criticalC], 600);
+    expect(split.funded.map((r) => r.sku)).toEqual(["C-CRIT"]);
+    expect(split.deferred.map((r) => r.sku)).toEqual(["A-LOW"]);
+  });
 
   it("routes broken-cost rows to checkCost, never into the split", () => {
     const good = mkRow({});
