@@ -43,6 +43,15 @@ import {
   registerSnapshotCronSchedules,
   type SnapshotCronQueue,
 } from "./snapshot-cron";
+import {
+  SYNC_SCHEDULE_QUEUE,
+  createSyncScheduleQueue,
+  createSyncScheduleWorker,
+  registerSyncSchedules,
+  shopifySyncPattern,
+  type SyncScheduleQueue,
+} from "./sync-schedule-cron";
+import { createSyncQueue, type SyncQueue } from "@wezesha/queue";
 import { createSyncWorker } from "./worker";
 
 /**
@@ -68,6 +77,11 @@ import { createSyncWorker } from "./worker";
  *                           (nightly cost-moved checks); unset keeps dev/CI quiet
  *   SNAPSHOT_CRON         — "1" registers + runs the inventory-snapshot cron
  *                           (nightly on-hand history); unset keeps dev/CI quiet
+ *   SHOPIFY_SYNC_CRON     — "1" registers + runs the recurring Shopify sync
+ *                           (every SHOPIFY_SYNC_PATTERN, plus a daily full pull
+ *                           so removed products are noticed); unset keeps
+ *                           dev/CI quiet
+ *   SHOPIFY_SYNC_PATTERN  — cron pattern for that sync (default every 15 min)
  *   POS_FEED_SECRET       — bearer token for the POS feed fetch (per-provider)
  *   SENTRY_DSN            — error tracking; unset = tracking disabled (no-op)
  */
@@ -169,6 +183,26 @@ async function main(): Promise<void> {
     console.log("worker: snapshot cron registered (nightly inventory snapshot)");
   }
 
+  let syncScheduleQueue: SyncScheduleQueue | null = null;
+  let syncScheduleWorker: Worker | null = null;
+  let syncProducerQueue: SyncQueue | null = null;
+  if (process.env.SHOPIFY_SYNC_CRON === "1") {
+    syncScheduleQueue = createSyncScheduleQueue(connection);
+    // A producer handle onto the sync queue the worker above consumes from —
+    // this cron's whole job is to put work on it.
+    syncProducerQueue = createSyncQueue(connection);
+    await registerSyncSchedules(syncScheduleQueue);
+    syncScheduleWorker = createSyncScheduleWorker({
+      connection,
+      syncQueue: syncProducerQueue,
+    });
+    syncScheduleWorker.on("failed", (job, err) => {
+      console.error(`worker: sync schedule cron ${job?.id} failed`, err);
+      captureError(err, { jobId: job?.id, queue: SYNC_SCHEDULE_QUEUE });
+    });
+    console.log(`worker: shopify sync cron registered (${shopifySyncPattern()})`);
+  }
+
   let closing = false;
   const shutdown = (signal: string) => {
     if (closing) return;
@@ -189,6 +223,9 @@ async function main(): Promise<void> {
       costQueue?.close(),
       snapshotWorker?.close(),
       snapshotQueue?.close(),
+      syncScheduleWorker?.close(),
+      syncScheduleQueue?.close(),
+      syncProducerQueue?.close(),
     ])
       .then(() => Promise.all([connection.quit(), publisher.quit()]))
       .then(
