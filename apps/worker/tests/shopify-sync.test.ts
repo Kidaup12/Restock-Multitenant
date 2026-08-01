@@ -231,10 +231,13 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     expect(argan.id).toBeTruthy();
 
     // Role-correct rollup: currentStock is SELLS-only (Main Store 6); the
-    // warehouse's 10 holds (excluded), and the en-route 20 feeds onOrder.
+    // warehouse's 10 holds (excluded). On-order is BOTH in-transit signals —
+    // the en-route location's 20 on-hand, plus the 5 Shopify reports as
+    // incoming at the Main Store, which is where a transfer or purchase order
+    // actually lands.
     const arganFresh = await prismaService.product.findFirst({ where: { tenantId, sku: "ARG-100" } });
     expect(arganFresh?.currentStock).toBe(6);
-    expect(arganFresh?.onOrder).toBe(20);
+    expect(arganFresh?.onOrder).toBe(25);
     // Shea only sits in the warehouse — nothing sellable.
     const sheaFresh = await prismaService.product.findFirst({ where: { tenantId, sku: "SHEA-250" } });
     expect(sheaFresh?.currentStock).toBe(0);
@@ -666,5 +669,125 @@ describe.skipIf(!runnable)("product lifecycle ingest (real db + redis)", () => {
     await processor(jobStub(tenantId));
     expect((await bySku("BALM-01")).syncError).toBeNull();
     expect((await bySku("BALM-01")).syncErrorAt).toBeNull();
+  });
+});
+
+const ONROUTE_SLUG = "shopify-onroute-test";
+const ONROUTE_SHOP = "onroute-test-store.myshopify.com";
+
+/** One ordinary shop, one product. No warehouse, no location named anything
+ *  the role guesser would read as en-route — the setup almost every Shopify
+ *  merchant actually has. */
+const onRouteCatalogue: ShopifyProductNode[] = [
+  {
+    id: "gid://shopify/Product/701",
+    title: "Cleansing Balm",
+    vendor: "Beauty Co",
+    status: "ACTIVE",
+    variants: [
+      {
+        id: "gid://shopify/ProductVariant/801",
+        sku: "CLB-01",
+        price: "2000",
+        inventoryItem: { id: "gid://shopify/InventoryItem/901", unitCost: { amount: "1200" } },
+      },
+    ],
+  },
+];
+
+/** Shopify reports a purchase order / transfer as `incoming` AGAINST THE
+ *  DESTINATION, which here is the shop itself. */
+const onRouteLocations: ShopifyLocationNode[] = [
+  {
+    id: "gid://shopify/Location/9201",
+    name: "Kilimani",
+    isActive: true,
+    inventoryLevels: [
+      {
+        quantities: [
+          { name: "on_hand", quantity: 3 },
+          { name: "incoming", quantity: 20 },
+        ],
+        item: { id: "gid://shopify/InventoryItem/901", variant: { id: "gid://shopify/ProductVariant/801", product: { id: "gid://shopify/Product/701" } } },
+      },
+    ],
+  },
+];
+
+describe.skipIf(!runnable)("on-route without an en-route location (real db + redis)", () => {
+  let prismaService: typeof import("@wezesha/db").prismaService;
+  let processor: (job: Job<SyncJobData>) => Promise<void>;
+  let publisher: Redis;
+  let tenantId: string;
+
+  beforeAll(async () => {
+    process.env.TOKEN_ENCRYPTION_KEY ??= crypto.randomBytes(32).toString("base64");
+    ({ prismaService } = await import("@wezesha/db"));
+    const mod = await import("../src/shopify-sync");
+
+    publisher = new Redis(redisUrl!);
+    processor = mod.createShopifySyncProcessor({
+      publisher,
+      makeApi: () => ({
+        ensureWebhooks: async () => {},
+        shopSettings: async () => ({ currencyCode: null }),
+        products: async () => onRouteCatalogue,
+        locations: async () => onRouteLocations,
+        orders: async () => [],
+      }),
+    });
+
+    await prismaService.tenant.deleteMany({ where: { slug: ONROUTE_SLUG } });
+    const tenant = await prismaService.tenant.create({
+      data: { name: "On Route Test", slug: ONROUTE_SLUG },
+    });
+    tenantId = tenant.id;
+    await prismaService.shopifyConnection.create({
+      data: {
+        tenantId,
+        shopDomain: ONROUTE_SHOP,
+        accessToken: encryptToken(TOKEN),
+        scopes: "read_products",
+      },
+    });
+    await processor(jobStub(tenantId));
+  });
+
+  afterAll(async () => {
+    await prismaService.tenant.deleteMany({ where: { slug: ONROUTE_SLUG } });
+    await prismaService.$disconnect();
+    await publisher.quit();
+  });
+
+  it("counts incoming stock as on-order even though no location is typed en-route", async () => {
+    // The regression this guards: onOrder used to be built only from on-hand at
+    // en-route-typed locations, so a shop like this one reported nothing
+    // incoming forever and the buy list kept recommending stock already paid for.
+    const locations = await prismaService.location.findMany({ where: { tenantId } });
+    expect(locations).toHaveLength(1);
+    expect(locations[0]!.locationType).toBe("branch"); // NOT enroute
+
+    const product = await prismaService.product.findFirstOrThrow({
+      where: { tenantId, sku: "CLB-01" },
+    });
+    expect(product.currentStock).toBe(3);
+    expect(product.onOrder).toBe(20);
+  });
+
+  it("drops on-order back to zero once the stock has arrived", async () => {
+    // Full-snapshot semantics: the delivery lands as on-hand and Shopify stops
+    // reporting it incoming, so on-route has to clear itself without anyone
+    // marking anything received.
+    onRouteLocations[0]!.inventoryLevels![0]!.quantities = [
+      { name: "on_hand", quantity: 23 },
+      { name: "incoming", quantity: 0 },
+    ];
+    await processor(jobStub(tenantId));
+
+    const product = await prismaService.product.findFirstOrThrow({
+      where: { tenantId, sku: "CLB-01" },
+    });
+    expect(product.currentStock).toBe(23);
+    expect(product.onOrder).toBe(0);
   });
 });

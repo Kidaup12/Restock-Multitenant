@@ -269,7 +269,13 @@ async function syncProducts(
  *  - En-route locations' on_hand → Product.onOrder (never counted as on-hand)
  *  - Holds (warehouse) / Ignore contribute to neither (held for transfers /
  *    excluded); their raw on_hand is still stored per InventoryLevel.
- * Shopify "incoming" per level is stored on InventoryLevel.incoming.
+ *
+ * Shopify's own "incoming" per level is stored on InventoryLevel.incoming AND
+ * summed into Product.onOrder across every location bar Ignore. That is where a
+ * purchase order or a transfer actually shows up — against the destination,
+ * which for most shops is a plain selling branch — so a rollup keyed only on the
+ * En-route role reported nothing incoming for them, and the buy list went on
+ * recommending stock that was already on its way.
  *
  * A location with no owner-confirmed role gets a name-guessed role stamped as
  * "assumed"; a "confirmed" role is never overwritten by the sync.
@@ -284,6 +290,7 @@ async function syncLocationsAndInventory(
   let processed = 0;
   const sellsByProduct = new Map<string, number>();
   const enrouteByProduct = new Map<string, number>();
+  const incomingByProduct = new Map<string, number>();
   const seenProducts = new Set<string>();
 
   await onProgress?.(0, locations.length);
@@ -327,19 +334,30 @@ async function syncLocationsAndInventory(
       if (role === "sells") sellsByProduct.set(productId, (sellsByProduct.get(productId) ?? 0) + onHand);
       else if (role === "enroute")
         enrouteByProduct.set(productId, (enrouteByProduct.get(productId) ?? 0) + onHand);
+      // Shopify's own in-transit number, counted wherever it lands. A purchase
+      // order or transfer shows as `incoming` at its DESTINATION — an ordinary
+      // selling branch — so keying this off the En-route role alone discarded it
+      // for every shop that does not model transit as a location.
+      if (role !== "ignore")
+        incomingByProduct.set(productId, (incomingByProduct.get(productId) ?? 0) + incoming);
       levels++;
     }
   }
 
   // Full-snapshot semantics: every product seen this sync gets both figures
   // rewritten (0 when it has no Sells / En-route stock), so stock that moved out
-  // of a selling location drops out of sellable on-hand instead of lingering.
+  // of a selling location drops out of sellable on-hand instead of lingering —
+  // and stock that has arrived drops out of on-order the same way.
   for (const productId of seenProducts) {
     await prismaService.product.updateMany({
       where: { id: productId, tenantId },
       data: {
         currentStock: sellsByProduct.get(productId) ?? 0,
-        onOrder: enrouteByProduct.get(productId) ?? 0,
+        // Both conventions, because a shop uses one or the other: Shopify's
+        // `incoming`, and stock parked at a location the owner typed En route.
+        // A shop doing both would briefly double-count a transfer into that
+        // location, which resolves itself the moment the stock is received.
+        onOrder: (enrouteByProduct.get(productId) ?? 0) + (incomingByProduct.get(productId) ?? 0),
       },
     });
   }

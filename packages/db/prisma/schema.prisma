@@ -379,7 +379,10 @@ model InventoryLevel {
   locationId String
   productId  String
   onHand     Int      @default(0) // on_hand quantity, NOT available
-  incoming   Int      @default(0) // Shopify "incoming" quantity at this location (in-transit to it); feeds the in-transit-between-branches number, never sellable on-hand
+  // Shopify "incoming" at this location — stock on its way TO it, from a
+  // purchase order or a transfer. Summed across locations into Product.onOrder
+  // (the "on route" figure the buy list nets off), never sellable on-hand.
+  incoming   Int      @default(0)
   updatedAt  DateTime @updatedAt
 
   location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
