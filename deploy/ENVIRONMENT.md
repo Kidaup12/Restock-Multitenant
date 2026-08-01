@@ -35,6 +35,8 @@ it embeds a password).
 | `FORECAST_CRON` | `apps/worker/src/index.ts` | worker | Railway (`1` to run the nightly forecast + monthly backtest) | config | unset — schedule OFF |
 | `COST_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` to run the nightly cost-moved check) | config | unset — schedule OFF |
 | `SNAPSHOT_CRON` | `apps/worker/src/index.ts` (gates `apps/worker/src/snapshot-cron.ts`) | worker | Railway (`1` everywhere on-hand history is wanted — stockout-rate and dead-stock trends read off it) | config | unset — schedule OFF |
+| `SHOPIFY_SYNC_CRON` | `apps/worker/src/index.ts` (gates `apps/worker/src/sync-schedule-cron.ts`) | worker | Railway (`1` in production — without it a shop's data only refreshes when someone presses Sync now) | config | unset — schedule OFF |
+| `SHOPIFY_SYNC_PATTERN` | `apps/worker/src/sync-schedule-cron.ts` | worker | Railway (only to re-time the sync) | config | `*/15 * * * *`. Ten minutes is the floor worth considering: a tick does a full inventory refresh, and the app calls a run stalled once its progress has been quiet for ten |
 | `RESEND_API_KEY` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | secret | unset (mail is logged to the console, never sent — dev/CI/tests stay offline) |
 | `EMAIL_FROM` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | config | unset (only read when `RESEND_API_KEY` is set; sender as `Name <address>` or a bare address) |
 | `ADMIN_EMAILS` | `apps/web/lib/admin/gate.ts` | web | Vercel | config (sensitive — names the operator accounts) | unset. Bootstrap only: it answers who is an admin while the `PlatformAdmin` table has no live row, and goes inert once one does. With both empty the console 404s for everyone — fail closed |
@@ -74,11 +76,16 @@ Notes:
   `SERVICE_DATABASE_URL` + `DATABASE_URL` (client construction) alongside `REDIS_URL`,
   `TOKEN_ENCRYPTION_KEY`, and `SHOPIFY_APP_URL` on Railway.
 - **Every scheduled job is off unless switched on.** `EMAIL_CRONS`, `OPS_CRONS`,
-  `POS_CRONS`, `FORECAST_CRON`, `COST_CRONS` and `SNAPSHOT_CRON` each register their
-  schedules only when the value is exactly `"1"` (`apps/worker/src/index.ts`). Unset is
-  the default everywhere, which keeps dev and CI quiet — and means a production worker
-  that should run the nightly forecast, cost checks and on-hand snapshots does nothing
-  until those are set to `1` on Railway. Decide this deliberately per environment.
+  `POS_CRONS`, `FORECAST_CRON`, `COST_CRONS`, `SNAPSHOT_CRON` and `SHOPIFY_SYNC_CRON`
+  each register their schedules only when the value is exactly `"1"`
+  (`apps/worker/src/index.ts`). Unset is the default everywhere, which keeps dev and CI
+  quiet — and means a production worker that should run the nightly forecast, cost
+  checks, on-hand snapshots and the recurring Shopify sync does nothing until those are
+  set to `1` on Railway. Decide this deliberately per environment.
+- **`SHOPIFY_SYNC_CRON` is the one a customer notices immediately.** Without it a shop's
+  catalogue, stock and sales only move when someone presses Sync now or a webhook
+  happens to fire, so the buy list can be hours stale. It also carries the daily full
+  pull that lets products deleted in Shopify be noticed at all.
 - **Realtime needs `NEXT_PUBLIC_WS_URL` on web.** The gateway can be up and reachable
   and the app will still never connect: `/api/realtime-token` returns `url: null` when
   the variable is unset. Point it at the gateway's `wss://` origin once the Railway
