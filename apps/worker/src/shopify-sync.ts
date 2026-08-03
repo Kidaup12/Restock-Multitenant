@@ -616,8 +616,10 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       await run.phaseEnd("orders", { salesDays });
 
       await run.ok();
-      // Recovery re-arms the reconnect alert (see incident.ts).
+      // Recovery re-arms the reconnect alert (see incident.ts)...
       await clearIncident(options.publisher, tenantId, "shopify");
+      // ...and lets the scheduler pick this store back up.
+      await clearAuthFailureState(tenantId);
     } catch (err) {
       // Close the row on every exit, so a retry opens a fresh one and no attempt
       // is left reading as "running" for ever.
@@ -645,6 +647,57 @@ const CATALOGUE_NOTICE_DEDUP_MS = 12 * 60 * 60 * 1000;
  *  catalogue notice, and for the same reason: a condition that persists is worth
  *  re-raising twice a day, not four times an hour. */
 const SYNC_FAILURE_NOTICE_DEDUP_MS = 12 * 60 * 60 * 1000;
+
+/** Consecutive auth failures before the scheduler stops trying a store. Three
+ *  rather than one: a 403 immediately after an install can be scope propagation
+ *  or a Shopify-side blip, and pausing a healthy shop on a single bad answer
+ *  costs more than three quarters of an hour of pointless retries. */
+export const AUTH_FAILURES_BEFORE_PAUSE = 3;
+
+/** Clear the auth-failure state after any successful sync — the token works, so
+ *  whatever the counter was mid-way to is no longer true. Kept beside
+ *  clearIncident: both are "this store recovered" signals and drift apart if
+ *  they live in different places. */
+export async function clearAuthFailureState(tenantId: string): Promise<void> {
+  await prismaService.shopifyConnection.updateMany({
+    where: { tenantId },
+    data: { authFailureCount: 0, syncPausedAt: null, lastAuthError: null, lastAuthErrorAt: null },
+  });
+}
+
+/**
+ * Count an auth failure and pause the store once it has failed enough times in
+ * a row. Returns true on the transition into paused, so the caller can say so
+ * once rather than on every subsequent tick.
+ */
+async function recordAuthFailure(tenantId: string, message: string): Promise<boolean> {
+  const connection = await prismaService.shopifyConnection.findUnique({
+    where: { tenantId },
+    select: { authFailureCount: true, syncPausedAt: true, uninstalledAt: true },
+  });
+  if (!connection || connection.syncPausedAt) return false;
+
+  const count = connection.authFailureCount + 1;
+  const pausing = count >= AUTH_FAILURES_BEFORE_PAUSE;
+  await prismaService.shopifyConnection.update({
+    where: { tenantId },
+    data: {
+      authFailureCount: count,
+      lastAuthError: message.slice(0, 300),
+      lastAuthErrorAt: new Date(),
+      ...(pausing ? { syncPausedAt: new Date() } : {}),
+    },
+  });
+  if (pausing && !connection.uninstalledAt) {
+    // The store still reads as installed while refusing every request, so no
+    // app/uninstalled webhook arrived. Either it never landed or the token was
+    // revoked without an uninstall — worth knowing which, next time this happens.
+    console.warn(
+      `worker: pausing Shopify syncs for ${tenantId} after ${count} auth failures; connection still marked installed`
+    );
+  }
+  return pausing;
+}
 
 /** The sentence a shop actually needs: what arrived, and what about it needs a
  *  human. Empty when the run changed nothing worth interrupting anyone for. */
@@ -723,8 +776,15 @@ export async function handleSyncFailure(
   const reconnect =
     err instanceof ShopifyAuthError ||
     /auth failed|token revoked|no live Shopify connection|token unusable/.test(err.message);
+  // Counting happens before the notification so the pause can change what it says.
+  const paused = reconnect ? await recordAuthFailure(tenantId, err.message).catch(() => false) : false;
+
   const kind = reconnect ? "shopify_reconnect" : "sync_failed";
-  const title = reconnect ? "Shopify connection needs attention" : "Shopify sync failed";
+  const title = paused
+    ? "Shopify syncs are paused"
+    : reconnect
+      ? "Shopify connection needs attention"
+      : "Shopify sync failed";
   try {
     // A revoked token fails every tick, and the tick is every 15 minutes — without
     // a window the bell fills with the same sentence hundreds of times while the
@@ -744,9 +804,11 @@ export async function handleSyncFailure(
           tenantId,
           kind,
           title,
-          body: reconnect
-            ? "The store's access token no longer works. Please reconnect the store under Settings → Connections."
-            : `The last sync did not finish: ${err.message.slice(0, 300)}`,
+          body: paused
+            ? "Automatic syncs have stopped because the store's access token keeps being refused. Reconnect the store under Settings → Connections to resume."
+            : reconnect
+              ? "The store's access token no longer works. Please reconnect the store under Settings → Connections."
+              : `The last sync did not finish: ${err.message.slice(0, 300)}`,
         },
       });
       await publishEvent(publisher, {
