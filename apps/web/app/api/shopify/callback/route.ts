@@ -80,6 +80,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         scopes: token.scopes,
         installedAt: new Date(),
         uninstalledAt: null,
+        // A fresh token is the reconnect the auth-failure pause was waiting for.
+        // Without this the scheduler keeps skipping a store that now works.
+        authFailureCount: 0,
+        syncPausedAt: null,
+        lastAuthError: null,
+        lastAuthErrorAt: null,
       },
     });
   } catch (err) {

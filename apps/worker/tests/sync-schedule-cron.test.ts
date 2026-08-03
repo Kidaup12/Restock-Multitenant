@@ -18,7 +18,8 @@ const runnable = Boolean(redisUrl) && localDb;
 const CONNECTED = "sync-sched-connected";
 const UNINSTALLED = "sync-sched-uninstalled";
 const NO_CONNECTION = "sync-sched-unconnected";
-const SLUGS = [CONNECTED, UNINSTALLED, NO_CONNECTION];
+const PAUSED = "sync-sched-paused";
+const SLUGS = [CONNECTED, UNINSTALLED, NO_CONNECTION, PAUSED];
 
 describe.skipIf(!runnable)("shopify sync schedule (real redis + db)", () => {
   let prismaService: typeof import("@wezesha/db").prismaService;
@@ -28,6 +29,7 @@ describe.skipIf(!runnable)("shopify sync schedule (real redis + db)", () => {
   let syncQueue: SyncQueue;
   let connectedId: string;
   let uninstalledId: string;
+  let pausedId: string;
 
   beforeAll(async () => {
     process.env.TOKEN_ENCRYPTION_KEY ??= Buffer.alloc(32, 7).toString("base64");
@@ -72,6 +74,23 @@ describe.skipIf(!runnable)("shopify sync schedule (real redis + db)", () => {
     // Never connected at all.
     await prismaService.tenant.create({
       data: { name: "Sync Sched Unconnected", slug: NO_CONNECTION },
+    });
+
+    // Token revoked and given up on: still installed, but retrying it four times
+    // an hour is what filled a live shop's bell with hundreds of identical rows.
+    const stuck = await prismaService.tenant.create({
+      data: { name: "Sync Sched Paused", slug: PAUSED },
+    });
+    pausedId = stuck.id;
+    await prismaService.shopifyConnection.create({
+      data: {
+        tenantId: pausedId,
+        shopDomain: "sync-sched-paused.myshopify.com",
+        accessToken: encryptToken("shpat_sched_paused"),
+        scopes: "read_products",
+        authFailureCount: 3,
+        syncPausedAt: new Date(),
+      },
     });
   }, 30_000);
 
@@ -132,6 +151,27 @@ describe.skipIf(!runnable)("shopify sync schedule (real redis + db)", () => {
     // The uninstalled shop has a connection row; syncing it would burn retries
     // against an app the merchant has removed.
     expect(tenantIds).not.toContain(uninstalledId);
+    // Same for a store whose token keeps being refused: only a reconnect or a
+    // deliberate "Sync now" gets it moving again, and neither arrives via a tick.
+    expect(tenantIds).not.toContain(pausedId);
+  });
+
+  it("leaves a paused shop's cursor alone on the nightly full sync", async () => {
+    // markTenantsForFullSync shares connectedTenantIds, so a paused store must
+    // not have its products cursor dropped — it would re-pull the whole
+    // catalogue the moment someone reconnects, for no reason.
+    await prismaService.ingestCursor.deleteMany({ where: { tenantId: pausedId } });
+    await prismaService.ingestCursor.create({
+      data: { tenantId: pausedId, source: "shopify", resource: "products", cursor: new Date() },
+    });
+
+    await cron.markTenantsForFullSync();
+
+    const left = await prismaService.ingestCursor.findMany({
+      where: { tenantId: pausedId, source: "shopify" },
+      select: { resource: true },
+    });
+    expect(left.map((r) => r.resource)).toEqual(["products"]);
   });
 
   it("is a no-op for a shop whose sync has not finished", async () => {

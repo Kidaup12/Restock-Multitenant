@@ -938,6 +938,18 @@ model ShopifyConnection {
   installedAt   DateTime  @default(now())
   uninstalledAt DateTime? // set by app/uninstalled webhook or in-app disconnect; null = live
 
+  // A revoked token answers 403 to every request, and nothing about waiting
+  // fixes it — only a human reconnecting does. Left alone the scheduler retries
+  // four times an hour indefinitely. These four fields let it give up: count
+  // consecutive auth failures, and once syncPausedAt is set the scheduler skips
+  // this store until a reconnect or a manual "Sync now" clears it. Not derived
+  // from SyncRun, which is pruned after 14 days — a store paused longer than
+  // that would read as healthy and start over.
+  authFailureCount Int       @default(0)
+  syncPausedAt     DateTime?
+  lastAuthErrorAt  DateTime?
+  lastAuthError    String?
+
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 

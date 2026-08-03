@@ -404,11 +404,19 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     // A revoked token fails every 15 minutes indefinitely. Before this window the
     // bell took a row per tick — hundreds of copies of one sentence.
     await prismaService.notification.deleteMany({ where: { tenantId, kind: "shopify_reconnect" } });
+    await prismaService.shopifyConnection.updateMany({
+      where: { tenantId },
+      data: { authFailureCount: 0, syncPausedAt: null },
+    });
     const wrapped = new UnrecoverableError(new ShopifyAuthError(401, SHOP).message);
     await handleFailure(jobStub(tenantId), wrapped, publisher);
     await handleFailure(jobStub(tenantId), wrapped, publisher);
-    await handleFailure(jobStub(tenantId), wrapped, publisher);
-    expect(await prismaService.notification.count({ where: { tenantId, kind: "shopify_reconnect" } })).toBe(1);
+    // Counted by title, not kind: the third failure trips the pause, whose
+    // notice is a different sentence and is meant to get through.
+    const same = await prismaService.notification.count({
+      where: { tenantId, title: "Shopify connection needs attention" },
+    });
+    expect(same).toBe(1);
   });
 
   it("a different failure still gets through while a reconnect notice is live", async () => {
@@ -417,6 +425,48 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     const before = await prismaService.notification.count({ where: { tenantId, kind: "sync_failed" } });
     await handleFailure(jobStub(tenantId), new UnrecoverableError("locations pull returned nothing"), publisher);
     expect(await prismaService.notification.count({ where: { tenantId, kind: "sync_failed" } })).toBe(before + 1);
+  });
+
+  it("gives up on a store after three auth failures in a row, and says so once", async () => {
+    await prismaService.notification.deleteMany({ where: { tenantId } });
+    await prismaService.shopifyConnection.updateMany({
+      where: { tenantId },
+      data: { authFailureCount: 0, syncPausedAt: null },
+    });
+    const wrapped = new UnrecoverableError(new ShopifyAuthError(401, SHOP).message);
+
+    await handleFailure(jobStub(tenantId), wrapped, publisher);
+    await handleFailure(jobStub(tenantId), wrapped, publisher);
+    let conn = await prismaService.shopifyConnection.findUnique({ where: { tenantId } });
+    // Two is a blip — scope propagation right after an install looks like this.
+    expect(conn!.syncPausedAt).toBeNull();
+    expect(conn!.authFailureCount).toBe(2);
+
+    await handleFailure(jobStub(tenantId), wrapped, publisher);
+    conn = await prismaService.shopifyConnection.findUnique({ where: { tenantId } });
+    expect(conn!.syncPausedAt).not.toBeNull();
+    expect(conn!.lastAuthError).toContain("auth failed");
+
+    // Further ticks change nothing and add nothing.
+    await handleFailure(jobStub(tenantId), wrapped, publisher);
+    const paused = await prismaService.notification.count({
+      where: { tenantId, title: "Shopify syncs are paused" },
+    });
+    expect(paused).toBe(1);
+  });
+
+  it("a sync that works again un-pauses the store", async () => {
+    await prismaService.shopifyConnection.updateMany({
+      where: { tenantId },
+      data: { authFailureCount: 3, syncPausedAt: new Date(), lastAuthError: "auth failed (403)" },
+    });
+
+    await processor(jobStub(tenantId));
+
+    const conn = await prismaService.shopifyConnection.findUnique({ where: { tenantId } });
+    expect(conn!.syncPausedAt).toBeNull();
+    expect(conn!.authFailureCount).toBe(0);
+    expect(conn!.lastAuthError).toBeNull();
   });
 
   it("final failures email the alert contact once per incident; a successful sync re-arms", async () => {

@@ -71,12 +71,16 @@ export async function registerSyncSchedules(queue: SyncScheduleQueue): Promise<v
   );
 }
 
-/** Customer workspaces with a Shopify connection that has not been uninstalled.
+/** Customer workspaces with a Shopify connection that has not been uninstalled
+ *  and has not been paused after repeated auth failures (see
+ *  AUTH_FAILURES_BEFORE_PAUSE — a revoked token cannot be retried back to life,
+ *  and a paused store waits for a reconnect or a manual "Sync now", neither of
+ *  which comes through here).
  *  Enumerating tenants is a cross-tenant system read — prismaService. */
 async function connectedTenantIds(): Promise<string[]> {
   // eslint-disable-next-line tenant-safety/require-tenant-scope -- fan-out dispatch: enumerating every connected customer workspace is the job, and the per-tenant sync it queues is scoped.
   const rows = await prismaService.shopifyConnection.findMany({
-    where: { uninstalledAt: null, tenant: CUSTOMER_TENANTS_WHERE },
+    where: { uninstalledAt: null, syncPausedAt: null, tenant: CUSTOMER_TENANTS_WHERE },
     select: { tenantId: true },
   });
   return rows.map((r) => r.tenantId);
