@@ -641,6 +641,11 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
  *  15 minutes; without this the bell would be unusable inside a day. */
 const CATALOGUE_NOTICE_DEDUP_MS = 12 * 60 * 60 * 1000;
 
+/** How long a sync-failure notice suppresses an identical one. Same window as the
+ *  catalogue notice, and for the same reason: a condition that persists is worth
+ *  re-raising twice a day, not four times an hour. */
+const SYNC_FAILURE_NOTICE_DEDUP_MS = 12 * 60 * 60 * 1000;
+
 /** The sentence a shop actually needs: what arrived, and what about it needs a
  *  human. Empty when the run changed nothing worth interrupting anyone for. */
 export function catalogueNoticeTitle(result: ProductSyncResult): string | null {
@@ -718,21 +723,37 @@ export async function handleSyncFailure(
   const reconnect =
     err instanceof ShopifyAuthError ||
     /auth failed|token revoked|no live Shopify connection|token unusable/.test(err.message);
+  const kind = reconnect ? "shopify_reconnect" : "sync_failed";
+  const title = reconnect ? "Shopify connection needs attention" : "Shopify sync failed";
   try {
-    await prismaService.notification.create({
-      data: {
-        tenantId,
-        kind: reconnect ? "shopify_reconnect" : "sync_failed",
-        title: reconnect ? "Shopify connection needs attention" : "Shopify sync failed",
-        body: reconnect
-          ? "The store's access token no longer works. Please reconnect the store under Settings → Connections."
-          : `The last sync did not finish: ${err.message.slice(0, 300)}`,
-      },
+    // A revoked token fails every tick, and the tick is every 15 minutes — without
+    // a window the bell fills with the same sentence hundreds of times while the
+    // shop's actual problem stays exactly as unresolved as it was. The incident
+    // email has its own one-shot latch (incident.ts); this feed needs the opposite,
+    // something that resurfaces periodically, because it is what a human acts on.
+    const since = new Date(Date.now() - SYNC_FAILURE_NOTICE_DEDUP_MS);
+    const prior = await prismaService.notification.findFirst({
+      where: { tenantId, kind, title, createdAt: { gte: since } },
+      select: { id: true },
     });
-    await publishEvent(publisher, {
-      type: "notification.new",
-      data: { tenantId, kind: reconnect ? "shopify_reconnect" : "sync_failed", title: "Shopify sync failed" },
-    });
+    // Suppress the bell entry only — the incident email below keeps its own latch,
+    // and skipping it here would tie two independent recovery signals together.
+    if (!prior) {
+      await prismaService.notification.create({
+        data: {
+          tenantId,
+          kind,
+          title,
+          body: reconnect
+            ? "The store's access token no longer works. Please reconnect the store under Settings → Connections."
+            : `The last sync did not finish: ${err.message.slice(0, 300)}`,
+        },
+      });
+      await publishEvent(publisher, {
+        type: "notification.new",
+        data: { tenantId, kind, title },
+      });
+    }
   } catch (persistErr) {
     // A missing tenant (e.g. smoke fixtures) must not crash the worker loop.
     console.error(`worker: could not persist sync-failure notification for ${tenantId}`, persistErr);
