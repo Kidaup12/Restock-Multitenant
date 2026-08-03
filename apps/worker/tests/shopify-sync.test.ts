@@ -400,6 +400,25 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     expect(await prismaService.notification.count({ where: { tenantId } })).toBe(before);
   });
 
+  it("repeats of the same failure raise the bell once, not once per tick", async () => {
+    // A revoked token fails every 15 minutes indefinitely. Before this window the
+    // bell took a row per tick — hundreds of copies of one sentence.
+    await prismaService.notification.deleteMany({ where: { tenantId, kind: "shopify_reconnect" } });
+    const wrapped = new UnrecoverableError(new ShopifyAuthError(401, SHOP).message);
+    await handleFailure(jobStub(tenantId), wrapped, publisher);
+    await handleFailure(jobStub(tenantId), wrapped, publisher);
+    await handleFailure(jobStub(tenantId), wrapped, publisher);
+    expect(await prismaService.notification.count({ where: { tenantId, kind: "shopify_reconnect" } })).toBe(1);
+  });
+
+  it("a different failure still gets through while a reconnect notice is live", async () => {
+    // The window is per kind+title. A store that is both unreachable and broken in
+    // some other way must not have the second problem swallowed by the first.
+    const before = await prismaService.notification.count({ where: { tenantId, kind: "sync_failed" } });
+    await handleFailure(jobStub(tenantId), new UnrecoverableError("locations pull returned nothing"), publisher);
+    expect(await prismaService.notification.count({ where: { tenantId, kind: "sync_failed" } })).toBe(before + 1);
+  });
+
   it("final failures email the alert contact once per incident; a successful sync re-arms", async () => {
     const incident = await import("../src/incident");
     await prismaService.tenantConfig.create({
