@@ -37,7 +37,7 @@ type LastSyncRow = { resource: string; syncedAt: string | null };
 const OAUTH_ERRORS: Record<string, string> = {
   forbidden: "Only owners and admins can connect a store.",
   no_app_credentials:
-    "Add your Shopify app's client ID and secret below before connecting a store.",
+    "That install needs your own app's client ID and secret. Add them above, or paste an Admin API token instead — the token route needs neither.",
   // Almost always a stale tab: the state cookie lives ten minutes, so a second
   // attempt started in another tab invalidates the first. Saying "expired or
   // tampered with" alone reads as a security event and tells nobody what to do.
@@ -272,7 +272,7 @@ export function ShopifyConnectionCard({
     <div className="space-y-3 border-t border-edge pt-4">
       <div>
         <h3 className="text-sm font-medium text-ink">
-          {connection === null ? "Or connect with your own app" : "Connect with your own app instead"}
+          {connection === null ? "Connect with your own app" : "Connect with your own app instead"}
         </h3>
         <p className="mt-1 text-sm text-ink-muted">
           In your Shopify admin, go to Settings → Apps and sales channels → Develop
@@ -361,10 +361,11 @@ export function ShopifyConnectionCard({
                 )}
               </h3>
               <p className="mt-1 text-sm text-ink-muted">
-                Each workspace uses its own Shopify app, so your store&apos;s data is
-                only ever reached with credentials you control. Paste the client ID
-                and API secret key from your app here. We never show the secret
-                again once it is saved.
+                Optional. Your store&apos;s data is only ever reached with credentials
+                you control, and these let us refresh access on our own instead of
+                holding a token that eventually expires. If you would rather just
+                paste a token, leave this empty. We never show the secret again once
+                it is saved.
               </p>
             </div>
             <div className="grid gap-2 sm:max-w-md">
@@ -422,11 +423,29 @@ export function ShopifyConnectionCard({
         {connection === null ? (
           canManage ? (
             <div className="space-y-5">
-              <div className="space-y-3">
-                <p className="text-sm text-ink-muted">
-                  Connect your store to pull the catalog, stock levels, and sales
-                  history that drive restock suggestions.
-                </p>
+              <p className="text-sm text-ink-muted">
+                Connect your store to pull the catalog, stock levels, and sales
+                history that drive restock suggestions.
+              </p>
+
+              {/* The token route leads because it is the one that always works.
+                  The install below needs an app whose distribution is set up in
+                  the Shopify Partner dashboard; until that is done it ends on
+                  "this app can't be installed yet", which reads as our fault and
+                  tells the shop nothing it can act on. */}
+              {tokenConnectPanel}
+
+              <div className="space-y-3 border-t border-edge pt-4">
+                <div>
+                  <h3 className="text-sm font-medium text-ink">
+                    Or install a published app
+                  </h3>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    Only for an app whose distribution is already configured in the
+                    Shopify Partner dashboard. If you see &ldquo;this app can&apos;t
+                    be installed yet&rdquo;, use the token above instead.
+                  </p>
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
                     value={shop}
@@ -435,8 +454,11 @@ export function ShopifyConnectionCard({
                     placeholder="your-store.myshopify.com"
                     className="max-w-xs"
                     aria-label="Shop domain"
+                    autoComplete="off"
+                    name="shopify-install-shop"
                   />
                   <Button
+                    variant="ghost"
                     onClick={connect}
                     loading={busy === "install"}
                     disabled={busy !== null || !shop.trim()}
@@ -445,8 +467,6 @@ export function ShopifyConnectionCard({
                   </Button>
                 </div>
               </div>
-
-              {tokenConnectPanel}
             </div>
           ) : (
             <p className="text-sm text-ink-muted">
