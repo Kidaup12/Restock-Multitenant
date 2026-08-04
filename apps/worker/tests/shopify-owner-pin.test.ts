@@ -81,7 +81,7 @@ describe.skipIf(!runnable)("owner keep-active pin through the Shopify sync (real
     await prismaService.tenant.deleteMany({ where: { slug: SLUG } });
     tenantId = (await prismaService.tenant.create({ data: { name: "Owner Pin Test", slug: SLUG } })).id;
     await prismaService.shopifyConnection.create({
-      data: { tenantId, shopDomain: SHOP, accessToken: encryptToken(TOKEN), scopes: "read_products" },
+      data: { tenantId, shopDomain: SHOP, accessToken: encryptToken(TOKEN), scopes: "read_products", authMode: "token" },
     });
     await processor(jobStub(tenantId));
   });

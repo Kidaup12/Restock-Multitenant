@@ -193,7 +193,7 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     const tenant = await prismaService.tenant.create({ data: { name: "Sync Test", slug: SLUG } });
     tenantId = tenant.id;
     await prismaService.shopifyConnection.create({
-      data: { tenantId, shopDomain: SHOP, accessToken: encryptToken(TOKEN), scopes: "read_products" },
+      data: { tenantId, shopDomain: SHOP, accessToken: encryptToken(TOKEN), scopes: "read_products", authMode: "token" },
     });
 
     subscriber = new Redis(redisUrl!);
@@ -414,6 +414,26 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     const job = { ...jobStub(tenantId), attemptsMade: 2, opts: { attempts: 6 } } as unknown as Job<SyncJobData>;
     await handleFailure(job, new Error("transient"), publisher);
     expect(await prismaService.notification.count({ where: { tenantId } })).toBe(before);
+  });
+
+  it("says the credentials are missing rather than blaming the store's token", async () => {
+    // An OAuth connection's stored token was minted by the client-credentials
+    // grant and lives about a day. With no app credentials there is nothing to
+    // mint with, and presenting the stale token earns a 403 that reads "token
+    // revoked or app uninstalled" — sending the next person after a revocation
+    // that never happened. The store is fine; the workspace is unconfigured.
+    await prismaService.shopifyConnection.updateMany({
+      where: { tenantId },
+      data: { authMode: "oauth" },
+    });
+    try {
+      await expect(processor(jobStub(tenantId))).rejects.toThrow(/no Shopify app credentials/);
+    } finally {
+      await prismaService.shopifyConnection.updateMany({
+        where: { tenantId },
+        data: { authMode: "token" },
+      });
+    }
   });
 
   it("sellable stock excludes committed units, by exactly the committed count", async () => {
@@ -674,6 +694,7 @@ describe.skipIf(!runnable)("product lifecycle ingest (real db + redis)", () => {
         tenantId,
         shopDomain: LIFECYCLE_SHOP,
         accessToken: encryptToken(TOKEN),
+        authMode: "token",
         scopes: "read_products",
       },
     });
@@ -854,6 +875,7 @@ describe.skipIf(!runnable)("on-route without an en-route location (real db + red
         tenantId,
         shopDomain: ONROUTE_SHOP,
         accessToken: encryptToken(TOKEN),
+        authMode: "token",
         scopes: "read_products",
       },
     });
@@ -998,6 +1020,7 @@ describe.skipIf(!runnable)("catalogue notices (real db + redis)", () => {
         tenantId,
         shopDomain: NOTICE_SHOP,
         accessToken: encryptToken(TOKEN),
+        authMode: "token",
         scopes: "read_products",
       },
     });
