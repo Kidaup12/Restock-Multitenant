@@ -7,7 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { SyncRunView } from "@/lib/shopify/sync-run";
+import { connectShopifyWithToken } from "./actions";
 import { SyncProgress } from "./sync-progress";
+
+/** Named in the setup instructions so a shop ticks the right boxes first time
+ *  rather than discovering a missing scope after installing its app. */
+const REQUIRED_SCOPE_LABEL =
+  "read_products, read_inventory, read_locations and read_orders";
 
 export type ConnectionView = {
   shopDomain: string;
@@ -49,7 +55,9 @@ export function ShopifyConnectionCard({
 }) {
   const router = useRouter();
   const [shop, setShop] = useState("");
-  const [busy, setBusy] = useState<"sync" | "disconnect" | null>(null);
+  const [tokenShop, setTokenShop] = useState("");
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState<"sync" | "disconnect" | "token" | null>(null);
   // Covers the gap between the queue accepting the job and the worker opening
   // its row — the one moment a run exists but nothing durable says so.
   const [queued, setQueued] = useState(justConnected);
@@ -125,6 +133,31 @@ export function ShopifyConnectionCard({
     window.location.assign(`/api/shopify/install?shop=${encodeURIComponent(domain)}`);
   }
 
+  async function connectWithToken() {
+    setBusy("token");
+    setNotice(null);
+    try {
+      const cleaned = tokenShop.trim().toLowerCase();
+      const domain = cleaned.includes(".") ? cleaned : `${cleaned}.myshopify.com`;
+      const res = await connectShopifyWithToken({ shopDomain: domain, accessToken: token });
+      if (res.ok) {
+        // Clear it the moment it is stored — no reason for a bearer credential
+        // to sit in a form field for the rest of the session.
+        setToken("");
+        setQueued(true);
+        setQueueAttempt((n) => n + 1);
+        setNotice({ tone: "positive", text: res.message });
+        router.refresh();
+      } else {
+        setNotice({ tone: "negative", text: res.error });
+      }
+    } catch {
+      setNotice({ tone: "negative", text: "Could not connect the store." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const noticeTone = {
     positive: "bg-positive-soft text-positive",
     warning: "bg-warning-soft text-warning",
@@ -162,23 +195,64 @@ export function ShopifyConnectionCard({
 
         {connection === null ? (
           canManage ? (
-            <div className="space-y-3">
-              <p className="text-sm text-ink-muted">
-                Connect your store to pull the catalog, stock levels, and sales
-                history that drive restock suggestions.
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Input
-                  value={shop}
-                  onChange={(e) => setShop(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && connect()}
-                  placeholder="your-store.myshopify.com"
-                  className="max-w-xs"
-                  aria-label="Shop domain"
-                />
-                <Button onClick={connect} disabled={!shop.trim()}>
-                  Connect store
-                </Button>
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <p className="text-sm text-ink-muted">
+                  Connect your store to pull the catalog, stock levels, and sales
+                  history that drive restock suggestions.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    value={shop}
+                    onChange={(e) => setShop(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && connect()}
+                    placeholder="your-store.myshopify.com"
+                    className="max-w-xs"
+                    aria-label="Shop domain"
+                  />
+                  <Button onClick={connect} disabled={!shop.trim()}>
+                    Connect store
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-3 border-t border-edge pt-4">
+                <div>
+                  <h3 className="text-sm font-medium text-ink">
+                    Or connect with your own app
+                  </h3>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    In your Shopify admin, go to Settings → Apps and sales channels
+                    → Develop apps, create an app with the {REQUIRED_SCOPE_LABEL}{" "}
+                    scopes, install it, then paste its Admin API access token here.
+                  </p>
+                </div>
+                <div className="grid gap-2 sm:max-w-md">
+                  <Input
+                    value={tokenShop}
+                    onChange={(e) => setTokenShop(e.target.value)}
+                    placeholder="your-store.myshopify.com"
+                    aria-label="Store address"
+                  />
+                  <Input
+                    // Treated as a password: it is a bearer credential, and this
+                    // screen gets shared over someone's shoulder.
+                    type="password"
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    placeholder="shpat_…"
+                    aria-label="Admin API access token"
+                  />
+                  <div>
+                    <Button
+                      onClick={connectWithToken}
+                      loading={busy === "token"}
+                      disabled={busy !== null || !tokenShop.trim() || !token.trim()}
+                    >
+                      Connect with token
+                    </Button>
+                  </div>
+                </div>
               </div>
             </div>
           ) : (
