@@ -52,9 +52,12 @@ vi.mock("@wezesha/shopify", async (importOriginal) => {
 import { prismaService } from "@wezesha/db";
 import { decryptToken, ShopifyAuthError, ShopifyRateLimitedError } from "@wezesha/shopify";
 import {
+  clearShopifyAppCredentials,
   connectShopifyWithToken,
+  saveShopifyAppCredentials,
   testShopifyConnection,
 } from "@/app/(shell)/settings/connections/actions";
+import { credentialsForShopDomain, credentialsForTenant } from "@/lib/shopify/credentials";
 
 const SLUGS = ["token-connect-a", "token-connect-b"];
 const GOOD_TOKEN = "shpat_abcdef0123456789";
@@ -242,6 +245,93 @@ describe.skipIf(!runnable)("connect a store with a pasted token (local db)", () 
       actAs(tenantA, "MEMBER");
       const res = await testShopifyConnection();
       expect(res.ok).toBe(false);
+    });
+  });
+
+  describe("per-workspace app credentials", () => {
+    const CLIENT_ID = "abc123clientid";
+    const API_SECRET = "shpss_secret_value_xyz";
+
+    beforeEach(async () => {
+      await prismaService.shopifyAppCredential.deleteMany({
+        where: { tenantId: { in: [tenantA, tenantB] } },
+      });
+      actAs(tenantA);
+    });
+
+    it("stores the secret encrypted and reads it back for that workspace only", async () => {
+      const res = await saveShopifyAppCredentials({ clientId: CLIENT_ID, apiSecret: API_SECRET });
+      expect(res).toMatchObject({ ok: true });
+
+      const row = await prismaService.shopifyAppCredential.findUnique({ where: { tenantId: tenantA } });
+      // The client id is not a secret — it travels in the authorize URL.
+      expect(row!.clientId).toBe(CLIENT_ID);
+      // The secret is. Plaintext in this column would be the leak.
+      expect(row!.apiSecret).not.toBe(API_SECRET);
+      await expect(credentialsForTenant(tenantA)).resolves.toEqual({
+        clientId: CLIENT_ID,
+        apiSecret: API_SECRET,
+      });
+      // Another workspace has its own, or none. Never this one's.
+      await expect(credentialsForTenant(tenantB)).resolves.toBeNull();
+    });
+
+    it("has no environment fallback — an unconfigured workspace gets nothing", async () => {
+      // The whole point: one shared app across every client is what stopped a
+      // client connecting its own store. A fallback would reintroduce it.
+      process.env.SHOPIFY_API_KEY = "leftover-platform-key";
+      process.env.SHOPIFY_API_SECRET = "leftover-platform-secret";
+      try {
+        await expect(credentialsForTenant(tenantA)).resolves.toBeNull();
+      } finally {
+        delete process.env.SHOPIFY_API_KEY;
+        delete process.env.SHOPIFY_API_SECRET;
+      }
+    });
+
+    it("resolves a webhook's shop domain to that workspace's secret", async () => {
+      await saveShopifyAppCredentials({ clientId: CLIENT_ID, apiSecret: API_SECRET });
+      await connectShopifyWithToken({
+        shopDomain: "creds-demo.myshopify.com",
+        accessToken: GOOD_TOKEN,
+      });
+
+      const resolved = await credentialsForShopDomain("creds-demo.myshopify.com");
+      expect(resolved).toMatchObject({ tenantId: tenantA, apiSecret: API_SECRET });
+      // A domain nobody has connected must not resolve to anyone's secret.
+      await expect(credentialsForShopDomain("nobody.myshopify.com")).resolves.toBeNull();
+    });
+
+    it("removing them leaves a connected store alone", async () => {
+      await saveShopifyAppCredentials({ clientId: CLIENT_ID, apiSecret: API_SECRET });
+      await connectShopifyWithToken({
+        shopDomain: "creds-demo.myshopify.com",
+        accessToken: GOOD_TOKEN,
+      });
+
+      await clearShopifyAppCredentials();
+
+      await expect(credentialsForTenant(tenantA)).resolves.toBeNull();
+      // The store keeps syncing on its stored access token; only new installs
+      // and webhook verification depend on the app credentials.
+      expect(await prismaService.shopifyConnection.count({ where: { tenantId: tenantA } })).toBe(1);
+    });
+
+    it("never returns the secret to the settings screen", async () => {
+      await saveShopifyAppCredentials({ clientId: CLIENT_ID, apiSecret: API_SECRET });
+      // The page selects only the client id — the shape the card is handed.
+      const shown = await prismaService.shopifyAppCredential.findUnique({
+        where: { tenantId: tenantA },
+        select: { clientId: true },
+      });
+      expect(Object.keys(shown!)).toEqual(["clientId"]);
+    });
+
+    it("is closed to a member", async () => {
+      actAs(tenantA, "MEMBER");
+      const res = await saveShopifyAppCredentials({ clientId: CLIENT_ID, apiSecret: API_SECRET });
+      expect(res.ok).toBe(false);
+      expect(await prismaService.shopifyAppCredential.count({ where: { tenantId: tenantA } })).toBe(0);
     });
   });
 

@@ -69,6 +69,8 @@ function render(
       justConnected={justConnected}
       errorCode={null}
       syncRun={syncRun}
+      appCredentialsConfigured
+      appClientId="client-abc"
     />
   );
 }
@@ -154,6 +156,16 @@ describe("connections card — sync states", () => {
     expect(html).not.toContain("Reconnect required");
     expect(html).not.toContain("Automatic syncs are paused");
     expect(html).toContain("Sync failed");
+  });
+
+  it("asks for the workspace's own app credentials, and never echoes the secret", () => {
+    const html = render(null);
+    expect(html).toContain("Your Shopify app");
+    expect(html).toContain("Configured");
+    expect(html).toContain('aria-label="Shopify app API secret"');
+    // The client id is not a secret and is shown back; the stored secret never
+    // reaches the client at all, so it cannot appear anywhere in the markup.
+    expect(html).toContain("client-abc");
   });
 
   it("says queued between connecting a store and the worker picking the job up", () => {

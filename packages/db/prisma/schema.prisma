@@ -129,6 +129,7 @@ model Tenant {
   purchaseOrders          PurchaseOrder[]
   distributionPlans       DistributionPlan[]
   shopifyConnection       ShopifyConnection?
+  shopifyAppCredential    ShopifyAppCredential?
   ingestCursors           IngestCursor[]
   syncRuns                SyncRun[]
   notifications           Notification[]
@@ -957,6 +958,27 @@ model ShopifyConnection {
   syncPausedAt     DateTime?
   lastAuthErrorAt  DateTime?
   lastAuthError    String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// The Shopify app credentials belonging to THIS tenant, so a shop connects with
+// its own app rather than ours. Wezesha no longer holds a platform-wide client
+// id or secret: SHOPIFY_API_KEY / SHOPIFY_API_SECRET are gone, and there is no
+// env fallback — a workspace with no row here cannot run an OAuth install and
+// cannot have a webhook verified, by design.
+//
+// clientId is stored in the clear on purpose. It is not a secret: it travels in
+// the authorize URL the merchant's own browser visits, and support needs to be
+// able to read it back. apiSecret is AES-256-GCM ciphertext, same treatment and
+// same key as ShopifyConnection.accessToken.
+model ShopifyAppCredential {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  clientId  String
+  apiSecret String // AES-256-GCM ciphertext
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }

@@ -8,7 +8,7 @@ import {
   verifyOAuthHmac,
 } from "@wezesha/shopify";
 import { STATE_COOKIE, STATE_COOKIE_PATH } from "@/lib/shopify/cookies";
-import { shopifyEnv } from "@/lib/shopify/env";
+import { credentialsForTenant } from "@/lib/shopify/credentials";
 import { canManageConnections, tenantActor } from "@/lib/shopify/membership";
 import { enqueueShopifySync } from "@/lib/shopify/queue";
 
@@ -52,13 +52,19 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
   if (!isValidShopDomain(shop) || shop !== cookieShop) return done(origin, "error", "invalid_shop");
 
-  const { apiKey, apiSecret } = shopifyEnv();
+  // The same workspace credentials the install redirect was built from. If they
+  // have been cleared mid-install there is nothing to verify the callback with,
+  // and no platform app to fall back to.
+  const credentials = await credentialsForTenant(actor.tenantId);
+  if (!credentials) return done(origin, "error", "no_app_credentials");
+
+  const { clientId, apiSecret } = credentials;
   if (!verifyOAuthHmac(params, apiSecret)) return done(origin, "error", "invalid_hmac");
   if (!code) return done(origin, "error", "missing_code");
 
   let token: { accessToken: string; scopes: string };
   try {
-    token = await exchangeCodeForToken({ shop, clientId: apiKey, clientSecret: apiSecret, code });
+    token = await exchangeCodeForToken({ shop, clientId, clientSecret: apiSecret, code });
   } catch (err) {
     console.error("shopify callback: token exchange failed", err);
     return done(origin, "error", "exchange_failed");

@@ -238,6 +238,11 @@ export const builders: Record<string, Builder> = {
     accessToken: `ciphertext-${key}`,
     scopes: "read_products",
   }),
+  ShopifyAppCredential: (tenantId, key) => ({
+    tenantId,
+    clientId: `client-${key}`,
+    apiSecret: `ciphertext-${key}`,
+  }),
   IngestCursor: (tenantId, key) => ({
     tenantId,
     source: "shopify",

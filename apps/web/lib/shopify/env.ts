@@ -1,11 +1,17 @@
-/** Shopify app credentials + public origin, read lazily so build-time page
- *  collection doesn't demand them. Fails loudly at first real use. */
-export function shopifyEnv(): { apiKey: string; apiSecret: string; appUrl: string } {
-  const apiKey = process.env.SHOPIFY_API_KEY;
-  const apiSecret = process.env.SHOPIFY_API_SECRET;
+/**
+ * The app's own public origin. This is OUR domain, not a Shopify credential —
+ * it builds the OAuth redirect_uri and the webhook callback URL, both of which
+ * point back at this deployment whichever app a shop connects with.
+ *
+ * The Shopify client id and secret used to live here too. They no longer exist
+ * anywhere in the codebase: every workspace supplies its own
+ * (ShopifyAppCredential), with no platform-wide app and no env fallback. See
+ * lib/shopify/credentials.ts.
+ *
+ * Read lazily so build-time page collection doesn't demand it.
+ */
+export function shopifyAppUrl(): string {
   const appUrl = process.env.SHOPIFY_APP_URL?.replace(/\/$/, "");
-  if (!apiKey || !apiSecret || !appUrl) {
-    throw new Error("SHOPIFY_API_KEY / SHOPIFY_API_SECRET / SHOPIFY_APP_URL must be set.");
-  }
-  return { apiKey, apiSecret, appUrl };
+  if (!appUrl) throw new Error("SHOPIFY_APP_URL must be set.");
+  return appUrl;
 }

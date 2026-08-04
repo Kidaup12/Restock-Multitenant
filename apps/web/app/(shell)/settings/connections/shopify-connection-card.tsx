@@ -7,7 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { SyncRunView } from "@/lib/shopify/sync-run";
-import { connectShopifyWithToken, testShopifyConnection } from "./actions";
+import {
+  clearShopifyAppCredentials,
+  connectShopifyWithToken,
+  saveShopifyAppCredentials,
+  testShopifyConnection,
+} from "./actions";
 import { SyncProgress } from "./sync-progress";
 
 /** Named in the setup instructions so a shop ticks the right boxes first time
@@ -30,6 +35,8 @@ type LastSyncRow = { resource: string; syncedAt: string | null };
 
 const OAUTH_ERRORS: Record<string, string> = {
   forbidden: "Only owners and admins can connect a store.",
+  no_app_credentials:
+    "Add your Shopify app's client ID and secret below before connecting a store.",
   invalid_state: "The install attempt expired or was tampered with. Try again.",
   invalid_shop: "The store that came back did not match the one you entered.",
   invalid_hmac: "Shopify's signature on the callback did not verify.",
@@ -45,6 +52,8 @@ export function ShopifyConnectionCard({
   justConnected,
   errorCode,
   syncRun,
+  appCredentialsConfigured,
+  appClientId,
 }: {
   connection: ConnectionView | null;
   lastSync: LastSyncRow[];
@@ -52,12 +61,21 @@ export function ShopifyConnectionCard({
   justConnected: boolean;
   errorCode: string | null;
   syncRun: SyncRunView | null;
+  /** Whether this workspace has stored its own app credentials. The secret
+   *  itself is never sent to the client — only whether one exists. */
+  appCredentialsConfigured: boolean;
+  /** Safe to show: a client ID is not a secret and travels in the authorize URL. */
+  appClientId: string | null;
 }) {
   const router = useRouter();
   const [shop, setShop] = useState("");
   const [tokenShop, setTokenShop] = useState("");
   const [token, setToken] = useState("");
-  const [busy, setBusy] = useState<"sync" | "disconnect" | "token" | "test" | null>(null);
+  const [clientId, setClientId] = useState(appClientId ?? "");
+  const [apiSecret, setApiSecret] = useState("");
+  const [busy, setBusy] = useState<
+    "sync" | "disconnect" | "token" | "test" | "creds" | "clearCreds" | null
+  >(null);
   // Covers the gap between the queue accepting the job and the worker opening
   // its row — the one moment a run exists but nothing durable says so.
   const [queued, setQueued] = useState(justConnected);
@@ -158,6 +176,47 @@ export function ShopifyConnectionCard({
     }
   }
 
+  async function saveCredentials() {
+    setBusy("creds");
+    setNotice(null);
+    try {
+      const res = await saveShopifyAppCredentials({ clientId, apiSecret });
+      if (res.ok) {
+        // The secret is stored; keeping it in a form field afterwards only
+        // creates somewhere for it to be read from.
+        setApiSecret("");
+        setNotice({ tone: "positive", text: res.message });
+        router.refresh();
+      } else {
+        setNotice({ tone: "negative", text: res.error });
+      }
+    } catch {
+      setNotice({ tone: "negative", text: "Could not save the credentials." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function clearCredentials() {
+    setBusy("clearCreds");
+    setNotice(null);
+    try {
+      const res = await clearShopifyAppCredentials();
+      setNotice(
+        res.ok ? { tone: "positive", text: res.message } : { tone: "negative", text: res.error }
+      );
+      if (res.ok) {
+        setClientId("");
+        setApiSecret("");
+        router.refresh();
+      }
+    } catch {
+      setNotice({ tone: "negative", text: "Could not remove the credentials." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function testConnection() {
     setBusy("test");
     setNotice(null);
@@ -206,6 +265,61 @@ export function ShopifyConnectionCard({
       <CardContent className="space-y-4">
         {notice && (
           <p className={`rounded-md px-3 py-2 text-sm ${noticeTone[notice.tone]}`}>{notice.text}</p>
+        )}
+
+        {canManage && (
+          <div className="space-y-3 rounded-md border border-edge p-3">
+            <div>
+              <h3 className="text-sm font-medium text-ink">
+                Your Shopify app{" "}
+                {appCredentialsConfigured ? (
+                  <Badge tone="positive">Configured</Badge>
+                ) : (
+                  <Badge tone="neutral">Not set</Badge>
+                )}
+              </h3>
+              <p className="mt-1 text-sm text-ink-muted">
+                Each workspace uses its own Shopify app, so your store&apos;s data is
+                only ever reached with credentials you control. Paste the client ID
+                and API secret key from your app here. We never show the secret
+                again once it is saved.
+              </p>
+            </div>
+            <div className="grid gap-2 sm:max-w-md">
+              <Input
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                placeholder="Client ID"
+                aria-label="Shopify app client ID"
+              />
+              <Input
+                type="password"
+                value={apiSecret}
+                onChange={(e) => setApiSecret(e.target.value)}
+                placeholder={appCredentialsConfigured ? "•••••••• (unchanged)" : "API secret key"}
+                aria-label="Shopify app API secret"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={saveCredentials}
+                  loading={busy === "creds"}
+                  disabled={busy !== null || !clientId.trim() || !apiSecret.trim()}
+                >
+                  {appCredentialsConfigured ? "Update credentials" : "Save credentials"}
+                </Button>
+                {appCredentialsConfigured && (
+                  <Button
+                    variant="ghost"
+                    onClick={clearCredentials}
+                    loading={busy === "clearCreds"}
+                    disabled={busy !== null}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
         )}
 
         {connection === null ? (
