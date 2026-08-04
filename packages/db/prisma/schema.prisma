@@ -938,6 +938,14 @@ model ShopifyConnection {
   installedAt   DateTime  @default(now())
   uninstalledAt DateTime? // set by app/uninstalled webhook or in-app disconnect; null = live
 
+  // How the token was obtained. "oauth" = our app, via the install round trip.
+  // "token" = the shop made its own custom app under Settings → Apps → Develop
+  // apps and pasted the Admin API token; there is no OAuth and no app secret, so
+  // webhooks cannot be verified for it and it lives on the polling sync instead.
+  // Defaulted, not nullable: every row that existed before this column came from
+  // the OAuth path, and that has to keep being true without a backfill.
+  authMode      String    @default("oauth")
+
   // A revoked token answers 403 to every request, and nothing about waiting
   // fixes it — only a human reconnecting does. Left alone the scheduler retries
   // four times an hour indefinitely. These four fields let it give up: count
