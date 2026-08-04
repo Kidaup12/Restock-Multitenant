@@ -16,9 +16,11 @@ import { clearIncident, sendIncidentAlert } from "./incident";
 import { SyncRunReporter } from "./sync-run";
 import {
   ShopifyAuthError,
+  ShopifyGrantError,
   bucketSalesByProductDay,
   computeWindowStart,
   createShopifyClient,
+  createTokenCache,
   decryptToken,
   ensureWebhookSubscriptions,
   fetchLocationsWithInventory,
@@ -520,15 +522,56 @@ export interface ShopifySyncOptions {
   makeApi?: (shopDomain: string, accessToken: string) => ShopifySyncApi;
   /** Public app origin for webhook registration; falls back to env, then skips. */
   appUrl?: string;
+  /** Injectable token cache for tests; defaults to a process-local one shared
+   *  by every job this processor handles. */
+  tokenCache?: ReturnType<typeof createTokenCache>;
 }
 
 const PHASES = ["products", "inventory", "orders"] as const;
+
+/**
+ * The credential a sync actually authenticates with.
+ *
+ * Two shapes, in priority order:
+ *
+ * 1. **The workspace's own app credentials** — mint a fresh Admin token per
+ *    ~24h via the client-credentials grant. This is the path that works for a
+ *    custom app whose distribution was never set up, and it has no stored token
+ *    to expire.
+ * 2. **A stored access token** — what a shop pastes from its own custom app.
+ *    Those are long-lived, so they are used as-is.
+ *
+ * Storing a MINTED token was the original defect: it lives about a day, we kept
+ * presenting it for a week, and Shopify reports an expired token as "revoked or
+ * app uninstalled" — so it read as the merchant having disconnected us.
+ */
+async function resolveAccessToken(
+  tenantId: string,
+  connection: { shopDomain: string; accessToken: string },
+  tokens: ReturnType<typeof createTokenCache>
+): Promise<string> {
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- keyed on the tenantId the job carries; the worker has no session to scope by.
+  const credential = await prismaService.shopifyAppCredential.findUnique({
+    where: { tenantId },
+    select: { clientId: true, apiSecret: true },
+  });
+  if (credential) {
+    return tokens.get(connection.shopDomain, {
+      clientId: credential.clientId,
+      clientSecret: decryptToken(credential.apiSecret),
+    });
+  }
+  return decryptToken(connection.accessToken);
+}
 
 export function createShopifySyncProcessor(options: ShopifySyncOptions) {
   const makeApi =
     options.makeApi ??
     ((shopDomain: string, accessToken: string) =>
       realShopifySyncApi(createShopifyClient({ shopDomain, accessToken })));
+  // One cache for the worker's lifetime, so a shop is minted for once a day
+  // rather than once a tick.
+  const tokens = options.tokenCache ?? createTokenCache();
 
   return async (job: Job<SyncJobData>): Promise<void> => {
     const { tenantId } = job.data;
@@ -540,8 +583,13 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
 
     let api: ShopifySyncApi;
     try {
-      api = makeApi(connection.shopDomain, decryptToken(connection.accessToken));
+      api = makeApi(connection.shopDomain, await resolveAccessToken(tenantId, connection, tokens));
     } catch (err) {
+      if (err instanceof ShopifyGrantError) {
+        // The app credentials themselves are wrong or the app is no longer
+        // installed on that store. Retrying mints the same rejection.
+        throw new UnrecoverableError(err.message);
+      }
       throw new UnrecoverableError(`stored Shopify token unusable: ${(err as Error).message}`);
     }
 
