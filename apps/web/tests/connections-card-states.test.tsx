@@ -168,6 +168,25 @@ describe("connections card — sync states", () => {
     expect(html).toContain("client-abc");
   });
 
+  it("offers the token route to a store that is connected but cannot sync", () => {
+    // The case this exists for: our OAuth install cannot complete (draft
+    // listing, unregistered app), so "Reconnect" sends someone in a circle.
+    // Pasting a token from the shop's own app is the only way back that does
+    // not depend on our app, and it was previously hidden behind "no connection
+    // yet" — unreachable exactly when it was needed.
+    const paused = { ...CONNECTION, syncPausedAt: "2026-08-04 08:15 UTC" };
+    const html = render(run({ status: "failed", error: "Shopify auth failed (403)" }), false, paused);
+    expect(html).toContain("Connect with your own app instead");
+    expect(html).toContain('aria-label="Admin API access token"');
+    expect(html).toContain("This replaces the current connection.");
+  });
+
+  it("does not invite a healthy store to swap its credentials", () => {
+    const html = render(run({ status: "ok", summary: "12 products", finishedAt: "2026-08-04 08:00 UTC" }));
+    expect(html).not.toContain("Connect with your own app instead");
+    expect(html).not.toContain('aria-label="Admin API access token"');
+  });
+
   it("says queued between connecting a store and the worker picking the job up", () => {
     // Straight after OAuth there is no row yet — the gap this covers.
     const html = render(null, true);

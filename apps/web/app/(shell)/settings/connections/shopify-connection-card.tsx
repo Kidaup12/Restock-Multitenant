@@ -232,6 +232,62 @@ export function ShopifyConnectionCard({
     }
   }
 
+  /**
+   * Connecting with a token the shop generates itself.
+   *
+   * Rendered for a store that has never connected AND for one that is
+   * connected but broken. That second case is the one that matters: when our
+   * OAuth install cannot complete — a draft listing, an unregistered app, a
+   * revoked token — "Reconnect" sends someone in a circle, and this is the only
+   * route back that does not depend on our app at all. Hiding it behind
+   * "no connection yet" made it unreachable exactly when it was needed.
+   */
+  const tokenConnectPanel = (
+    <div className="space-y-3 border-t border-edge pt-4">
+      <div>
+        <h3 className="text-sm font-medium text-ink">
+          {connection === null ? "Or connect with your own app" : "Connect with your own app instead"}
+        </h3>
+        <p className="mt-1 text-sm text-ink-muted">
+          In your Shopify admin, go to Settings → Apps and sales channels → Develop
+          apps, create an app with the {REQUIRED_SCOPE_LABEL} scopes, install it,
+          then paste its Admin API access token here.
+          {connection !== null && " This replaces the current connection."}
+        </p>
+      </div>
+      <div className="grid gap-2 sm:max-w-md">
+        <Input
+          value={tokenShop}
+          onChange={(e) => setTokenShop(e.target.value)}
+          placeholder="your-store.myshopify.com"
+          aria-label="Store address"
+          autoComplete="off"
+          name="shopify-token-shop"
+        />
+        <Input
+          // Treated as a password: it is a bearer credential, and this screen
+          // gets shared over someone's shoulder.
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="shpat_…"
+          aria-label="Admin API access token"
+          autoComplete="new-password"
+          name="shopify-admin-token"
+        />
+        <div>
+          <Button
+            onClick={connectWithToken}
+            loading={busy === "token"}
+            disabled={busy !== null || !tokenShop.trim() || !token.trim()}
+          >
+            Connect with token
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+
   const noticeTone = {
     positive: "bg-positive-soft text-positive",
     warning: "bg-warning-soft text-warning",
@@ -352,48 +408,7 @@ export function ShopifyConnectionCard({
                 </div>
               </div>
 
-              <div className="space-y-3 border-t border-edge pt-4">
-                <div>
-                  <h3 className="text-sm font-medium text-ink">
-                    Or connect with your own app
-                  </h3>
-                  <p className="mt-1 text-sm text-ink-muted">
-                    In your Shopify admin, go to Settings → Apps and sales channels
-                    → Develop apps, create an app with the {REQUIRED_SCOPE_LABEL}{" "}
-                    scopes, install it, then paste its Admin API access token here.
-                  </p>
-                </div>
-                <div className="grid gap-2 sm:max-w-md">
-                  <Input
-                    value={tokenShop}
-                    onChange={(e) => setTokenShop(e.target.value)}
-                    placeholder="your-store.myshopify.com"
-                    aria-label="Store address"
-                    autoComplete="off"
-                    name="shopify-token-shop"
-                  />
-                  <Input
-                    // Treated as a password: it is a bearer credential, and this
-                    // screen gets shared over someone's shoulder.
-                    type="password"
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    placeholder="shpat_…"
-                    aria-label="Admin API access token"
-                    autoComplete="new-password"
-                    name="shopify-admin-token"
-                  />
-                  <div>
-                    <Button
-                      onClick={connectWithToken}
-                      loading={busy === "token"}
-                      disabled={busy !== null || !tokenShop.trim() || !token.trim()}
-                    >
-                      Connect with token
-                    </Button>
-                  </div>
-                </div>
-              </div>
+              {tokenConnectPanel}
             </div>
           ) : (
             <p className="text-sm text-ink-muted">
@@ -488,6 +503,12 @@ export function ShopifyConnectionCard({
                 </Button>
               )}
             </div>
+
+            {/* A store that cannot sync needs a way back that does not depend on
+                our app completing an install. Shown only when something is
+                actually wrong, so a healthy connection is not invited to swap
+                its credentials for no reason. */}
+            {canManage && (!live || paused) && tokenConnectPanel}
           </div>
         )}
       </CardContent>
