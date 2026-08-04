@@ -33,4 +33,11 @@ export type { DayBucket } from "./sales";
 export { WEBHOOK_TOPICS, ensureWebhookSubscriptions } from "./webhooks";
 export { fetchShopSettings, type ShopSettings } from "./shop";
 export { probeConnection, type ConnectionProbe } from "./probe";
+export {
+  ShopifyGrantError,
+  createTokenCache,
+  mintAdminToken,
+  type MintedToken,
+  type ShopifyAppCredentials,
+} from "./token";
 export type { WebhookTopic } from "./webhooks";
