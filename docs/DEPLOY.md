@@ -159,13 +159,16 @@ BETTER_AUTH_SECRET     openssl rand -base64 32
 NEXT_PUBLIC_WS_URL     wss://<gateway>.up.railway.app
 ADMIN_EMAILS           comma-separated; bootstrap only — who reaches the
                        operator console until the first PlatformAdmin row
-SHOPIFY_API_KEY        from the Shopify app
-SHOPIFY_API_SECRET     from the Shopify app
 SHOPIFY_APP_URL        the deployment's own public URL
 TOKEN_ENCRYPTION_KEY   the SAME value as the worker
 RESEND_API_KEY         from Resend
 EMAIL_FROM             as above
 ```
+
+There is no `SHOPIFY_API_KEY` or `SHOPIFY_API_SECRET`. Wezesha runs no Shopify
+app of its own: each workspace registers its own app and enters the client ID
+and secret under Settings → Connections, where they are stored encrypted against
+that tenant. Setting those variables does nothing — nothing reads them.
 
 `BETTER_AUTH_URL` must match the URL people actually visit. A mismatch fails
 sign-in with "Invalid origin", which reads like a wrong password and costs an

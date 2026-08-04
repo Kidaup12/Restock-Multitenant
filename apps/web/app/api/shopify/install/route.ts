@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { buildAuthorizeUrl, generateOAuthState, isValidShopDomain } from "@wezesha/shopify";
 import { STATE_COOKIE, STATE_COOKIE_PATH } from "@/lib/shopify/cookies";
-import { shopifyEnv } from "@/lib/shopify/env";
+import { credentialsForTenant } from "@/lib/shopify/credentials";
+import { shopifyAppUrl } from "@/lib/shopify/env";
 import { canManageConnections, tenantActor } from "@/lib/shopify/membership";
 
 /**
@@ -21,12 +22,20 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "shop must be a *.myshopify.com domain" }, { status: 400 });
   }
 
-  const { apiKey, appUrl } = shopifyEnv();
+  // This workspace's own app — there is no platform app to fall back to.
+  const credentials = await credentialsForTenant(actor.tenantId);
+  if (!credentials) {
+    return NextResponse.redirect(
+      new URL("/settings/connections?error=no_app_credentials", req.nextUrl.origin)
+    );
+  }
+
+  const appUrl = shopifyAppUrl();
   const state = generateOAuthState();
   const res = NextResponse.redirect(
     buildAuthorizeUrl({
       shop,
-      clientId: apiKey,
+      clientId: credentials.clientId,
       redirectUri: `${appUrl}/api/shopify/callback`,
       state,
     })

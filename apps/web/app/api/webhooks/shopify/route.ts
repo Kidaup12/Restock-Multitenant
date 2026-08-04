@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { Prisma, prismaService } from "@wezesha/db";
-import { numericCore, verifyWebhookHmac } from "@wezesha/shopify";
+import { isValidShopDomain, numericCore, verifyWebhookHmac } from "@wezesha/shopify";
+import { credentialsForShopDomain } from "@/lib/shopify/credentials";
 import { connectionByShopDomain } from "@/lib/shopify/resolve";
 import { enqueueShopifySync, publishRealtime } from "@/lib/shopify/queue";
 import {
@@ -28,8 +29,14 @@ import {
  *
  * The three mandatory compliance topics (customers/data_request,
  * customers/redact, shop/redact) are also handled here — see lib/shopify/
- * compliance.ts for what each one does and why. They run before the
- * connection-required path because shop/redact outlives the connection.
+ * compliance.ts for what each one does and why. They still run before the
+ * connection-required path because shop/redact outlives the connection, but
+ * they no longer outlive the CREDENTIAL: signing secrets are per workspace, so
+ * a delivery whose shop resolves to no stored secret cannot be verified and is
+ * refused above. Disconnecting keeps both rows (uninstalledAt is stamped, the
+ * credential is left alone) precisely so a late shop/redact still verifies;
+ * only full offboarding, which deletes the tenant, closes that door — and a
+ * deleted tenant has nothing left to redact.
  */
 
 const SYNC_TOPICS = new Set(["products/update", "inventory_levels/update", "orders/create"]);
@@ -54,23 +61,31 @@ function deletedProductId(raw: string): string | null {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const secret = process.env.SHOPIFY_API_SECRET;
-  if (!secret) {
-    console.error("webhook: SHOPIFY_API_SECRET is not set");
-    return NextResponse.json({ error: "not configured" }, { status: 500 });
-  }
-
-  const raw = await req.text();
-  const hmac = req.headers.get("x-shopify-hmac-sha256") ?? "";
-  if (!verifyWebhookHmac(raw, hmac, secret)) {
-    return NextResponse.json({ error: "invalid hmac" }, { status: 401 });
-  }
-
   const webhookId = req.headers.get("x-shopify-webhook-id") ?? "";
   const topic = req.headers.get("x-shopify-topic") ?? "";
   const shopDomain = (req.headers.get("x-shopify-shop-domain") ?? "").toLowerCase();
   if (!webhookId || !topic || !shopDomain) {
     return NextResponse.json({ error: "missing shopify headers" }, { status: 400 });
+  }
+  // Reject a malformed domain before it reaches the database, so an
+  // unauthenticated caller cannot turn this endpoint into a query generator.
+  if (!isValidShopDomain(shopDomain)) {
+    return NextResponse.json({ error: "invalid hmac" }, { status: 401 });
+  }
+
+  // Signing secrets are per workspace now, so the shop has to be identified
+  // BEFORE the signature can be checked. The header only selects which key to
+  // try — it grants nothing, and a forged domain just selects a key the forged
+  // body will not verify against. The tenant that is actually acted on below
+  // comes from the resolved row, never from the header.
+  const resolved = await credentialsForShopDomain(shopDomain);
+
+  const raw = await req.text();
+  const hmac = req.headers.get("x-shopify-hmac-sha256") ?? "";
+  // An unknown shop and a bad signature return the identical response: a
+  // difference here would tell an unauthenticated caller which stores exist.
+  if (!resolved || !verifyWebhookHmac(raw, hmac, resolved.apiSecret)) {
+    return NextResponse.json({ error: "invalid hmac" }, { status: 401 });
   }
 
   try {

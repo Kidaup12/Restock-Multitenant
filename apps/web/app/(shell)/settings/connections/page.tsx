@@ -37,6 +37,9 @@ export default async function ConnectionsPage({
   const run = connection
     ? await db.syncRun.findFirst({ where: { source: "shopify" }, orderBy: { startedAt: "desc" } })
     : null;
+  // Only whether a secret exists, plus the client ID — which is not a secret and
+  // travels in the authorize URL anyway. The secret itself never leaves the server.
+  const appCredential = await db.shopifyAppCredential.findFirst({ select: { clientId: true } });
   const params = await searchParams;
 
   return (
@@ -73,6 +76,8 @@ export default async function ConnectionsPage({
         justConnected={params.connected === "1"}
         errorCode={params.error ?? null}
         syncRun={toSyncRunView(run, new Date())}
+        appCredentialsConfigured={appCredential !== null}
+        appClientId={appCredential?.clientId ?? null}
       />
     </div>
   );

@@ -24,8 +24,6 @@ it embeds a password).
 | `WS_DEV_TOKEN` | `apps/ws-gateway/src/index.ts` | ws-gateway, **non-production only** | Railway (staging/preview environments only) | secret | unset (no dev tokens accepted; real sessions still authorize) |
 | `NEXT_OUTPUT` | `apps/web/next.config.ts` | web, **build time only** | set to `standalone` by `apps/web/Dockerfile`; leave unset on Vercel | config | unset (default Next output) |
 | `NODE_ENV` | `apps/web/components/sw-register.tsx`; `packages/db/src/client.ts`; `apps/ws-gateway/src/index.ts` (gates the dev token) | web, ws-gateway; db consumers | set by Vercel/Next and the Dockerfiles automatically — never set by hand | config | `development` |
-| `SHOPIFY_API_KEY` | `apps/web/lib/shopify/env.ts` | web | Vercel | secret | unset (Shopify flows 500 with a clear message) |
-| `SHOPIFY_API_SECRET` | `apps/web/lib/shopify/env.ts`; `apps/web/app/api/webhooks/shopify/route.ts` | web | Vercel | secret | unset |
 | `SHOPIFY_APP_URL` | `apps/web/lib/shopify/env.ts`; `apps/worker/src/shopify-sync.ts` | web (OAuth redirect URI); worker (webhook registration) | Vercel; Railway | url (config) | `http://localhost:3000` (OAuth/webhooks need a public tunnel locally) |
 | `TOKEN_ENCRYPTION_KEY` | `packages/shopify/src/crypto.ts` (via web callback + worker sync) | web, worker | Vercel; Railway — SAME value on both | secret | unset (token store/read throws) |
 | `POS_FEED_SECRET` | `apps/worker/src/pos-sync.ts` (passed to `packages/pos/src/feed.ts`) | worker | Railway | secret | unset (the feed GET goes out with no `Authorization` header — only matters for tenants that have `TenantConfig.posFeedUrl` set) |
@@ -184,7 +182,6 @@ Supabase specifics that are easy to get wrong:
 | `BETTER_AUTH_URL` | prod origin | preview origin | `http://localhost:3000` |
 | `REDIS_URL` | prod Redis | staging Redis — never prod | local |
 | `NEXT_PUBLIC_WS_URL` | `wss://<prod gateway domain>` | `wss://<staging gateway domain>` or unset | `ws://localhost:8081` or unset |
-| `SHOPIFY_API_KEY` / `SHOPIFY_API_SECRET` | prod app | dev app — never the prod app | dev app |
 | `SHOPIFY_APP_URL` | prod origin | preview origin | tunnel origin |
 | `TOKEN_ENCRYPTION_KEY` | prod key (= worker's) | preview key (= staging worker's) | local key |
 | `SENTRY_DSN` | prod DSN (when provisioned) | preview DSN or unset | unset |

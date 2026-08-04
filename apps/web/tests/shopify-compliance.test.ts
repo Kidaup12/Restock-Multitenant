@@ -52,7 +52,8 @@ describe.skipIf(!runnable)("shopify compliance webhooks (real db)", () => {
   const run = Date.now().toString(36);
 
   beforeAll(async () => {
-    process.env.SHOPIFY_API_SECRET = SECRET;
+    // Per-workspace signing secret, stored against the tenant rather than in env.
+    process.env.TOKEN_ENCRYPTION_KEY ??= Buffer.alloc(32, 3).toString("base64");
     ({ prismaService } = await import("@wezesha/db"));
     ({ POST } = (await import("../app/api/webhooks/shopify/route")) as unknown as {
       POST: (req: Request) => Promise<Response>;
@@ -99,6 +100,16 @@ describe.skipIf(!runnable)("shopify compliance webhooks (real db)", () => {
     liveTenantId = live.id;
     await prismaService.shopifyConnection.create({
       data: { tenantId: liveTenantId, shopDomain: LIVE_SHOP, accessToken: "ciphertext", scopes: "read_products" },
+    });
+
+    // Both shops keep their app credentials: a disconnected store retains them
+    // precisely so a shop/redact arriving ~48h after uninstall still verifies.
+    const { encryptToken } = await import("@wezesha/shopify");
+    await prismaService.shopifyAppCredential.createMany({
+      data: [
+        { tenantId, clientId: "client-compliance", apiSecret: encryptToken(SECRET) },
+        { tenantId: liveTenantId, clientId: "client-compliance-live", apiSecret: encryptToken(SECRET) },
+      ],
     });
   });
 
@@ -152,10 +163,24 @@ describe.skipIf(!runnable)("shopify compliance webhooks (real db)", () => {
     expect(entry!.meta).toMatchObject({ erased: false });
   });
 
-  it("answers 200 for a shop it has never heard of", async () => {
+  it("refuses a redact for a shop it has never heard of", async () => {
+    // A compliance topic gets no special pass: the signature still has to check
+    // out, and an unknown shop has no per-workspace secret to check it against.
+    // Nothing is lost — a store we hold no data for has nothing to erase.
     const body = JSON.stringify({ shop_domain: "compliance-unknown.myshopify.com" });
     const res = await POST(
       webhookRequest({ body, topic: "shop/redact", webhookId: `${run}-c4`, shop: "compliance-unknown.myshopify.com" })
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("still verifies a redact for a store that has disconnected", async () => {
+    // shop/redact lands ~48h after an uninstall. Disconnecting stamps
+    // uninstalledAt but keeps the connection and the credential rows, so the
+    // delivery can still be authenticated — the whole reason neither is deleted.
+    const body = JSON.stringify({ shop_domain: SHOP });
+    const res = await POST(
+      webhookRequest({ body, topic: "customers/data_request", webhookId: `${run}-c4b`, shop: SHOP })
     );
     expect(res.status).toBe(200);
   });

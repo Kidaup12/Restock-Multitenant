@@ -156,6 +156,72 @@ export async function connectShopifyWithToken(input: {
 }
 
 /**
+ * Save this workspace's own Shopify app credentials.
+ *
+ * Wezesha holds no Shopify app any more: there is no SHOPIFY_API_KEY and no
+ * SHOPIFY_API_SECRET anywhere, so these are the only credentials the OAuth
+ * install and the webhook verifier will use for this shop. A workspace that has
+ * not set them cannot do either, which is the point — one shared app across
+ * every client is exactly what made a client unable to connect its own store.
+ *
+ * The secret is never read back to anyone. The settings screen renders a
+ * "configured" flag, the same way the till-feed secret is handled.
+ */
+export async function saveShopifyAppCredentials(input: {
+  clientId: string;
+  apiSecret: string;
+}): Promise<ConnectResult> {
+  const actor = await actorContext();
+  if (!actor) return err("Only owners and admins can change Shopify app credentials.");
+
+  const clientId = input.clientId.trim();
+  const apiSecret = input.apiSecret.trim();
+  if (!clientId || !apiSecret) return err("Both the client ID and the secret are required.");
+  // Shopify renders both as 32-character hex. Not a security boundary — the
+  // store rejects a wrong one anyway — but it catches the two fields being
+  // pasted the wrong way round, or a token pasted into either.
+  if (!/^[A-Za-z0-9_-]{8,}$/.test(clientId)) return err("That client ID does not look right.");
+  if (!/^[A-Za-z0-9_-]{8,}$/.test(apiSecret)) return err("That API secret does not look right.");
+
+  const db = prismaForTenant(actor.tenantId);
+  const existing = await db.shopifyAppCredential.findUnique({
+    where: { tenantId: actor.tenantId },
+    select: { id: true },
+  });
+  await db.shopifyAppCredential.upsert({
+    where: { tenantId: actor.tenantId },
+    create: { tenantId: actor.tenantId, clientId, apiSecret: encryptToken(apiSecret) },
+    update: { clientId, apiSecret: encryptToken(apiSecret) },
+  });
+  // Neither value reaches the ledger — only that they changed.
+  await audit(actor.tenantId, "shopify_app_credentials_saved", actor.userId, {
+    replaced: Boolean(existing),
+  });
+
+  revalidatePath("/settings/connections");
+  return {
+    ok: true,
+    message: existing
+      ? "App credentials updated. New installs will use them."
+      : "App credentials saved. You can now connect a store with your own app.",
+  };
+}
+
+/** Remove this workspace's app credentials. Leaves any connected store alone —
+ *  a store already connected keeps syncing on its stored access token. */
+export async function clearShopifyAppCredentials(): Promise<ConnectResult> {
+  const actor = await actorContext();
+  if (!actor) return err("Only owners and admins can change Shopify app credentials.");
+
+  const db = prismaForTenant(actor.tenantId);
+  await db.shopifyAppCredential.deleteMany({ where: { tenantId: actor.tenantId } });
+  await audit(actor.tenantId, "shopify_app_credentials_cleared", actor.userId, {});
+
+  revalidatePath("/settings/connections");
+  return { ok: true, message: "App credentials removed." };
+}
+
+/**
  * Answer "is this store actually reachable right now", on demand.
  *
  * The question this replaces is a bad one: today the only way to find out is to

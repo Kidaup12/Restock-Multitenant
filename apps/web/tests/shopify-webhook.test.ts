@@ -60,8 +60,11 @@ describe.skipIf(!runnable)("shopify webhook route (real db + redis)", () => {
   const run = Date.now().toString(36);
 
   beforeAll(async () => {
-    process.env.SHOPIFY_API_SECRET = SECRET;
+    // The signing secret is per workspace now, so it is stored against the
+    // tenant rather than read from the environment.
+    process.env.TOKEN_ENCRYPTION_KEY ??= Buffer.alloc(32, 3).toString("base64");
     ({ prismaService } = await import("@wezesha/db"));
+    const { encryptToken } = await import("@wezesha/shopify");
     ({ POST } = (await import("../app/api/webhooks/shopify/route")) as unknown as {
       POST: (req: Request) => Promise<Response>;
     });
@@ -71,6 +74,9 @@ describe.skipIf(!runnable)("shopify webhook route (real db + redis)", () => {
     tenantId = tenant.id;
     await prismaService.shopifyConnection.create({
       data: { tenantId, shopDomain: SHOP, accessToken: "ciphertext", scopes: "read_products" },
+    });
+    await prismaService.shopifyAppCredential.create({
+      data: { tenantId, clientId: "client-webhook-test", apiSecret: encryptToken(SECRET) },
     });
   });
 
@@ -127,13 +133,35 @@ describe.skipIf(!runnable)("shopify webhook route (real db + redis)", () => {
     await removeEnqueuedJob(tenantId); // the first delivery legitimately enqueued
   });
 
-  it("answers 200 for an unknown shop so Shopify stops retrying", async () => {
+  it("an unknown shop is indistinguishable from a forged signature", async () => {
+    // Signing secrets are per workspace, so a shop we do not know has no key to
+    // check against and CANNOT be authenticated. The old behaviour — 200
+    // "ignored", so Shopify would stop retrying — is only possible when one
+    // platform secret verifies every delivery, which is exactly the shared-app
+    // arrangement that stopped a client connecting its own store.
+    //
+    // Answering 200 to an unverified request would tell any unauthenticated
+    // caller which stores are connected here, one guess at a time. Both cases
+    // therefore return the same 401 with the same body.
     const body = JSON.stringify({ id: 44 });
-    const res = await POST(
+    const unknown = await POST(
       webhookRequest({ body, topic: "orders/create", webhookId: `${run}-w3`, shop: "webhook-test-unknown.myshopify.com" })
     );
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, ignored: true });
+    const forged = await POST(
+      webhookRequest({ body, topic: "orders/create", webhookId: `${run}-w3b`, hmac: "not-a-signature" })
+    );
+    expect(unknown.status).toBe(401);
+    expect(forged.status).toBe(401);
+    expect(await unknown.json()).toEqual(await forged.json());
+  });
+
+  it("refuses a malformed shop domain without touching the database", async () => {
+    const res = await POST(
+      webhookRequest({ body: "{}", topic: "orders/create", webhookId: `${run}-w3c`, shop: "not a domain" })
+    );
+    expect(res.status).toBe(401);
+    // Nothing is recorded for a request that never authenticated.
+    expect(await prismaService.webhookEvent.count({ where: { webhookId: `${run}-w3c` } })).toBe(0);
   });
 
   it("app/uninstalled marks the connection and persists a Notification", async () => {
@@ -195,7 +223,7 @@ describe.skipIf(!runnable)("shopify webhook products/delete (real db)", () => {
   }
 
   beforeAll(async () => {
-    process.env.SHOPIFY_API_SECRET = SECRET;
+    process.env.TOKEN_ENCRYPTION_KEY ??= Buffer.alloc(32, 3).toString("base64");
     ({ prismaService } = await import("@wezesha/db"));
     ({ POST } = (await import("../app/api/webhooks/shopify/route")) as unknown as {
       POST: (req: Request) => Promise<Response>;
@@ -209,6 +237,10 @@ describe.skipIf(!runnable)("shopify webhook products/delete (real db)", () => {
 
     await prismaService.shopifyConnection.create({
       data: { tenantId, shopDomain: DELETE_SHOP, accessToken: "ciphertext", scopes: "read_products" },
+    });
+    const { encryptToken } = await import("@wezesha/shopify");
+    await prismaService.shopifyAppCredential.create({
+      data: { tenantId, clientId: "client-delete-test", apiSecret: encryptToken(SECRET) },
     });
     await seedCatalogue(tenantId, "DEL");
     await seedCatalogue(otherTenantId, "OTH");

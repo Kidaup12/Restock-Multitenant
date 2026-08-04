@@ -64,6 +64,9 @@ export const EXPORTED_MODELS: ReadonlyArray<{
   { model: "DistributionPlanLine", delegate: "distributionPlanLine" },
   { model: "ProductPlanOverride", delegate: "productPlanOverride" },
   { model: "ShopifyConnection", delegate: "shopifyConnection", omit: { accessToken: true } },
+  // clientId is exportable (it is not a secret and the shop owns it); the
+  // signing secret is not, same rule as the access token.
+  { model: "ShopifyAppCredential", delegate: "shopifyAppCredential", omit: { apiSecret: true } },
   { model: "IngestCursor", delegate: "ingestCursor" },
   { model: "SyncRun", delegate: "syncRun" },
   { model: "Notification", delegate: "notification" },
