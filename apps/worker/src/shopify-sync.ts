@@ -556,7 +556,7 @@ const PHASES = ["products", "inventory", "orders"] as const;
  */
 async function resolveAccessToken(
   tenantId: string,
-  connection: { shopDomain: string; accessToken: string },
+  connection: { shopDomain: string; accessToken: string; authMode: string },
   tokens: ReturnType<typeof createTokenCache>
 ): Promise<string> {
   // eslint-disable-next-line tenant-safety/require-tenant-scope -- keyed on the tenantId the job carries; the worker has no session to scope by.
@@ -570,7 +570,25 @@ async function resolveAccessToken(
       clientSecret: decryptToken(credential.apiSecret),
     });
   }
-  return decryptToken(connection.accessToken);
+
+  // A pasted Admin API token is long-lived and is the credential in its own
+  // right — nothing to mint, use it.
+  if (connection.authMode === "token") return decryptToken(connection.accessToken);
+
+  // Anything else stored an OAuth token, and one minted by the
+  // client-credentials grant lives about a day. Presenting it now would earn a
+  // 403 that reads "token revoked or app uninstalled" and send the next person
+  // hunting a revocation that never happened — the store is fine, this
+  // workspace simply has no app credentials to mint with.
+  //
+  // The cache is dropped too: a worker that minted before the credentials were
+  // removed would otherwise keep syncing on a token nobody can renew, so the
+  // screen would say "connected" until the token quietly aged out.
+  tokens.invalidate(connection.shopDomain);
+  throw new UnrecoverableError(
+    `${connection.shopDomain} has no Shopify app credentials for this workspace. ` +
+      `Add the client ID and secret under Settings → Connections, or connect the store with an Admin API token.`
+  );
 }
 
 export function createShopifySyncProcessor(options: ShopifySyncOptions) {
@@ -594,6 +612,9 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
     try {
       api = makeApi(connection.shopDomain, await resolveAccessToken(tenantId, connection, tokens));
     } catch (err) {
+      // Already diagnosed and already final — re-wrapping would bury the
+      // sentence that says what to do behind a generic one that does not.
+      if (err instanceof UnrecoverableError) throw err;
       if (err instanceof ShopifyGrantError) {
         // The app credentials themselves are wrong or the app is no longer
         // installed on that store. Retrying mints the same rejection.

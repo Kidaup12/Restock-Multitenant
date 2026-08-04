@@ -327,6 +327,28 @@ describe.skipIf(!runnable)("connect a store with a pasted token (local db)", () 
       expect(Object.keys(shown!)).toEqual(["clientId"]);
     });
 
+    it("keeps the stored secret when only the client id changes", async () => {
+      // The secret is never shown again, so a blank box can only mean "leave it
+      // alone". Requiring it on every edit is what made a Save press appear to
+      // do nothing and left a workspace believing it was configured.
+      await saveShopifyAppCredentials({ clientId: CLIENT_ID, apiSecret: API_SECRET });
+      const res = await saveShopifyAppCredentials({ clientId: "newclientid999", apiSecret: "" });
+      expect(res).toMatchObject({ ok: true });
+
+      await expect(credentialsForTenant(tenantA)).resolves.toEqual({
+        clientId: "newclientid999",
+        apiSecret: API_SECRET,
+      });
+    });
+
+    it("refuses a blank secret when there is no stored one to keep", async () => {
+      const res = await saveShopifyAppCredentials({ clientId: CLIENT_ID, apiSecret: "" });
+      expect(res.ok).toBe(false);
+      // Says so, rather than a disabled button silently doing nothing.
+      expect(!res.ok && res.error).toContain("API secret");
+      expect(await prismaService.shopifyAppCredential.count({ where: { tenantId: tenantA } })).toBe(0);
+    });
+
     it("is closed to a member", async () => {
       actAs(tenantA, "MEMBER");
       const res = await saveShopifyAppCredentials({ clientId: CLIENT_ID, apiSecret: API_SECRET });

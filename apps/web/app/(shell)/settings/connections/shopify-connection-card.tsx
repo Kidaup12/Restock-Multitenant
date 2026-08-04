@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/auth/password-input";
 import type { SyncRunView } from "@/lib/shopify/sync-run";
 import {
   clearShopifyAppCredentials,
@@ -37,7 +38,11 @@ const OAUTH_ERRORS: Record<string, string> = {
   forbidden: "Only owners and admins can connect a store.",
   no_app_credentials:
     "Add your Shopify app's client ID and secret below before connecting a store.",
-  invalid_state: "The install attempt expired or was tampered with. Try again.",
+  // Almost always a stale tab: the state cookie lives ten minutes, so a second
+  // attempt started in another tab invalidates the first. Saying "expired or
+  // tampered with" alone reads as a security event and tells nobody what to do.
+  invalid_state:
+    "That install link had gone stale — they expire after ten minutes, and starting a second attempt cancels the first. Press Reconnect once and follow it through.",
   invalid_shop: "The store that came back did not match the one you entered.",
   invalid_hmac: "Shopify's signature on the callback did not verify.",
   missing_code: "Shopify did not return an authorization code.",
@@ -74,7 +79,7 @@ export function ShopifyConnectionCard({
   const [clientId, setClientId] = useState(appClientId ?? "");
   const [apiSecret, setApiSecret] = useState("");
   const [busy, setBusy] = useState<
-    "sync" | "disconnect" | "token" | "test" | "creds" | "clearCreds" | null
+    "sync" | "disconnect" | "token" | "test" | "creds" | "clearCreds" | "install" | null
   >(null);
   // Covers the gap between the queue accepting the job and the worker opening
   // its row — the one moment a run exists but nothing durable says so.
@@ -150,11 +155,26 @@ export function ShopifyConnectionCard({
     }
   }
 
-  function connect() {
-    const cleaned = shop.trim().toLowerCase();
+  /**
+   * Hand the browser to Shopify's authorize page.
+   *
+   * A full-page navigation gives no feedback of its own — on a slow hop the
+   * button simply sits there and the page looks dead, so people press it again
+   * and land on "the install attempt expired", which describes the FIRST
+   * attempt's cookie and explains nothing. The busy state and the line below it
+   * are the only things that say the click was heard.
+   */
+  function startInstall(rawDomain: string) {
+    const cleaned = rawDomain.trim().toLowerCase();
     if (!cleaned) return;
     const domain = cleaned.includes(".") ? cleaned : `${cleaned}.myshopify.com`;
+    setBusy("install");
+    setNotice({ tone: "positive", text: `Taking you to ${domain} to approve access…` });
     window.location.assign(`/api/shopify/install?shop=${encodeURIComponent(domain)}`);
+  }
+
+  function connect() {
+    startInstall(shop);
   }
 
   async function connectWithToken() {
@@ -270,10 +290,10 @@ export function ShopifyConnectionCard({
           autoComplete="off"
           name="shopify-token-shop"
         />
-        <Input
-          // Treated as a password: it is a bearer credential, and this screen
-          // gets shared over someone's shoulder.
-          type="password"
+        {/* Masked by default — it is a bearer credential and this screen gets
+            shared over someone's shoulder — but revealable, because a mistyped
+            token is otherwise invisible until the connection fails. */}
+        <PasswordInput
           value={token}
           onChange={(e) => setToken(e.target.value)}
           placeholder="shpat_…"
@@ -359,8 +379,10 @@ export function ShopifyConnectionCard({
                 autoComplete="off"
                 name="shopify-client-id"
               />
-              <Input
-                type="password"
+              {/* Same reveal control as the sign-in field: these are long
+                  opaque strings and a silent typo is otherwise only discovered
+                  by a failed connection. */}
+              <PasswordInput
                 value={apiSecret}
                 onChange={(e) => setApiSecret(e.target.value)}
                 placeholder={appCredentialsConfigured ? "•••••••• (unchanged)" : "API secret key"}
@@ -372,7 +394,13 @@ export function ShopifyConnectionCard({
                 <Button
                   onClick={saveCredentials}
                   loading={busy === "creds"}
-                  disabled={busy !== null || !clientId.trim() || !apiSecret.trim()}
+                  // A configured workspace may change just the client id; the
+                  // stored secret is kept when the box is left blank.
+                  disabled={
+                    busy !== null ||
+                    !clientId.trim() ||
+                    (!apiSecret.trim() && !appCredentialsConfigured)
+                  }
                 >
                   {appCredentialsConfigured ? "Update credentials" : "Save credentials"}
                 </Button>
@@ -408,7 +436,11 @@ export function ShopifyConnectionCard({
                     className="max-w-xs"
                     aria-label="Shop domain"
                   />
-                  <Button onClick={connect} disabled={!shop.trim()}>
+                  <Button
+                    onClick={connect}
+                    loading={busy === "install"}
+                    disabled={busy !== null || !shop.trim()}
+                  >
                     Connect store
                   </Button>
                 </div>
@@ -499,11 +531,9 @@ export function ShopifyConnectionCard({
               )}
               {canManage && (!live || paused) && (
                 <Button
-                  onClick={() =>
-                    window.location.assign(
-                      `/api/shopify/install?shop=${encodeURIComponent(connection.shopDomain)}`
-                    )
-                  }
+                  onClick={() => startInstall(connection.shopDomain)}
+                  loading={busy === "install"}
+                  disabled={busy !== null}
                 >
                   Reconnect
                 </Button>

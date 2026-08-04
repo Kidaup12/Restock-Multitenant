@@ -176,22 +176,36 @@ export async function saveShopifyAppCredentials(input: {
 
   const clientId = input.clientId.trim();
   const apiSecret = input.apiSecret.trim();
-  if (!clientId || !apiSecret) return err("Both the client ID and the secret are required.");
-  // Shopify renders both as 32-character hex. Not a security boundary — the
-  // store rejects a wrong one anyway — but it catches the two fields being
-  // pasted the wrong way round, or a token pasted into either.
-  if (!/^[A-Za-z0-9_-]{8,}$/.test(clientId)) return err("That client ID does not look right.");
-  if (!/^[A-Za-z0-9_-]{8,}$/.test(apiSecret)) return err("That API secret does not look right.");
+  if (!clientId) return err("The client ID is required.");
 
   const db = prismaForTenant(actor.tenantId);
   const existing = await db.shopifyAppCredential.findUnique({
     where: { tenantId: actor.tenantId },
     select: { id: true },
   });
+
+  // An empty secret box means "leave the stored one alone" — it is the only
+  // thing the form can offer, since the secret is never shown again. With no
+  // stored secret to keep there is nothing to save, and saying so is the whole
+  // point: a disabled button that silently does nothing is how a workspace ends
+  // up believing it is configured when it is not.
+  if (!apiSecret && !existing) {
+    return err("Paste the API secret key as well — there is no stored one to keep.");
+  }
+  // Shopify renders both as 32-character hex. Not a security boundary — the
+  // store rejects a wrong one anyway — but it catches the two fields being
+  // pasted the wrong way round, or a token pasted into either.
+  if (!/^[A-Za-z0-9_-]{8,}$/.test(clientId)) return err("That client ID does not look right.");
+  if (apiSecret && !/^[A-Za-z0-9_-]{8,}$/.test(apiSecret)) {
+    return err("That API secret does not look right.");
+  }
+
   await db.shopifyAppCredential.upsert({
     where: { tenantId: actor.tenantId },
+    // A blank secret box on an already-configured workspace changes only the
+    // client id; the stored ciphertext is left exactly as it is.
     create: { tenantId: actor.tenantId, clientId, apiSecret: encryptToken(apiSecret) },
-    update: { clientId, apiSecret: encryptToken(apiSecret) },
+    update: { clientId, ...(apiSecret ? { apiSecret: encryptToken(apiSecret) } : {}) },
   });
   // Neither value reaches the ledger — only that they changed.
   await audit(actor.tenantId, "shopify_app_credentials_saved", actor.userId, {
