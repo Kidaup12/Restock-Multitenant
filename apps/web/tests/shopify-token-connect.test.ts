@@ -50,8 +50,11 @@ vi.mock("@wezesha/shopify", async (importOriginal) => {
 });
 
 import { prismaService } from "@wezesha/db";
-import { decryptToken, ShopifyAuthError } from "@wezesha/shopify";
-import { connectShopifyWithToken } from "@/app/(shell)/settings/connections/actions";
+import { decryptToken, ShopifyAuthError, ShopifyRateLimitedError } from "@wezesha/shopify";
+import {
+  connectShopifyWithToken,
+  testShopifyConnection,
+} from "@/app/(shell)/settings/connections/actions";
 
 const SLUGS = ["token-connect-a", "token-connect-b"];
 const GOOD_TOKEN = "shpat_abcdef0123456789";
@@ -179,6 +182,67 @@ describe.skipIf(!runnable)("connect a store with a pasted token (local db)", () 
     });
     expect(res.ok).toBe(false);
     expect(await prismaService.shopifyConnection.count({ where: { tenantId: tenantA } })).toBe(0);
+  });
+
+  describe("test connection", () => {
+    beforeEach(async () => {
+      await connectShopifyWithToken({
+        shopDomain: "amara-demo.myshopify.com",
+        accessToken: GOOD_TOKEN,
+      });
+    });
+
+    it("names the store and its currency when everything works", async () => {
+      const res = await testShopifyConnection();
+      expect(res).toMatchObject({ ok: true });
+      expect(res.ok && res.message).toContain("Amara Beauty");
+      expect(res.ok && res.message).toContain("KES");
+    });
+
+    it("says the token was rejected, and by which store", async () => {
+      probeState.error = new ShopifyAuthError(403, "amara-demo.myshopify.com");
+      const res = await testShopifyConnection();
+      expect(res.ok).toBe(false);
+      // Naming the store matters: the usual cause is a token from a different one.
+      expect(!res.ok && res.error).toContain("amara-demo.myshopify.com");
+    });
+
+    it("distinguishes rate limiting from a dead token", async () => {
+      probeState.error = new ShopifyRateLimitedError(2000, "throttled");
+      const res = await testShopifyConnection();
+      expect(res.ok).toBe(false);
+      // "Try again" and "reconnect the store" are very different instructions.
+      expect(!res.ok && res.error).toContain("rate limiting");
+    });
+
+    it("reports a connection that works but cannot see everything", async () => {
+      probeState.result = {
+        shopName: "Amara Beauty",
+        currencyCode: "KES",
+        grantedScopes: ["read_products", "read_orders"],
+        missingScopes: ["read_inventory"],
+      };
+      const res = await testShopifyConnection();
+      expect(res.ok).toBe(false);
+      expect(!res.ok && res.error).toContain("read_inventory");
+    });
+
+    it("changes nothing — it is a read", async () => {
+      const before = await prismaService.shopifyConnection.findUnique({ where: { tenantId: tenantA } });
+      probeState.error = new ShopifyAuthError(403, "amara-demo.myshopify.com");
+      await testShopifyConnection();
+      const after = await prismaService.shopifyConnection.findUnique({ where: { tenantId: tenantA } });
+      // A failed test must not count towards the auto-pause: someone checking
+      // whether a store is healthy should not be able to switch its syncs off.
+      expect(after!.authFailureCount).toBe(before!.authFailureCount);
+      expect(after!.syncPausedAt).toEqual(before!.syncPausedAt);
+    });
+
+    it("is closed to a member", async () => {
+      actAs(tenantA, "MEMBER");
+      const res = await testShopifyConnection();
+      expect(res.ok).toBe(false);
+    });
   });
 
   it("clears an earlier give-up state when a working token replaces a dead one", async () => {

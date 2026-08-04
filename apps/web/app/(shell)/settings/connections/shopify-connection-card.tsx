@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import type { SyncRunView } from "@/lib/shopify/sync-run";
-import { connectShopifyWithToken } from "./actions";
+import { connectShopifyWithToken, testShopifyConnection } from "./actions";
 import { SyncProgress } from "./sync-progress";
 
 /** Named in the setup instructions so a shop ticks the right boxes first time
@@ -57,7 +57,7 @@ export function ShopifyConnectionCard({
   const [shop, setShop] = useState("");
   const [tokenShop, setTokenShop] = useState("");
   const [token, setToken] = useState("");
-  const [busy, setBusy] = useState<"sync" | "disconnect" | "token" | null>(null);
+  const [busy, setBusy] = useState<"sync" | "disconnect" | "token" | "test" | null>(null);
   // Covers the gap between the queue accepting the job and the worker opening
   // its row — the one moment a run exists but nothing durable says so.
   const [queued, setQueued] = useState(justConnected);
@@ -153,6 +153,21 @@ export function ShopifyConnectionCard({
       }
     } catch {
       setNotice({ tone: "negative", text: "Could not connect the store." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function testConnection() {
+    setBusy("test");
+    setNotice(null);
+    try {
+      const res = await testShopifyConnection();
+      setNotice(
+        res.ok ? { tone: "positive", text: res.message } : { tone: "negative", text: res.error }
+      );
+    } catch {
+      setNotice({ tone: "negative", text: "Could not test the connection." });
     } finally {
       setBusy(null);
     }
@@ -314,6 +329,16 @@ export function ShopifyConnectionCard({
                   {syncRun?.status === "failed" || syncRun?.status === "stalled"
                     ? "Retry sync"
                     : "Sync now"}
+                </Button>
+              )}
+              {canManage && live && (
+                <Button
+                  variant="ghost"
+                  onClick={testConnection}
+                  loading={busy === "test"}
+                  disabled={busy !== null}
+                >
+                  Test connection
                 </Button>
               )}
               {canManage && live && (
