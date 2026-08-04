@@ -55,6 +55,9 @@ export default async function ConnectionsPage({
                   ? formatUtc(connection.uninstalledAt)
                   : null,
                 scopes: connection.scopes,
+                syncPausedAt: connection.syncPausedAt
+                  ? formatUtc(connection.syncPausedAt)
+                  : null,
               }
             : null
         }
