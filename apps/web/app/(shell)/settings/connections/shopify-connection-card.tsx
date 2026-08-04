@@ -9,11 +9,15 @@ import { Input } from "@/components/ui/input";
 import type { SyncRunView } from "@/lib/shopify/sync-run";
 import { SyncProgress } from "./sync-progress";
 
-type ConnectionView = {
+export type ConnectionView = {
   shopDomain: string;
   installedAt: string;
   uninstalledAt: string | null;
   scopes: string;
+  /** Set once the store's token has been refused enough times in a row that the
+   *  scheduler stopped trying. The app still holds a connection; only a
+   *  reconnect makes it usable again. */
+  syncPausedAt: string | null;
 };
 
 type LastSyncRow = { resource: string; syncedAt: string | null };
@@ -64,6 +68,8 @@ export function ShopifyConnectionCard({
   );
 
   const live = connection !== null && connection.uninstalledAt === null;
+  // Still installed as far as the app knows, but every request is being refused.
+  const paused = live && connection.syncPausedAt !== null;
   const syncing = syncActive;
   const onActiveChange = useCallback((value: boolean) => setSyncActive(value), []);
   const onSettled = useCallback(() => setQueued(false), []);
@@ -137,6 +143,9 @@ export function ShopifyConnectionCard({
             <Badge tone="warning">Disconnected</Badge>
           ) : syncing ? (
             <Badge tone="accent">Syncing</Badge>
+          ) : paused ? (
+            // Ahead of "Sync failed": both are true, but only one says what to do.
+            <Badge tone="warning">Reconnect required</Badge>
           ) : syncRun?.status === "failed" ? (
             <Badge tone="negative">Sync failed</Badge>
           ) : syncRun?.status === "stalled" ? (
@@ -179,6 +188,13 @@ export function ShopifyConnectionCard({
           )
         ) : (
           <div className="space-y-4">
+            {paused && (
+              <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">
+                Automatic syncs are paused — the store kept refusing our access token.
+                Reconnect the store to resume. Stock and sales figures below are from
+                the last sync that worked.
+              </p>
+            )}
             <dl className="grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
               <div className="flex items-baseline justify-between gap-4 sm:block">
                 <dt className="text-ink-muted">Store</dt>
@@ -236,7 +252,7 @@ export function ShopifyConnectionCard({
                   Disconnect
                 </Button>
               )}
-              {canManage && !live && (
+              {canManage && (!live || paused) && (
                 <Button
                   onClick={() =>
                     window.location.assign(

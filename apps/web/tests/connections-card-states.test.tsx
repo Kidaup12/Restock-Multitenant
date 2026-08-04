@@ -12,7 +12,10 @@ vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: ReactNode }) => <a href={href}>{children}</a>,
 }));
 
-import { ShopifyConnectionCard } from "../app/(shell)/settings/connections/shopify-connection-card";
+import {
+  ShopifyConnectionCard,
+  type ConnectionView,
+} from "../app/(shell)/settings/connections/shopify-connection-card";
 
 /**
  * What the Connections card says in each state of a sync.
@@ -22,11 +25,12 @@ import { ShopifyConnectionCard } from "../app/(shell)/settings/connections/shopi
  * middle of a sync has to be right on the strength of the stored row alone.
  */
 
-const CONNECTION = {
+const CONNECTION: ConnectionView = {
   shopDomain: "demo-store.myshopify.com",
   installedAt: "2026-07-01 09:00 UTC",
   uninstalledAt: null,
   scopes: "read_products",
+  syncPausedAt: null,
 };
 
 const LAST_SYNC = [
@@ -52,10 +56,14 @@ function run(over: Partial<SyncRunView> = {}): SyncRunView {
   };
 }
 
-function render(syncRun: SyncRunView | null, justConnected = false): string {
+function render(
+  syncRun: SyncRunView | null,
+  justConnected = false,
+  connection: ConnectionView = CONNECTION
+): string {
   return renderToStaticMarkup(
     <ShopifyConnectionCard
-      connection={CONNECTION}
+      connection={connection}
       lastSync={LAST_SYNC}
       canManage
       justConnected={justConnected}
@@ -123,6 +131,29 @@ describe("connections card — sync states", () => {
     expect(html).toContain("Sync may have stopped");
     expect(html).toContain("Retry sync");
     expect(html).not.toContain("progressbar");
+  });
+
+  it("tells a shop whose token keeps being refused what to actually do", () => {
+    const paused = { ...CONNECTION, syncPausedAt: "2026-08-04 06:15 UTC" };
+    // A failed run is true at the same time, but "Sync failed" does not tell
+    // anyone that no further sync will be attempted until they act.
+    const html = render(run({ status: "failed", error: "Shopify auth failed (403)" }), false, paused);
+    expect(html).toContain("Reconnect required");
+    expect(html).not.toContain("Sync failed");
+    expect(html).toContain("Automatic syncs are paused");
+    expect(html).toContain("Reconnect");
+    // The manual retry is the one way out that does not need a full OAuth round
+    // trip, so it must not be disabled along with everything else.
+    expect(html).toContain("Retry sync");
+  });
+
+  it("shows no paused warning on a healthy store", () => {
+    // Guards against an unconditional badge — the assertion above would pass
+    // just as happily if the card always said it.
+    const html = render(run({ status: "failed", error: "Shopify auth failed (403)" }));
+    expect(html).not.toContain("Reconnect required");
+    expect(html).not.toContain("Automatic syncs are paused");
+    expect(html).toContain("Sync failed");
   });
 
   it("says queued between connecting a store and the worker picking the job up", () => {
