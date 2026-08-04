@@ -211,6 +211,10 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
       where: { locationId_productId: { locationId: primary.id, productId: can.productId } },
     });
     expect(levelAfter!.onHand).toBe((levelBefore?.onHand ?? 0) + 25);
+    // Stock arriving on a PO is sellable, so available moves with on-hand.
+    // Prisma's `increment` would have been NULL + 25 = NULL on a level no
+    // available-aware sync had touched, silently erasing what the buy list reads.
+    expect(levelAfter!.available).toBe((levelBefore?.available ?? levelBefore?.onHand ?? 0) + 25);
     // currentStock is recomputed from the level sums, so it moves by exactly 25.
     const productAfter = await prismaService.product.findUnique({ where: { id: can.productId } });
     expect(productAfter!.currentStock).toBe(productBefore!.currentStock + 25);
@@ -219,6 +223,32 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
       where: { tenantId, purchaseOrderId: orbitPoId },
     });
     expect(orders.every((o) => o.status === "ordered")).toBe(true);
+  });
+
+  it("a receipt onto a level with no available figure establishes one", async () => {
+    // The hazard this guards: `available` is nullable, NULL + n is NULL in SQL,
+    // and a Prisma `increment` would therefore blank the column on any level no
+    // available-aware sync has written — turning a delivery into a stockout.
+    const detail = (await getPoDetail(tenantId, orbitPoId, { canViewCosts: true }))!;
+    const can = detail.lines.find((l) => l.sku === "CAN-SHE-340")!;
+    const primary = detail.locations.find((l) => l.isPrimary)!;
+    await prismaService.$executeRaw`
+      UPDATE "InventoryLevel" SET "available" = NULL
+       WHERE "locationId" = ${primary.id} AND "productId" = ${can.productId}`;
+    const before = await prismaService.inventoryLevel.findUnique({
+      where: { locationId_productId: { locationId: primary.id, productId: can.productId } },
+    });
+    expect(before!.available).toBeNull();
+
+    await receivePoLines(tenantId, orbitPoId, [{ lineId: can.id, qty: 5 }], primary.id);
+
+    const after = await prismaService.inventoryLevel.findUnique({
+      where: { locationId_productId: { locationId: primary.id, productId: can.productId } },
+    });
+    // Unknown committed units means "assume none", the same answer
+    // sellableUnits() falls back to — so available lands on the new on-hand.
+    expect(after!.available).toBe(after!.onHand);
+    expect(after!.onHand).toBe(before!.onHand + 5);
   });
 
   it("completes the delivery: orders completed, lead time learned (typed not overwritten)", async () => {

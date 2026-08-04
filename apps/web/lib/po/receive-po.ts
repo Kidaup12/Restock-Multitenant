@@ -90,11 +90,27 @@ export async function receivePoLines(
         where: { id: line.id },
         data: { receivedQty: nextQty, receivedAt: now },
       });
+      // Stock arriving on a PO is both physically present and sellable, so both
+      // columns move. Raw SQL rather than Prisma's `increment` for `available`:
+      // it is nullable, and `NULL + n` is NULL in SQL, so an increment on a row
+      // no available-aware sync has touched yet would silently erase the figure
+      // the whole buy list reads. COALESCE makes the first receipt establish it.
       await tx.inventoryLevel.upsert({
         where: { locationId_productId: { locationId, productId: line.productId } },
+        // available is left unset on create and settled by the statement below,
+        // which runs on both paths — setting it here too would add the quantity
+        // twice for a level this receipt is the first to touch.
         create: { tenantId, locationId, productId: line.productId, onHand: entry.qty },
         update: { onHand: { increment: entry.qty } },
       });
+      // onHand already includes this receipt by now, so the NULL branch resolves
+      // to the pre-receipt on-hand plus the quantity — i.e. treat a level no
+      // available-aware sync has touched as having nothing committed, exactly
+      // what sellableUnits() falls back to.
+      await tx.$executeRaw`
+        UPDATE "InventoryLevel"
+           SET "available" = COALESCE("available", "onHand" - ${entry.qty}) + ${entry.qty}
+         WHERE "locationId" = ${locationId} AND "productId" = ${line.productId}`;
       line.receivedQty = nextQty;
       receivedUnits += entry.qty;
       if (nextQty >= line.quantity) fullyReceivedProducts.push(line.productId);

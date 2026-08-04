@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./roles": "./src/roles.ts",
+    "./inventory": "./src/inventory.ts",
     "./platform-tenant": "./src/platform-tenant.ts"
   },
   "scripts": {

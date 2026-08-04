@@ -28,6 +28,8 @@ export {
   typeOfRole,
 } from "./roles";
 export type { LocationRole, LocationType } from "./roles";
+export { committedUnits, sellableUnits } from "./inventory";
+export type { SellableLevel } from "./inventory";
 export {
   BUYABLE_PRODUCT_WHERE,
   LIFECYCLE_LABELS,
