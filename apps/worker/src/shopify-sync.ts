@@ -382,11 +382,16 @@ async function syncLocationsAndInventory(
       if (!productId) continue; // variant not in the catalogue (gift card) — skip
       const onHand = level.quantities?.find((q) => q.name === "on_hand")?.quantity ?? 0;
       const incoming = level.quantities?.find((q) => q.name === "incoming")?.quantity ?? 0;
+      // Shopify sends "available" on every level (resources.ts asks for it). It
+      // is on_hand minus whatever is committed to unfulfilled orders — the only
+      // one of the two that answers "how much can we actually sell". Absent only
+      // in a fixture that forgot it, and null is the honest record of that.
+      const available = level.quantities?.find((q) => q.name === "available")?.quantity ?? null;
       // eslint-disable-next-line tenant-safety/require-tenant-scope -- the unique key is (locationId, productId) and both ids were resolved inside this tenant's sync, so the lookup cannot reach another tenant's row; the created row carries tenantId.
       await prismaService.inventoryLevel.upsert({
         where: { locationId_productId: { locationId: row.id, productId } },
-        create: { tenantId, locationId: row.id, productId, onHand, incoming },
-        update: { onHand, incoming },
+        create: { tenantId, locationId: row.id, productId, onHand, available, incoming },
+        update: { onHand, available, incoming },
       });
       seenProducts.add(productId);
       if (role === "sells") sellsByProduct.set(productId, (sellsByProduct.get(productId) ?? 0) + onHand);

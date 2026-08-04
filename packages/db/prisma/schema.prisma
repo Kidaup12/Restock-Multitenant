@@ -382,7 +382,22 @@ model InventoryLevel {
   tenantId   String
   locationId String
   productId  String
-  onHand     Int      @default(0) // on_hand quantity, NOT available
+  // Shopify "on_hand": everything physically at this location, INCLUDING units
+  // already committed to unfulfilled customer orders. The honest per-location
+  // physical figure, and what reconciles against Shopify's own location screen.
+  onHand     Int      @default(0)
+  // Shopify "available": what can actually be sold — on_hand minus committed.
+  // This is the number every "how much can we sell or move" question wants; a
+  // shop with 2 on hand and 1 already sold has 1 to sell, and counting 2 makes
+  // the buy list under-order by exactly the committed amount.
+  //
+  // Nullable ON PURPOSE, with no default. NULL means "no sync has written this
+  // row since the column existed" and is distinguishable from a genuine zero;
+  // `0` would not be, and a NOT NULL DEFAULT 0 would read as "nothing is
+  // sellable" for every product until the next successful sync. Read it through
+  // sellableUnits() (packages/db/src/inventory.ts), which falls back to onHand —
+  // the old, overstated number, never zero.
+  available  Int?
   // Shopify "incoming" at this location — stock on its way TO it, from a
   // purchase order or a transfer. Summed across locations into Product.onOrder
   // (the "on route" figure the buy list nets off), never sellable on-hand.

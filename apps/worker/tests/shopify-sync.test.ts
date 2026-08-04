@@ -90,12 +90,20 @@ const locations: ShopifyLocationNode[] = [
     name: "Warehouse", // guesses → warehouse (Holds)
     isActive: true,
     inventoryLevels: [
+      // available == on_hand here and below: nothing is committed at these
+      // locations, so switching the rollup to available must be provably inert.
       {
-        quantities: [{ name: "on_hand", quantity: 10 }],
+        quantities: [
+          { name: "available", quantity: 10 },
+          { name: "on_hand", quantity: 10 },
+        ],
         item: { variant: { id: "gid://shopify/ProductVariant/201", product: { id: "gid://shopify/Product/101" } } },
       },
       {
-        quantities: [{ name: "on_hand", quantity: 3 }],
+        quantities: [
+          { name: "available", quantity: 3 },
+          { name: "on_hand", quantity: 3 },
+        ],
         item: { variant: { id: "gid://shopify/ProductVariant/202", product: { id: "gid://shopify/Product/102" } } },
       },
     ],
@@ -106,7 +114,10 @@ const locations: ShopifyLocationNode[] = [
     isActive: true,
     inventoryLevels: [
       {
-        quantities: [{ name: "on_hand", quantity: 20 }],
+        quantities: [
+          { name: "available", quantity: 20 },
+          { name: "on_hand", quantity: 20 },
+        ],
         item: { variant: { id: "gid://shopify/ProductVariant/201", product: { id: "gid://shopify/Product/101" } } },
       },
     ],
@@ -223,10 +234,13 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     expect(byCore.get("9002")).toMatchObject({ locationType: "warehouse", roleStatus: "assumed" });
     expect(byCore.get("9003")).toMatchObject({ locationType: "enroute", roleStatus: "assumed" });
 
-    // Levels carry on_hand (not available) + incoming.
+    // Levels carry BOTH quantities: on_hand is what is physically there,
+    // available is what can be sold once committed units are set aside. The
+    // Main Store has 6 on the shelf with 2 already spoken for.
     const levels = await prismaService.inventoryLevel.findMany({ where: { tenantId } });
     expect(levels).toHaveLength(4);
     const mainStoreArgan = levels.find((l) => l.locationId === byCore.get("9001")!.id && l.onHand === 6);
+    expect(mainStoreArgan?.available).toBe(4);
     expect(mainStoreArgan?.incoming).toBe(5); // "incoming" quantity stored per level
     expect(argan.id).toBeTruthy();
 
@@ -580,11 +594,17 @@ const lifecycleLocations: ShopifyLocationNode[] = [
     isActive: true,
     inventoryLevels: [
       {
-        quantities: [{ name: "on_hand", quantity: 5 }],
+        quantities: [
+          { name: "available", quantity: 5 },
+          { name: "on_hand", quantity: 5 },
+        ],
         item: { id: "gid://shopify/InventoryItem/501", variant: { id: "gid://shopify/ProductVariant/401", product: { id: "gid://shopify/Product/301" } } },
       },
       {
-        quantities: [{ name: "on_hand", quantity: 9 }],
+        quantities: [
+          { name: "available", quantity: 9 },
+          { name: "on_hand", quantity: 9 },
+        ],
         item: { id: "gid://shopify/InventoryItem/502", variant: { id: "gid://shopify/ProductVariant/402", product: { id: "gid://shopify/Product/301" } } },
       },
     ],
@@ -774,6 +794,7 @@ const onRouteLocations: ShopifyLocationNode[] = [
     inventoryLevels: [
       {
         quantities: [
+          { name: "available", quantity: 3 },
           { name: "on_hand", quantity: 3 },
           { name: "incoming", quantity: 20 },
         ],
@@ -848,6 +869,7 @@ describe.skipIf(!runnable)("on-route without an en-route location (real db + red
     // reporting it incoming, so on-route has to clear itself without anyone
     // marking anything received.
     onRouteLocations[0]!.inventoryLevels![0]!.quantities = [
+      { name: "available", quantity: 23 },
       { name: "on_hand", quantity: 23 },
       { name: "incoming", quantity: 0 },
     ];

@@ -261,7 +261,13 @@ export async function seedDev(): Promise<SeedResult> {
     revenueKes: number;
     channel: string;
   }[] = [];
-  const levelRows: { tenantId: string; locationId: string; productId: string; onHand: number }[] = [];
+  const levelRows: {
+    tenantId: string;
+    locationId: string;
+    productId: string;
+    onHand: number;
+    available: number;
+  }[] = [];
 
   for (let i = 0; i < CATALOGUE.length; i++) {
     const p = CATALOGUE[i]!;
@@ -307,9 +313,27 @@ export async function seedDev(): Promise<SeedResult> {
       },
     });
 
+    // Every fourth product has stock already promised to a customer order, so
+    // available sits below on-hand for some of the catalogue and the difference
+    // between the two is visible locally instead of the seed making them equal
+    // everywhere and hiding it. The shop floor is where orders are picked from;
+    // nothing in the warehouse is committed.
+    const committed = i % 4 === 0 ? Math.min(shopShare, 1 + (i % 3)) : 0;
     levelRows.push(
-      { tenantId: tenant.id, locationId: shop.id, productId: product.id, onHand: shopShare },
-      { tenantId: tenant.id, locationId: warehouse.id, productId: product.id, onHand: warehouseShare }
+      {
+        tenantId: tenant.id,
+        locationId: shop.id,
+        productId: product.id,
+        onHand: shopShare,
+        available: shopShare - committed,
+      },
+      {
+        tenantId: tenant.id,
+        locationId: warehouse.id,
+        productId: product.id,
+        onHand: warehouseShare,
+        available: warehouseShare,
+      }
     );
 
     for (let day = 0; day < DAYS; day++) {
