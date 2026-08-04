@@ -59,7 +59,7 @@ function run(over: Partial<SyncRunView> = {}): SyncRunView {
 function render(
   syncRun: SyncRunView | null,
   justConnected = false,
-  connection: ConnectionView = CONNECTION
+  connection: ConnectionView | null = CONNECTION
 ): string {
   return renderToStaticMarkup(
     <ShopifyConnectionCard
@@ -166,6 +166,22 @@ describe("connections card — sync states", () => {
     // The client id is not a secret and is shown back; the stored secret never
     // reaches the client at all, so it cannot appear anywhere in the markup.
     expect(html).toContain("client-abc");
+  });
+
+  it("leads a new workspace with the route that always works", () => {
+    // The OAuth install needs an app whose distribution is configured in the
+    // Partner dashboard; until that is done Shopify answers "this app can't be
+    // installed yet", which reads as our fault and gives the shop nothing to
+    // act on. A tester hit exactly that. The token route needs no distribution,
+    // no review and no Partner account, so it goes first.
+    const html = render(null, false, null);
+    const tokenAt = html.indexOf("Connect with your own app");
+    const installAt = html.indexOf("Or install a published app");
+    expect(tokenAt).toBeGreaterThan(-1);
+    expect(installAt).toBeGreaterThan(-1);
+    expect(tokenAt).toBeLessThan(installAt);
+    // And the install says what it needs, rather than failing at Shopify.
+    expect(html).toContain("distribution is already configured");
   });
 
   it("offers the token route to a store that is connected but cannot sync", () => {
