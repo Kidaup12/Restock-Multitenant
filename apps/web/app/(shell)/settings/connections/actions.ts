@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { Prisma, prismaForTenant, prismaService } from "@wezesha/db";
 import {
   createShopifyClient,
+  decryptToken,
   encryptToken,
   isValidShopDomain,
   probeConnection,
@@ -152,4 +153,64 @@ export async function connectShopifyWithToken(input: {
   revalidatePath("/settings/connections");
   const where = probe.shopName ? ` to ${probe.shopName}` : "";
   return { ok: true, message: `Connected${where}. The first sync is running in the background.` };
+}
+
+/**
+ * Answer "is this store actually reachable right now", on demand.
+ *
+ * The question this replaces is a bad one: today the only way to find out is to
+ * press Sync now and wait for a run to fail, which reports the fault in worker
+ * language ("Shopify auth failed (403)") on a screen that also has to explain
+ * fifteen other things. A token can be dead for days before anyone notices —
+ * both production stores were, and neither said so anywhere a shop could see.
+ *
+ * Deliberately no writes. This is a read someone presses when they are already
+ * unsure; making it mutate state would mean an unlucky press could pause syncs
+ * or clear a pause on evidence nobody asked it to gather.
+ */
+export async function testShopifyConnection(): Promise<ConnectResult> {
+  const actor = await actorContext();
+  if (!actor) return err("Only owners and admins can test a store connection.");
+
+  const db = prismaForTenant(actor.tenantId);
+  const connection = await db.shopifyConnection.findFirst();
+  if (!connection) return err("No store is connected yet.");
+  if (connection.uninstalledAt) {
+    return err("This store is disconnected. Reconnect it before testing.");
+  }
+
+  let accessToken: string;
+  try {
+    accessToken = decryptToken(connection.accessToken);
+  } catch {
+    // The stored ciphertext cannot be read — almost always TOKEN_ENCRYPTION_KEY
+    // differing between deploys. Worth saying plainly; no amount of retrying
+    // helps, and the sync would fail the same way with less explanation.
+    return err("The stored token could not be read. Reconnect the store to store a fresh one.");
+  }
+
+  let probe;
+  try {
+    probe = await probeConnection(createShopifyClient({ shopDomain: connection.shopDomain, accessToken }));
+  } catch (e) {
+    if (e instanceof ShopifyAuthError) {
+      return err(
+        `${connection.shopDomain} rejected our access token. Reconnect the store, or regenerate the token in your Shopify admin.`
+      );
+    }
+    if (e instanceof ShopifyRateLimitedError) {
+      return err("The store is rate limiting us right now. Try again in a minute.");
+    }
+    return err(`Could not reach ${connection.shopDomain}: ${(e as Error).message}`);
+  }
+
+  if (probe.missingScopes.length > 0) {
+    return err(
+      `Connected, but the app is missing ${probe.missingScopes.join(", ")}. Add those scopes in your Shopify admin and reconnect, or stock and sales will not sync fully.`
+    );
+  }
+
+  const name = probe.shopName ?? connection.shopDomain;
+  const currency = probe.currencyCode ? `, trading in ${probe.currencyCode}` : "";
+  return { ok: true, message: `Working. Connected to ${name}${currency}.` };
 }
