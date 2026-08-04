@@ -244,13 +244,15 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     expect(mainStoreArgan?.incoming).toBe(5); // "incoming" quantity stored per level
     expect(argan.id).toBeTruthy();
 
-    // Role-correct rollup: currentStock is SELLS-only (Main Store 6); the
-    // warehouse's 10 holds (excluded). On-order is BOTH in-transit signals —
-    // the en-route location's 20 on-hand, plus the 5 Shopify reports as
-    // incoming at the Main Store, which is where a transfer or purchase order
-    // actually lands.
+    // Role-correct rollup: currentStock is SELLS-only and counts what can
+    // actually be SOLD — the Main Store's available 4, not its on-hand 6. The
+    // two units already committed to customer orders cannot be sold twice, and
+    // counting them is what made the buy list order short. The warehouse's 10
+    // holds (excluded). On-order is BOTH in-transit signals — the en-route
+    // location's 20 on-hand, plus the 5 Shopify reports as incoming at the Main
+    // Store, which is where a transfer or purchase order actually lands.
     const arganFresh = await prismaService.product.findFirst({ where: { tenantId, sku: "ARG-100" } });
-    expect(arganFresh?.currentStock).toBe(6);
+    expect(arganFresh?.currentStock).toBe(4);
     expect(arganFresh?.onOrder).toBe(25);
     // Shea only sits in the warehouse — nothing sellable.
     const sheaFresh = await prismaService.product.findFirst({ where: { tenantId, sku: "SHEA-250" } });
@@ -412,6 +414,21 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     const job = { ...jobStub(tenantId), attemptsMade: 2, opts: { attempts: 6 } } as unknown as Job<SyncJobData>;
     await handleFailure(job, new Error("transient"), publisher);
     expect(await prismaService.notification.count({ where: { tenantId } })).toBe(before);
+  });
+
+  it("sellable stock excludes committed units, by exactly the committed count", async () => {
+    // The client's correction, stated as arithmetic: 6 on the shelf, 2 promised
+    // to customers, 4 sellable. Counting 6 is what inflated days-of-cover and
+    // made the buy list order 2 short on this product.
+    const level = await prismaService.inventoryLevel.findFirstOrThrow({
+      where: { tenantId, onHand: 6 },
+    });
+    const product = await prismaService.product.findFirstOrThrow({
+      where: { tenantId, sku: "ARG-100" },
+    });
+    const committed = level.onHand - (level.available ?? level.onHand);
+    expect(committed).toBe(2);
+    expect(product.currentStock).toBe(level.onHand - committed);
   });
 
   it("repeats of the same failure raise the bell once, not once per tick", async () => {

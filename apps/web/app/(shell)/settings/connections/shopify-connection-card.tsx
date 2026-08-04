@@ -98,7 +98,13 @@ export function ShopifyConnectionCard({
   const paused = live && connection.syncPausedAt !== null;
   const syncing = syncActive;
   const onActiveChange = useCallback((value: boolean) => setSyncActive(value), []);
-  const onSettled = useCallback(() => setQueued(false), []);
+  const onSettled = useCallback((status?: SyncRunView["status"]) => {
+    setQueued(false);
+    // A run that just succeeded settles every complaint on this card. Without
+    // this, a "Test connection" failure from before the store was fixed sits
+    // there in red above a sync that has plainly worked.
+    if (status === "ok") setNotice(null);
+  }, []);
 
   async function syncNow() {
     setBusy("sync");

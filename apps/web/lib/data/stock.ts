@@ -5,6 +5,7 @@ import {
   prismaForTenant,
   productLifecycle,
   roleOf,
+  sellableUnits,
   type LocationRole,
   type ProductLifecycle,
 } from "@wezesha/db";
@@ -184,7 +185,13 @@ export async function getStockCatalogue(
       // shades land in their own order rather than shuffled.
       orderBy: [{ title: "asc" }, { variantTitle: "asc" }],
     }),
-    db.inventoryLevel.groupBy({ by: ["productId", "locationId"], _sum: { onHand: true } }),
+    // findMany + fold rather than groupBy/_sum: `available` is nullable and SQL
+    // SUM skips NULLs, so two independent sums could not be reconciled per row
+    // into "available, falling back to on-hand". The unique key is already
+    // (locationId, productId), so the groupBy was collapsing nothing anyway.
+    db.inventoryLevel.findMany({
+      select: { productId: true, locationId: true, available: true, onHand: true },
+    }),
     db.location.findMany({ select: { id: true, locationType: true } }),
     getCatalogueMetrics(tenantId),
   ]);
@@ -193,7 +200,9 @@ export async function getStockCatalogue(
   const holds = new Map<string, number>();
   for (const lvl of levels) {
     if (roleByLocation.get(lvl.locationId) === "holds") {
-      holds.set(lvl.productId, (holds.get(lvl.productId) ?? 0) + (lvl._sum.onHand ?? 0));
+      // What a warehouse can actually send, not what is standing in it: units
+      // already promised to an order cannot be moved.
+      holds.set(lvl.productId, (holds.get(lvl.productId) ?? 0) + sellableUnits(lvl));
     }
   }
 
@@ -412,16 +421,21 @@ export async function getStockByLocation(
   for (const location of locations) {
     if (roleOf(location) !== "sells") continue;
     for (const lvl of location.inventoryLevels) {
-      if (lvl.onHand > 0) sellsTotal.set(lvl.productId, (sellsTotal.get(lvl.productId) ?? 0) + lvl.onHand);
+      const lvlUnits = sellableUnits(lvl);
+      if (lvlUnits > 0) sellsTotal.set(lvl.productId, (sellsTotal.get(lvl.productId) ?? 0) + lvlUnits);
     }
   }
 
   return locations.map((location) => {
     const role = roleOf(location);
     const showCover = role === "sells";
+    // Sellable units throughout, so this screen reconciles with the catalogue
+    // and with cover: a unit already promised to a customer is not stock this
+    // branch can sell, and showing it here would put the two screens at odds.
     const held = location.inventoryLevels
-      .filter((level) => level.onHand !== 0) // keep oversold (negative), drop only true zeros
-      .sort((a, b) => b.onHand - a.onHand);
+      .map((level) => ({ level, units: sellableUnits(level) }))
+      .filter(({ units }) => units !== 0) // keep oversold (negative), drop only true zeros
+      .sort((a, b) => b.units - a.units);
 
     return {
       locationId: location.id,
@@ -431,25 +445,25 @@ export async function getStockByLocation(
       isPrimary: location.isPrimary,
       showCover,
       skuCount: held.length,
-      unitsOnHand: held.reduce((s, l) => s + l.onHand, 0),
+      unitsOnHand: held.reduce((s, { units }) => s + units, 0),
       stockValueKes: canViewCosts
-        ? held.reduce((s, l) => s + l.onHand * l.product.costKes, 0)
+        ? held.reduce((s, { level, units }) => s + units * level.product.costKes, 0)
         : null,
-      lines: held.map((level) => {
-        const oversold = level.onHand < 0;
+      lines: held.map(({ level, units }) => {
+        const oversold = units < 0;
         let daysCover: number | null = null;
         if (showCover) {
           const total = sellsTotal.get(level.product.id) ?? 0;
           const rate = rateFor(level.product.id);
-          const branchRate = total > 0 ? rate * (Math.max(level.onHand, 0) / total) : 0;
-          daysCover = branchRate > 0 ? Math.floor(level.onHand / branchRate) : null;
+          const branchRate = total > 0 ? rate * (Math.max(units, 0) / total) : 0;
+          daysCover = branchRate > 0 ? Math.floor(units / branchRate) : null;
         }
         return {
           productId: level.product.id,
           sku: level.product.sku,
           title: level.product.title,
-          onHand: level.onHand,
-          valueKes: canViewCosts ? level.onHand * level.product.costKes : null,
+          onHand: units,
+          valueKes: canViewCosts ? units * level.product.costKes : null,
           daysCover,
           oversold,
         };

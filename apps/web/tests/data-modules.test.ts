@@ -8,7 +8,7 @@ import {
 } from "../../../packages/db/scripts/seed-dev";
 import { getReorderNeeded, getTodayMetrics } from "../lib/data/today";
 import { getRevenueByMonth, getSalesSeries, getTopProducts } from "../lib/data/sales";
-import { roleOf } from "@wezesha/db";
+import { roleOf, sellableUnits } from "@wezesha/db";
 import { getStockCatalogue, getStockByLocation } from "../lib/data/stock";
 
 /**
@@ -110,12 +110,13 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
     const rows = await getStockCatalogue(seeded.tenantId, { canViewCosts: true });
     expect(rows).toHaveLength(seeded.productCount);
 
-    // Independently split each product's on-hand by its location's role.
+    // Independently split each product's SELLABLE units by its location's role.
+    // Sellable means available — what is left once units already promised to a
+    // customer are set aside — not everything physically standing there.
     const [levels, locations] = await Promise.all([
-      prismaService.inventoryLevel.groupBy({
-        by: ["productId", "locationId"],
+      prismaService.inventoryLevel.findMany({
         where: { tenantId: seeded.tenantId },
-        _sum: { onHand: true },
+        select: { productId: true, locationId: true, available: true, onHand: true },
       }),
       prismaService.location.findMany({
         where: { tenantId: seeded.tenantId },
@@ -127,7 +128,7 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
     const holds = new Map<string, number>();
     for (const l of levels) {
       const role = roleByLocation.get(l.locationId);
-      const units = l._sum.onHand ?? 0;
+      const units = sellableUnits(l);
       if (role === "sells") sells.set(l.productId, (sells.get(l.productId) ?? 0) + units);
       else if (role === "holds") holds.set(l.productId, (holds.get(l.productId) ?? 0) + units);
     }
@@ -153,12 +154,14 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
   it("sellable on-hand EXCLUDES the warehouse (a wrong role would corrupt cover)", async () => {
     const rows = await getStockCatalogue(seeded.tenantId, { canViewCosts: true });
 
-    const levels = await prismaService.inventoryLevel.groupBy({
-      by: ["productId"],
+    const levels = await prismaService.inventoryLevel.findMany({
       where: { tenantId: seeded.tenantId },
-      _sum: { onHand: true },
+      select: { productId: true, available: true, onHand: true },
     });
-    const allLocations = new Map(levels.map((l) => [l.productId, l._sum.onHand ?? 0]));
+    const allLocations = new Map<string, number>();
+    for (const l of levels) {
+      allLocations.set(l.productId, (allLocations.get(l.productId) ?? 0) + sellableUnits(l));
+    }
 
     // Some product has stock in the warehouse (Holds) — its sellable on-hand
     // must be strictly below its all-locations total, i.e. the warehouse units
