@@ -53,14 +53,15 @@ export function SyncProgress({
    *  and only this component can tell — the card's row prop is a server render
    *  and does not move while a sync progresses. */
   onActiveChange,
-  /** A run reached a terminal state; the card clears its queued flag. */
+  /** A run reached a terminal state; the card clears its queued flag, and uses
+   *  the status to decide whether any standing complaint is now obsolete. */
   onSettled,
 }: {
   initialRun: SyncRunView | null;
   queued: boolean;
   queueAttempt: number;
   onActiveChange: (active: boolean) => void;
-  onSettled: () => void;
+  onSettled: (status?: SyncRunView["status"]) => void;
 }) {
   const router = useRouter();
   const [run, setRun] = useState<SyncRunView | null>(initialRun);
@@ -87,7 +88,7 @@ export function SyncProgress({
       setRun(data.run);
       // With no socket, polling is the only thing that will ever notice a run
       // ending — so it has to release the queued flag too.
-      if (data.run && data.run.status !== "running") onSettled();
+      if (data.run && data.run.status !== "running") onSettled(data.run.status);
     } catch {
       // Transient — the next tick tries again.
     }
