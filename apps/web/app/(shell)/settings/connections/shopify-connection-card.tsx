@@ -280,6 +280,17 @@ export function ShopifyConnectionCard({
           then paste its Admin API access token here.
           {connection !== null && " This replaces the current connection."}
         </p>
+        {/* Shopify's expiring-token rules land on PUBLIC apps — public apps
+            created from 1 Apr 2026, and all public apps from 1 Jan 2027. An app
+            a merchant makes in their own admin is explicitly excluded, so the
+            token pasted here does not expire. Said out loud because the rule is
+            easy to read as applying to everything, and someone reasonably
+            assumed it did. */}
+        <p className="mt-1 text-xs text-ink-faint">
+          An app you create in your own store admin is a custom app, so its token
+          does not expire. Shopify&apos;s expiring-token rules apply to public
+          apps listed on the App Store, not to this one.
+        </p>
       </div>
       <div className="grid gap-2 sm:max-w-md">
         <Input
