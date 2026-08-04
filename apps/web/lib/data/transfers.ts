@@ -1,4 +1,11 @@
-import { BUYABLE_PRODUCT_WHERE, isSellable, prismaForTenant, roleOf, type LocationRole } from "@wezesha/db";
+import {
+  BUYABLE_PRODUCT_WHERE,
+  isSellable,
+  prismaForTenant,
+  roleOf,
+  sellableUnits,
+  type LocationRole,
+} from "@wezesha/db";
 import { getCatalogueMetrics } from "@/lib/metrics";
 
 /**
@@ -311,7 +318,7 @@ export async function getTransferLocations(tenantId: string): Promise<TransferLo
   const db = prismaForTenant(tenantId);
   const locations = await db.location.findMany({
     orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
-    include: { inventoryLevels: { select: { onHand: true } } },
+    include: { inventoryLevels: { select: { available: true, onHand: true } } },
   });
 
   return locations
@@ -320,7 +327,12 @@ export async function getTransferLocations(tenantId: string): Promise<TransferLo
       name: location.name,
       role: roleOf(location),
       isPrimary: location.isPrimary,
-      unitsOnHand: location.inventoryLevels.reduce((sum, l) => sum + Math.max(0, l.onHand), 0),
+      // Movable units, not units present: stock already committed to an order
+      // cannot be transferred out from under it.
+      unitsOnHand: location.inventoryLevels.reduce(
+        (sum, l) => sum + Math.max(0, sellableUnits(l)),
+        0
+      ),
     }))
     .filter((l) => l.role === "holds" || l.role === "sells")
     .sort((a, b) => (a.role === b.role ? 0 : a.role === "holds" ? -1 : 1));
@@ -371,7 +383,12 @@ export async function getDistributionProposal(
       select: { id: true, sku: true, title: true, costKes: true },
       orderBy: { title: "asc" },
     }),
-    db.inventoryLevel.groupBy({ by: ["productId", "locationId"], _sum: { onHand: true } }),
+    // findMany + fold, not groupBy/_sum: SQL SUM skips NULLs, so a nullable
+    // `available` cannot be reconciled against `onHand` per row inside an
+    // aggregate. The unique key is already (locationId, productId).
+    db.inventoryLevel.findMany({
+      select: { productId: true, locationId: true, available: true, onHand: true },
+    }),
     db.salesHistory.groupBy({
       by: ["productId", "locationId"],
       _sum: { quantity: true },
@@ -380,8 +397,10 @@ export async function getDistributionProposal(
     getCatalogueMetrics(tenantId),
   ]);
 
+  // Movable units per location: proposing to move stock that is already
+  // promised to a customer is a transfer that cannot actually happen.
   const onHandAt = new Map<string, number>(
-    levels.map((l) => [`${l.productId}:${l.locationId}`, l._sum.onHand ?? 0])
+    levels.map((l) => [`${l.productId}:${l.locationId}`, sellableUnits(l)])
   );
   const soldAt = new Map<string, number>(
     attributed.map((a) => [`${a.productId}:${a.locationId}`, a._sum.quantity ?? 0])

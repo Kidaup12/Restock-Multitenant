@@ -530,11 +530,13 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     });
     const before = await prismaService.inventoryLevel.findUniqueOrThrow({
       where: { locationId_productId: { locationId: warehouse.id, productId: product.id } },
-      select: { onHand: true },
+      select: { onHand: true, available: true },
     });
+    // Both move together — a warehouse holding 200 with only its old available
+    // figure would be 200 units nothing is allowed to shift.
     await prismaService.inventoryLevel.update({
       where: { locationId_productId: { locationId: warehouse.id, productId: product.id } },
-      data: { onHand: 200 },
+      data: { onHand: 200, available: 200 },
     });
 
     const args = { tenantId: seeded.tenantId, fromLocationId: warehouse.id, coverDays: 14 };
@@ -574,7 +576,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
 
     await prismaService.inventoryLevel.update({
       where: { locationId_productId: { locationId: warehouse.id, productId: product.id } },
-      data: { onHand: before.onHand },
+      data: { onHand: before.onHand, available: before.available },
     });
   });
 });

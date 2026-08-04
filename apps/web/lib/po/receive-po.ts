@@ -1,4 +1,4 @@
-import { prismaForTenantTx, prismaService, isSellable } from "@wezesha/db";
+import { prismaForTenantTx, prismaService, isSellable, sellableUnits } from "@wezesha/db";
 
 /**
  * Line-by-line receiving with partial quantities. One tenant transaction:
@@ -116,19 +116,25 @@ export async function receivePoLines(
       if (nextQty >= line.quantity) fullyReceivedProducts.push(line.productId);
     }
 
-    // currentStock is SELLABLE on-hand — the sum over Sells-role locations only,
-    // matching the sync's definition (a warehouse holds stock, it doesn't sell
-    // it). Summing every level here would let received warehouse stock inflate
-    // sellable cover. Recompute from that source of truth per touched product.
+    // currentStock is SELLABLE on-hand — the sum of what can actually be sold
+    // over Sells-role locations only, matching the sync's definition exactly (a
+    // warehouse holds stock, it doesn't sell it; units promised to a customer
+    // cannot be sold twice). Both halves matter: summing every level would let
+    // received warehouse stock inflate sellable cover, and summing on-hand would
+    // undo the sync's committed-unit subtraction on every receipt.
     const touched = [...new Set(receipts.map((e) => lineById.get(e.lineId)!.productId))];
     for (const productId of touched) {
       const levels = await tx.inventoryLevel.findMany({
         where: { productId },
-        select: { onHand: true, location: { select: { locationType: true } } },
+        select: {
+          available: true,
+          onHand: true,
+          location: { select: { locationType: true } },
+        },
       });
       const sellable = levels
         .filter((l) => l.location && isSellable(l.location))
-        .reduce((sum, l) => sum + l.onHand, 0);
+        .reduce((sum, l) => sum + sellableUnits(l), 0);
       await tx.product.update({
         where: { id: productId },
         data: { currentStock: sellable },

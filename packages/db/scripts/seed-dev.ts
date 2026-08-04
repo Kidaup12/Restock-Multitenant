@@ -287,6 +287,11 @@ export async function seedDev(): Promise<SeedResult> {
     const inWarehouse = p.pattern === "faller" || p.pattern === "dead";
     const shopShare = inWarehouse ? Math.ceil(onHand * 0.6) : onHand;
     const warehouseShare = onHand - shopShare;
+    // Every fourth product has stock already promised to a customer order, so
+    // available sits below on-hand for part of the catalogue and the difference
+    // is visible locally instead of the seed hiding it by making them equal.
+    // The shop floor is where orders are picked from; the warehouse holds none.
+    const committed = i % 4 === 0 ? Math.min(shopShare, 1 + (i % 3)) : 0;
 
     const product = await prismaService.product.create({
       data: {
@@ -306,19 +311,15 @@ export async function seedDev(): Promise<SeedResult> {
         publishedAt: utcDay(0),
         // Sellable on-hand is the Sells-location rollup only (matches
         // shopify-sync's invariant); warehouse/Holds stock is not sellable.
-        currentStock: shopShare,
+        // Sellable on-hand, matching what the sync and PO receipt both compute:
+        // the Sells-location rollup of AVAILABLE, so committed units are out.
+        currentStock: shopShare - committed,
         dailySalesRate: last30 / 30,
         supplierId: suppliers[p.supplier]!.id,
         shopifyCreatedAt: utcDay(DAYS + 120),
       },
     });
 
-    // Every fourth product has stock already promised to a customer order, so
-    // available sits below on-hand for some of the catalogue and the difference
-    // between the two is visible locally instead of the seed making them equal
-    // everywhere and hiding it. The shop floor is where orders are picked from;
-    // nothing in the warehouse is committed.
-    const committed = i % 4 === 0 ? Math.min(shopShare, 1 + (i % 3)) : 0;
     levelRows.push(
       {
         tenantId: tenant.id,

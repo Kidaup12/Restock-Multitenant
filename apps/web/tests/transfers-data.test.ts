@@ -281,17 +281,26 @@ describe.skipIf(!runnable)("transfers across two branches selling at different r
       where: { tenantId, productId, channel: "shopify" },
       data: { locationId: branchBId },
     });
+    // Both quantities move together: nothing here is committed to an order, and
+    // a level whose available lags its on-hand is a state no writer produces —
+    // the sync sets both, and receiving a PO settles available with COALESCE.
     await prismaService.inventoryLevel.updateMany({
       where: { tenantId, productId, locationId: branchAId },
-      data: { onHand: 0 },
+      data: { onHand: 0, available: 0 },
     });
     await prismaService.inventoryLevel.create({
-      data: { tenantId, productId, locationId: branchBId, onHand: 0 },
+      data: { tenantId, productId, locationId: branchBId, onHand: 0, available: 0 },
     });
     await prismaService.inventoryLevel.upsert({
       where: { locationId_productId: { locationId: warehouseId, productId } },
-      create: { tenantId, productId, locationId: warehouseId, onHand: warehouseStock },
-      update: { onHand: warehouseStock },
+      create: {
+        tenantId,
+        productId,
+        locationId: warehouseId,
+        onHand: warehouseStock,
+        available: warehouseStock,
+      },
+      update: { onHand: warehouseStock, available: warehouseStock },
     });
   }, 120_000);
 
@@ -338,7 +347,7 @@ describe.skipIf(!runnable)("transfers across two branches selling at different r
   it("is capped by the source: a thin warehouse levels both branches lower", async () => {
     await prismaService.inventoryLevel.update({
       where: { locationId_productId: { locationId: warehouseId, productId } },
-      data: { onHand: 20 },
+      data: { onHand: 20, available: 20 },
     });
 
     const proposal = await getDistributionProposal(tenantId, {

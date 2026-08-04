@@ -8,6 +8,7 @@ import {
   roleOfType,
   typeOfRole,
 } from "@wezesha/db";
+import { sellableUnits } from "@wezesha/db";
 import { publishEvent } from "@wezesha/realtime";
 import { tenantDayKey } from "@wezesha/pos";
 import type { SyncJobData } from "@wezesha/queue";
@@ -396,7 +397,15 @@ async function syncLocationsAndInventory(
         update: { onHand, available, incoming },
       });
       seenProducts.add(productId);
-      if (role === "sells") sellsByProduct.set(productId, (sellsByProduct.get(productId) ?? 0) + onHand);
+      // Sellable stock is what can actually be sold: on-hand minus whatever is
+      // already committed to unfulfilled orders. Counting on-hand here read a
+      // product with 2 on the shelf and 1 sold as 2 sellable, which inflated
+      // days-of-cover and made the buy list order short by the committed amount.
+      if (role === "sells")
+        sellsByProduct.set(productId, (sellsByProduct.get(productId) ?? 0) + sellableUnits({ available, onHand }));
+      // En-route stays on on-hand: stock parked at a transit location is not
+      // "available" to sell in Shopify's sense, so available there is typically
+      // zero and switching this would silently delete the on-route signal.
       else if (role === "enroute")
         enrouteByProduct.set(productId, (enrouteByProduct.get(productId) ?? 0) + onHand);
       // Shopify's own in-transit number, counted wherever it lands. A purchase
