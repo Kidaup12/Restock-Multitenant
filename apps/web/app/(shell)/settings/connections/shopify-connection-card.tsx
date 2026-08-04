@@ -286,11 +286,16 @@ export function ShopifyConnectionCard({
               </p>
             </div>
             <div className="grid gap-2 sm:max-w-md">
+              {/* autoComplete off throughout: a bare text + password pair in a
+                  settings form is exactly what a browser offers to fill with the
+                  saved sign-in, which silently puts an email in the client ID. */}
               <Input
                 value={clientId}
                 onChange={(e) => setClientId(e.target.value)}
                 placeholder="Client ID"
                 aria-label="Shopify app client ID"
+                autoComplete="off"
+                name="shopify-client-id"
               />
               <Input
                 type="password"
@@ -298,6 +303,8 @@ export function ShopifyConnectionCard({
                 onChange={(e) => setApiSecret(e.target.value)}
                 placeholder={appCredentialsConfigured ? "•••••••• (unchanged)" : "API secret key"}
                 aria-label="Shopify app API secret"
+                autoComplete="new-password"
+                name="shopify-api-secret"
               />
               <div className="flex flex-wrap items-center gap-2">
                 <Button
@@ -362,6 +369,8 @@ export function ShopifyConnectionCard({
                     onChange={(e) => setTokenShop(e.target.value)}
                     placeholder="your-store.myshopify.com"
                     aria-label="Store address"
+                    autoComplete="off"
+                    name="shopify-token-shop"
                   />
                   <Input
                     // Treated as a password: it is a bearer credential, and this
@@ -371,6 +380,8 @@ export function ShopifyConnectionCard({
                     onChange={(e) => setToken(e.target.value)}
                     placeholder="shpat_…"
                     aria-label="Admin API access token"
+                    autoComplete="new-password"
+                    name="shopify-admin-token"
                   />
                   <div>
                     <Button
