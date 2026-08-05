@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
-import { authenticatePosFeed, ingestPosSales, type PosSaleInput } from "@wezesha/pos";
+import { authenticatePosFeed, ingestPosSales, validatePosSales } from "@wezesha/pos";
 import { withCapture } from "@/lib/observability/wrap";
+
+/** Enough for a bridge operator to act on without returning a payload-sized
+ *  error body when every row is malformed. */
+const MAX_REPORTED_ERRORS = 20;
 
 /**
  * POS feed ingest — accepts a window of physical sales as a POST payload and
@@ -40,7 +44,19 @@ export const POST = withCapture(async (request: Request) => {
   const tenant = await authenticatePosFeed(slug, presented);
   if (!tenant) return unauthorized();
 
-  const result = await ingestPosSales({ tenantId: tenant.id, sales: body.sales as PosSaleInput[] });
+  // Validate before anything is written. An unreadable date or a missing lines
+  // array used to surface as a 500, which a POS bridge can only respond to by
+  // retrying the same bad payload forever — with the shop's till sales missing
+  // from restock planning the whole time.
+  const parsed = validatePosSales(body.sales);
+  if (!parsed.ok) {
+    return NextResponse.json(
+      { error: "invalid sales", errors: parsed.errors.slice(0, MAX_REPORTED_ERRORS) },
+      { status: 400 }
+    );
+  }
+
+  const result = await ingestPosSales({ tenantId: tenant.id, sales: parsed.sales });
   if (!result) return NextResponse.json({ error: "unknown tenant" }, { status: 404 });
   return NextResponse.json(result);
 });

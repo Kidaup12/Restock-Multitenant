@@ -211,3 +211,39 @@ describe("planPosIngest — determinism (set-semantics foundation)", () => {
     expect(planPosIngest(input)).toEqual(planPosIngest(input));
   });
 });
+
+describe("planPosIngest — duplicate external ids in one payload", () => {
+  /**
+   * A bridge resending a receipt inside one batch used to take the whole batch
+   * down: the delete removed the stored row once, then createMany inserted the
+   * same id twice against a unique constraint — losing every other valid sale
+   * in the request. Duplicates would also have double-counted the day's units.
+   */
+  it("keeps one sale per external id, and counts it once", () => {
+    const plan = planPosIngest({
+      sales: [
+        sale({ externalId: "DUP-1", lines: [{ sku: "CAN-SHE-340", qty: 2 }] }),
+        sale({ externalId: "OTHER", lines: [{ sku: "NL-GLY-750", qty: 1 }] }),
+        sale({ externalId: "DUP-1", lines: [{ sku: "CAN-SHE-340", qty: 5 }] }),
+      ],
+      skuToProductId: skuMap,
+      priceByProductId: prices,
+      dayKeyOf: utcDay,
+    });
+
+    expect(plan.externalIds.filter((id) => id === "DUP-1")).toHaveLength(1);
+    expect(plan.sales).toHaveLength(2);
+
+    // Last occurrence wins — the rule a resend already follows against the
+    // stored rows, so a payload and a re-POST of its tail agree.
+    const kept = plan.sales.find((s) => s.externalId === "DUP-1");
+    expect(kept?.lines[0]?.qty).toBe(5);
+
+    // Counted once, not 2 + 5.
+    const cantu = plan.salesHistory.find((r) => r.productId === "prod-cantu");
+    expect(cantu?.quantity).toBe(5);
+
+    // The valid sale alongside it still survives the batch.
+    expect(plan.sales.some((s) => s.externalId === "OTHER")).toBe(true);
+  });
+});
