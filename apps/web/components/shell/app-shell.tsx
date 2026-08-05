@@ -11,6 +11,8 @@ import {
   TAB_BAR_LABEL,
 } from "@/components/shell/nav-config";
 import { NavItem } from "@/components/shell/nav-item";
+import { ConnectionBanner } from "@/components/shell/connection-banner";
+import type { ConnectionState } from "@/lib/admin/fleet";
 import { RouteLoadingProvider } from "@/components/shell/route-loading";
 import { NotificationBell } from "@/components/shell/notification-bell";
 import { ProfileMenu } from "@/components/shell/profile-menu";
@@ -61,6 +63,7 @@ export function AppShell({
   tourAutoStart,
   unreadNotifications,
   isPlatformAdmin,
+  connection,
   children,
 }: {
   user: ShellUser;
@@ -72,6 +75,9 @@ export function AppShell({
   unreadNotifications: number;
   /* Caller is on the operator allow-list — the only thing that reveals /admin. */
   isPlatformAdmin: boolean;
+  /* Whether this shop's data is still moving, and whether this caller can fix
+     it. Null when there is no active workspace to have a connection. */
+  connection: { state: ConnectionState; canFix: boolean } | null;
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -195,6 +201,10 @@ export function AppShell({
               />
             </div>
           </header>
+
+          {connection && (
+            <ConnectionBanner state={connection.state} canFix={connection.canFix} />
+          )}
 
           <main className="flex-1 px-4 py-6 pb-24 md:px-8 md:py-8 md:pb-10">
             <div className="mx-auto w-full max-w-6xl">{children}</div>

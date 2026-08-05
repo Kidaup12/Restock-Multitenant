@@ -4,6 +4,7 @@ import { isPlatformAdmin } from "@/lib/admin/gate";
 import { planAllows } from "@/lib/capabilities/plan-features";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getUnreadCount } from "@/lib/notifications/data";
+import { getConnectionStatus } from "@/lib/data/connection-status";
 import { AppShell } from "@/components/shell/app-shell";
 
 const roleLabels: Record<Role, string> = {
@@ -28,11 +29,16 @@ export default async function ShellLayout({
   // Match the badge to the feed the caller can actually open: cost alerts are
   // filtered out of a money-blind member's list, so counting them here would
   // leave a badge that never clears.
-  const unreadNotifications = membership
-    ? await getUnreadCount(membership.tenantId, {
-        canViewCosts: hasPermission(membership, "view_costs"),
-      })
-    : 0;
+  const [unreadNotifications, connectionStatus] = membership
+    ? await Promise.all([
+        getUnreadCount(membership.tenantId, {
+          canViewCosts: hasPermission(membership, "view_costs"),
+        }),
+        // Rides above every screen, so a shop whose sync has stopped finds out
+        // on the page it is already looking at rather than only in Settings.
+        getConnectionStatus(membership.tenantId),
+      ])
+    : [0, null];
 
   return (
     <AppShell
@@ -62,6 +68,16 @@ export default async function ShellLayout({
          non-admin's shell carries no trace of /admin. A hint only — requireAdmin
          is what actually guards the console. */
       isPlatformAdmin={platformAdmin}
+      connection={
+        connectionStatus && membership
+          ? {
+              state: connectionStatus.state,
+              // Pointing a member at a screen they cannot open is worse than
+              // pointing them nowhere: the message still shows, the link does not.
+              canFix: hasPermission(membership, "manage_settings"),
+            }
+          : null
+      }
     >
       {children}
     </AppShell>
