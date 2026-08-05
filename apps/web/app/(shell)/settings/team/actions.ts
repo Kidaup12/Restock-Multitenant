@@ -64,11 +64,21 @@ export async function inviteTeammate(input: {
     role: input.role,
   });
   if (!created.ok) return err(created.error);
-  await sendInviteEmail({
-    invite: created.invite,
-    tenantName: membership.tenant.name,
-    invitedBy: session.user.name || session.user.email,
-  });
+  try {
+    await sendInviteEmail({
+      invite: created.invite,
+      tenantName: membership.tenant.name,
+      invitedBy: session.user.name || session.user.email,
+    });
+  } catch {
+    // The invite row is written before the email is sent, so a delivery failure
+    // used to leave a pending invite nobody could act on: the admin saw the
+    // action fail, the teammate never got a link, and the ghost occupied the
+    // invite list until it expired. Take it back so the admin can simply retry.
+    await cancelInvite(membership.tenantId, created.invite.token);
+    revalidatePath("/settings/team");
+    return err("We couldn't send the invite email, so nothing was invited. Try again in a moment.");
+  }
   revalidatePath("/settings/team");
   return { ok: true };
 }
