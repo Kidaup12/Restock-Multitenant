@@ -37,6 +37,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
   { href: "/suppliers", label: "Suppliers", icon: <InboxIcon />, tourKey: "nav-suppliers" },
   { href: "/sales", label: "Sales data", icon: <ChartIcon />, tourKey: "nav-sales" },
   { href: "/insights", label: "Insights", icon: <BulbIcon />, tourKey: "nav-insights" },
+  { href: "/activity", label: "Activity log", icon: <ClipboardIcon />, tourKey: "nav-activity" },
   { href: "/settings", label: "Settings", icon: <GearIcon />, tourKey: "nav-settings" },
 ];
 
