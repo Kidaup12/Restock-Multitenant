@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import {
   BoxIcon,
   CalendarIcon,
+  BanknoteIcon,
   ChartIcon,
   ChevronRightIcon,
   GearIcon,
@@ -16,6 +17,12 @@ import { SkeletonCard } from "@/components/ui/skeleton";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { getConnectionStatus } from "@/lib/data/connection-status";
 import { getSettingsOverview } from "@/lib/data/settings-overview";
+import { getTenantPlan } from "@/lib/capabilities";
+import {
+  PLAN_ORDER,
+  PLAN_TIER_LABEL,
+  type PlanTier,
+} from "@/lib/capabilities/plan-features";
 import { planFreshnessLabel } from "@/lib/data/forecast-freshness";
 import { RunForecastButton } from "../today/run-forecast-button";
 
@@ -40,9 +47,10 @@ const CONNECTION_STATUS: Record<string, string> = {
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 async function SettingsSections({ tenantId }: { tenantId: string }) {
-  const [connection, overview] = await Promise.all([
+  const [connection, overview, plan] = await Promise.all([
     getConnectionStatus(tenantId),
     getSettingsOverview(tenantId),
+    getTenantPlan(tenantId),
   ]);
 
   const sections = [
@@ -52,6 +60,13 @@ async function SettingsSections({ tenantId }: { tenantId: string }) {
       title: "Workspace",
       description: "Name, trading day, alert email, dead stock, and how you buy.",
       status: null,
+    },
+    {
+      href: "/settings/plan",
+      icon: <BanknoteIcon />,
+      title: "Plan",
+      description: "What this workspace's plan includes, and what the next one adds.",
+      status: PLAN_TIER_LABEL[(PLAN_ORDER.find((t) => t === plan) ?? "starter") as PlanTier],
     },
     {
       href: "/settings/connections",
