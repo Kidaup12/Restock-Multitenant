@@ -16,7 +16,11 @@ export type SyncResource = (typeof SYNC_RESOURCES)[number];
  *  staleness rule surfaced fleet-wide). */
 export const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
 
-export type ConnectionState = "live" | "uninstalled" | "none";
+/** "paused" is a store the app still holds a connection for but has stopped
+ *  syncing, because its token kept being refused. It reported as "live" until
+ *  this existed, which is the most misleading answer available: the fleet is
+ *  the one screen whose job is to show that a shop's data has stopped moving. */
+export type ConnectionState = "live" | "paused" | "uninstalled" | "none";
 
 /** Never-synced or older than the threshold. Clock lives here, not in
  *  components — react-hooks/purity bans Date.now() during render. */
@@ -42,12 +46,19 @@ export type FleetRow = {
   lastForecastRunAt: Date | null;
 };
 
+/** A store the app holds a usable connection row for. Paused counts: its data
+ *  exists and is going stale, which is precisely what the fleet must show — it
+ *  is the difference between "no store here" and "this store stopped moving". */
+export function isConnected(state: ConnectionState): boolean {
+  return state === "live" || state === "paused";
+}
+
 function worstStaleness(
   state: ConnectionState,
   lastSync: Record<SyncResource, Date | null>,
   now: number
 ): number | null {
-  if (state !== "live") return null;
+  if (!isConnected(state)) return null;
   let worst = 0;
   for (const resource of SYNC_RESOURCES) {
     const at = lastSync[resource];
@@ -69,7 +80,9 @@ export async function getFleet(now: number = Date.now()): Promise<FleetRow[]> {
       orderBy: { createdAt: "asc" },
       include: {
         _count: { select: { memberships: true, products: true } },
-        shopifyConnection: { select: { shopDomain: true, uninstalledAt: true } },
+        shopifyConnection: {
+          select: { shopDomain: true, uninstalledAt: true, syncPausedAt: true },
+        },
       },
     }),
     prismaService.ingestCursor.findMany({
@@ -100,7 +113,9 @@ export async function getFleet(now: number = Date.now()): Promise<FleetRow[]> {
       ? "none"
       : t.shopifyConnection.uninstalledAt
         ? "uninstalled"
-        : "live";
+        : t.shopifyConnection.syncPausedAt
+          ? "paused"
+          : "live";
     const tenantCursors = cursorsByTenant.get(t.id);
     const lastSync = Object.fromEntries(
       SYNC_RESOURCES.map((r) => [r, tenantCursors?.get(r) ?? null])
