@@ -72,7 +72,11 @@ export function PosSetupView({
           <p className="text-sm text-ink-secondary">
             {configured
               ? "Your till can post sales to Wezesha. They appear under Sales data, where anything that didn't match a product waits for you."
-              : "Nothing can post sales to this workspace yet. Create a secret below and give it to whoever set up your till system."}
+              : canManage
+                ? "Nothing can post sales to this workspace yet. Create a secret below and give it to whoever set up your till system."
+                : // The controls below are owner/admin only, so telling a member
+                  // to "create a secret below" points at buttons they cannot see.
+                  "Nothing can post sales to this workspace yet. An owner or admin needs to set this up."}
           </p>
           {!configured && (
             <p className="mt-2 text-sm text-ink-muted">
