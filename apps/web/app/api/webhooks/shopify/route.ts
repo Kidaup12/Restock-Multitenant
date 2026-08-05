@@ -141,6 +141,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true });
   }
 
+  // Disconnect has to mean "this store no longer changes my workspace". Above
+  // this line: the mandatory compliance topics (which must run regardless, and
+  // returned already) and app/uninstalled (which is what SETS the flag).
+  // Everything below mutates tenant data, so one gate covers all of it —
+  // products/delete used to slip past because only the sync topics checked.
+  if (connection.uninstalledAt) {
+    return NextResponse.json({ ok: true, ignored: true });
+  }
+
   if (topic === "products/delete") {
     const shopifyProductId = deletedProductId(raw);
     if (!shopifyProductId) {
@@ -160,7 +169,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true });
   }
 
-  if (SYNC_TOPICS.has(topic) && !connection.uninstalledAt) {
+  if (SYNC_TOPICS.has(topic)) {
     try {
       await enqueueShopifySync(tenantId);
     } catch (err) {
