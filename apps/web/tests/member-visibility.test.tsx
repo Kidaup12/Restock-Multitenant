@@ -377,6 +377,28 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     expect(groupFor(member)).toEqual(groupFor(owner));
   });
 
+  it("never tells a money-blind member a product's cost exceeds its price", async () => {
+    // `plannable` carries no number, but the screen turns it into sentences that
+    // are entirely about cost — "cost is above the selling price", "no unit cost
+    // on file". A member reading those has learned a cost fact, which is the same
+    // leak-by-derivation the cost-moved flag is guarded against.
+    const [member, owner] = await Promise.all([
+      getBuyList(seeded.tenantId, { canViewCosts: false }),
+      getBuyList(seeded.tenantId, { canViewCosts: true }),
+    ]);
+
+    expect(member!.rows.length + member!.excluded.length).toBeGreaterThan(0); // vacuity guard
+    for (const row of [...member!.rows, ...member!.excluded]) {
+      expect(row.plannable, row.sku).toBe("ok");
+    }
+    // The section whose only purpose is to report broken cost data is gone.
+    expect(member!.excluded.some((r) => r.reason === "unplannable")).toBe(false);
+    // Same products either way — this redacts a field, it does not hide rows.
+    expect(new Set(member!.rows.map((r) => r.predictionId))).toEqual(
+      new Set(owner!.rows.map((r) => r.predictionId))
+    );
+  });
+
   it("orders a member's buy list without costs: same rows, cost-free ranking", async () => {
     // Redaction nulls the line total but not the position it put the row in.
     // Inside a tie-group (same urgency, same days to stockout) the owner's order
@@ -708,6 +730,32 @@ describe("plan buy-list redaction (pure)", () => {
     expect(costNumbers(member.rows)).toEqual([]);
     const ownerList = mkList([mkRow(5000)]);
     expect(redactBuyList(ownerList, true)).toBe(ownerList);
+  });
+
+  it("hides a cost verdict from a member, and keeps it for the owner", () => {
+    // "Cost is above the selling price — restocking this loses money" is a cost
+    // fact even though `plannable` holds no number, and it rendered for every
+    // role. Redact the field; do not remove the row.
+    const broken: BuyListRow = { ...mkRow(0), plannable: "cost-exceeds-price" };
+    const ordered: BuyListRow = { ...mkRow(0), predictionId: "p2", plannable: "ok" };
+    const owner: BuyList = {
+      ...mkList([broken, ordered]),
+      excluded: [
+        { ...broken, predictionId: "x1", reason: "unplannable" },
+        { ...ordered, predictionId: "x2", reason: "covered" },
+      ],
+    };
+
+    const member = redactBuyList(owner, false);
+    expect(member.rows.map((r) => r.plannable)).toEqual(["ok", "ok"]);
+    // The group that exists only to report broken cost data is dropped whole —
+    // a redacted version would be a heading with nothing to say.
+    expect(member.excluded.map((r) => r.reason)).toEqual(["covered"]);
+    expect(member.rows).toHaveLength(2); // rows are redacted, never hidden
+
+    // The owner keeps the verdict — this is redaction, not deletion.
+    expect(owner.rows[0]!.plannable).toBe("cost-exceeds-price");
+    expect(owner.excluded.some((r) => r.reason === "unplannable")).toBe(true);
   });
 
   it("an owner-overridden row keeps its quantity but still hides the line total from a member", () => {

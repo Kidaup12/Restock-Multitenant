@@ -191,11 +191,22 @@ const redactRow = (r: BuyListRow): BuyListRow => ({
   unitCostKes: null,
   lineTotalKes: null,
   atRiskKes: null,
+  // `plannable` is not money, but its values are ABOUT money: the UI renders
+  // "cost is above the selling price — restocking this loses money" and "no unit
+  // cost on file" from it, for every role. That is a cost fact reaching a
+  // money-blind member through a derivation rather than a field — the same shape
+  // as the cost-moved flag the suite already guards. Resolve it to "ok" so the
+  // rows still appear and the notes do not.
+  plannable: "ok",
 });
 
 /** Redact an excluded row's costs, keeping its reason — same money-blind masking
- *  as an active row (the reason is metadata, not money). */
+ *  as an active row (the reason is metadata, not money). The `unplannable` group
+ *  is dropped outright: its whole purpose is to say a product's cost data is
+ *  wrong, so a redacted version would be a heading with nothing behind it. */
 const redactExcluded = (r: ExcludedRow): ExcludedRow => ({ ...redactRow(r), reason: r.reason });
+const redactExcludedList = (rows: ExcludedRow[]): ExcludedRow[] =>
+  rows.filter((r) => r.reason !== "unplannable").map(redactExcluded);
 
 /** The persisted cover as a real day count, or null once it reaches the engine's
  *  "effectively forever" sentinel — a cover that far out is a ~zero run rate,
@@ -563,7 +574,7 @@ export async function getBuyList(
     forecastRunId: latest.forecastRunId,
     runDate: latest.runDate,
     rows: canViewCosts ? sizedRows : sizedRows.map(redactRow),
-    excluded: canViewCosts ? excludedRows : excludedRows.map(redactExcluded),
+    excluded: canViewCosts ? excludedRows : redactExcludedList(excludedRows),
     totalPredicted: predictions.length,
     totalCostKes: canViewCosts ? sizedRows.reduce((sum, r) => sum + r.lineTotalKes, 0) : null,
   };
@@ -583,7 +594,7 @@ export function redactBuyList(buyList: BuyList, canViewCosts: boolean): BuyList 
   return {
     ...buyList,
     rows: buyList.rows.map(redactRow).sort(byUrgencyCostFree),
-    excluded: buyList.excluded.map(redactExcluded).sort(byUrgencyCostFree),
+    excluded: redactExcludedList(buyList.excluded).sort(byUrgencyCostFree),
     totalCostKes: null,
   };
 }
