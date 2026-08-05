@@ -26,7 +26,10 @@ export default async function AdminLayout({
   return (
     <div className="min-h-dvh bg-page">
       <header className="sticky top-0 z-10 border-b border-edge bg-surface/90 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
+        {/* Wraps below ~440px. Five non-shrinking items in one nowrap row gave
+            the console a hard minimum wider than a phone, so every /admin page
+            scrolled sideways and the sticky bar detached from the content. */}
+        <div className="mx-auto flex min-h-14 max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0 sm:px-6">
           <Link href="/admin" className="flex items-baseline gap-2">
             <span className="font-display text-sm font-bold tracking-tight text-ink-strong">
               Wezesha
@@ -44,7 +47,17 @@ export default async function AdminLayout({
             </Link>
           </nav>
           <div className="ml-auto flex items-center gap-3">
-            <span className="hidden text-xs text-ink-muted sm:block">{admin.email}</span>
+            {/* The console has no sidebar and no workspace switcher by design,
+                which left no way back to one's own shop except editing the URL. */}
+            <Link
+              href="/today"
+              className="text-sm font-medium text-ink-secondary transition-colors hover:text-ink"
+            >
+              Back to app
+            </Link>
+            <span className="hidden max-w-[16rem] truncate text-xs text-ink-muted sm:block">
+              {admin.email}
+            </span>
             <ThemeToggle />
           </div>
         </div>

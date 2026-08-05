@@ -18,6 +18,7 @@ import { relativeTime } from "@/lib/notifications/format";
 import { requireAdmin } from "@/lib/admin/gate";
 import {
   getFleet,
+  isConnected,
   isStale,
   sortFleet,
   SYNC_RESOURCES,
@@ -43,7 +44,7 @@ function parseSort(raw: string | undefined): FleetSort {
 
 /** One resource's last-sync cell: red past the 24h staleness line. */
 function SyncCell({ row, at }: { row: FleetRow; at: Date | null }) {
-  if (row.connection.state !== "live") {
+  if (!isConnected(row.connection.state)) {
     return <span className="text-ink-faint">—</span>;
   }
   if (!at) return <span className="font-medium text-negative">never</span>;
@@ -56,6 +57,9 @@ function SyncCell({ row, at }: { row: FleetRow; at: Date | null }) {
 
 const connectionBadge = {
   live: <Badge tone="positive">Connected</Badge>,
+  // Still installed, but nothing is syncing until someone reconnects it —
+  // "Connected" here reads as healthy and is the opposite of the truth.
+  paused: <Badge tone="negative">Not syncing</Badge>,
   uninstalled: <Badge tone="warning">Uninstalled</Badge>,
   none: <Badge tone="neutral">None</Badge>,
 } as const;
@@ -158,7 +162,9 @@ export default async function AdminFleetPage({
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-2">
-                      {row.connection.state === "live" && <SyncButton tenantId={row.tenantId} />}
+                      {/* Offered while paused too: a manual run is the operator's
+                          way to check whether a reconnect actually took. */}
+                      {isConnected(row.connection.state) && <SyncButton tenantId={row.tenantId} />}
                       <form action={enterWorkspace}>
                         <input type="hidden" name="tenantId" value={row.tenantId} />
                         <Button size="sm" type="submit">
