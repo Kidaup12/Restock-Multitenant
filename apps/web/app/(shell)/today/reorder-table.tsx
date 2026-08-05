@@ -11,6 +11,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { planFreshnessLabel } from "@/lib/data/forecast-freshness";
 import { getReorderNeeded } from "@/lib/data/today";
 
 const urgencyBadge: Record<string, { label: string; tone: "negative" | "warning" | "accent" | "neutral" }> = {
@@ -46,16 +47,15 @@ export async function ReorderTable({
     );
   }
 
-  const runDay = reorder.runDate.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-  });
+  // Same freshness rule as the planner, so the two screens never disagree about
+  // how old the plan is.
+  const freshness = planFreshnessLabel(reorder.runDate);
 
   return (
     <Card>
       <CardHeader
         title="Reorder needed"
-        subtitle={`${reorder.rows.length} of ${reorder.totalPredicted} forecast products · run ${runDay}`}
+        subtitle={`${reorder.rows.length} of ${reorder.totalPredicted} forecast products · ${freshness.short}`}
         action={
           <Link href="/plan" className="text-sm font-medium text-accent-ink hover:underline">
             Open Restock planner
