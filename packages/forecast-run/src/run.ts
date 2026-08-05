@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
-import { BUYABLE_PRODUCT_WHERE, isSellable, prismaForTenant, prismaForTenantTx } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, isSellable, prismaForTenantTx } from "@wezesha/db";
 import {
   assignAbc,
   dailySalesValue,
@@ -112,11 +112,15 @@ function priorLabel(p: OwnerPriorFacts): string {
 }
 
 export async function runForecast(tenantId: string): Promise<ForecastRunResult> {
-  const db = prismaForTenant(tenantId);
   const now = new Date();
   const historySince = new Date(now.getTime() - HISTORY_DAYS * DAY_MS);
 
-  const [
+  // One connection for the whole read phase. Issued as a Promise.all these become
+  // one transaction per query, so the batch asks the pool for ten connections at
+  // once and everything behind the slowest read times out waiting — which is how
+  // the nightly run died against a pooled `connection_limit=1`. Sequential on one
+  // connection cannot starve itself at any pool size.
+  const {
     products,
     config,
     promos,
@@ -127,78 +131,85 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
     priorRows,
     emptyShelfDays,
     firstSnapshot,
-  ] = await Promise.all([
-    db.product.findMany({
+  } = await prismaForTenantTx(
+    tenantId,
+    async (tx) => ({
       // One predicate decides what the shop still sells — testers and damaged
       // stock, anything the store drafted or archived, anything that vanished
       // from it. They stay visible in the catalogue and earn no forecast, so
       // nothing the shop stopped selling can reach a buy list.
-      where: { ...BUYABLE_PRODUCT_WHERE },
-      select: {
-        id: true,
-        sku: true,
-        title: true,
-        productType: true,
-        vendor: true,
-        customCategory: true,
-        priceKes: true,
-        costKes: true,
-        currentStock: true,
-        onOrder: true,
-        leadTimeDays: true,
-        shopifyCreatedAt: true,
-        supplier: { select: { leadTimeAvgDays: true, leadTimeStdDays: true } },
-      },
+      products: await tx.product.findMany({
+        where: { ...BUYABLE_PRODUCT_WHERE },
+        select: {
+          id: true,
+          sku: true,
+          title: true,
+          productType: true,
+          vendor: true,
+          customCategory: true,
+          priceKes: true,
+          costKes: true,
+          currentStock: true,
+          onOrder: true,
+          leadTimeDays: true,
+          shopifyCreatedAt: true,
+          supplier: { select: { leadTimeAvgDays: true, leadTimeStdDays: true } },
+        },
+      }),
+      config: await tx.tenantConfig.findFirst(),
+      promos: await tx.promo.findMany({
+        where: { deletedAt: null, startDate: { lte: now }, endDate: { gte: now } },
+        select: { discountPct: true, promoType: true, channel: true, scope: true, scopeValue: true },
+      }),
+      // Past/ongoing promo windows overlapping the history window: their spike days
+      // are censored from the baseline run rate (distinct from the active-promo LIFT
+      // above, which boosts the forward forecast).
+      pastPromos: await tx.promo.findMany({
+        where: { deletedAt: null, startDate: { lte: now }, endDate: { gte: historySince } },
+        select: { startDate: true, endDate: true, scope: true, scopeValue: true },
+      }),
+      // Shop-closure days across the history window, censored so a closed-day zero
+      // doesn't deflate the rate. Per-location; the full-closure filter is below.
+      closures: await tx.locationClosure.findMany({
+        where: { date: { gte: historySince } },
+        select: { locationId: true, date: true },
+      }),
+      locations: await tx.location.findMany({ select: { id: true, locationType: true } }),
+      sales: await tx.salesHistory.findMany({
+        where: { date: { gte: historySince } },
+        select: { productId: true, date: true, quantity: true, revenueKes: true, channel: true },
+      }),
+      priorRows: await tx.ownerPrior.findMany({
+        where: { revokedAt: null },
+        select: {
+          scope: true,
+          scopeValue: true,
+          expectedUnits: true,
+          multiplier: true,
+          proxyProductId: true,
+          weeks: true,
+          createdAt: true,
+          revokedAt: true,
+        },
+      }),
+      // The in-stock-day denominator: every product-day the nightly snapshot
+      // recorded an empty shelf. ONE query for the whole catalogue (never a lookup
+      // per product), and only the empty rows travel — the in-stock majority stays
+      // in the database. Indexed on (tenantId, date).
+      emptyShelfDays: await tx.inventorySnapshot.findMany({
+        where: { date: { gte: historySince }, onHand: { lte: 0 } },
+        select: { productId: true, date: true },
+      }),
+      // How far back the snapshots reach. Older history has no proof either way and
+      // keeps gap inference, so a tenant a week into snapshotting is not read as
+      // having been in stock all year.
+      firstSnapshot: await tx.inventorySnapshot.findFirst({
+        orderBy: { date: "asc" },
+        select: { date: true },
+      }),
     }),
-    db.tenantConfig.findFirst(),
-    db.promo.findMany({
-      where: { deletedAt: null, startDate: { lte: now }, endDate: { gte: now } },
-      select: { discountPct: true, promoType: true, channel: true, scope: true, scopeValue: true },
-    }),
-    // Past/ongoing promo windows overlapping the history window: their spike days
-    // are censored from the baseline run rate (distinct from the active-promo LIFT
-    // above, which boosts the forward forecast).
-    db.promo.findMany({
-      where: { deletedAt: null, startDate: { lte: now }, endDate: { gte: historySince } },
-      select: { startDate: true, endDate: true, scope: true, scopeValue: true },
-    }),
-    // Shop-closure days across the history window, censored so a closed-day zero
-    // doesn't deflate the rate. Per-location; the full-closure filter is below.
-    db.locationClosure.findMany({
-      where: { date: { gte: historySince } },
-      select: { locationId: true, date: true },
-    }),
-    db.location.findMany({ select: { id: true, locationType: true } }),
-    db.salesHistory.findMany({
-      where: { date: { gte: historySince } },
-      select: { productId: true, date: true, quantity: true, revenueKes: true, channel: true },
-    }),
-    db.ownerPrior.findMany({
-      where: { revokedAt: null },
-      select: {
-        scope: true,
-        scopeValue: true,
-        expectedUnits: true,
-        multiplier: true,
-        proxyProductId: true,
-        weeks: true,
-        createdAt: true,
-        revokedAt: true,
-      },
-    }),
-    // The in-stock-day denominator: every product-day the nightly snapshot
-    // recorded an empty shelf. ONE query for the whole catalogue (never a lookup
-    // per product), and only the empty rows travel — the in-stock majority stays
-    // in the database. Indexed on (tenantId, date).
-    db.inventorySnapshot.findMany({
-      where: { date: { gte: historySince }, onHand: { lte: 0 } },
-      select: { productId: true, date: true },
-    }),
-    // How far back the snapshots reach. Older history has no proof either way and
-    // keeps gap inference, so a tenant a week into snapshotting is not read as
-    // having been in stock all year.
-    db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
-  ]);
+    { maxWait: 30_000, timeout: 120_000 }
+  );
 
   const historyByProduct = new Map<string, SalesPoint[]>();
   for (const row of sales) {
