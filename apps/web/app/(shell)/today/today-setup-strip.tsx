@@ -49,8 +49,12 @@ export async function TodaySetupStrip({ tenantId }: { tenantId: string }) {
   return (
     <Card className="px-5 py-4">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
+        {/* Wraps at every level. On a 390px phone the label, the level badge,
+            the counter and four signals in one non-wrapping row pushed the
+            document to 485px wide, so first-run Today scrolled sideways and
+            felt broken. */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium text-ink">Setup depth</span>
             <Badge tone={level >= 3 ? "positive" : "neutral"}>Level {level} of 3</Badge>
             {/* The level is a capability rung; this is the plainer question the
@@ -59,7 +63,7 @@ export async function TodaySetupStrip({ tenantId }: { tenantId: string }) {
               {done} of {SIGNAL_ORDER.length} done
             </span>
           </div>
-          <ol className="flex items-center gap-3" aria-label="Setup signals">
+          <ol className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Setup signals">
             {SIGNAL_ORDER.map(({ key, label }) => {
               const on = signals[key];
               return (
