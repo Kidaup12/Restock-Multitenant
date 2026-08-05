@@ -26,6 +26,17 @@ export const INVENTORY_SNAPSHOT_PATTERN = "0 1 * * *";
 export const SNAPSHOT_DISPATCH_JOB = "inventory-snapshot-dispatch";
 export const SNAPSHOT_TENANT_JOB = "inventory-snapshot-tenant";
 
+/** A missed snapshot is a hole in the in-stock-day denominator the forecast reads,
+ *  and the row can only be written for the day it describes — so retry, and keep
+ *  the failure rather than deleting the only trace of it. Day-keyed jobIds mean a
+ *  retained failure never blocks tomorrow's run. */
+export const SNAPSHOT_JOB_OPTIONS = {
+  attempts: 3,
+  backoff: { type: "exponential" as const, delay: 300_000 },
+  removeOnComplete: true,
+  removeOnFail: { age: 7 * 24 * 60 * 60 },
+};
+
 /** ~13 months of history: every week keeps last year's matching week to compare
  *  against, and the table stays bounded at ~400 rows per product. */
 export const SNAPSHOT_RETENTION_DAYS = 400;
@@ -46,7 +57,7 @@ export async function registerSnapshotCronSchedules(queue: SnapshotCronQueue): P
   await queue.upsertJobScheduler(
     INVENTORY_SNAPSHOT_SCHEDULER,
     { pattern: INVENTORY_SNAPSHOT_PATTERN },
-    { name: SNAPSHOT_DISPATCH_JOB }
+    { name: SNAPSHOT_DISPATCH_JOB, opts: SNAPSHOT_JOB_OPTIONS }
   );
 }
 
@@ -77,7 +88,7 @@ export async function dispatchInventorySnapshots(
     await queue.add(
       SNAPSHOT_TENANT_JOB,
       { tenantId: tenant.id },
-      { jobId: snapshotJobId(tenant.id, runKey), removeOnComplete: true, removeOnFail: true }
+      { ...SNAPSHOT_JOB_OPTIONS, jobId: snapshotJobId(tenant.id, runKey) }
     );
   }
   return tenants.length;
