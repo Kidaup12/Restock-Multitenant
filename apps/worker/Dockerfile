@@ -19,6 +19,10 @@ COPY packages/observability/package.json packages/observability/
 COPY packages/queue/package.json packages/queue/
 COPY packages/realtime/package.json packages/realtime/
 COPY packages/shopify/package.json packages/shopify/
+# packages/db's postinstall is `prisma generate`, so the schema has to be in the
+# image BEFORE the install — copying it with the rest of the source below is too
+# late and fails the build.
+COPY packages/db/prisma/ packages/db/prisma/
 RUN npm ci -w @wezesha/worker
 
 COPY packages/db/ packages/db/
