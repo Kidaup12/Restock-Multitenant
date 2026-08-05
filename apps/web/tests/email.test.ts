@@ -8,10 +8,8 @@ import { sendEmail } from "../lib/email";
  * network — the fetch is always a fake.
  */
 
-type FetchArgs = Parameters<typeof fetch>;
-
 function okFetch(status = 201) {
-  return vi.fn(async (..._args: FetchArgs) => ({
+  return vi.fn(async () => ({
     ok: status < 400,
     status,
     text: async () => "",
