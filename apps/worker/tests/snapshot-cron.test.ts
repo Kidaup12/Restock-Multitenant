@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Redis } from "ioredis";
 import type { Queue } from "bullmq";
-import { CUSTOMER_TENANTS_WHERE } from "@wezesha/db/platform-tenant";
+import { PLATFORM_TENANT_ID } from "@wezesha/db/platform-tenant";
 
 /**
  * Inventory-snapshot cron. The writer suite runs against the local database:
@@ -199,19 +199,24 @@ describe.skipIf(!runnable)("inventory snapshot cron (real redis + db)", () => {
   it("dispatch fans out one no-overlap job per customer workspace", async () => {
     const now = new Date();
     const count = await cron.dispatchInventorySnapshots(queue, now);
-    const expected = await prismaService.tenant.count({ where: CUSTOMER_TENANTS_WHERE });
-    expect(count).toBe(expected);
     expect(count).toBeGreaterThan(0);
+
+    // Asserted against THIS suite's tenant, never a live global count: sibling
+    // worker suites create and delete tenants in the same database, so a second
+    // census taken after the dispatch can legitimately disagree with it.
+    const fannedTenantIds = async (): Promise<Array<string | undefined>> =>
+      (await queue.getJobs(["waiting", "prioritized"]))
+        .filter((j) => j.name === cron.SNAPSHOT_TENANT_JOB)
+        .map((j) => (j.data as { tenantId?: string }).tenantId);
+
+    expect(await fannedTenantIds()).toContain(tenantId);
     // The platform workspace holds no inventory to snapshot.
-    expect(await prismaService.tenant.count()).toBeGreaterThan(expected);
+    expect(await fannedTenantIds()).not.toContain(PLATFORM_TENANT_ID);
 
     // Dispatching again for the same day is a no-op per tenant (jobId dedup).
     await cron.dispatchInventorySnapshots(queue, now);
-    const fanned = (await queue.getJobs(["waiting", "prioritized"])).filter(
-      (j) => j.name === cron.SNAPSHOT_TENANT_JOB
-    );
-    expect(fanned).toHaveLength(count); // not doubled
-    expect(fanned.map((j) => (j.data as { tenantId?: string }).tenantId)).toContain(tenantId);
+    const fanned = (await fannedTenantIds()).filter((id) => id === tenantId);
+    expect(fanned).toHaveLength(1); // not doubled
     await queue.drain();
   });
 
