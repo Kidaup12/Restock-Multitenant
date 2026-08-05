@@ -13,6 +13,10 @@ const DAY_MS = 86_400_000;
 
 export interface WeeklySummary {
   tenantName: string;
+  /** The workspace's own currency. The Shopify sync adopts the store's, so a
+   *  USD shop was being emailed its revenue labelled KES. The field name keeps
+   *  its historical `Kes` suffix — the amount is in this currency, not KES. */
+  currency: string;
   revenue30dKes: number;
   unitsSold30d: number;
   stockouts: number;
@@ -23,7 +27,7 @@ export async function buildWeeklySummary(tenantId: string): Promise<WeeklySummar
   // eslint-disable-next-line tenant-safety/require-tenant-scope -- reads one tenant by the id the job already carries; the worker has no session, so there is no resolver to route through.
   const tenant = await prismaService.tenant.findUnique({
     where: { id: tenantId },
-    select: { name: true },
+    select: { name: true, currency: true },
   });
   if (!tenant) return null;
 
@@ -58,6 +62,7 @@ export async function buildWeeklySummary(tenantId: string): Promise<WeeklySummar
 
   return {
     tenantName: tenant.name,
+    currency: tenant.currency ?? "KES",
     revenue30dKes: totals._sum.revenueKes ?? 0,
     unitsSold30d: totals._sum.quantity ?? 0,
     stockouts,
@@ -73,7 +78,7 @@ export function renderWeeklySummary(summary: WeeklySummary): string {
   const lines = [
     `Weekly stock summary — ${summary.tenantName}`,
     "",
-    `Revenue, last 30 days: KES ${Math.round(summary.revenue30dKes).toLocaleString("en-KE")}`,
+    `Revenue, last 30 days: ${summary.currency} ${Math.round(summary.revenue30dKes).toLocaleString("en-KE")}`,
     `Units sold, last 30 days: ${Math.round(summary.unitsSold30d).toLocaleString("en-KE")}`,
     `Products stocked out right now: ${summary.stockouts}`,
     "",

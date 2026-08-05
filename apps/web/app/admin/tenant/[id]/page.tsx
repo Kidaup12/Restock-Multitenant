@@ -30,11 +30,15 @@ export const metadata: Metadata = {
   title: "Workspace",
 };
 
-const kes = new Intl.NumberFormat("en-KE", {
-  style: "currency",
-  currency: "KES",
-  maximumFractionDigits: 0,
-});
+/** Support looks at whatever currency the workspace actually trades in — the
+ *  Shopify sync adopts the store's, so a hard-coded KES mislabels a USD shop's
+ *  figures on the one screen used to diagnose it. */
+const money = (currency: string) =>
+  new Intl.NumberFormat("en-KE", {
+    style: "currency",
+    currency: currency || "KES",
+    maximumFractionDigits: 0,
+  });
 
 const urgencyTone: Record<string, "negative" | "warning" | "neutral"> = {
   critical: "negative",
@@ -58,6 +62,7 @@ export default async function AdminTenantPage({
 
   const detail = await getTenantDetail(id);
   if (!detail) notFound();
+  const kes = money(detail.tenant.currency ?? "KES");
 
   const grant = await resolveAdminWorkspace(await getSession());
   if (!grant || grant.tenantId !== id) {
