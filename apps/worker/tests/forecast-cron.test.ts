@@ -79,6 +79,61 @@ describe.skipIf(!runnable)("forecast crons (real redis + db)", () => {
     await queue.removeJobScheduler(cron.MONTHLY_BACKTEST_SCHEDULER);
   });
 
+  it("schedules off the sync-tick minute", () => {
+    // The Shopify sync ticks every 15 minutes from :00, and the monthly backtest
+    // used to start in the same minute as the 03:00 full-sync cursor clear.
+    for (const pattern of [cron.NIGHTLY_FORECAST_PATTERN, cron.MONTHLY_BACKTEST_PATTERN]) {
+      expect(Number(pattern.split(" ")[0])).not.toBe(0);
+    }
+  });
+
+  it("fans out jobs that retry and keep their failures", async () => {
+    await queue.drain();
+    await cron.dispatchForecasts(queue, new Date());
+    const [job] = (await queue.getJobs(["waiting", "prioritized"])).filter(
+      (j) => j.name === cron.FORECAST_TENANT_JOB
+    );
+    expect(job).toBeDefined();
+    expect(job!.opts.attempts).toBe(3);
+    expect(job!.opts.backoff).toMatchObject({ type: "exponential", delay: 300_000 });
+    // Not `true`: deleting a failed job erased the only record of the outage.
+    expect(job!.opts.removeOnFail).toMatchObject({ age: expect.any(Number) });
+    await queue.drain();
+  });
+
+  it("raises a notice once the retries are spent, and not before", async () => {
+    await prismaService.notification.deleteMany({ where: { tenantId, kind: "forecast_failed" } });
+    const publisher = new Redis(redisUrl!, { maxRetriesPerRequest: null });
+    const failed = (attemptsMade: number) =>
+      ({
+        name: cron.FORECAST_TENANT_JOB,
+        data: { tenantId },
+        opts: { attempts: 3 },
+        attemptsMade,
+      }) as unknown as Parameters<typeof cron.handleForecastFailure>[0];
+    try {
+      await cron.handleForecastFailure(failed(1), new Error("pool timeout"), publisher);
+      expect(
+        await prismaService.notification.count({ where: { tenantId, kind: "forecast_failed" } })
+      ).toBe(0);
+
+      await cron.handleForecastFailure(failed(3), new Error("pool timeout"), publisher);
+      const notices = await prismaService.notification.findMany({
+        where: { tenantId, kind: "forecast_failed" },
+      });
+      expect(notices).toHaveLength(1);
+      expect(notices[0]!.body).toContain("pool timeout");
+
+      // A run that keeps failing must not fill the bell with the same sentence.
+      await cron.handleForecastFailure(failed(3), new Error("pool timeout"), publisher);
+      expect(
+        await prismaService.notification.count({ where: { tenantId, kind: "forecast_failed" } })
+      ).toBe(1);
+    } finally {
+      await publisher.quit();
+    }
+  });
+
   it("dispatch fans out one no-overlap job per customer workspace", async () => {
     const now = new Date();
     const count = await cron.dispatchForecasts(queue, now);

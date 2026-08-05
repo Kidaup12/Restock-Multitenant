@@ -26,6 +26,7 @@ import {
   FORECAST_CRON_QUEUE,
   createForecastCronQueue,
   createForecastCronWorker,
+  handleForecastFailure,
   registerForecastCronSchedules,
   type ForecastCronQueue,
 } from "./forecast-cron";
@@ -153,6 +154,9 @@ async function main(): Promise<void> {
     forecastWorker.on("failed", (job, err) => {
       console.error(`worker: forecast cron ${job?.id} failed`, err);
       captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: FORECAST_CRON_QUEUE });
+      void handleForecastFailure(job, err, publisher).catch((notifyErr) => {
+        console.error("worker: forecast failure notice failed", notifyErr);
+      });
     });
     console.log("worker: forecast crons registered (nightly forecast + monthly backtest)");
   }

@@ -2,6 +2,7 @@ import { Queue, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { CUSTOMER_TENANTS_WHERE, prismaService } from "@wezesha/db";
 import { runForecast, runBacktest } from "@wezesha/forecast-run";
+import { publishEvent } from "@wezesha/realtime";
 
 /**
  * Forecast crons — the freshness + accuracy backbone (spec §6).
@@ -22,12 +23,32 @@ import { runForecast, runBacktest } from "@wezesha/forecast-run";
 export const FORECAST_CRON_QUEUE = "forecast-crons";
 
 export const NIGHTLY_FORECAST_SCHEDULER = "nightly-forecast";
-/** 02:00 worker-local — backs the spec's "forecast from last night 02:00". */
-export const NIGHTLY_FORECAST_PATTERN = "0 2 * * *";
+/** ~02:00 worker-local — backs the spec's "forecast from last night 02:00".
+ *  Off the hour because the Shopify sync ticks every 15 minutes and the run has
+ *  no reason to start in the same minute as a catalogue pull. */
+export const NIGHTLY_FORECAST_PATTERN = "7 2 * * *";
 
 export const MONTHLY_BACKTEST_SCHEDULER = "monthly-backtest";
-/** 03:00 on the 1st of each month — after the nightly run, before the day. */
-export const MONTHLY_BACKTEST_PATTERN = "0 3 1 * *";
+/** After the nightly run and clear of the 03:00 full-sync cursor clear, which it
+ *  used to start alongside. */
+export const MONTHLY_BACKTEST_PATTERN = "40 3 1 * *";
+
+/** A missed night is a stale buy list the next morning, so the run retries rather
+ *  than being dropped — and a failure is KEPT, because `removeOnFail` erased the
+ *  only evidence the last outage left behind. Safe against the per-tenant jobId
+ *  dedup: the id is day-keyed, so yesterday's retained failure cannot block today.
+ *  Backoff is minutes, not the sync's seconds — this waits on our own database,
+ *  not on a rate-limited external API. */
+export const FORECAST_JOB_OPTIONS = {
+  attempts: 3,
+  backoff: { type: "exponential" as const, delay: 300_000 },
+  removeOnComplete: true,
+  removeOnFail: { age: 7 * 24 * 60 * 60 },
+};
+
+/** One notice per tenant per half-day: long enough not to fill the bell while a
+ *  run keeps failing, short enough to resurface as something a human acts on. */
+const FORECAST_FAILURE_NOTICE_DEDUP_MS = 12 * 60 * 60 * 1000;
 
 export const FORECAST_DISPATCH_JOB = "forecast-dispatch";
 export const FORECAST_TENANT_JOB = "forecast-tenant";
@@ -41,17 +62,19 @@ export function createForecastCronQueue(connection: Redis): ForecastCronQueue {
   return new Queue<ForecastCronJobData>(FORECAST_CRON_QUEUE, { connection });
 }
 
-/** Idempotent: upserting a scheduler replaces any previous cadence. */
+/** Idempotent: upserting a scheduler replaces any previous cadence. The dispatch
+ *  jobs carry the same options as the per-tenant ones — a fan-out that fails
+ *  silently loses the night for every tenant at once. */
 export async function registerForecastCronSchedules(queue: ForecastCronQueue): Promise<void> {
   await queue.upsertJobScheduler(
     NIGHTLY_FORECAST_SCHEDULER,
     { pattern: NIGHTLY_FORECAST_PATTERN },
-    { name: FORECAST_DISPATCH_JOB }
+    { name: FORECAST_DISPATCH_JOB, opts: FORECAST_JOB_OPTIONS }
   );
   await queue.upsertJobScheduler(
     MONTHLY_BACKTEST_SCHEDULER,
     { pattern: MONTHLY_BACKTEST_PATTERN },
-    { name: BACKTEST_DISPATCH_JOB }
+    { name: BACKTEST_DISPATCH_JOB, opts: FORECAST_JOB_OPTIONS }
   );
 }
 
@@ -82,7 +105,7 @@ async function enqueuePerTenant(
     await queue.add(
       jobName,
       { tenantId: tenant.id },
-      { jobId: jobId(tenant.id), removeOnComplete: true, removeOnFail: true }
+      { ...FORECAST_JOB_OPTIONS, jobId: jobId(tenant.id) }
     );
   }
   return tenants.length;
@@ -98,6 +121,47 @@ export function dispatchForecasts(queue: ForecastCronQueue, now: Date = new Date
 export function dispatchBacktests(queue: ForecastCronQueue, now: Date = new Date()): Promise<number> {
   const key = monthKey(now);
   return enqueuePerTenant(queue, BACKTEST_TENANT_JOB, (id) => backtestJobId(id, key));
+}
+
+/** Tell the shop its plan did not update, once the retries are spent.
+ *
+ *  Until this existed the run failed into a console line and a deleted job, so a
+ *  stale buy list looked exactly like a fresh one — which is how two nights went
+ *  unnoticed. Only the final attempt speaks; a retry that later succeeds is not
+ *  news. */
+export async function handleForecastFailure(
+  job: Job<ForecastCronJobData> | undefined,
+  err: Error,
+  publisher: Redis
+): Promise<void> {
+  const tenantId = job?.data.tenantId;
+  if (!job || !tenantId || job.name !== FORECAST_TENANT_JOB) return;
+  const isFinal = err.name === "UnrecoverableError" || job.attemptsMade >= (job.opts.attempts ?? 1);
+  if (!isFinal) return;
+
+  const kind = "forecast_failed";
+  const title = "Last night's plan did not update";
+  try {
+    const since = new Date(Date.now() - FORECAST_FAILURE_NOTICE_DEDUP_MS);
+    const prior = await prismaService.notification.findFirst({
+      where: { tenantId, kind, title, createdAt: { gte: since } },
+      select: { id: true },
+    });
+    if (prior) return;
+
+    await prismaService.notification.create({
+      data: {
+        tenantId,
+        kind,
+        title,
+        body: `The overnight forecast did not finish, so the buy list still shows the previous run. It will be retried tonight; use Run forecast on Today to refresh it now. (${err.message.slice(0, 300)})`,
+      },
+    });
+    await publishEvent(publisher, { type: "notification.new", data: { tenantId, kind, title } });
+  } catch (persistErr) {
+    // Never let the notice mask the failure it is reporting.
+    console.error(`worker: could not persist forecast-failure notification for ${tenantId}`, persistErr);
+  }
 }
 
 export interface ForecastCronWorkerOptions {
