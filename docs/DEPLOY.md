@@ -47,11 +47,11 @@ important thing on this page.
 
    **The port differs, and getting it wrong takes the app down under load.**
 
-   | Variable | Port | Suffix |
-   |---|---|---|
-   | `DIRECT_URL` | `5432` session | — |
-   | `DATABASE_URL` | `6543` transaction | `?pgbouncer=true&connection_limit=1` |
-   | `SERVICE_DATABASE_URL` | `6543` transaction | `?pgbouncer=true&connection_limit=1` |
+   | Variable | Port | Suffix (Vercel) | Suffix (worker) |
+   |---|---|---|---|
+   | `DIRECT_URL` | `5432` session | — | not set |
+   | `DATABASE_URL` | `6543` transaction | `?pgbouncer=true&connection_limit=1` | `?pgbouncer=true&connection_limit=10&pool_timeout=20` |
+   | `SERVICE_DATABASE_URL` | `6543` transaction | `?pgbouncer=true&connection_limit=1` | `?pgbouncer=true&connection_limit=10&pool_timeout=20` |
 
    Session mode allows only 15 clients. Every serverless invocation holds one
    for its lifetime, so a few page loads exhaust the pool and requests start
@@ -60,6 +60,13 @@ important thing on this page.
    Migrations are the exception: they need a real session, which is what 5432
    is for. The long-running worker should use the transaction ports too; it
    otherwise holds connections out of the same small pool all day.
+
+   The worker keeps the ports but **not** the `connection_limit=1`. That value
+   suits serverless, where each instance runs one query at a time; the worker is
+   one process running several queues concurrently, and every tenant-scoped
+   operation opens its own transaction, so a job issuing a batch of reads asks
+   for one connection per read and times out against a pool of one. Keep the sum
+   of every service's limit under the project's pooler pool size.
 
    `pgbouncer=true` stops Prisma using prepared statements, which do not survive
    transaction pooling. Tenant scope is safe under it because the scope is set
