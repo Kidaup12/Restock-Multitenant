@@ -42,6 +42,9 @@ function mkRow(partial: Partial<BuyListRow>): BuyListRow {
     plannable: "ok",
     atRiskKes: 0,
     revenue30dKes: 0,
+    confidence: "sure",
+    coldStart: null,
+    borrowedFromTitle: null,
     ...partial,
   };
 }

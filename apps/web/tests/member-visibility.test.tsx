@@ -146,7 +146,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     const products = await prismaService.product.findMany({
       where: { tenantId: seeded.tenantId },
       select: { id: true },
-      take: 2,
+      take: 3,
     });
     await prismaService.prediction.createMany({
       data: products.map((p, index) => ({
@@ -158,7 +158,13 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
         layer2Adjustment: 0,
         finalForecast30d: 30,
         daysUntilStockout: 4 + index,
-        recommendedQty: 12,
+        // The third is sized to nothing and carries the trust columns, so the
+        // not-on-the-list surface and the confidence word both have something
+        // to be asserted against — with two positive rows and no words, the
+        // money-blind checks below would pass on an empty set.
+        recommendedQty: index === 2 ? 0 : 12,
+        confidenceWord: index === 2 ? "guessing" : "sure",
+        coldStart: index === 2 ? "too_new" : null,
         safetyStock: 5,
         reorderPoint: 10,
         confidence: 0.8,
@@ -335,6 +341,40 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
       expect(typeof row.revenue30dKes).toBe("number");
       expect(row.revenue30dKes).toBe(ownerRevenue.get(row.predictionId));
     }
+  });
+
+  it("shows a member the same trust words, and the same not-on-the-list grouping", async () => {
+    const [member, owner] = await Promise.all([
+      getBuyList(seeded.tenantId, { canViewCosts: false }),
+      getBuyList(seeded.tenantId, { canViewCosts: true }),
+    ]);
+    expect(member!.excluded.length).toBeGreaterThan(0); // vacuity guard
+
+    // The trust layer is derived from sales history, variability and product
+    // age — never from cost — so it is identical for both roles. Asserted field
+    // by field rather than relying on costNumbers(), which only matches keys
+    // ending in "Kes" and would miss a cost smuggled in under another name.
+    const ownerTrust = new Map(
+      [...owner!.rows, ...owner!.excluded].map((r) => [
+        r.predictionId,
+        { c: r.confidence, s: r.coldStart, b: r.borrowedFromTitle },
+      ])
+    );
+    for (const row of [...member!.rows, ...member!.excluded]) {
+      expect(ownerTrust.get(row.predictionId)).toEqual({
+        c: row.confidence,
+        s: row.coldStart,
+        b: row.borrowedFromTitle,
+      });
+    }
+    expect(costNumbers(member)).toEqual([]);
+
+    // Group membership is the same partition for both roles. A grouping that
+    // differed by cost visibility would be a cost figure by another route —
+    // the same defect the budget-split partition test guards against.
+    const groupFor = (list: Awaited<ReturnType<typeof getBuyList>>) =>
+      new Map(list!.excluded.map((r) => [r.predictionId, r.reason]));
+    expect(groupFor(member)).toEqual(groupFor(owner));
   });
 
   it("orders a member's buy list without costs: same rows, cost-free ranking", async () => {
@@ -639,6 +679,9 @@ describe("plan buy-list redaction (pure)", () => {
     plannable: "ok",
     atRiskKes: 0,
     revenue30dKes,
+    confidence: "sure",
+    coldStart: null,
+    borrowedFromTitle: null,
   });
 
   const mkList = (rows: BuyListRow[]): BuyList => ({
