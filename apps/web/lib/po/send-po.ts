@@ -49,21 +49,37 @@ export async function sendPoToSupplier(tenantId: string, poId: string): Promise<
   const lead = po.supplier.leadTimeAvgDays;
   const expectedAt = lead != null ? new Date(sentAt.getTime() + lead * DAY_MS) : null;
 
+  // Claim the PO BEFORE the email goes out. Read-then-send-then-mark let two
+  // admins, two tabs or a double-click each read "draft" and each email the
+  // supplier — one real order placed twice, with a single PO showing as sent.
+  // The status guard makes the claim the race: exactly one caller updates a row
+  // still in draft, and only that caller sends.
+  const claim = await db.purchaseOrder.updateMany({
+    where: { id: po.id, status: "draft", deletedAt: null },
+    data: { status: "sent", sentAt, expectedAt },
+  });
+  if (claim.count === 0) return { ok: false, reason: "not_sendable" };
+
   // The supplier is quoting against these figures — the send action is what
   // authorises the costs to leave the building, not the viewing member — so the
   // supplier-facing document always carries them.
   const doc = buildPoDocument({ ...po, sentAt, expectedAt }, tenant.name, { canViewCosts: true });
-  await sendEmail({
-    to: po.supplier.email,
-    subject: poEmailSubject(doc),
-    text: poEmailText(doc),
-    html: poEmailHtml(doc),
-  });
-
-  await db.purchaseOrder.update({
-    where: { id: po.id },
-    data: { status: "sent", sentAt, expectedAt },
-  });
+  try {
+    await sendEmail({
+      to: po.supplier.email,
+      subject: poEmailSubject(doc),
+      text: poEmailText(doc),
+      html: poEmailHtml(doc),
+    });
+  } catch (err) {
+    // Hand the claim back so the owner can retry, rather than leaving a PO that
+    // says "sent" to a supplier who never heard from us.
+    await db.purchaseOrder.updateMany({
+      where: { id: po.id, status: "sent" },
+      data: { status: "draft", sentAt: null, expectedAt: null },
+    });
+    throw err;
+  }
   // The linked queue rows inherit the ETA so "on the way" surfaces can show it.
   if (expectedAt) {
     await db.order.updateMany({
