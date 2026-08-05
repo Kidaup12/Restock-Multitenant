@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 import {
   BoxIcon,
   CalendarIcon,
@@ -9,59 +10,108 @@ import {
   LayersIcon,
   UsersIcon,
 } from "@/components/icons";
-import { Card } from "@/components/ui/card";
+import { Card, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { SkeletonCard } from "@/components/ui/skeleton";
+import { activeMembership, requireSession } from "@/lib/auth";
+import { getConnectionStatus } from "@/lib/data/connection-status";
+import { getSettingsOverview } from "@/lib/data/settings-overview";
+import { planFreshnessLabel } from "@/lib/data/forecast-freshness";
+import { RunForecastButton } from "../today/run-forecast-button";
 
 export const metadata: Metadata = {
   title: "Settings",
 };
 
-const sections = [
-  {
-    href: "/settings/workspace",
-    icon: <GearIcon />,
-    title: "Workspace",
-    description: "Name, trading day, alert email, dead stock, and how you buy.",
-  },
-  {
-    href: "/settings/locations",
-    icon: <BoxIcon />,
-    title: "Locations",
-    description: "What each location does for your stock math — sells, holds, ignores.",
-  },
-  {
-    href: "/settings/team",
-    icon: <UsersIcon />,
-    title: "Team",
-    description: "Invite teammates, set roles, and remove access.",
-  },
-  {
-    href: "/settings/connections",
-    icon: <LayersIcon />,
-    title: "Connections",
-    description: "Connect your Shopify store and check how recently it synced.",
-  },
-  {
-    href: "/settings/pos",
-    icon: <ChartIcon />,
-    title: "Till sales",
-    description: "Send in-store sales to Wezesha, so the forecast sees the whole shop.",
-  },
-  {
-    href: "/settings/signals",
-    icon: <CalendarIcon />,
-    title: "Promotions & closures",
-    description: "Days that weren't normal trading — so a giveaway doesn't inflate every order after it.",
-  },
-];
+/**
+ * A hub that answers "is this set up?" on the page, rather than six links you
+ * have to open one by one to find out. Each row keeps its drill-down — the
+ * editing still lives on its own screen — but carries the one fact the owner
+ * came to check.
+ */
 
-export default function SettingsPage() {
+const CONNECTION_STATUS: Record<string, string> = {
+  live: "Connected and syncing",
+  paused: "Paused — the store keeps refusing our access",
+  uninstalled: "Disconnected — nothing is syncing",
+  none: "No store connected yet",
+};
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+async function SettingsSections({ tenantId }: { tenantId: string }) {
+  const [connection, overview] = await Promise.all([
+    getConnectionStatus(tenantId),
+    getSettingsOverview(tenantId),
+  ]);
+
+  const sections = [
+    {
+      href: "/settings/workspace",
+      icon: <GearIcon />,
+      title: "Workspace",
+      description: "Name, trading day, alert email, dead stock, and how you buy.",
+      status: null,
+    },
+    {
+      href: "/settings/connections",
+      icon: <LayersIcon />,
+      title: "Connections",
+      description: "Connect your Shopify store and check how recently it synced.",
+      status: CONNECTION_STATUS[connection.state] ?? null,
+      // The one row where the status IS the reason to visit, so it leads.
+      alert: connection.state !== "live",
+    },
+    {
+      href: "/settings/locations",
+      icon: <BoxIcon />,
+      title: "Locations",
+      description: "What each location does for your stock math — sells, holds, ignores.",
+      status: overview.locations > 0 ? plural(overview.locations, "location", "locations") : "None set up",
+      alert: overview.locations === 0,
+    },
+    {
+      href: "/settings/team",
+      icon: <UsersIcon />,
+      title: "Team",
+      description: "Invite teammates, set roles, and remove access.",
+      status: plural(overview.teamMembers, "person", "people"),
+    },
+    {
+      href: "/settings/pos",
+      icon: <ChartIcon />,
+      title: "Till sales",
+      description: "Send in-store sales to Wezesha, so the forecast sees the whole shop.",
+      status: overview.hasTillSales ? "Receiving till sales" : "No till sales received yet",
+    },
+    {
+      href: "/settings/signals",
+      icon: <CalendarIcon />,
+      title: "Promotions & closures",
+      description:
+        "Days that weren't normal trading — so a giveaway doesn't inflate every order after it.",
+      status: overview.signals > 0 ? plural(overview.signals, "day recorded", "days recorded") : "None recorded",
+    },
+  ];
+
+  const freshness = overview.lastForecastRun
+    ? planFreshnessLabel(overview.lastForecastRun)
+    : null;
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Settings"
-        description="Workspace, team, and integrations"
-      />
+    <>
+      <Card>
+        <CardHeader
+          title="Forecast"
+          subtitle={
+            freshness
+              ? freshness.text
+              : "No forecast has run for this workspace yet — run one to build the buy list."
+          }
+          action={<RunForecastButton />}
+        />
+      </Card>
+
       <Card>
         {sections.map((section) => (
           <Link
@@ -74,14 +124,52 @@ export default function SettingsPage() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium text-ink">{section.title}</div>
-              <div className="truncate text-xs text-ink-muted">
-                {section.description}
-              </div>
+              <div className="truncate text-xs text-ink-muted">{section.description}</div>
             </div>
+            {section.status && (
+              <span
+                className={
+                  section.alert
+                    ? "hidden shrink-0 text-xs font-medium text-warning sm:block"
+                    : "hidden shrink-0 text-xs text-ink-muted sm:block"
+                }
+              >
+                {section.status}
+              </span>
+            )}
             <ChevronRightIcon className="size-4 shrink-0 text-ink-faint" />
           </Link>
         ))}
       </Card>
+
+      <Card>
+        <CardHeader title="Legal" subtitle="The terms this workspace runs under." />
+        <div className="px-5 pb-5 text-sm">
+          <Link href="/terms" className="font-medium text-accent-ink hover:underline">
+            Terms &amp; Conditions
+          </Link>
+          <span className="px-2 text-ink-faint">·</span>
+          <Link href="/privacy" className="font-medium text-accent-ink hover:underline">
+            Privacy Policy
+          </Link>
+        </div>
+      </Card>
+    </>
+  );
+}
+
+export default async function SettingsPage() {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title="Settings" description="Workspace, team, and integrations" />
+      {membership && (
+        <Suspense fallback={<SkeletonCard />}>
+          <SettingsSections tenantId={membership.tenantId} />
+        </Suspense>
+      )}
     </div>
   );
 }
