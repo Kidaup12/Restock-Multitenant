@@ -1,4 +1,6 @@
 export { normalizeSku } from "./normalize";
+export { validatePosSales } from "./validate";
+export type { PosValidationError, PosValidationResult } from "./validate";
 export { tenantDayKey, dayMarker, parsePosDate } from "./time";
 export { resolvePosSkuMap, suggestProductForSku } from "./match";
 export type { ProductSuggestion } from "./match";
