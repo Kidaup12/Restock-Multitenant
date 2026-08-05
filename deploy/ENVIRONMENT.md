@@ -146,22 +146,37 @@ Three connections, three privilege levels — the rationale lives in
 | `SERVICE_DATABASE_URL` | `wezesha_service` | `BYPASSRLS` | pooled (Supavisor, transaction mode) |
 | `DIRECT_URL` | `postgres` (owner) | full — migrations only | direct to the database |
 
-Production URL shapes (substitute `<project-ref>`, `<region>`, and vault passwords):
+Production URL shapes (substitute `<project-ref>`, `<region>`, and vault passwords).
+**`connection_limit` differs between the web app and the worker** — see the pool-size
+note below; it is not a value to copy between them.
 
 ```
+# Vercel (serverless: many short-lived instances, one query at a time)
 DATABASE_URL=postgresql://wezesha_app.<project-ref>:<app-role-password>@aws-0-<region>.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
 SERVICE_DATABASE_URL=postgresql://wezesha_service.<project-ref>:<service-role-password>@aws-0-<region>.pooler.supabase.com:6543/postgres?pgbouncer=true&connection_limit=1
+
+# Railway worker (one long-lived process running several queues concurrently)
+DATABASE_URL=…same host/role/password…?pgbouncer=true&connection_limit=10&pool_timeout=20
+SERVICE_DATABASE_URL=…same host/role/password…?pgbouncer=true&connection_limit=10&pool_timeout=20
+
 DIRECT_URL=postgresql://postgres:<owner-password>@db.<project-ref>.supabase.co:5432/postgres
 ```
 
 Supabase specifics that are easy to get wrong:
 
 - **Pooled = port 6543, transaction mode.** `pgbouncer=true` disables Prisma prepared
-  statements (transaction pooling breaks them); `connection_limit=1` keeps serverless
-  instances from hoarding pooled connections. Transaction-mode pooling is exactly what
+  statements (transaction pooling breaks them). Transaction-mode pooling is exactly what
   the tenant client is designed for — the `app.tenant_id` GUC is set
   transaction-locally in the same transaction as each query (`packages/db/src/client.ts`),
   so nothing leaks across recycled connections.
+- **Size `connection_limit` to the process, not to a habit.** `connection_limit=1` is
+  advice for *serverless*: many short-lived instances that each run one query at a time,
+  where a larger pool per instance just hoards pooled connections. A long-lived container
+  running several queues concurrently is the opposite case and needs a real pool — every
+  tenant-scoped operation opens its own transaction, so a batch of N reads wants N
+  connections and starves itself when the pool is smaller. The nightly forecast failed
+  this way for two nights in August. Keep the sum of every service's limit under the
+  project's pooler pool size (Supabase → Database → Connection pooling).
 - **Pooled usernames are `<role>.<project-ref>`** (Supavisor routing format). Direct
   connections (`:5432` on `db.<project-ref>.supabase.co`) use the plain role name.
 - **`DIRECT_URL` is not a runtime variable.** The Prisma *client* never reads it; only
@@ -212,7 +227,11 @@ previews must never hold prod credentials.
 **Railway (worker)** — service variables:
 
 - `REDIS_URL` = `${{Redis.REDIS_URL}}` (same reference)
-- `DATABASE_URL`, `SERVICE_DATABASE_URL` — same DB values as web for the environment
+- `DATABASE_URL`, `SERVICE_DATABASE_URL` — same host, role and password as web, but a
+  **larger `connection_limit`** (see the pool-size note above). This is the one DB
+  setting that must not be copied from web: the worker is a long-lived process running
+  several queues at once, and at web's `connection_limit=1` a job that issues a batch of
+  reads starves itself
 - `TOKEN_ENCRYPTION_KEY` — same value as web for the environment
 - `SHOPIFY_APP_URL` — the web origin for the environment (webhook registration)
 - `EMAIL_CRONS`, `OPS_CRONS`, `POS_CRONS`, `FORECAST_CRON`, `COST_CRONS`,

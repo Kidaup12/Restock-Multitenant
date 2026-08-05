@@ -21,8 +21,13 @@ rows, so a missed conversion fails closed (empty page, never a cross-tenant leak
 
 Pooler note: the per-operation array-form `$transaction` pins both statements to
 one backend, which is what makes the GUC safe under transaction-mode pooling in
-production. Size `connection_limit` accordingly and prefer `prismaForTenantTx`
-for routes that run many queries.
+production. It also means **one connection per operation**, so a batch of N reads
+issued together (a `Promise.all`) asks the pool for N connections and everything
+behind the slowest one times out where the pool is smaller. Run batches through
+`prismaForTenantTx`, which holds a single connection for the whole callback and
+takes the transaction limits — a nightly batch needs a `timeout` well above the
+5s default. Size `connection_limit` to the process: 1 for serverless, a real pool
+for the long-lived worker (`deploy/ENVIRONMENT.md`).
 
 ## Workflow
 

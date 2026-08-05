@@ -128,8 +128,9 @@ second.
 ## 3. Migrate + verify RLS
 
 1. Compose the three URLs per `deploy/ENVIRONMENT.md` (pooled `:6543` with
-   `pgbouncer=true&connection_limit=1` for app/service, direct `:5432` for owner) →
-   vault.
+   `pgbouncer=true` for app/service, direct `:5432` for owner) → vault. Note that
+   `connection_limit` is per-service, not one value for the project: 1 for the
+   serverless web app, a real pool for the worker.
 2. From a repo checkout, in a shell with **only this project's env** (do not reuse a
    dev shell with a local `.env` loaded):
    ```sh
