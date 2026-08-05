@@ -18,6 +18,10 @@ COPY apps/ws-gateway/package.json apps/ws-gateway/
 COPY packages/db/package.json packages/db/
 COPY packages/observability/package.json packages/observability/
 COPY packages/realtime/package.json packages/realtime/
+# packages/db's postinstall is `prisma generate`, so the schema has to be in the
+# image BEFORE the install — copying it with the rest of the source below is too
+# late and fails the build.
+COPY packages/db/prisma/ packages/db/prisma/
 RUN npm ci -w @wezesha/ws-gateway
 
 COPY packages/db/ packages/db/
