@@ -155,6 +155,30 @@ describe.skipIf(!runnable)("email crons (real redis + db)", () => {
     expect(sent[0]!.text).toContain("Marula Oil 50ml");
   });
 
+  it("labels the money in the workspace's own currency", async () => {
+    // The Shopify sync adopts the store's currency, so a USD shop was being
+    // emailed its own revenue labelled KES — wrong on the one number the
+    // summary exists to report.
+    const { buildWeeklySummary, renderWeeklySummary } = await import("../src/weekly-summary");
+    const before = await prismaService.tenant.findUnique({
+      where: { id: tenantId },
+      select: { currency: true },
+    });
+    await prismaService.tenant.update({ where: { id: tenantId }, data: { currency: "USD" } });
+    try {
+      const summary = await buildWeeklySummary(tenantId);
+      expect(summary!.currency).toBe("USD");
+      const body = renderWeeklySummary(summary!);
+      expect(body).toContain("Revenue, last 30 days: USD 8,600");
+      expect(body).not.toContain("KES");
+    } finally {
+      await prismaService.tenant.update({
+        where: { id: tenantId },
+        data: { currency: before?.currency ?? "KES" },
+      });
+    }
+  });
+
   it("sends nothing for a tenant without a recipient or a vanished tenant", async () => {
     const bare = await prismaService.tenant.create({
       data: { name: "Crons Bare", slug: `${SLUG}-bare` },
