@@ -15,6 +15,12 @@ import { CostMovedList } from "./cost-moved-list";
 
 export const metadata: Metadata = { title: "Costs" };
 
+/** QuickBooks is a documented priority tier in the cost resolver, but the
+ *  connector does not exist. Shown beside working sources it reads as an
+ *  integration a shop can turn on, which sets an expectation nothing meets.
+ *  Flip this when the seam is actually built. */
+const QUICKBOOKS_CONNECTOR_EXISTS = false;
+
 const SOURCE_LABEL: Record<CostSource, string> = {
   manual: "Typed",
   qb: "QuickBooks",
@@ -23,7 +29,12 @@ const SOURCE_LABEL: Record<CostSource, string> = {
 };
 
 function SourceSplit({ split }: { split: CostCoverage["sourceSplit"] }) {
-  const order: CostSource[] = ["manual", "qb", "shopify", "missing"];
+  // A "QuickBooks 0" chip is still a QuickBooks label promising a source the
+  // shop cannot choose. Hidden until the connector exists — but never hidden
+  // when a row somehow carries it, so no cost silently vanishes from the split.
+  const order: CostSource[] = ["manual", "qb", "shopify", "missing"].filter(
+    (k) => k !== "qb" || QUICKBOOKS_CONNECTOR_EXISTS || split.qb > 0
+  ) as CostSource[];
   return (
     <div className="flex flex-wrap gap-2 text-sm">
       {order.map((k) => (
@@ -85,14 +96,16 @@ async function CostsBoard({
         <CostMovedList alerts={alerts} canManage={canManage} />
       </Card>
 
-      <Card>
-        <CardHeader title="QuickBooks" subtitle="Optional — sync costs and vendors automatically" />
-        <CardContent>
-          <p className="text-sm text-ink-muted">
-            Not connected. QuickBooks cost sync is not available yet; upload or paste your costs below in the meantime.
-          </p>
-        </CardContent>
-      </Card>
+      {QUICKBOOKS_CONNECTOR_EXISTS && (
+        <Card>
+          <CardHeader title="QuickBooks" subtitle="Optional — sync costs and vendors automatically" />
+          <CardContent>
+            <p className="text-sm text-ink-muted">
+              Not connected. Upload or paste your costs below in the meantime.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       <CostImport canManage={canManage} />
     </div>
@@ -106,7 +119,7 @@ export default async function CostsPage() {
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Costs" description="Cost coverage, upload and QuickBooks" />
+        <PageHeader title="Costs" description="Cost coverage and upload" />
         <EmptyState title="No workspace yet" description="Ask an admin to invite you to a workspace." />
       </div>
     );
