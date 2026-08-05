@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { normalizeShopDomain } from "@/lib/shopify/shop-domain";
 import { PasswordInput } from "@/components/auth/password-input";
 import type { SyncRunView } from "@/lib/shopify/sync-run";
 import {
@@ -165,9 +166,16 @@ export function ShopifyConnectionCard({
    * are the only things that say the click was heard.
    */
   function startInstall(rawDomain: string) {
-    const cleaned = rawDomain.trim().toLowerCase();
-    if (!cleaned) return;
-    const domain = cleaned.includes(".") ? cleaned : `${cleaned}.myshopify.com`;
+    const domain = normalizeShopDomain(rawDomain);
+    if (!domain) {
+      // Say so inline. Passing it through meant the install route answered with
+      // a raw 400 JSON page on the first screen a merchant uses.
+      setNotice({
+        tone: "negative",
+        text: "That doesn't look like a Shopify store address. Paste your admin URL, or type just the store handle.",
+      });
+      return;
+    }
     setBusy("install");
     setNotice({ tone: "positive", text: `Taking you to ${domain} to approve access…` });
     window.location.assign(`/api/shopify/install?shop=${encodeURIComponent(domain)}`);
@@ -181,8 +189,14 @@ export function ShopifyConnectionCard({
     setBusy("token");
     setNotice(null);
     try {
-      const cleaned = tokenShop.trim().toLowerCase();
-      const domain = cleaned.includes(".") ? cleaned : `${cleaned}.myshopify.com`;
+      const domain = normalizeShopDomain(tokenShop);
+      if (!domain) {
+        setNotice({
+          tone: "negative",
+          text: "That doesn't look like a Shopify store address. Paste your admin URL, or type just the store handle.",
+        });
+        return;
+      }
       const res = await connectShopifyWithToken({ shopDomain: domain, accessToken: token });
       if (res.ok) {
         // Clear it the moment it is stored — no reason for a bearer credential
