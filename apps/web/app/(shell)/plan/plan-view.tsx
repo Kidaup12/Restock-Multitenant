@@ -3,10 +3,12 @@
 import { useEffect, useState, useTransition } from "react";
 import { BanknoteIcon, CalendarIcon, ClipboardIcon } from "@/components/icons";
 import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-features";
+import type { PlanFreshness as Freshness } from "@/lib/data/forecast-freshness";
 import type { BuyList } from "@/lib/data/plan";
 import { BudgetPlanner } from "./budget-planner";
 import { BuyChecklist } from "./buy-checklist";
 import { PlanDecisionHeader } from "./decision-header";
+import { PlanFreshness } from "./plan-freshness";
 import { deleteScope, listScopes, saveScope, type SavedScope } from "./scope-actions";
 import { EMPTY_SCOPE, filterBuyListRows, ScopeBar, type ScopeSelection } from "./scope-bar";
 import { SupplyCalendarMode } from "./supply-calendar";
@@ -79,11 +81,14 @@ export function PlanView({
   canViewCosts,
   canBudget,
   canOverride,
+  freshness: planFreshness,
 }: {
   buyList: BuyList;
   canViewCosts: boolean;
   canBudget: boolean;
   canOverride: boolean;
+  /** Decided server-side, so the verdict cannot drift between render and hydration. */
+  freshness: Freshness;
 }) {
   const [mode, setMode] = useState<Mode>("choose");
   const [scope, setScope] = useState<ScopeSelection>(EMPTY_SCOPE);
@@ -117,16 +122,17 @@ export function PlanView({
     });
   }
 
+  // One authority for how old the plan is, shown in every mode — it used to
+  // appear only here, as grey text, and vanish the moment a mode was picked.
+  const freshness = <PlanFreshness freshness={planFreshness} />;
+
   if (mode === "choose") {
-    const runDay = new Date(buyList.runDate).toLocaleDateString("en-GB", {
-      day: "numeric",
-      month: "short",
-    });
     return (
       <div className="space-y-4">
+        {freshness}
         <p className="text-sm text-ink-muted">
-          {buyList.rows.length} of {buyList.totalPredicted} forecast products need restocking ·
-          run {runDay}. Nothing is planned until you pick.
+          {buyList.rows.length} of {buyList.totalPredicted} forecast products need restocking.
+          Nothing is planned until you pick.
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <ModeCard
@@ -185,6 +191,7 @@ export function PlanView({
     };
     return (
       <div className="space-y-4">
+        {freshness}
         <PlanDecisionHeader rows={filteredRows} canViewCosts={canViewCosts} />
         <ScopeBar
           rows={buyList.rows}
@@ -206,7 +213,17 @@ export function PlanView({
     );
   }
   if (mode === "calendar") {
-    return <SupplyCalendarMode canViewCosts={canViewCosts} backLink={backLink} />;
+    return (
+      <div className="space-y-4">
+        {freshness}
+        <SupplyCalendarMode canViewCosts={canViewCosts} backLink={backLink} />
+      </div>
+    );
   }
-  return <BudgetPlanner canViewCosts={canViewCosts} backLink={backLink} />;
+  return (
+    <div className="space-y-4">
+      {freshness}
+      <BudgetPlanner canViewCosts={canViewCosts} backLink={backLink} />
+    </div>
+  );
 }

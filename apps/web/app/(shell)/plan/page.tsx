@@ -6,6 +6,7 @@ import { CalendarIcon } from "@/components/icons";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonCard } from "@/components/ui/skeleton";
+import { planFreshnessLabel } from "@/lib/data/forecast-freshness";
 import { getBuyList } from "@/lib/data/plan";
 import { getTenantPlan, planAllows } from "@/lib/capabilities";
 import { RunForecastButton } from "../today/run-forecast-button";
@@ -64,6 +65,7 @@ async function PlanContent({
       canViewCosts={canViewCosts}
       canBudget={canBudget}
       canOverride={canOverride}
+      freshness={planFreshnessLabel(buyList.runDate)}
     />
   );
 }
