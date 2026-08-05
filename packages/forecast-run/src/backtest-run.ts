@@ -1,4 +1,4 @@
-import { prismaForTenant } from "@wezesha/db";
+import { prismaForTenant, prismaForTenantTx } from "@wezesha/db";
 import {
   assignAbc,
   dailySalesValue,
@@ -52,13 +52,22 @@ export async function runBacktest(
   const horizonDays = opts?.horizonDays ?? DEFAULT_HORIZON_DAYS;
   const historySince = new Date(now.getTime() - HISTORY_DAYS * DAY_MS);
 
-  const [products, sales] = await Promise.all([
-    db.product.findMany({ where: { active: true }, select: { id: true, priceKes: true } }),
-    db.salesHistory.findMany({
-      where: { date: { gte: historySince } },
-      select: { productId: true, date: true, quantity: true },
+  // One connection for both reads — see the note in packages/db on why a batch
+  // through the per-operation client asks the pool for one connection per query.
+  const { products, sales } = await prismaForTenantTx(
+    tenantId,
+    async (tx) => ({
+      products: await tx.product.findMany({
+        where: { active: true },
+        select: { id: true, priceKes: true },
+      }),
+      sales: await tx.salesHistory.findMany({
+        where: { date: { gte: historySince } },
+        select: { productId: true, date: true, quantity: true },
+      }),
     }),
-  ]);
+    { maxWait: 30_000, timeout: 120_000 }
+  );
 
   const historyByProduct = new Map<string, SalesPoint[]>();
   for (const row of sales) {

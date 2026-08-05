@@ -80,13 +80,24 @@ export type TenantClient = ReturnType<typeof prismaForTenant>;
 
 /** Multi-statement atomic work for one tenant: a single interactive transaction with
  *  the GUC set once. The callback gets the RAW tx client (not the per-op extended
- *  client), so its operations are not re-wrapped — avoids nested transactions. */
+ *  client), so its operations are not re-wrapped — avoids nested transactions.
+ *
+ *  Also the way to run a BATCH of reads on one connection: `prismaForTenant` opens
+ *  a transaction per operation, so issuing N of them together asks the pool for N
+ *  connections and starves itself wherever the pool is smaller (see
+ *  packages/db/README.md on sizing `connection_limit`).
+ *
+ *  `options` are Prisma's interactive-transaction limits, and default to
+ *  `maxWait 2s / timeout 5s`. Anything that holds the connection for longer than a
+ *  request — a nightly batch, a bulk write — must raise `timeout` explicitly or it
+ *  trades a pool timeout for a transaction one. */
 export function prismaForTenantTx<T>(
   tenantId: string,
-  fn: (tx: Prisma.TransactionClient) => Promise<T>
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  options?: { maxWait?: number; timeout?: number }
 ): Promise<T> {
   return basePrisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
     return fn(tx);
-  });
+  }, options);
 }
