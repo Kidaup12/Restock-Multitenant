@@ -32,6 +32,7 @@ const SIGNAL_ORDER: { key: SetupSignal; label: string }[] = [
 
 export async function TodaySetupStrip({ tenantId }: { tenantId: string }) {
   const { level, signals, nextUnlock } = await setupDepth(tenantId);
+  const done = SIGNAL_ORDER.filter(({ key }) => signals[key]).length;
   const nudgeHref = nextUnlock ? NUDGE_HREF[nextUnlock.signal] : undefined;
   const nudge = nextUnlock ? (
     <>
@@ -52,6 +53,11 @@ export async function TodaySetupStrip({ tenantId }: { tenantId: string }) {
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-ink">Setup depth</span>
             <Badge tone={level >= 3 ? "positive" : "neutral"}>Level {level} of 3</Badge>
+            {/* The level is a capability rung; this is the plainer question the
+                owner is actually asking — how much is left. */}
+            <span className="text-xs text-ink-muted">
+              {done} of {SIGNAL_ORDER.length} done
+            </span>
           </div>
           <ol className="flex items-center gap-3" aria-label="Setup signals">
             {SIGNAL_ORDER.map(({ key, label }) => {
