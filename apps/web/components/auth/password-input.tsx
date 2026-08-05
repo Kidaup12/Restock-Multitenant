@@ -23,7 +23,12 @@ export function PasswordInput({ className, ...rest }: PasswordInputProps) {
       <button
         type="button"
         onClick={() => setVisible((v) => !v)}
-        aria-label={visible ? "Hide password" : "Show password"}
+        /* Deliberately not "Show password": the field itself is labelled
+           Password, and a second control carrying that word means asking for
+           "Password" by voice or screen reader is ambiguous — it can land on
+           the toggle instead of the input. Naming the action rather than the
+           field keeps both reachable. */
+        aria-label={visible ? "Hide characters" : "Show characters"}
         aria-pressed={visible}
         className={cn(
           "absolute inset-y-0 right-0 grid w-11 place-items-center rounded-r-md text-ink-muted transition-colors",
