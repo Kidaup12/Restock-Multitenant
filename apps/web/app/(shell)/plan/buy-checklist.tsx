@@ -9,7 +9,15 @@ import { CostValue } from "@/components/ui/cost-value";
 import { formatMoney, formatNumber } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
 import { cn } from "@/lib/cn";
-import type { BuyList, BuyListRow, BuyTier, ExcludedReason, ExcludedRow } from "@/lib/data/plan";
+import type {
+  BuyList,
+  BuyListRow,
+  BuyTier,
+  ExcludedReason,
+  ExcludedRow,
+  PlanColdStart,
+  PlanConfidence,
+} from "@/lib/data/plan";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import { moqPreview, type MoqPreview } from "@/lib/plan/moq-preview";
 import {
@@ -50,26 +58,130 @@ const PLANNABLE_NOTES: Record<string, string> = {
   "cost-exceeds-price": "Cost is above the selling price — restocking this loses money.",
 };
 
-// The "Excluded" section below the tiers: products the run sized but held off
-// the active list, grouped by why. Read-only — nothing here is being ordered;
-// it's surfaced so nothing drops silently.
-const EXCLUDED_GROUPS: { reason: ExcludedReason; title: string; subtitle: string }[] = [
+// The "Not on the buy list" section below the tiers: every product the run
+// covered but isn't asking anyone to order, grouped by why. Read-only. The last
+// two groups carry no quantity — the run sized them to nothing — and until they
+// were surfaced the owner had no way to find out why a product was missing.
+export const EXCLUDED_GROUPS: { reason: ExcludedReason; title: string; subtitle: string }[] = [
   {
     reason: "already-ordered",
     title: "Already on the way",
     subtitle: "These already have an open order in progress — the plan isn't ordering them again.",
   },
   {
-    reason: "unplannable",
-    title: "Cost needs checking",
-    subtitle: "Missing or broken cost data — fix the numbers and they rejoin the list.",
+    reason: "covered",
+    title: "You already have enough",
+    subtitle:
+      "What's on the shelf plus what's coming already covers what these are expected to sell.",
+  },
+  {
+    reason: "too-new",
+    title: "Too new to forecast",
+    subtitle:
+      "These haven't been on the shelf long enough to have a sales pattern yet. Give them a few weeks of sales, or tell us what to expect.",
   },
   {
     reason: "slow-mover",
     title: "Too slow to stock now",
     subtitle: "Plenty of cover and selling slowly — the cash is better spent elsewhere first.",
   },
+  {
+    reason: "unplannable",
+    title: "Cost needs checking",
+    subtitle: "Missing or broken cost data — fix the numbers and they rejoin the list.",
+  },
 ];
+
+/** Groups whose rows carry a quantity worth showing. The zero-sized ones render
+ *  a narrower table — a column of 0 and KES 0 is noise, not information. */
+const QTY_GROUPS = new Set<ExcludedReason>(["already-ordered", "unplannable", "slow-mover"]);
+
+// The run's own honesty words, in shop language. The engine's tokens
+// ("fairly_sure", "min_max") must never reach a screen.
+export const CONFIDENCE_COPY: Record<PlanConfidence, { chip: string; tone: string; sentence: string }> = {
+  sure: {
+    chip: "Sure",
+    tone: "border-positive bg-positive-soft text-positive",
+    sentence:
+      "A steady seller with a long, clean sales record — this number is as good as we get.",
+  },
+  fairly_sure: {
+    chip: "Fairly sure",
+    tone: "border-edge bg-surface-2 text-ink-muted",
+    sentence:
+      "Enough sales history to be useful, but something is unsettled — a short record, uneven weeks, or a promotion running.",
+  },
+  guessing: {
+    chip: "Guessing",
+    tone: "border-warning bg-warning-soft text-warning",
+    sentence:
+      "Not enough clean sales history to be confident. Treat this as a starting point and use your own judgement.",
+  },
+};
+
+export const COLD_START_COPY: Record<PlanColdStart, { chip: (from: string | null) => string; sentence: (from: string | null) => string }> = {
+  too_new: {
+    chip: () => "Too new",
+    sentence: () =>
+      "This product hasn't been on the shelf long enough to have a sales pattern yet.",
+  },
+  borrowed: {
+    chip: (from) => (from ? `Selling like ${from}` : "Selling like a similar product"),
+    sentence: (from) =>
+      `Too new to have its own sales pattern, so we've borrowed the shape of ${from ?? "a similar product that already sells well"} and scaled it to this product's price.`,
+  },
+};
+
+/** What set the target, keyed on the run's own method — this is what keeps the
+ *  word "min_max" off the screen. */
+export const SIZING_RULE_COPY: Record<string, string> = {
+  mean_cover: "Sized to cover sales until the next delivery lands, plus a buffer.",
+  calibrated:
+    "Sized so you rarely run out — enough to cover the wait for a delivery, at the service level set for this class.",
+  min_max:
+    "Topped up to a simple two-week shelf level. This one sells too slowly and too unevenly to forecast precisely, so we keep a steady level instead of chasing a number.",
+};
+
+/** How far to trust the number, beside the product it belongs to. Absent when
+ *  the run predates the trust columns, so an old plan simply says nothing rather
+ *  than claiming confidence it never recorded. */
+export function TrustChips({ row }: { row: Pick<BuyListRow, "confidence" | "coldStart" | "borrowedFromTitle"> }) {
+  const confidence = row.confidence ? CONFIDENCE_COPY[row.confidence] : null;
+  const cold = row.coldStart ? COLD_START_COPY[row.coldStart] : null;
+  if (!confidence && !cold) return null;
+  return (
+    <>
+      {confidence && (
+        <span
+          className={cn(
+            "rounded-full border px-2 py-0.5 text-xs font-medium",
+            confidence.tone
+          )}
+        >
+          {confidence.chip}
+        </span>
+      )}
+      {cold && (
+        <span className="rounded-full border border-edge bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-muted">
+          {cold.chip(row.borrowedFromTitle)}
+        </span>
+      )}
+    </>
+  );
+}
+
+/** The same two facts in full sentences, inside the "why this quantity" panel. */
+function TrustNotes({ row }: { row: Pick<BuyListRow, "confidence" | "coldStart" | "borrowedFromTitle"> }) {
+  const confidence = row.confidence ? CONFIDENCE_COPY[row.confidence] : null;
+  const cold = row.coldStart ? COLD_START_COPY[row.coldStart] : null;
+  if (!confidence && !cold) return null;
+  return (
+    <>
+      {confidence && <p className="mt-2 text-ink-secondary">{confidence.sentence}</p>}
+      {cold && <p className="mt-2 text-ink-secondary">{cold.sentence(row.borrowedFromTitle)}</p>}
+    </>
+  );
+}
 
 // Cover-days what-if control: step a uniform days-of-cover horizon and re-size
 // the whole list to it. A weekly step keeps the choices meaningful; the server
@@ -231,7 +343,7 @@ function MoqNote({ preview }: { preview: MoqPreview }) {
  * grouped by why. Read-only — no ticking, no override — so it reads as context,
  * not a second buy list. Costs redact through the same CostValue as the tiers.
  */
-function ExcludedSection({
+export function ExcludedSection({
   excluded,
   canViewCosts,
 }: {
@@ -242,36 +354,45 @@ function ExcludedSection({
     <div className="space-y-4">
       <div>
         <h2 className="font-display text-base font-semibold text-ink">
-          Held off the list · {excluded.length}
+          Not on the buy list · {excluded.length}
         </h2>
         <p className="mt-0.5 text-sm text-ink-muted">
-          Nothing here is being ordered — surfaced so nothing drops silently.
+          Nothing here is being ordered. This is why each one isn&apos;t.
         </p>
       </div>
       {EXCLUDED_GROUPS.map(({ reason, title, subtitle }) => {
         const groupRows = excluded.filter((r) => r.reason === reason);
         if (groupRows.length === 0) return null;
+        // A run that sized these to nothing has no quantity or line total worth
+        // a column — 0 and KES 0 down the page is noise, not information.
+        const showsQty = QTY_GROUPS.has(reason);
         return (
           <Card key={reason}>
             <CardHeader title={`${title} · ${groupRows.length}`} subtitle={subtitle} />
             <div className="mt-2 w-full overflow-x-auto pb-2">
-              <table className="w-full min-w-[560px] text-sm">
+              <table className={cn("w-full text-sm", showsQty ? "min-w-[560px]" : "min-w-[420px]")}>
                 <thead>
                   <tr className="border-b border-edge">
                     <th scope="col" className={TH}>Product</th>
                     <th scope="col" className={cn(TH, "hidden md:table-cell")}>Supplier</th>
+                    <th scope="col" className={TH_NUM}>In stock</th>
                     <th scope="col" className={TH_NUM}>Days left</th>
-                    <th scope="col" className={cn(TH_NUM, "hidden md:table-cell")}>Suggested qty</th>
-                    <th scope="col" className={TH_NUM}>Line total</th>
+                    {showsQty && (
+                      <>
+                        <th scope="col" className={cn(TH_NUM, "hidden md:table-cell")}>Suggested qty</th>
+                        <th scope="col" className={TH_NUM}>Line total</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
                   {groupRows.map((row) => (
                     <tr key={row.predictionId} className="border-b border-edge">
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium text-ink">{row.title}</span>
                           {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
+                          <TrustChips row={row} />
                         </div>
                         <div className="mt-0.5 font-mono text-xs text-ink-muted">{row.sku}</div>
                         {reason === "unplannable" && PLANNABLE_NOTES[row.plannable] && (
@@ -279,15 +400,20 @@ function ExcludedSection({
                         )}
                       </td>
                       <td className={cn(TD, "hidden md:table-cell")}>{row.supplierName ?? "—"}</td>
+                      <td className={TD_NUM}>{row.onHandUnits}</td>
                       <td className={TD_NUM}>
                         {row.onHandUnits <= 0 || row.daysUntilStockout == null
                           ? "—"
                           : `${row.daysUntilStockout}d`}
                       </td>
-                      <td className={cn(TD_NUM, "hidden md:table-cell")}>{row.recommendedQty}</td>
-                      <td className={TD_NUM}>
-                        <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
-                      </td>
+                      {showsQty && (
+                        <>
+                          <td className={cn(TD_NUM, "hidden md:table-cell")}>{row.recommendedQty}</td>
+                          <td className={TD_NUM}>
+                            <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
+                          </td>
+                        </>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -433,6 +559,10 @@ export function BuyChecklist({
           { header: `Line total (${currency})`, cell: (r) => r.lineTotalKes },
         ] satisfies ExportColumn<BuyListRow>[])
       : []),
+    // Not money, so these ship for every role — a printed list taken to a
+    // supplier should carry the same honesty word as the screen it came from.
+    { header: "Confidence", cell: (r) => (r.confidence ? CONFIDENCE_COPY[r.confidence].chip : "") },
+    { header: "Sizing", cell: (r) => (r.explain ? (SIZING_RULE_COPY[r.explain.method] ?? "") : "") },
     { header: "Why", cell: (r) => r.reasoning },
   ];
 
@@ -594,9 +724,10 @@ export function BuyChecklist({
                             />
                           </td>
                           <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                               <span className="font-medium text-ink">{row.title}</span>
                               {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
+                              <TrustChips row={row} />
                             </div>
                             <div className="mt-0.5 font-mono text-xs text-ink-muted">
                               {row.sku}
@@ -668,7 +799,13 @@ export function BuyChecklist({
                                 <p className="font-mono text-xs text-ink">
                                   {row.explain?.summary ?? row.qtySummary}
                                 </p>
+                                {row.explain && SIZING_RULE_COPY[row.explain.method] && (
+                                  <p className="mt-2 text-ink-secondary">
+                                    {SIZING_RULE_COPY[row.explain.method]}
+                                  </p>
+                                )}
                                 <p className="mt-2 text-ink-secondary">{row.reasoning}</p>
+                                <TrustNotes row={row} />
                                 {row.plannable !== "ok" && (
                                   <p className="mt-2 text-warning">
                                     {PLANNABLE_NOTES[row.plannable]}

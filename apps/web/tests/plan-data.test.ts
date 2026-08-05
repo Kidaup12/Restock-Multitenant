@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prismaForTenant, prismaService } from "@wezesha/db";
-import { ASSUMED_LEAD_DAYS, coverDaysFor, leadDaysFor, recommendedQty } from "@wezesha/forecast";
+import {
+  ASSUMED_LEAD_DAYS,
+  NO_STOCKOUT_DAYS,
+  coverDaysFor,
+  leadDaysFor,
+  recommendedQty,
+} from "@wezesha/forecast";
 import {
   DEAD_SKUS,
   STOCKOUT_SKUS,
@@ -61,12 +67,13 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       where: { tenantId: seeded.tenantId },
       include: { product: { include: { supplier: true } } },
     });
-    const expectedIds = new Set(
-      predictions.filter((p) => Math.round(p.recommendedQty) > 0).map((p) => p.id)
-    );
+    // EVERY prediction, not only the ones sized above zero. A zero-quantity row
+    // used to be filtered out before the split and appear nowhere at all, so the
+    // owner had no way to find out why a product they expected wasn't listed.
+    const expectedIds = new Set(predictions.map((p) => p.id));
     // The exclusion split holds some products off the active list (already on the
-    // way / bad cost / too slow) but never drops them: active ∪ excluded is still
-    // exactly every prediction the run sized, each appearing once.
+    // way / bad cost / too slow / nothing to buy) but never drops them: active ∪
+    // excluded is exactly every prediction the run made, each appearing once.
     const activeIds = buyList!.rows.map((r) => r.predictionId);
     const excludedIds = buyList!.excluded.map((r) => r.predictionId);
     expect(new Set([...activeIds, ...excludedIds])).toEqual(expectedIds);
@@ -90,7 +97,12 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     for (const row of [...buyList!.rows, ...buyList!.excluded]) {
       const p = bySku.get(row.sku)!;
       expect(row.recommendedQty).toBe(Math.round(p.recommendedQty));
-      expect(row.daysUntilStockout).toBe(p.daysUntilStockout);
+      // "No stockout in sight" is a sentinel, resolved to null so no screen can
+      // print 999 as a day count. Zero-quantity rows reach this loop now, and
+      // they are exactly the ones that carry it.
+      expect(row.daysUntilStockout).toBe(
+        p.daysUntilStockout >= NO_STOCKOUT_DAYS ? null : p.daysUntilStockout
+      );
       expect(row.urgency).toBe(p.urgency);
       expect(row.unitCostKes).toBe(p.product.costKes);
       expect(row.lineTotalKes).toBeCloseTo(row.recommendedQty * p.product.costKes, 5);
@@ -150,10 +162,14 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       expect(row!.tier).toBe("order_today");
     }
     for (const sku of DEAD_SKUS) {
-      // Dead SKUs size to zero, so they're off the run entirely — not merely
-      // held back. They appear in neither the active list nor the excluded one.
+      // Dead SKUs size to zero, so they stay off the ACTIVE list — but they are
+      // no longer silently gone. They surface under `excluded` with the reason
+      // they aren't being bought, which is what the owner came to find out.
       expect(buyList!.rows.find((r) => r.sku === sku)).toBeUndefined();
-      expect(buyList!.excluded.find((r) => r.sku === sku)).toBeUndefined();
+      const held = buyList!.excluded.find((r) => r.sku === sku);
+      expect(held, sku).toBeDefined();
+      expect(held!.recommendedQty).toBe(0);
+      expect(["covered", "too-new", "already-ordered"]).toContain(held!.reason);
     }
   });
 
@@ -317,24 +333,135 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     }
   });
 
+  it("carries the run's trust columns into every row it builds", async () => {
+    // The columns had been written every night since the trust layer shipped and
+    // read by nothing: the select omitted them, so they arrived `undefined` and
+    // no component could have shown them. A render test proves a chip draws when
+    // handed a prop; only this proves the prop is ever populated.
+    const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const rows = [...buyList!.rows, ...buyList!.excluded];
+    const stored = new Map(
+      (await prismaService.prediction.findMany({ where: { tenantId: seeded.tenantId } })).map(
+        (p) => [p.id, p]
+      )
+    );
+
+    for (const row of rows) {
+      const p = stored.get(row.predictionId)!;
+      expect(row.confidence, row.sku).toBe(p.confidenceWord);
+      expect(row.coldStart, row.sku).toBe(p.coldStart);
+    }
+
+    // Vacuity guards: the assertions above pass trivially if every value is null.
+    expect(rows.some((r) => r.confidence !== null)).toBe(true);
+    expect(new Set(rows.map((r) => r.confidence)).size).toBeGreaterThan(1);
+  });
+
+  it("explains a policy-driven quantity instead of leaving it blank", async () => {
+    // The old read-time recomputation could only redo the mean-cover branch, so
+    // it returned null for every min/max row — and min/max is what class C
+    // defaults to, i.e. most of the catalogue. The run's own breakdown covers it.
+    const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const rows = [...buyList!.rows, ...buyList!.excluded];
+    const minMaxIds = new Set(
+      (
+        await prismaService.prediction.findMany({
+          where: { tenantId: seeded.tenantId, regime: "min_max" },
+          select: { id: true },
+        })
+      ).map((p) => p.id)
+    );
+    const minMaxRows = rows.filter((r) => minMaxIds.has(r.predictionId));
+    expect(minMaxRows.length).toBeGreaterThan(0); // vacuity guard
+    const explained = minMaxRows.filter((r) => r.explain !== null);
+    expect(explained.length).toBeGreaterThan(0);
+    for (const row of explained) {
+      expect(row.explain!.summary.length).toBeGreaterThan(0);
+      expect(row.explain!.recommendedQty).toBe(row.recommendedQty);
+    }
+  });
+
+  it("re-explains a what-if instead of shipping the plan's own breakdown", async () => {
+    // A re-size at exactly the item's own cover reproduces the persisted
+    // quantity, so an equality check alone would let the stored breakdown pass
+    // while describing a different horizon. The horizon has to be the one asked for.
+    const WANTED = 90; // clear of every natural cover in the seed (14/17/28/49)
+    const plan = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const naturalCover = new Map(
+      plan!.rows.filter((r) => r.explain).map((r) => [r.predictionId, r.explain!.coverDays])
+    );
+    expect(naturalCover.size).toBeGreaterThan(0);
+    // Nothing here plans 45 days ahead by itself, so the horizon is a fingerprint:
+    // if any row still shows its own cover, the stored breakdown was shipped.
+    expect([...naturalCover.values()].every((c) => c < WANTED)).toBe(true);
+
+    const resized = await getBuyList(seeded.tenantId, {
+      canViewCosts: true,
+      coverDays: WANTED,
+    });
+    const explained = resized!.rows.filter((r) => r.explain !== null && r.overriddenQty == null);
+    expect(explained.length).toBeGreaterThan(0);
+    for (const row of explained) {
+      expect(row.explain!.recommendedQty, row.sku).toBe(row.recommendedQty);
+      expect(row.explain!.coverDays, row.sku).toBe(Math.max(WANTED, row.leadDays));
+    }
+  });
+
+  it("resolves a borrowed proxy title tenant-scoped, and never leaks the id", async () => {
+    const [own, other] = await Promise.all([
+      prismaService.product.findFirst({ where: { tenantId: seeded.tenantId } }),
+      prismaService.product.findFirst({ where: { tenantId: { not: seeded.tenantId } } }),
+    ]);
+    const target = await prismaService.prediction.findFirst({
+      where: { tenantId: seeded.tenantId },
+    });
+    const restore = {
+      coldStart: target!.coldStart,
+      borrowedFromProductId: target!.borrowedFromProductId,
+    };
+    try {
+      const borrowed = async (proxyId: string | null) => {
+        await prismaService.prediction.update({
+          where: { id: target!.id },
+          data: { coldStart: "borrowed", borrowedFromProductId: proxyId },
+        });
+        const list = await getBuyList(seeded.tenantId, { canViewCosts: true });
+        return [...list!.rows, ...list!.excluded].find((r) => r.predictionId === target!.id)!;
+      };
+
+      expect((await borrowed(own!.id)).borrowedFromTitle).toBe(own!.title);
+      // A proxy that has since been deleted — there is no FK to stop this.
+      expect((await borrowed("prod-that-never-existed")).borrowedFromTitle).toBeNull();
+      // Another workspace's product resolves to nothing: RLS scopes the lookup,
+      // so the id can't be used to probe for products outside this tenant.
+      if (other) expect((await borrowed(other.id)).borrowedFromTitle).toBeNull();
+    } finally {
+      await prismaService.prediction.update({ where: { id: target!.id }, data: restore });
+    }
+  });
+
   it("gives every row a qty breakdown that lands on the shown number", async () => {
     const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     for (const row of buyList!.rows) {
       // The derived identity line always exists and always names the shown qty.
       expect(row.qtySummary).toContain(`+ ${row.recommendedQty} ordered`);
       expect(row.reasoning.length).toBeGreaterThan(0);
-      // The exact mean-cover arithmetic only attaches when it reproduces the
-      // stored number. Under default tenant config every class resolves to a
-      // policy rule (calibrated/min-max), so explain is typically null — but
-      // when present it must be exact.
+      // The breakdown is now the RUN's own, read back from explainParts rather
+      // than recomputed — so it attaches to calibrated and min/max rows too,
+      // which a read-time mean-cover recomputation could never reproduce.
       if (row.explain) {
         expect(row.explain.recommendedQty).toBe(row.recommendedQty);
-        const { dailyForecast, coverDays, safetyStock, currentStock, onOrder } = row.explain;
-        const total = Math.max(
-          0,
-          Math.ceil(dailyForecast * coverDays + safetyStock - currentStock - onOrder)
+        // The identity every rule satisfies: ordering the quantity brings the
+        // shelf up to the level the rule targets.
+        const { targetUnits, currentStock, onOrder } = row.explain;
+        expect(Math.max(0, Math.ceil(targetUnits - currentStock - onOrder))).toBe(
+          row.recommendedQty
         );
-        expect(total).toBe(row.recommendedQty);
+        // The mean-cover arithmetic holds only where mean cover set the target.
+        if (row.explain.method === "mean_cover") {
+          const { dailyForecast, coverDays, safetyStock } = row.explain;
+          expect(Math.ceil(dailyForecast * coverDays + safetyStock)).toBe(Math.ceil(targetUnits));
+        }
       }
     }
   });
@@ -773,6 +900,9 @@ describe("splitByBudget (pure)", () => {
       plannable: "ok",
       atRiskKes: 0,
       revenue30dKes: 0,
+      confidence: "sure",
+      coldStart: null,
+      borrowedFromTitle: null,
       ...partial,
     };
   }
@@ -905,6 +1035,9 @@ describe("filterBuyListRows (pure)", () => {
       plannable: "ok",
       atRiskKes: 0,
       revenue30dKes: 0,
+      confidence: "sure",
+      coldStart: null,
+      borrowedFromTitle: null,
       ...partial,
     };
   }

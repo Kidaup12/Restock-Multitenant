@@ -48,7 +48,10 @@ async function PlanContent({
     );
   }
 
-  if (buyList.rows.length === 0) {
+  // Only a truly empty run gets the empty state. A shop with nothing to buy but
+  // 47 products the run covered still has something to read — hiding the whole
+  // view would take that away from exactly the shops that need it most.
+  if (buyList.rows.length === 0 && buyList.excluded.length === 0) {
     return (
       <EmptyState
         icon={<CalendarIcon />}

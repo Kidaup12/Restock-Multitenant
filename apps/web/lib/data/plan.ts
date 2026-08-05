@@ -51,6 +51,11 @@ const REVENUE_WINDOW_DAYS = 30;
  */
 export type BuyTier = "order_today" | "this_week" | "can_wait";
 
+/** The run's own honesty words. Persisted per prediction by the engine; the UI
+ *  translates them into shop language and never prints the token. */
+export type PlanConfidence = "sure" | "fairly_sure" | "guessing";
+export type PlanColdStart = "too_new" | "borrowed";
+
 export type BuyListRow = {
   predictionId: string;
   productId: string;
@@ -109,6 +114,17 @@ export type BuyListRow = {
   explain: QtyExplanation | null;
   /** Always-true one-line arithmetic: what ordering this quantity brings the shelf to. */
   qtySummary: string;
+  /** How far the run trusts this number, in the engine's own three words. Null
+   *  only for a run written before the column existed. */
+  confidence: PlanConfidence | null;
+  /** "too_new" — on the shelf too briefly to have a sales pattern and no similar
+   *  product to borrow from; "borrowed" — shaped on an established product's
+   *  history; null — an ordinary forecast off its own sales. */
+  coldStart: PlanColdStart | null;
+  /** Title of the product whose shape was borrowed, resolved tenant-scoped. Null
+   *  when nothing was borrowed OR the proxy no longer exists. The raw id never
+   *  leaves the server — it would be a cross-tenant object-id oracle. */
+  borrowedFromTitle: string | null;
   /** "ok", or why the budget planner can't reason about this row's economics. */
   plannable: PlannableReason;
   /** Revenue the forecast expects to miss over the next 30 days if this item is
@@ -132,7 +148,17 @@ export type BuyListRow = {
  *     (missing/broken cost). The specific `plannable` reason rides on the row.
  *   - slow-mover: plenty of cover (urgency "low") AND selling below the
  *     slow-mover pace — the cash is better spent elsewhere first. */
-export type ExcludedReason = "already-ordered" | "unplannable" | "slow-mover";
+export type ExcludedReason =
+  | "already-ordered"
+  | "unplannable"
+  | "slow-mover"
+  // Reasons for a product the run sized to ZERO. These never reached any screen
+  // before: the qty filter dropped them ahead of the split, so 47 of the live
+  // tenant's 49 forecast products simply vanished with nothing said about them.
+  //   - too-new: no sales pattern yet, so there is nothing to forecast from.
+  //   - covered: stock plus what's incoming already covers expected demand.
+  | "too-new"
+  | "covered";
 
 /** An excluded row — a full buy-list row plus the typed reason it was held back.
  *  Surfaced read-only so nothing the run sized is ever silently dropped. */
@@ -239,6 +265,18 @@ function excludedReasonFor(
   return null;
 }
 
+/** Why a product the run sized to ZERO isn't on the list. `unplannable` and
+ *  `slow-mover` are deliberately not reused: with nothing to buy, a cost problem
+ *  is moot, and "sells slowly" isn't the reason — having enough already is. */
+function notPlannedReasonFor(
+  row: { coldStart: PlanColdStart | null },
+  hasOpenOrder: boolean
+): ExcludedReason {
+  if (hasOpenOrder) return "already-ordered";
+  if (row.coldStart === "too_new") return "too-new";
+  return "covered";
+}
+
 /** The latest run's buy list, or null when no forecast has run yet. Rows are
  *  built on full costs and then redacted, but the ORDER follows the flag too:
  *  the cost tiebreak is a cost viewer's, a money-blind caller is ranked on
@@ -285,6 +323,11 @@ export async function getBuyList(
       safetyStock: true,
       reasoning: true,
       regime: true,
+      // The trust layer the run has always written and nothing has ever read.
+      confidenceWord: true,
+      coldStart: true,
+      borrowedFromProductId: true,
+      explainParts: true,
       product: {
         select: {
           sku: true,
@@ -303,17 +346,23 @@ export async function getBuyList(
     },
   });
 
-  const kept = predictions
-    .map((p) => ({ ...p, qty: Math.round(p.recommendedQty) }))
-    .filter((p) => p.qty > 0);
+  const sized = predictions.map((p) => ({ ...p, qty: Math.round(p.recommendedQty) }));
+  const kept = sized.filter((p) => p.qty > 0);
+  // Everything the run sized to nothing. Built into rows too, so the owner can
+  // see WHY a product they expected isn't on the list — they used to be dropped
+  // here and never appear anywhere, not even under `excluded`.
+  const zeroQty = sized.filter((p) => p.qty <= 0);
+  // Per-product lookups below cover both sets. Widening them cannot change an
+  // active row: every one is keyed by productId.
+  const lookupIds = [...kept, ...zeroQty].map((p) => p.productId);
 
   // Owner overrides of the recommended quantity, keyed by productId so they
   // outlive the nightly re-plan (it wipes and recreates every prediction). A
   // product with no override is untouched below — the one-engine default.
   const overrideByProduct = new Map<string, number>();
-  if (kept.length > 0) {
+  if (lookupIds.length > 0) {
     const overrides = await db.productPlanOverride.findMany({
-      where: { productId: { in: kept.map((p) => p.productId) } },
+      where: { productId: { in: lookupIds } },
       select: { productId: true, qty: true },
     });
     for (const o of overrides) overrideByProduct.set(o.productId, o.qty);
@@ -324,10 +373,10 @@ export async function getBuyList(
   // recomputed per screen.
   const revenueSince = new Date(Date.now() - REVENUE_WINDOW_DAYS * 86_400_000);
   const revenueByProduct = new Map<string, number>();
-  if (kept.length > 0) {
+  if (lookupIds.length > 0) {
     const grouped = await db.salesHistory.groupBy({
       by: ["productId"],
-      where: { productId: { in: kept.map((p) => p.productId) }, date: { gte: revenueSince } },
+      where: { productId: { in: lookupIds }, date: { gte: revenueSince } },
       _sum: { revenueKes: true },
     });
     for (const g of grouped) revenueByProduct.set(g.productId, g._sum.revenueKes ?? 0);
@@ -339,8 +388,8 @@ export async function getBuyList(
   //   - a DRAFT purchase-order line → keep active, but warn on double-ordering.
   const openOrderProductIds = new Set<string>();
   const draftPoProductIds = new Set<string>();
-  if (kept.length > 0) {
-    const productIds = kept.map((p) => p.productId);
+  if (lookupIds.length > 0) {
+    const productIds = lookupIds;
     const [openOrders, draftLines] = await Promise.all([
       db.order.findMany({
         where: {
@@ -362,6 +411,20 @@ export async function getBuyList(
     for (const l of draftLines) draftPoProductIds.add(l.productId);
   }
 
+  // Titles for cold-start borrows. Tenant-scoped through the same client, so a
+  // foreign id resolves to nothing; there is no FK on borrowedFromProductId and
+  // Product has no soft delete, so a proxy that has since been deleted simply
+  // misses the map and the row degrades to "a similar product".
+  const borrowedTitleById = new Map<string, string>();
+  const borrowedIds = [...new Set(sized.map((p) => p.borrowedFromProductId).filter((id) => !!id))];
+  if (borrowedIds.length > 0) {
+    const proxies = await db.product.findMany({
+      where: { id: { in: borrowedIds as string[] } },
+      select: { id: true, title: true },
+    });
+    for (const proxy of proxies) borrowedTitleById.set(proxy.id, proxy.title);
+  }
+
   // What-if flags, resolved once. A demand uplift only counts when it lifts
   // (multiplier > 1) — a 1x (or absent) uplift is a no-op, so with no coverDays
   // the whole re-size path is skipped and every field stays byte-identical to
@@ -369,8 +432,7 @@ export async function getBuyList(
   const demandMultiplier = demandUplift != null && demandUplift > 1 ? demandUplift : 1;
   const whatIf = coverDays != null || demandMultiplier > 1;
 
-  const built = kept
-    .map((p): FullBuyListRow => {
+  const buildRow = (p: (typeof sized)[number]): FullBuyListRow => {
       const product = p.product;
       // Two lenses on the same fact, and they must not be swapped. The measured
       // lead (null when there is none) floors the what-if SIZING below — a
@@ -401,9 +463,11 @@ export async function getBuyList(
       // what-if. With neither lens active, `whatIf` is false, `resizedQty` is
       // null and `qty === override ?? p.qty`, byte-identical to today.
       const override = overrideByProduct.get(p.productId) ?? null;
-      const resizedQty =
+      // One object, fed to BOTH the re-size and its explanation, so the breakdown
+      // can never describe a different horizon from the one that set the number.
+      const resizeInput =
         whatIf && override == null
-          ? recommendedQty({
+          ? {
               finalForecast30d: p.finalForecast30d * demandMultiplier,
               safetyStock: p.safetyStock,
               currentStock: product.currentStock,
@@ -412,8 +476,9 @@ export async function getBuyList(
                 coverDays != null
                   ? Math.max(coverDays, measuredLeadDays ?? 0)
                   : coverDaysFor(product, product.supplier),
-            })
+            }
           : null;
+      const resizedQty = resizeInput ? recommendedQty(resizeInput) : null;
       const qty = override ?? resizedQty ?? p.qty;
       return {
         predictionId: p.id,
@@ -442,15 +507,22 @@ export async function getBuyList(
         lineTotalKes: qty * product.costKes,
         priceKes: product.priceKes,
         reasoning: p.reasoning,
-        explain: buildExplain(p, qty),
+        explain: explainFor(p.explainParts, qty, resizeInput, override),
         qtySummary: buildQtySummary(p, qty),
+        confidence: asConfidence(p.confidenceWord),
+        coldStart: asColdStart(p.coldStart),
+        borrowedFromTitle: p.borrowedFromProductId
+          ? (borrowedTitleById.get(p.borrowedFromProductId) ?? null)
+          : null,
         plannable: plannableReason(product),
         atRiskKes: Math.round((p.finalForecast30d / RISK_HORIZON_DAYS) * product.priceKes * stockoutDays),
         revenue30dKes: revenueByProduct.get(p.productId) ?? 0,
         // Draft-PO overlap is a warn, not a drop: keep the row active but flag it.
         doubleOrderWarn: draftPoProductIds.has(p.productId) || undefined,
       };
-    });
+  };
+
+  const built = kept.map(buildRow);
 
   // Split the sized rows: hold already-ordered / unplannable / slow-mover
   // products OFF the active list (surfaced under `excluded`, never silently
@@ -463,6 +535,15 @@ export async function getBuyList(
     const reason = excludedReasonFor(row, openOrderProductIds.has(row.productId));
     if (reason) excludedRows.push({ ...row, reason });
     else activeRows.push(row);
+  }
+
+  // Products the run sized to nothing, appended AFTER the split so the three
+  // existing groups and the active list are untouched. Each carries the reason
+  // it isn't being ordered — the question the owner actually asks of a plan is
+  // "why isn't X here?", and until now no screen answered it.
+  for (const p of zeroQty) {
+    const row = buildRow(p);
+    excludedRows.push({ ...row, reason: notPlannedReasonFor(row, openOrderProductIds.has(row.productId)) });
   }
 
   // The ordering follows the flag: a money-blind caller's rows are ranked on
@@ -507,32 +588,51 @@ export function redactBuyList(buyList: BuyList, canViewCosts: boolean): BuyList 
   };
 }
 
-/** Recompute the mean-cover arithmetic; keep it only when the total lands on the
- *  stored quantity (policy-driven rules and post-run stock drift both disqualify —
- *  a breakdown that doesn't sum to the shown number is worse than none). */
-function buildExplain(
-  p: {
-    regime: string | null;
-    finalForecast30d: number;
-    safetyStock: number;
-    product: {
-      currentStock: number;
-      onOrder: number;
-      leadTimeDays: number | null;
-      supplier: { leadTimeAvgDays: number | null; leadTimeStdDays: number | null } | null;
-    };
-  },
-  storedQty: number
+const CONFIDENCE_WORDS = new Set<string>(["sure", "fairly_sure", "guessing"]);
+const COLD_START_STATES = new Set<string>(["too_new", "borrowed"]);
+
+const asConfidence = (v: string | null): PlanConfidence | null =>
+  v && CONFIDENCE_WORDS.has(v) ? (v as PlanConfidence) : null;
+const asColdStart = (v: string | null): PlanColdStart | null =>
+  v && COLD_START_STATES.has(v) ? (v as PlanColdStart) : null;
+
+/** `Prediction.explainParts` is a Json column, and rows written by hand (tests,
+ *  fixtures) carry none — so it is narrowed rather than trusted. */
+function asQtyExplanation(v: unknown): QtyExplanation | null {
+  if (typeof v !== "object" || v === null) return null;
+  const parts = v as Partial<QtyExplanation>;
+  return typeof parts.summary === "string" && typeof parts.recommendedQty === "number"
+    ? (parts as QtyExplanation)
+    : null;
+}
+
+/**
+ * The explanation for the quantity actually shown, from the same source that
+ * decided it:
+ *   - owner override → none. No engine rule produced that number, and
+ *     `qtySummary` plus the "you set N" affordance already say so.
+ *   - what-if re-size → the ONE engine again on the SAME input the re-size used,
+ *     so the breakdown describes the horizon the owner asked for. A numeric
+ *     equality check is not enough here: re-sizing at exactly the item's own
+ *     cover reproduces the persisted quantity, so the stored parts would match
+ *     the number while describing a different window.
+ *   - otherwise → the run's OWN persisted breakdown, read back rather than
+ *     recomputed. This is what gives min/max and calibrated rows a real "why";
+ *     recomputing could only ever redo the mean-cover branch, so it returned
+ *     null for every policy-driven row — most of the catalogue.
+ * Kept only when it still lands on the shown number: stock drifts after a run,
+ * and a breakdown that doesn't sum to the number is worse than none.
+ */
+function explainFor(
+  storedParts: unknown,
+  qty: number,
+  resizeInput: Parameters<typeof explainQty>[0] | null,
+  override: number | null
 ): QtyExplanation | null {
-  if (p.regime === "min_max") return null;
-  const explain = explainQty({
-    finalForecast30d: p.finalForecast30d,
-    safetyStock: p.safetyStock,
-    currentStock: p.product.currentStock,
-    onOrder: p.product.onOrder,
-    coverDays: coverDaysFor(p.product, p.product.supplier),
-  });
-  return explain.recommendedQty === storedQty ? explain : null;
+  if (override != null) return null;
+  if (resizeInput) return explainQty(resizeInput, qty);
+  const stored = asQtyExplanation(storedParts);
+  return stored && stored.recommendedQty === qty ? stored : null;
 }
 
 const r1 = (n: number) => Math.round(n * 10) / 10;

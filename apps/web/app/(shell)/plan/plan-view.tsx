@@ -133,6 +133,18 @@ export function PlanView({
         <p className="text-sm text-ink-muted">
           {buyList.rows.length} of {buyList.totalPredicted} forecast products need restocking.
           Nothing is planned until you pick.
+          {buyList.excluded.length > 0 && (
+            <>
+              {" "}
+              <button
+                type="button"
+                onClick={() => setMode("list")}
+                className="font-medium text-accent-ink hover:underline"
+              >
+                {`${buyList.excluded.length} aren’t on the list — see why`}
+              </button>
+            </>
+          )}
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <ModeCard
@@ -185,6 +197,10 @@ export function PlanView({
     const filteredBuyList: BuyList = {
       ...buyList,
       rows: filteredRows,
+      // The not-on-the-list section is scoped by the same selection: it is now
+      // most of the catalogue, so leaving it unfiltered would have the scope bar
+      // narrow the top of the page and not the bottom.
+      excluded: filterBuyListRows(buyList.excluded, scope) as typeof buyList.excluded,
       totalCostKes: canViewCosts
         ? filteredRows.reduce((sum, r) => sum + (r.lineTotalKes ?? 0), 0)
         : null,
