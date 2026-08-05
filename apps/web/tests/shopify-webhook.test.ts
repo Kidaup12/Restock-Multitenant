@@ -281,6 +281,37 @@ describe.skipIf(!runnable)("shopify webhook products/delete (real db)", () => {
     expect((await skuState(tenantId, "DEL-A"))?.missingFromShopifyAt).toEqual(first);
   });
 
+  it("stops changing the catalogue once the store has been disconnected", async () => {
+    // Disconnect stamps uninstalledAt locally; it does not unsubscribe the
+    // store's webhooks, so deliveries keep arriving. They must not still be
+    // able to mark this workspace's products missing — "disconnected" has to
+    // mean the store no longer changes anything here.
+    await prismaService.shopifyConnection.updateMany({
+      where: { tenantId },
+      data: { uninstalledAt: new Date() },
+    });
+    try {
+      const before = (await skuState(tenantId, "DEL-C"))?.missingFromShopifyAt ?? null;
+      const res = await POST(
+        webhookRequest({
+          body: JSON.stringify({ id: 9002 }),
+          topic: "products/delete",
+          webhookId: `${run}-disc`,
+          shop: DELETE_SHOP,
+        })
+      );
+      // 200 so Shopify stops retrying — there is nothing to deliver here.
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ ok: true, ignored: true });
+      expect((await skuState(tenantId, "DEL-C"))?.missingFromShopifyAt ?? null).toEqual(before);
+    } finally {
+      await prismaService.shopifyConnection.updateMany({
+        where: { tenantId },
+        data: { uninstalledAt: null },
+      });
+    }
+  });
+
   it("matches the stored core id whether the payload sends a gid or a bare number", async () => {
     const body = JSON.stringify({ id: "gid://shopify/Product/9002" });
     const res = await POST(
