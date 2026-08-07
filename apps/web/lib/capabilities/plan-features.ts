@@ -77,6 +77,37 @@ export const PLAN_FEATURES: Record<PlanFeature, PlanTier> = {
   priority_support: "scale",
 };
 
+/**
+ * What each feature is called, in the shop's words rather than the key's.
+ *
+ * Shared because two surfaces name the same things: the customer's own plan
+ * page, and the operator's tier control — which used to describe the tiers with
+ * a fixed sentence that never changed when the tier did, so nobody changing a
+ * plan could see what they were granting or taking away.
+ */
+export const PLAN_FEATURE_LABEL: Record<PlanFeature, string> = {
+  core_ordering: "Buy list, orders and receiving",
+  run_forecast: "Nightly forecast and re-runs",
+  supplier_po_email: "Email purchase orders to suppliers",
+  transfers: "Move stock between locations",
+  multi_location: "More than one location",
+  insights: "Insights and shelf health",
+  budget_planner: "Plan against a budget",
+  team_depth: "Larger team with per-person permissions",
+  priority_support: "Priority support",
+};
+
+/** Everything a tier includes — its own features plus every lower tier's. */
+export function featuresIncludedIn(tier: PlanTier): PlanFeature[] {
+  return (Object.keys(PLAN_FEATURES) as PlanFeature[]).filter((f) => planAllows(tier, f));
+}
+
+/** What moving from one tier to another turns on (or, reversed, turns off). */
+export function featuresGained(from: PlanTier, to: PlanTier): PlanFeature[] {
+  const had = new Set(featuresIncludedIn(from));
+  return featuresIncludedIn(to).filter((f) => !had.has(f));
+}
+
 /** The tier a feature needs (for upgrade copy). */
 export function planFeatureTier(feature: PlanFeature): PlanTier {
   return PLAN_FEATURES[feature];
