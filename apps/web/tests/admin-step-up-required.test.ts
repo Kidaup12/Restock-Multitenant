@@ -29,7 +29,7 @@ vi.mock("@/lib/admin/audit", () => ({
   },
 }));
 
-import { provisionWorkspaceAction, setTenantPlan } from "../app/admin/actions";
+import { inviteWorkspaceOwner, provisionWorkspaceAction, setTenantPlan } from "../app/admin/actions";
 import { STEP_UP_REQUIRED } from "../lib/admin/step-up-contract";
 
 function form(entries: Record<string, string>): FormData {
@@ -48,6 +48,16 @@ describe("console mutations without a step-up grant", () => {
   it("refuses to provision a workspace", async () => {
     const result = await provisionWorkspaceAction(
       form({ name: "Should Not Exist", ownerEmail: "nobody@example.test" })
+    );
+    expect(result).toEqual({ ok: false, error: STEP_UP_REQUIRED });
+    expect(writes.audit).toBe(0);
+  });
+
+  it("refuses to hand out ownership of a workspace", async () => {
+    // The one console action that grants standing access to someone else's
+    // shop, so it must fail closed before it reads the tenant or the email.
+    const result = await inviteWorkspaceOwner(
+      form({ tenantId: "any", email: "nobody@example.test" })
     );
     expect(result).toEqual({ ok: false, error: STEP_UP_REQUIRED });
     expect(writes.audit).toBe(0);

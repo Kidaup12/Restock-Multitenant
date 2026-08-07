@@ -24,6 +24,7 @@ import { getTodayMetrics, getReorderNeeded } from "@/lib/data/today";
 import { relativeTime } from "@/lib/notifications/format";
 import { enterWorkspace, exitWorkspace } from "../../actions";
 import { SyncButton } from "../../sync-button";
+import { OwnerControl } from "./owner-control";
 import { PlanControl } from "./plan-control";
 
 export const metadata: Metadata = {
@@ -176,6 +177,16 @@ export default async function AdminTenantPage({
           />
           <CardContent>
             <PlanControl tenantId={id} plan={detail.tenant.plan} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Add an owner"
+            subtitle="The workspace's own team screen can only invite staff"
+          />
+          <CardContent>
+            <OwnerControl tenantId={id} />
           </CardContent>
         </Card>
 
