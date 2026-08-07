@@ -382,3 +382,103 @@ export async function deleteCategoryAction(input: {
   revalidateCatalogue();
   return { ok: true, message: `Deleted "${name}" — ${result.count} products now uncategorised.` };
 }
+
+// ── Bulk lead time ───────────────────────────────────────────────────────────
+
+/** How many products one call may set. Generous enough for "the whole brand",
+ *  small enough that a malformed payload cannot rewrite the catalogue. */
+const LEAD_TIME_MAX_PRODUCTS = 500;
+
+/** Longest lead time worth typing; matches the single-product editor. */
+const LEAD_TIME_MAX_DAYS = 365;
+
+/**
+ * Set one lead time across many products at once.
+ *
+ * Lead time is what decides WHEN to order — an order-by date computed with no
+ * lead time assumes stock appears the moment it is ordered. Until now the only
+ * way to set it was one product at a time, from a field inside the supplier's
+ * product picker, which is why not a single product in any live workspace has
+ * one. A shop that buys most of its shelf from two importers wants to say "these
+ * take three weeks" once, not four hundred times.
+ *
+ * Two ways to choose the products, because the useful selections are different
+ * sizes: an explicit list of ids (what the reader ticked), or the reader's
+ * current filters (what "select all 312 matching" means — the rows are on the
+ * server, so the browser cannot enumerate them). The query route re-derives the
+ * match here rather than trusting a count from the client, exactly as the
+ * catalogue export does.
+ *
+ * Either way the ids are resolved on the RLS-scoped tenant client before the
+ * write, so an id belonging to another workspace simply does not come back.
+ */
+export async function setLeadTimeForProductsAction(input: {
+  leadTimeDays: number | null;
+  productIds?: string[];
+  query?: CatalogueQuery;
+}): Promise<CatalogueActionResult> {
+  const ctx = await actorContext(["manage_settings"]);
+  if (!ctx) return err("You don't have settings access in this workspace.");
+
+  const lead =
+    input.leadTimeDays == null || Number.isNaN(input.leadTimeDays)
+      ? null
+      : Math.round(input.leadTimeDays);
+  if (lead != null && (lead < 0 || lead > LEAD_TIME_MAX_DAYS)) {
+    return err(`Lead time should be between 0 and ${LEAD_TIME_MAX_DAYS} days.`);
+  }
+
+  const db = prismaForTenant(ctx.tenantId);
+
+  let ids: string[];
+  if (input.query) {
+    // canViewCosts only decides which columns come back; the rows themselves are
+    // the same list either way, so a money-blind admin selects the same set.
+    const rows = await getStockCatalogue(ctx.tenantId, { canViewCosts: false });
+    ids = selectRows(rows, input.query).map((r) => r.productId);
+  } else {
+    ids = [...new Set((input.productIds ?? []).filter((id) => typeof id === "string" && id))];
+  }
+
+  if (ids.length === 0) return err("Pick at least one product.");
+  if (ids.length > LEAD_TIME_MAX_PRODUCTS) {
+    return err(`Set up to ${LEAD_TIME_MAX_PRODUCTS} products at a time — narrow the list and repeat.`);
+  }
+
+  const found = await db.product.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, leadTimeDays: true },
+  });
+  if (found.length === 0) return err("Those products no longer exist.");
+
+  // Only the ones actually changing: a no-op write would still land an audit row
+  // saying a lead time moved when none did.
+  const changing = found.filter((p) => p.leadTimeDays !== lead).map((p) => p.id);
+  if (changing.length === 0) {
+    return { ok: true, message: lead == null ? "Already unset." : `Already ${lead} days.` };
+  }
+
+  const result = await db.product.updateMany({
+    where: { id: { in: changing } },
+    data: { leadTimeDays: lead },
+  });
+
+  await audit(ctx.tenantId, "-", "edited", ctx.actor, {
+    action: "bulk_lead_time",
+    to: lead,
+    products: result.count,
+    // How the set was chosen is worth keeping: "all 312 matching" and "these
+    // three" are very different actions to find in the ledger later.
+    scope: input.query ? "filtered" : "picked",
+  });
+  revalidateCatalogue();
+  revalidatePath("/suppliers");
+  revalidatePath("/plan");
+  return {
+    ok: true,
+    message:
+      lead == null
+        ? `Cleared the lead time on ${result.count} products.`
+        : `Lead time set to ${lead} days on ${result.count} products.`,
+  };
+}
