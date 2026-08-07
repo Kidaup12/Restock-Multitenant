@@ -59,7 +59,7 @@ export async function RevenueTrend({
   }
 
   const total = comparison.revenueKes;
-  const perDay = total / 30;
+  const perDay = total / comparison.windowDays;
   const deltaPct = priorTotal > 0 ? Math.round(((total - priorTotal) / priorTotal) * 100) : null;
   const spark = sparkline(series);
 
