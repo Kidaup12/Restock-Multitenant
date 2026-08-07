@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
+import { PasswordInput } from "@/components/auth/password-input";
 import { confirmStepUp } from "./step-up-actions";
 
 /**
@@ -51,9 +52,11 @@ export function StepUpPrompt({
         customer&apos;s workspace.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <input
-          className="w-56 rounded-md border border-edge bg-surface px-3 py-2 text-sm text-ink"
-          type="password"
+        {/* The same reveal control as sign-in and the Shopify token field. A
+            mistyped password is otherwise invisible until it is refused, and
+            this one costs a failed attempt against the lockout counter. */}
+        <PasswordInput
+          className="w-56"
           autoComplete="current-password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

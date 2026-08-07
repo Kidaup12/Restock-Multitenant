@@ -20,6 +20,7 @@ const ADMIN = {
   userId: "admin-invite-user",
   email: "invite-admin@example.test",
   name: "Invite Admin",
+  sessionId: "sess-test",
   viaFallback: false,
 };
 

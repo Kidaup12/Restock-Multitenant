@@ -24,6 +24,10 @@ import { auth, getSession, type AppSession } from "@/lib/auth";
 
 export type AdminActor = {
   userId: string;
+  /** The session this access came through. A step-up grant is bound to it, so
+   *  signing out and back in cannot inherit one — the user is the same, the
+   *  session is not. */
+  sessionId: string;
   email: string;
   name: string;
   /** True when this access comes from ADMIN_EMAILS rather than a PlatformAdmin
@@ -88,6 +92,7 @@ async function resolveActor(session: AppSession | null): Promise<AdminActor | nu
 function toActor(session: AppSession, viaFallback: boolean): AdminActor {
   return {
     userId: session.user.id,
+    sessionId: session.session.id,
     email: session.user.email,
     name: session.user.name,
     viaFallback,

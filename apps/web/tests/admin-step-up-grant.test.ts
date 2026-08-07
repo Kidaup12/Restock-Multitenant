@@ -36,7 +36,13 @@ describe.skipIf(!runnable)("grantStepUp", () => {
   let adminId: string;
   let otpId: string;
 
-  const actor = () => ({ userId: adminId, email: ADMIN_EMAIL, name: "Step Up", viaFallback: false });
+  const actor = (sessionId = "sess-test") => ({
+    userId: adminId,
+    email: ADMIN_EMAIL,
+    name: "Step Up",
+    sessionId,
+    viaFallback: false,
+  });
 
   beforeAll(async () => {
     ({ prismaService } = await import("@wezesha/db"));
@@ -95,6 +101,18 @@ describe.skipIf(!runnable)("grantStepUp", () => {
 
     expect(await stepUp.grantStepUp(actor(), PASSWORD)).toEqual({ ok: true });
     expect(await stepUp.hasStepUp(actor())).toBe(true);
+  });
+
+  it("does not carry the grant into a new session for the same person", async () => {
+    // The reported hole: sign out, sign back in, and walk into a customer's
+    // workspace unchallenged. Nothing clears this cookie on the way out —
+    // Better Auth owns sign-out and has never heard of it — so the grant has to
+    // be worthless to the next session rather than merely tidied away.
+    expect(await stepUp.grantStepUp(actor("session-one"), PASSWORD)).toEqual({ ok: true });
+    expect(await stepUp.hasStepUp(actor("session-one"))).toBe(true);
+
+    // Same user, same surviving cookie, different session.
+    expect(await stepUp.hasStepUp(actor("session-two"))).toBe(false);
 
     const row = await prismaService.platformAdmin.findUnique({ where: { userId: adminId } });
     expect(row).toMatchObject({ failedStepUps: 0, lockedUntil: null });
@@ -155,16 +173,16 @@ describe.skipIf(!runnable)("grantStepUp", () => {
     // itself if the two are conflated.
     await prismaService.platformAdmin.create({ data: { userId: otpId, email: OTP_EMAIL } });
     const result = await stepUp.grantStepUp(
-      { userId: otpId, email: OTP_EMAIL, name: "Code Only", viaFallback: false },
+      { userId: otpId, email: OTP_EMAIL, name: "Code Only", sessionId: "sess-test", viaFallback: false },
       "anything"
     );
     expect(result).toMatchObject({ ok: false, reason: "no_password" });
   });
 
   it("refuses a bootstrap admin, who has no row to hold a failure count", async () => {
-    const result = await stepUp.grantStepUp({ ...actor(), viaFallback: true }, PASSWORD);
+    const result = await stepUp.grantStepUp({ ...actor(), sessionId: "sess-test", viaFallback: true }, PASSWORD);
     expect(result).toMatchObject({ ok: false, reason: "not_eligible" });
-    expect(await stepUp.hasStepUp({ ...actor(), viaFallback: true })).toBe(false);
+    expect(await stepUp.hasStepUp({ ...actor(), sessionId: "sess-test", viaFallback: true })).toBe(false);
 
     // And the attempt never reached the throttle, so it cannot be used to lock
     // a real admin out by guessing against their address.
@@ -185,7 +203,7 @@ describe.skipIf(!runnable)("grantStepUp", () => {
     await stepUp.grantStepUp(actor(), PASSWORD);
     expect(await stepUp.hasStepUp(actor())).toBe(true);
     expect(
-      await stepUp.hasStepUp({ userId: otpId, email: OTP_EMAIL, name: "Code Only", viaFallback: false })
+      await stepUp.hasStepUp({ userId: otpId, email: OTP_EMAIL, name: "Code Only", sessionId: "sess-test", viaFallback: false })
     ).toBe(false);
   });
 });

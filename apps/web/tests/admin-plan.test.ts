@@ -21,6 +21,7 @@ const ADMIN = {
   userId: "admin-plan-user",
   email: "plan-admin@example.test",
   name: "Plan Admin",
+  sessionId: "sess-test",
   viaFallback: false,
 };
 
