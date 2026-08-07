@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +28,7 @@ import {
   type SortKey,
 } from "@/lib/catalogue";
 import type { CatalogueRow, CatalogueScreen, CategoryUsage } from "@/lib/data/stock";
+import { BulkLeadTimeBar } from "./bulk-lead-time-bar";
 import { CatalogueSearch } from "./catalogue-search";
 import { FacetFilterBar } from "./facet-filter-bar";
 import { CatalogueExportBar } from "./catalogue-export";
@@ -77,13 +79,52 @@ export function CatalogueView({
   canManage: boolean;
 }) {
   const currency = useCurrency();
+  const router = useRouter();
   // Which row is open is the one piece of state that does NOT change which rows
   // match, so it stays local — putting it in the URL would make expanding a row
   // a history entry.
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
+  // Selection is local for the same reason, and page-scoped: ticks travel with
+  // what is on screen. `allMatching` is the exception — it says "everything
+  // these filters match", which only the server can enumerate, so it is a flag
+  // rather than a list of ids the browser never had.
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [allMatching, setAllMatching] = useState(false);
+
   const { rows, aggregates, pageCount, page, from } = screen;
   const categoryNames = categories.map((c) => c.name);
+
+  const pageIds = useMemo(() => rows.map((r) => r.productId), [rows]);
+  const pageAllPicked = pageIds.length > 0 && pageIds.every((id) => picked.has(id));
+  const selectedCount = allMatching ? aggregates.matchedCount : picked.size;
+
+  function clearSelection() {
+    setPicked(new Set());
+    setAllMatching(false);
+  }
+
+  function togglePicked(productId: string) {
+    // Ticking a row after "all matching" means the reader is narrowing by hand,
+    // so the blanket selection stops applying.
+    setAllMatching(false);
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(productId)) next.delete(productId);
+      else next.add(productId);
+      return next;
+    });
+  }
+
+  function togglePage() {
+    setAllMatching(false);
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (pageAllPicked) for (const id of pageIds) next.delete(id);
+      else for (const id of pageIds) next.add(id);
+      return next;
+    });
+  }
 
   /** Every control routes through here. `withQuery` resets to page 1 for
    *  anything that changes WHICH rows match — filtering down to eight rows while
@@ -104,8 +145,9 @@ export function CatalogueView({
     `/stock${catalogueQueryToSearch(withQuery(query, patch))}`;
 
   // Product · ABC · Cost · Margin · On hand · On order · Sells/day · Cover ·
-  // Cash tied up · Revenue · Verdict, plus the optional warehouse column.
-  const colCount = 11 + (aggregates.hasWarehouseStock ? 1 : 0);
+  // Cash tied up · Revenue · Verdict, plus the optional warehouse column and
+  // the tick column an editor sees.
+  const colCount = 11 + (aggregates.hasWarehouseStock ? 1 : 0) + (canManage ? 1 : 0);
 
   return (
     <div className="space-y-4">
@@ -173,6 +215,17 @@ export function CatalogueView({
         <CardContent className="p-0 py-2">
           <Table>
             <TableHeader>
+              {canManage && (
+                <TableHead>
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-(--accent)"
+                    checked={pageAllPicked}
+                    onChange={togglePage}
+                    aria-label={pageAllPicked ? "Deselect this page" : "Select this page"}
+                  />
+                </TableHead>
+              )}
               <TableHead>Product</TableHead>
               <TableHead>ABC</TableHead>
               <TableHead numeric>Cost</TableHead>
@@ -201,12 +254,31 @@ export function CatalogueView({
                     categoryNames={categoryNames}
                     flags={ownerFlags[row.productId] ?? { active: true, activeOverride: false }}
                     colCount={colCount}
+                    picked={allMatching || picked.has(row.productId)}
+                    onPick={canManage ? () => togglePicked(row.productId) : undefined}
                   />
                 );
               })}
             </TableBody>
           </Table>
         </CardContent>
+
+        {/* Offered only once the page is fully ticked and there is more beyond
+            it: the rows live on the server, so "select all" on a 312-row match
+            has to be a claim the server resolves, not 312 ids the browser never
+            received. */}
+        {canManage && pageAllPicked && !allMatching && aggregates.matchedCount > pageIds.length && (
+          <p className="border-t border-edge px-4 py-2 text-sm text-ink-muted">
+            All {pageIds.length} on this page are selected.{" "}
+            <button
+              type="button"
+              onClick={() => setAllMatching(true)}
+              className="font-medium text-accent-ink underline-offset-2 hover:underline"
+            >
+              Select all {aggregates.matchedCount} matching
+            </button>
+          </p>
+        )}
 
         {pageCount > 1 && (
           <Pager
@@ -219,6 +291,21 @@ export function CatalogueView({
           />
         )}
       </Card>
+
+      {canManage && selectedCount > 0 && (
+        <BulkLeadTimeBar
+          count={selectedCount}
+          query={allMatching ? query : null}
+          productIds={[...picked]}
+          onDeselect={clearSelection}
+          onApplied={() => {
+            clearSelection();
+            // The rows came from the server, so the new lead times only appear
+            // once it re-renders them.
+            router.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -366,10 +453,15 @@ function RowGroup({
   categoryNames,
   flags,
   colCount,
+  picked,
+  onPick,
 }: {
   row: CatalogueRow;
   open: boolean;
   onToggle: () => void;
+  picked: boolean;
+  /** Undefined for a reader who cannot edit — no tick column at all. */
+  onPick?: () => void;
   hasWarehouseStock: boolean;
   canViewCosts: boolean;
   canManage: boolean;
@@ -383,6 +475,17 @@ function RowGroup({
   return (
     <>
       <TableRow className={open ? "bg-surface-2/60" : undefined}>
+        {onPick && (
+          <TableCell>
+            <input
+              type="checkbox"
+              className="size-4 accent-(--accent)"
+              checked={picked}
+              onChange={onPick}
+              aria-label={`Select ${row.title}`}
+            />
+          </TableCell>
+        )}
         <TableCell className="max-w-[22rem]">
           <button type="button" onClick={onToggle} className="flex items-center gap-2 text-left">
             <span className="text-ink-faint">{open ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}</span>
