@@ -28,6 +28,7 @@ function mkRow(partial: Partial<BuyListRow>): BuyListRow {
     urgency: "medium",
     tier: "this_week",
     recommendedQty: 10,
+    orderQty: 10,
     overriddenQty: null,
     runRatePerDay: 1,
     moq: 1,

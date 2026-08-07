@@ -1,4 +1,5 @@
 import { prismaForTenant, prismaForTenantTx } from "@wezesha/db";
+import { applyMoq } from "@/lib/po/po-math";
 import {
   allocateByBudget,
   ASSUMED_LEAD_DAYS,
@@ -90,6 +91,13 @@ export type BuyListRow = {
   runRatePerDay: number;
   /** Supplier minimum order quantity (units); 1 when none is set. */
   moq: number;
+  /** What will actually be ordered: recommendedQty raised to the supplier's
+   *  minimum. The two differ whenever a supplier won't ship a small line, and
+   *  every money figure uses THIS one — the plan used to price the pre-floor
+   *  number while the purchase order billed the floored one, so a plan showing
+   *  KES 1.08M of buying wrote KES 1.24M of orders. recommendedQty stays as the
+   *  engine's own number: the MOQ note and recommended-vs-actual both need it. */
+  orderQty: number;
   /** ABC class from the shared metric run; null when unranked or too new. */
   abc: string | null;
   /** Owner-defined grouping (the "Category" facet), from Product.customCategory;
@@ -491,6 +499,12 @@ export async function getBuyList(
           : null;
       const resizedQty = resizeInput ? recommendedQty(resizeInput) : null;
       const qty = override ?? resizedQty ?? p.qty;
+      // The supplier's floor is part of what this line costs, not a surprise
+      // applied at PO time. applyMoq is the same function create-po runs — but
+      // it floors at 1, and a row sized to zero is one we are NOT ordering
+      // (covered, too new, already on order). Flooring those to 1 would put a
+      // unit of cost against every product the plan deliberately left out.
+      const orderQty = qty > 0 ? applyMoq(qty, product.supplier?.moq ?? 1) : 0;
       return {
         predictionId: p.id,
         productId: p.productId,
@@ -509,13 +523,14 @@ export async function getBuyList(
         urgency: p.urgency,
         tier: tierFor(p.urgency, daysLeftToOrder),
         recommendedQty: qty,
+        orderQty,
         overriddenQty: override,
         runRatePerDay: r1(p.finalForecast30d / 30),
         moq: product.supplier?.moq ?? 1,
         abc: product.abcCategory,
         category: product.customCategory,
         unitCostKes: product.costKes,
-        lineTotalKes: qty * product.costKes,
+        lineTotalKes: orderQty * product.costKes,
         priceKes: product.priceKes,
         reasoning: p.reasoning,
         explain: explainFor(p.explainParts, qty, resizeInput, override),

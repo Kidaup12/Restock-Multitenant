@@ -27,6 +27,7 @@ const row = (reason: ExcludedReason, over: Partial<ExcludedRow> = {}): ExcludedR
   urgency: "low",
   tier: "can_wait",
   recommendedQty: 0,
+  orderQty: 0,
   overriddenQty: null,
   runRatePerDay: 0.3,
   moq: 1,
