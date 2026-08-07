@@ -6,6 +6,7 @@ import { CheckIcon } from "@/components/icons";
 import { getTenantPlan } from "@/lib/capabilities";
 import {
   PLAN_FEATURES,
+  PLAN_FEATURE_LABEL,
   PLAN_ORDER,
   PLAN_TIER_LABEL,
   planAllows,
@@ -26,18 +27,6 @@ export const metadata: Metadata = {
  * — a member met "Budget planner is on the Growth plan" as an upsell string with
  * nowhere to go and see the whole picture.
  */
-
-const FEATURE_LABEL: Record<PlanFeature, string> = {
-  core_ordering: "Buy list, orders and receiving",
-  run_forecast: "Nightly forecast and re-runs",
-  supplier_po_email: "Email purchase orders to suppliers",
-  transfers: "Move stock between locations",
-  multi_location: "More than one location",
-  insights: "Insights and shelf health",
-  budget_planner: "Plan against a budget",
-  team_depth: "Larger team with per-person permissions",
-  priority_support: "Priority support",
-};
 
 const FEATURES_BY_TIER = (tier: PlanTier): PlanFeature[] =>
   (Object.keys(PLAN_FEATURES) as PlanFeature[]).filter((f) => PLAN_FEATURES[f] === tier);
@@ -81,7 +70,7 @@ export default async function PlanPage() {
                       <CheckIcon />
                     </span>
                     <span className={has ? "text-ink" : "text-ink-muted"}>
-                      {FEATURE_LABEL[feature]}
+                      {PLAN_FEATURE_LABEL[feature]}
                     </span>
                   </li>
                 );

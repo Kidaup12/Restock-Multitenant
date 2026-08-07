@@ -3,7 +3,14 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { PLAN_ORDER, PLAN_TIER_LABEL, type PlanTier } from "@/lib/capabilities/plan-features";
+import {
+  PLAN_FEATURE_LABEL,
+  PLAN_ORDER,
+  PLAN_TIER_LABEL,
+  featuresGained,
+  featuresIncludedIn,
+  type PlanTier,
+} from "@/lib/capabilities/plan-features";
 import { setTenantPlan } from "@/app/admin/actions";
 import { STEP_UP_REQUIRED } from "@/lib/admin/step-up-contract";
 import { StepUpPrompt } from "@/app/admin/step-up-prompt";
@@ -85,11 +92,46 @@ export function PlanControl({ tenantId, plan }: { tenantId: string; plan: string
           onCancel={() => setNeedsStepUp(false)}
         />
       )}
-      <p className="text-xs text-ink-muted">
-        The tier decides Insights, Transfers, the budget planner and emailing a purchase order to a
-        supplier. A change applies on the workspace&apos;s next page load, and is written to the
-        audit trail.
+      <TierEffect current={current} choice={choice} />
+    </div>
+  );
+}
+
+/**
+ * What the chosen tier actually means, rather than a fixed sentence about tiers
+ * in general.
+ *
+ * The copy here used to name the four features a tier governs and never change
+ * — so an operator moving a customer between tiers could not see what they were
+ * granting, and moving one DOWN gave no warning that a screen someone is using
+ * today would stop opening tomorrow. Both directions are now spelled out from
+ * the same feature matrix the gates read, so this cannot drift from what the
+ * app enforces.
+ */
+function TierEffect({ current, choice }: { current: PlanTier; choice: PlanTier }) {
+  const list = (features: ReturnType<typeof featuresIncludedIn>) =>
+    features.map((f) => PLAN_FEATURE_LABEL[f]).join(", ");
+
+  const gained = featuresGained(current, choice);
+  const lost = featuresGained(choice, current);
+
+  return (
+    <div className="space-y-1.5 text-xs text-ink-muted">
+      <p>
+        <span className="font-medium text-ink">{PLAN_TIER_LABEL[choice]}</span> includes{" "}
+        {list(featuresIncludedIn(choice))}.
       </p>
+      {gained.length > 0 && (
+        <p className="text-positive">Moving up turns on {list(gained)}.</p>
+      )}
+      {lost.length > 0 && (
+        // The direction worth a warning: someone may be mid-task on one of these.
+        <p className="text-warning">
+          Moving down turns off {list(lost)} — anyone using them loses access on their next page
+          load.
+        </p>
+      )}
+      <p>A change applies on the workspace&apos;s next page load, and is written to the audit trail.</p>
     </div>
   );
 }
