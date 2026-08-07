@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { useRouter } from "next/navigation";
+import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -91,6 +92,20 @@ export function ShopifyConnectionCard({
   // so deriving the button state from it would leave "Sync now" disabled until
   // the next full page load.
   const [syncActive, setSyncActive] = useState(syncRun?.status === "running");
+  /**
+   * Which way in. The three routes used to be stacked on one page, all fillable
+   * at once — and filling two is not a harmless duplicate: the worker resolves
+   * app credentials FIRST and never reads a pasted token when a credential row
+   * exists, so a store connected both ways probes green and then dies about a
+   * day later on a minted token nobody renewed. Tabs make that combination
+   * impossible to reach rather than merely discouraged.
+   *
+   * The token route is the default because it is the one that always works. The
+   * install route needs an app whose distribution is configured in the Partner
+   * dashboard, which is the step most workspaces have not done.
+   */
+  const [route, setRoute] = useState<"token" | "install" | "credentials">("token");
+
   const [notice, setNotice] = useState<{ tone: "positive" | "warning" | "negative"; text: string } | null>(
     errorCode
       ? { tone: "negative", text: OAUTH_ERRORS[errorCode] ?? "Connecting the store failed." }
@@ -339,6 +354,114 @@ export function ShopifyConnectionCard({
     </div>
   );
 
+  /** The Partner-app route. Its own tab now: on one page with the token
+   *  field it read as an extra step rather than an alternative, and filling
+   *  both is the combination the worker silently resolves in this one's
+   *  favour. */
+  const appCredentialsPanel = (
+    <div className="space-y-3 rounded-md border border-edge p-3">
+      <div>
+        <h3 className="text-sm font-medium text-ink">
+          Your Shopify app{" "}
+          {appCredentialsConfigured ? (
+            <Badge tone="positive">Configured</Badge>
+          ) : (
+            <Badge tone="neutral">Not set</Badge>
+          )}
+        </h3>
+        <p className="mt-1 text-sm text-ink-muted">
+          For an app you registered in the Shopify Partner dashboard. We
+          refresh access with these instead of holding a token.{" "}
+          <strong className="font-medium text-ink">
+            Do not fill these in as well as pasting a token
+          </strong>{" "}
+          — when both are present these win, and the token is ignored. We
+          never show the secret again once it is saved.
+        </p>
+      </div>
+      <div className="grid gap-2 sm:max-w-md">
+        {/* autoComplete off throughout: a bare text + password pair in a
+            settings form is exactly what a browser offers to fill with the
+            saved sign-in, which silently puts an email in the client ID. */}
+        <Input
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          placeholder="Client ID"
+          aria-label="Shopify app client ID"
+          autoComplete="off"
+          name="shopify-client-id"
+        />
+        {/* Same reveal control as the sign-in field: these are long
+            opaque strings and a silent typo is otherwise only discovered
+            by a failed connection. */}
+        <PasswordInput
+          value={apiSecret}
+          onChange={(e) => setApiSecret(e.target.value)}
+          placeholder={appCredentialsConfigured ? "•••••••• (unchanged)" : "API secret key"}
+          aria-label="Shopify app API secret"
+          autoComplete="new-password"
+          name="shopify-api-secret"
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            onClick={saveCredentials}
+            loading={busy === "creds"}
+            // A configured workspace may change just the client id; the
+            // stored secret is kept when the box is left blank.
+            disabled={
+              busy !== null ||
+              !clientId.trim() ||
+              (!apiSecret.trim() && !appCredentialsConfigured)
+            }
+          >
+            {appCredentialsConfigured ? "Update credentials" : "Save credentials"}
+          </Button>
+          {appCredentialsConfigured && (
+            <Button
+              variant="ghost"
+              onClick={clearCredentials}
+              loading={busy === "clearCreds"}
+              disabled={busy !== null}
+            >
+              Remove
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  /** A store that has never connected chooses one route; a connected one keeps
+   *  its credential box on the page, because changing an app's secret is a
+   *  maintenance job rather than a way in. */
+  const choosingRoute = connection === null && canManage;
+
+  const routeTabs = (
+    <div role="tablist" aria-label="How to connect" className="flex flex-wrap gap-1 rounded-md bg-surface-2 p-1">
+      {(
+        [
+          ["token", "Admin API token"],
+          ["install", "Install a published app"],
+          ["credentials", "Client ID & secret"],
+        ] as const
+      ).map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          aria-selected={route === key}
+          onClick={() => setRoute(key)}
+          className={cn(
+            "rounded px-3 py-1.5 text-sm font-medium transition-colors",
+            route === key ? "bg-surface text-ink shadow-sm" : "text-ink-muted hover:text-ink",
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
   const noticeTone = {
     positive: "bg-positive-soft text-positive",
     warning: "bg-warning-soft text-warning",
@@ -374,76 +497,7 @@ export function ShopifyConnectionCard({
           <p className={`rounded-md px-3 py-2 text-sm ${noticeTone[notice.tone]}`}>{notice.text}</p>
         )}
 
-        {canManage && (
-          <div className="space-y-3 rounded-md border border-edge p-3">
-            <div>
-              <h3 className="text-sm font-medium text-ink">
-                Your Shopify app{" "}
-                {appCredentialsConfigured ? (
-                  <Badge tone="positive">Configured</Badge>
-                ) : (
-                  <Badge tone="neutral">Not set</Badge>
-                )}
-              </h3>
-              <p className="mt-1 text-sm text-ink-muted">
-                Optional. Your store&apos;s data is only ever reached with credentials
-                you control, and these let us refresh access on our own instead of
-                holding a token that eventually expires. If you would rather just
-                paste a token, leave this empty. We never show the secret again once
-                it is saved.
-              </p>
-            </div>
-            <div className="grid gap-2 sm:max-w-md">
-              {/* autoComplete off throughout: a bare text + password pair in a
-                  settings form is exactly what a browser offers to fill with the
-                  saved sign-in, which silently puts an email in the client ID. */}
-              <Input
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                placeholder="Client ID"
-                aria-label="Shopify app client ID"
-                autoComplete="off"
-                name="shopify-client-id"
-              />
-              {/* Same reveal control as the sign-in field: these are long
-                  opaque strings and a silent typo is otherwise only discovered
-                  by a failed connection. */}
-              <PasswordInput
-                value={apiSecret}
-                onChange={(e) => setApiSecret(e.target.value)}
-                placeholder={appCredentialsConfigured ? "•••••••• (unchanged)" : "API secret key"}
-                aria-label="Shopify app API secret"
-                autoComplete="new-password"
-                name="shopify-api-secret"
-              />
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  onClick={saveCredentials}
-                  loading={busy === "creds"}
-                  // A configured workspace may change just the client id; the
-                  // stored secret is kept when the box is left blank.
-                  disabled={
-                    busy !== null ||
-                    !clientId.trim() ||
-                    (!apiSecret.trim() && !appCredentialsConfigured)
-                  }
-                >
-                  {appCredentialsConfigured ? "Update credentials" : "Save credentials"}
-                </Button>
-                {appCredentialsConfigured && (
-                  <Button
-                    variant="ghost"
-                    onClick={clearCredentials}
-                    loading={busy === "clearCreds"}
-                    disabled={busy !== null}
-                  >
-                    Remove
-                  </Button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        {canManage && !choosingRoute && appCredentialsPanel}
 
         {connection === null ? (
           canManage ? (
@@ -453,45 +507,47 @@ export function ShopifyConnectionCard({
                 history that drive restock suggestions.
               </p>
 
-              {/* The token route leads because it is the one that always works.
-                  The install below needs an app whose distribution is set up in
-                  the Shopify Partner dashboard; until that is done it ends on
-                  "this app can't be installed yet", which reads as our fault and
-                  tells the shop nothing it can act on. */}
-              {tokenConnectPanel}
+              {routeTabs}
 
-              <div className="space-y-3 border-t border-edge pt-4">
-                <div>
-                  <h3 className="text-sm font-medium text-ink">
-                    Or install a published app
-                  </h3>
-                  <p className="mt-1 text-sm text-ink-muted">
-                    Only for an app whose distribution is already configured in the
-                    Shopify Partner dashboard. If you see &ldquo;this app can&apos;t
-                    be installed yet&rdquo;, use the token above instead.
-                  </p>
+              {route === "token" && tokenConnectPanel}
+
+              {route === "credentials" && appCredentialsPanel}
+
+              {route === "install" && (
+                <div className="space-y-3 border-t border-edge pt-4">
+                  <div>
+                    <h3 className="text-sm font-medium text-ink">Install a published app</h3>
+                    <p className="mt-1 text-sm text-ink-muted">
+                      Only for an app whose distribution is already configured in the
+                      Shopify Partner dashboard. If you see &ldquo;this app can&apos;t
+                      be installed yet&rdquo;, use the Admin API token tab instead.
+                    </p>
+                    <p className="mt-1 text-xs text-ink-faint">
+                      Needs the {REQUIRED_SCOPE_LABEL} scopes, and the client ID and
+                      secret saved under Client ID &amp; secret.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Input
+                      value={shop}
+                      onChange={(e) => setShop(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && connect()}
+                      placeholder="your-store.myshopify.com"
+                      className="max-w-xs"
+                      aria-label="Shop domain"
+                      autoComplete="off"
+                      name="shopify-install-shop"
+                    />
+                    <Button
+                      onClick={connect}
+                      loading={busy === "install"}
+                      disabled={busy !== null || !shop.trim()}
+                    >
+                      Connect store
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    value={shop}
-                    onChange={(e) => setShop(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && connect()}
-                    placeholder="your-store.myshopify.com"
-                    className="max-w-xs"
-                    aria-label="Shop domain"
-                    autoComplete="off"
-                    name="shopify-install-shop"
-                  />
-                  <Button
-                    variant="ghost"
-                    onClick={connect}
-                    loading={busy === "install"}
-                    disabled={busy !== null || !shop.trim()}
-                  >
-                    Connect store
-                  </Button>
-                </div>
-              </div>
+              )}
             </div>
           ) : (
             <p className="text-sm text-ink-muted">

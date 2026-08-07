@@ -174,14 +174,16 @@ describe("connections card — sync states", () => {
     // installed yet", which reads as our fault and gives the shop nothing to
     // act on. A tester hit exactly that. The token route needs no distribution,
     // no review and no Partner account, so it goes first.
+    // The routes are tabs now rather than one stacked page, so "first" is which
+    // one is selected, not which appears higher. They stopped being stacked
+    // because all three were fillable at once, and app credentials silently beat
+    // a pasted token in the worker — see shopify-connect-routes.test.tsx.
     const html = render(null, false, null);
-    const tokenAt = html.indexOf("Connect with your own app");
-    const installAt = html.indexOf("Or install a published app");
-    expect(tokenAt).toBeGreaterThan(-1);
-    expect(installAt).toBeGreaterThan(-1);
-    expect(tokenAt).toBeLessThan(installAt);
-    // And the install says what it needs, rather than failing at Shopify.
-    expect(html).toContain("distribution is already configured");
+    expect(html).toContain("Connect with your own app");
+    expect(html).toContain('name="shopify-admin-token"');
+    // The install route is offered, but as a tab the reader has to choose.
+    expect(html).toContain("Install a published app");
+    expect(html).not.toContain('name="shopify-install-shop"');
   });
 
   it("offers the token route to a store that is connected but cannot sync", () => {
