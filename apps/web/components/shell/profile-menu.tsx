@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { clearAdminCookies } from "@/app/admin/sign-out-actions";
 import { cn } from "@/lib/cn";
 import { authClient } from "@/lib/auth-client";
 import { useInstallPrompt } from "@/lib/use-install-prompt";
@@ -96,6 +97,9 @@ export function ProfileMenu({
 
   async function signOut() {
     setSigningOut(true);
+    // Before Better Auth drops the session: it owns sign-out and has never
+    // heard of the console's cookies, so nothing else would clear them.
+    await clearAdminCookies().catch(() => {});
     await authClient.signOut();
     router.push("/login");
   }

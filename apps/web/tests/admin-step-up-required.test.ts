@@ -15,6 +15,7 @@ const ADMIN = {
   userId: "step-up-required-admin",
   email: "step-up-required@example.test",
   name: "Guarded",
+  sessionId: "sess-test",
   viaFallback: false,
 };
 

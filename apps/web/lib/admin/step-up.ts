@@ -43,24 +43,37 @@ function hmac(payload: string, key: string): Buffer {
   return createHmac("sha256", key).update(payload).digest();
 }
 
-/** Signed cookie value granting step-up to one user until now+TTL. */
+/**
+ * Signed cookie value granting step-up to one SESSION until now+TTL.
+ *
+ * The session, not the user. Keyed on the user alone, a grant outlived the
+ * sign-out that should have ended it: nothing clears this cookie on the way
+ * out (Better Auth owns sign-out and knows nothing about it), so the same
+ * person signing back in inherited the rest of the 30 minutes and walked into
+ * a customer's workspace without being asked for anything. Binding it here
+ * closes that whether or not the cookie is ever cleared — a new session cannot
+ * present a grant issued to an old one.
+ */
 export function signStepUp(
   userId: string,
+  sessionId: string,
   now: number = Date.now(),
   key: string = secret()
 ): string {
   const payload = Buffer.from(
-    JSON.stringify({ u: userId, exp: now + ADMIN_STEPUP_TTL_MS })
+    JSON.stringify({ u: userId, s: sessionId, exp: now + ADMIN_STEPUP_TTL_MS })
   ).toString("base64url");
   return `${payload}.${hmac(payload, key).toString("base64url")}`;
 }
 
-/** The user id a cookie value grants, or null on tamper/expiry/garbage. */
+/** The session a cookie value grants, or null on tamper/expiry/garbage. A
+ *  grant signed before this change carries no session and is refused — the
+ *  worst it costs anyone is typing their password once. */
 export function verifyStepUp(
   value: string | null | undefined,
   now: number = Date.now(),
   key: string = secret()
-): string | null {
+): { userId: string; sessionId: string } | null {
   if (!value) return null;
   const dot = value.lastIndexOf(".");
   if (dot <= 0) return null;
@@ -75,19 +88,20 @@ export function verifyStepUp(
   }
   if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
 
-  let parsed: { u?: unknown; exp?: unknown };
+  let parsed: { u?: unknown; s?: unknown; exp?: unknown };
   try {
     parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
   } catch {
     return null;
   }
   if (typeof parsed.u !== "string" || typeof parsed.exp !== "number") return null;
+  if (typeof parsed.s !== "string") return null;
   if (parsed.exp <= now) return null;
-  return parsed.u;
+  return { userId: parsed.u, sessionId: parsed.s };
 }
 
-async function setStepUpCookie(userId: string): Promise<void> {
-  (await cookies()).set(ADMIN_STEPUP_COOKIE, signStepUp(userId), {
+async function setStepUpCookie(userId: string, sessionId: string): Promise<void> {
+  (await cookies()).set(ADMIN_STEPUP_COOKIE, signStepUp(userId, sessionId), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -119,7 +133,11 @@ export async function clearStepUpCookie(): Promise<void> {
 export async function hasStepUp(actor: AdminActor): Promise<boolean> {
   if (actor.viaFallback) return false;
   const value = (await cookies()).get(ADMIN_STEPUP_COOKIE)?.value;
-  return verifyStepUp(value) === actor.userId;
+  const grant = verifyStepUp(value);
+  // Both, not either: the session is what makes signing out actually end the
+  // grant, and the user is checked anyway so a session id alone could never
+  // stand in for one.
+  return grant !== null && grant.userId === actor.userId && grant.sessionId === actor.sessionId;
 }
 
 export type StepUpResult =
@@ -211,7 +229,7 @@ export async function grantStepUp(actor: AdminActor, password: string): Promise<
     where: { userId: actor.userId },
     data: { failedStepUps: 0, lockedUntil: null },
   });
-  await setStepUpCookie(actor.userId);
+  await setStepUpCookie(actor.userId, actor.sessionId);
   return { ok: true };
 }
 

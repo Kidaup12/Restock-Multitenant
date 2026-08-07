@@ -18,6 +18,7 @@ const ADMIN = {
   userId: "provision-admin",
   email: "provision@example.test",
   name: "Provision Admin",
+  sessionId: "sess-test",
   viaFallback: false,
 };
 
