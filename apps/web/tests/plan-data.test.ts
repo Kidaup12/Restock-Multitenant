@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prismaForTenant, prismaService } from "@wezesha/db";
+import { applyMoq } from "../lib/po/po-math";
 import {
   ASSUMED_LEAD_DAYS,
   NO_STOCKOUT_DAYS,
@@ -58,6 +59,42 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     await prismaService.$disconnect();
   });
 
+  it("prices a supplier minimum into the plan, not just into the purchase order", async () => {
+    // #18. The floor was applied when the PO was written and nowhere else, so a
+    // plan showing KES 1.08M of buying wrote KES 1.24M of orders. The owner
+    // budgeting against the first number was short by the difference.
+    const supplier = await prismaService.supplier.findFirst({
+      where: { tenantId: seeded.tenantId, deletedAt: null },
+      select: { id: true, moq: true },
+    });
+    expect(supplier).not.toBeNull();
+    const original = supplier!.moq;
+
+    try {
+      await prismaService.supplier.update({ where: { id: supplier!.id }, data: { moq: 48 } });
+      const list = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      const floored = list!.rows.filter(
+        (r) => r.moq === 48 && r.recommendedQty > 0 && r.recommendedQty < 48
+      );
+      // If nothing is under the floor the test proves nothing — say so loudly
+      // rather than passing on an empty set.
+      expect(floored.length).toBeGreaterThan(0);
+
+      for (const row of floored) {
+        expect(row.orderQty).toBe(48);
+        expect(row.lineTotalKes).toBeCloseTo(48 * row.unitCostKes!, 5);
+        // And the engine's own number survives, for the MOQ note and analytics.
+        expect(row.recommendedQty).toBeLessThan(48);
+      }
+
+      // The headline the owner budgets against moves with it.
+      const summed = list!.rows.reduce((s, r) => s + (r.lineTotalKes ?? 0), 0);
+      expect(list!.totalCostKes).toBeCloseTo(summed, 5);
+    } finally {
+      await prismaService.supplier.update({ where: { id: supplier!.id }, data: { moq: original } });
+    }
+  });
+
   it("builds the buy list from the latest run with real costs and ordering", async () => {
     const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     expect(buyList).not.toBeNull();
@@ -105,7 +142,11 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       );
       expect(row.urgency).toBe(p.urgency);
       expect(row.unitCostKes).toBe(p.product.costKes);
-      expect(row.lineTotalKes).toBeCloseTo(row.recommendedQty * p.product.costKes, 5);
+      // Priced off what will be ORDERED, not what was recommended. The two are
+      // the same until a supplier has a minimum, and that difference is exactly
+      // what used to make the plan cheaper than the purchase orders it became.
+      expect(row.lineTotalKes).toBeCloseTo(row.orderQty * p.product.costKes, 5);
+      expect(row.orderQty).toBeGreaterThanOrEqual(row.recommendedQty);
       expect(row.reasoning).toBe(p.reasoning);
       expect(row.supplierName).toBe(p.product.supplier?.name ?? null);
       // Deferral price recomputed straight from the stored engine output.
@@ -502,7 +543,12 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       const expected = engineQtyAt(row.sku, requested);
       expect(row.recommendedQty, row.sku).toBe(expected);
       expect(expected, row.sku).toBeGreaterThan(0);
-      expect(row.lineTotalKes).toBeCloseTo(expected * row.unitCostKes!, 5);
+      // The engine's number is what we need; the supplier's floor is what we
+      // must buy. The line is priced on the second — these assertions used to
+      // hold the first, which is the understatement #18 is about. The seeded
+      // suppliers carry MOQs of 12, 24 and 48, so this is not hypothetical.
+      expect(row.orderQty, row.sku).toBe(applyMoq(expected, row.moq));
+      expect(row.lineTotalKes).toBeCloseTo(row.orderQty * row.unitCostKes!, 5);
       expect(row.qtySummary).toContain(`+ ${expected} ordered`);
     }
     expect(sized!.totalCostKes).toBeCloseTo(
@@ -609,7 +655,12 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       const expected = engineUpliftAt(row.sku, 2);
       expect(row.recommendedQty, row.sku).toBe(expected);
       expect(expected, row.sku).toBeGreaterThan(0);
-      expect(row.lineTotalKes).toBeCloseTo(expected * row.unitCostKes!, 5);
+      // The engine's number is what we need; the supplier's floor is what we
+      // must buy. The line is priced on the second — these assertions used to
+      // hold the first, which is the understatement #18 is about. The seeded
+      // suppliers carry MOQs of 12, 24 and 48, so this is not hypothetical.
+      expect(row.orderQty, row.sku).toBe(applyMoq(expected, row.moq));
+      expect(row.lineTotalKes).toBeCloseTo(row.orderQty * row.unitCostKes!, 5);
       expect(row.qtySummary).toContain(`+ ${expected} ordered`);
     }
     expect(lifted!.totalCostKes).toBeCloseTo(
@@ -886,6 +937,7 @@ describe("splitByBudget (pure)", () => {
       urgency: "medium",
       tier: "this_week",
       recommendedQty: 10,
+      orderQty: 10,
       overriddenQty: null,
       runRatePerDay: 1,
       moq: 1,
@@ -1021,6 +1073,7 @@ describe("filterBuyListRows (pure)", () => {
       urgency: "medium",
       tier: "this_week",
       recommendedQty: 10,
+      orderQty: 10,
       overriddenQty: null,
       runRatePerDay: 1,
       moq: 1,

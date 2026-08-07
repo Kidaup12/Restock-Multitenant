@@ -687,6 +687,7 @@ describe("plan buy-list redaction (pure)", () => {
     urgency: "high",
     tier: "this_week",
     recommendedQty: 10,
+    orderQty: 10,
     overriddenQty: null,
     runRatePerDay: 1.5,
     moq: 1,
@@ -780,6 +781,7 @@ describe("plan buy-list redaction (pure)", () => {
       productId: sku,
       sku,
       recommendedQty: qty,
+      orderQty: qty,
       unitCostKes,
       lineTotalKes: qty * unitCostKes,
     });

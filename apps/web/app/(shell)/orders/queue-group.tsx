@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { OrderQueueGroup } from "@/lib/data/orders";
+import { buildPoLines, subtotal } from "@/lib/po/po-math";
 import { createPoAction } from "./actions";
 import { SupplierScoreBadges } from "./supplier-score-badges";
 
@@ -39,10 +40,40 @@ export function QueueGroup({
     () => group.lines.filter((l) => selected.has(l.orderId)),
     [group.lines, selected]
   );
-  const selectedUnits = selection.reduce((s, l) => s + l.qty, 0);
-  // lineCostKes is null for a money-blind member; the running total is only
-  // shown when canViewCosts, so a redacted line contributes nothing here.
-  const selectedCost = selection.reduce((s, l) => s + (l.lineCostKes ?? 0), 0);
+  /**
+   * What the PO will actually be — not what was ticked.
+   *
+   * These used to sum the queued rows as-is, while creating the PO merged
+   * duplicate products and raised each line to the supplier's minimum. So the
+   * button promised "90 units · KES 84,000" and wrote 108 units · KES 96,600.
+   * Across one forecast run the gap was KES 161,500 on a KES 1.08M plan — an
+   * owner who says they have KES 500,000 to spend was handed a plan that
+   * quietly cost more.
+   *
+   * Running the same `buildPoLines` the write path runs is what keeps the two
+   * honest: one function, so a preview and its purchase order cannot diverge.
+   */
+  const planned = useMemo(
+    () =>
+      buildPoLines(
+        selection.map((l) => ({
+          productId: l.productId,
+          sku: l.sku,
+          title: l.title,
+          qty: l.qty,
+          // Null for a money-blind member; the running total is only shown when
+          // canViewCosts, so a redacted line contributes nothing to it.
+          unitCostKes: l.unitCostKes ?? 0,
+        })),
+        group.moq ?? 1
+      ),
+    [selection, group.moq]
+  );
+  const selectedUnits = planned.reduce((s, l) => s + l.quantity, 0);
+  const selectedCost = subtotal(planned);
+  /** How many units the floor added — worth naming rather than leaving someone
+   *  to notice the number is bigger than what they ticked. */
+  const moqAddedUnits = selectedUnits - selection.reduce((s, l) => s + l.qty, 0);
 
   const toggle = (orderId: string) => {
     setSelected((prev) => {
@@ -89,6 +120,14 @@ export function QueueGroup({
             ) : (
               <span className="text-xs text-ink-muted">
                 Assign a supplier to order these
+              </span>
+            )}
+            {/* Named rather than left to be noticed: the number on the button is
+                bigger than what was ticked, and "the supplier won't ship fewer"
+                is the only reason that is acceptable. */}
+            {moqAddedUnits > 0 && (
+              <span className="text-xs text-ink-muted">
+                +{moqAddedUnits} to meet the {group.moq}-unit minimum
               </span>
             )}
           </div>
