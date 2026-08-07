@@ -27,6 +27,7 @@ import {
   type SortKey,
 } from "@/lib/catalogue";
 import type { CatalogueRow, CatalogueScreen, CategoryUsage } from "@/lib/data/stock";
+import { CatalogueSearch } from "./catalogue-search";
 import { FacetFilterBar } from "./facet-filter-bar";
 import { CatalogueExportBar } from "./catalogue-export";
 import { HealthStrip } from "./health-strip";
@@ -140,6 +141,12 @@ export function CatalogueView({
               />
             </div>
           }
+        />
+
+        <CatalogueSearch
+          query={query}
+          matched={aggregates.matchedCount}
+          clearHref={hrefFor({ search: "" })}
         />
 
         <HealthStrip

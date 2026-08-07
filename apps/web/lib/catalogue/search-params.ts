@@ -37,6 +37,11 @@ const SORT_PARAM = "sort";
 const DIR_PARAM = "dir";
 const ISSUE_PARAM = "issue";
 const MONEY_PARAM = "money";
+const SEARCH_PARAM = "q";
+
+/** Long enough for any product name a shop types, short enough that a pasted
+ *  essay cannot make every row run a scan over it. */
+const SEARCH_MAX = 120;
 
 const MONEY_FILTERS = ["dead_overstock", "revenue_at_risk", "below_cost"] as const;
 
@@ -70,6 +75,7 @@ export function parseCatalogueQuery(params: RawSearchParams): CatalogueQuery {
     scope: SCOPES.includes(scope as Scope) ? (scope as Scope) : DEFAULT_QUERY.scope,
     selection,
     healthFilter: issue && issue.length > 0 ? issue : null,
+    search: (one(params, SEARCH_PARAM) ?? "").trim().slice(0, SEARCH_MAX),
     moneyFilter: MONEY_FILTERS.includes(money as Exclude<MoneyBandFilter, null>)
       ? (money as MoneyBandFilter)
       : null,
@@ -91,6 +97,7 @@ export function catalogueQueryToSearch(q: CatalogueQuery, extra?: { view?: strin
   for (const key of FACET_KEYS) {
     for (const value of q.selection[key as FacetKey] ?? []) out.append(`${FACET_PREFIX}${key}`, value);
   }
+  if (q.search) out.set(SEARCH_PARAM, q.search);
   if (q.healthFilter) out.set(ISSUE_PARAM, q.healthFilter);
   if (q.moneyFilter) out.set(MONEY_PARAM, q.moneyFilter);
   if (q.sortKey !== DEFAULT_QUERY.sortKey) out.set(SORT_PARAM, q.sortKey);
@@ -98,6 +105,18 @@ export function catalogueQueryToSearch(q: CatalogueQuery, extra?: { view?: strin
   if (q.page > 0) out.set(PAGE_PARAM, String(q.page + 1));
   const s = out.toString();
   return s ? `?${s}` : "";
+}
+
+/** The query as hidden form fields, minus `q` and `page`. A GET form submits
+ *  only its own inputs, so a search box that did not carry the rest would
+ *  silently drop the reader's scope, facets, chip and sort the moment they
+ *  typed. Built from the same serializer the links use, so the two can't drift. */
+export function catalogueQueryFields(
+  q: CatalogueQuery,
+  extra?: { view?: string },
+): { name: string; value: string }[] {
+  const search = catalogueQueryToSearch({ ...q, search: "", page: 0 }, extra);
+  return [...new URLSearchParams(search.replace(/^\?/, ""))].map(([name, value]) => ({ name, value }));
 }
 
 /** A changed query, back on page 1. Every control that changes WHICH rows match

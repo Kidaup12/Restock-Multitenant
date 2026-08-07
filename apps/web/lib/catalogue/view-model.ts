@@ -162,6 +162,8 @@ export type CatalogueQuery = {
   selection: FacetSelection;
   healthFilter: string | null;
   moneyFilter: MoneyBandFilter;
+  /** Free text, already trimmed. Empty means no text filter. */
+  search: string;
   sortKey: SortKey;
   desc: boolean;
   page: number;
@@ -172,10 +174,31 @@ export const DEFAULT_QUERY: CatalogueQuery = {
   selection: {},
   healthFilter: null,
   moneyFilter: null,
+  search: "",
   sortKey: "title",
   desc: false,
   page: 0,
 };
+
+/** The text a search term is matched against: everything printed in the
+ *  product cell, so anything the reader can see on the row is findable. */
+function haystack(row: CatalogueRow): string {
+  return [row.title, row.sku, row.variantTitle, row.vendor, row.customCategory]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+/** Whitespace-separated terms, ANDed. "nivea 250" finds the 250ml Nivea
+ *  whichever order the words appear in the title, which is what someone typing
+ *  half-remembered packaging actually wants. Substring rather than word-prefix:
+ *  SKUs here run together (`NIV-250ML`), so a prefix match would miss `250`. */
+export function matchesSearch(row: CatalogueRow, search: string): boolean {
+  const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const text = haystack(row);
+  return terms.every((t) => text.includes(t));
+}
 
 /** The catalogue-wide readings: what the chips, band and facet bar report. All
  *  of them count the SCOPED catalogue, never the page — paging changes what is
@@ -213,6 +236,7 @@ export function selectRows(rows: CatalogueRow[], q: CatalogueQuery): CatalogueRo
   ).map((f) => f.row);
   if (q.healthFilter) filtered = filtered.filter((r) => rowHealthKeys(r).has(q.healthFilter!));
   if (q.moneyFilter) filtered = filtered.filter(moneyPredicate(q.moneyFilter));
+  if (q.search) filtered = filtered.filter((r) => matchesSearch(r, q.search));
   const sorted = [...filtered].sort((a, b) => compare(a, b, q.sortKey));
   return q.desc ? sorted.reverse() : sorted;
 }

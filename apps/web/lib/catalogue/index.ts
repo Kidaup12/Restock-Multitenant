@@ -9,6 +9,7 @@ export {
   status,
   rowHealthKeys,
   moneyPredicate,
+  matchesSearch,
   selectRows,
   buildAggregates,
   pageBounds,
@@ -25,6 +26,7 @@ export {
 export {
   parseCatalogueQuery,
   catalogueQueryToSearch,
+  catalogueQueryFields,
   withQuery,
   type RawSearchParams,
 } from "./search-params";
