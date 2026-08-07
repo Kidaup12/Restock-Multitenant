@@ -1,4 +1,5 @@
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
+import { trailingWindow } from "@/lib/data/trailing-window";
 import { moneyAtRest } from "@/lib/metrics";
 
 /**
@@ -44,9 +45,9 @@ export async function getTodayMetrics(
   { canViewCosts }: { canViewCosts: boolean }
 ): Promise<TodayMetrics> {
   const db = prismaForTenant(tenantId);
-  const now = Date.now();
-  const since30 = new Date(now - 30 * DAY_MS);
-  const since60 = new Date(now - 60 * DAY_MS);
+  // Both this tile and the chart under it read the same window definition, so
+  // the two cannot disagree about what "last 30 days" means.
+  const { start: since30, priorStart: since60 } = trailingWindow(30);
 
   const [current, prior, products, lastSales, config] = await Promise.all([
     db.salesHistory.aggregate({ _sum: { revenueKes: true }, where: { date: { gte: since30 } } }),
@@ -61,7 +62,7 @@ export async function getTodayMetrics(
 
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date]));
   const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
-  const deadCutoff = now - windowDays * DAY_MS;
+  const deadCutoff = Date.now() - windowDays * DAY_MS;
 
   let stockedOut = 0;
   let deadSkus = 0;

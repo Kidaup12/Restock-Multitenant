@@ -1,5 +1,6 @@
 import { prismaForTenant } from "@wezesha/db";
 import { runRate, type SalesPoint } from "@/lib/metrics";
+import { trailingWindow } from "@/lib/data/trailing-window";
 
 /**
  * Sales-screen queries. Server-only; explicit tenantId; RLS-enforced tenant
@@ -46,19 +47,25 @@ export type SalesComparison = {
   tradingDays: number;
   /** Revenue for the `days` days before the window (delta baseline). */
   priorRevenueKes: number;
+  /** Days the window covers — what a per-day average must divide by. A screen
+   *  that hard-codes 30 here reports the wrong average the moment it is asked
+   *  for a different span. */
+  windowDays: number;
 };
 
 /** The trailing window plus the window before it, split once here so screen
  *  components stay pure (no clock reads in render). */
 export async function getSalesComparison(tenantId: string, days = 30): Promise<SalesComparison> {
   const doubled = await getSalesSeries(tenantId, days * 2);
-  const cutoff = new Date(Date.now() - days * DAY_MS).toISOString().slice(0, 10);
+  // The shared boundary, as a day key — `doubled` is already grouped by day.
+  const { startKey: cutoff } = trailingWindow(days);
   const series = doubled.filter((s) => s.date >= cutoff);
   return {
     series,
     revenueKes: series.reduce((sum, s) => sum + s.revenueKes, 0),
     unitsSold: series.reduce((sum, s) => sum + s.unitsSold, 0),
     tradingDays: series.length,
+    windowDays: days,
     priorRevenueKes: doubled
       .filter((s) => s.date < cutoff)
       .reduce((sum, s) => sum + s.revenueKes, 0),
