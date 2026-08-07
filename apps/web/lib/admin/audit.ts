@@ -15,6 +15,7 @@ export const ADMIN_AUDIT_ACTIONS = [
   "admin_sync_trigger",
   "plan_changed",
   "workspace_provisioned",
+  "owner_invited",
   "step_up_granted",
   "step_up_failed",
 ] as const;
@@ -30,6 +31,7 @@ const ENTITY_BY_ACTION: Record<AdminAuditAction, string> = {
   admin_sync_trigger: "AdminSync",
   plan_changed: "Tenant",
   workspace_provisioned: "Tenant",
+  owner_invited: "Membership",
   // Step-up is about the admin, not any customer, so these key on the platform
   // workspace — the row that exists so platform-level events have somewhere
   // honest to live.

@@ -14,6 +14,7 @@ import {
   setAdminTenantCookie,
   verifyAdminTenant,
 } from "@/lib/admin/impersonation";
+import { cancelInvite, createInvite, sendInviteEmail } from "@/lib/auth/invites";
 import { customerWorkspaceExists } from "@/lib/admin/fleet";
 import { provisionWorkspace } from "@/lib/admin/provision";
 import { hasStepUp } from "@/lib/admin/step-up";
@@ -150,6 +151,69 @@ export async function setTenantPlan(formData: FormData): Promise<SetPlanResult> 
   revalidatePath("/admin/tenant/[id]", "page");
   revalidatePath("/admin");
   return { ok: true, plan: tier };
+}
+
+export type InviteOwnerResult = { ok: true; email: string } | { ok: false; error: string };
+
+/**
+ * Invite a second owner to a workspace that already exists.
+ *
+ * Every other owner grant in the product is bound to workspace *creation*:
+ * `createWorkspace` makes the founder an owner, and provisioning emails an owner
+ * invite to a tenant it made moments earlier. Nothing could add one afterwards,
+ * so "the shop changed hands" and "the client wants their colleague in" both had
+ * no answer short of a hand-written INSERT.
+ *
+ * It lives here rather than in the workspace's own team screen on purpose.
+ * `invitableRoles` deliberately caps every in-workspace actor at MEMBER
+ * (lib/auth/team-guards.ts) — an owner who could mint owners could hand out
+ * their own access, and closing only one of the two doors just moves the
+ * escalation. Who owns a workspace stays an operator decision, made behind
+ * step-up, and none of those guards are touched.
+ */
+export async function inviteWorkspaceOwner(formData: FormData): Promise<InviteOwnerResult> {
+  const admin = await requireAdmin();
+  if (!(await hasStepUp(admin))) return { ok: false, error: STEP_UP_REQUIRED };
+
+  const tenantId = String(formData.get("tenantId") ?? "");
+  const email = String(formData.get("email") ?? "");
+  // Same guard as the plan control: the id arrives from input because an
+  // operator acts on someone else's workspace, and Tenant carries no RLS policy
+  // of its own, so the existence check IS the isolation.
+  if (!tenantId || !(await customerWorkspaceExists(tenantId))) notFound();
+
+  const tenant = await prismaForTenant(tenantId).tenant.findUnique({
+    where: { id: tenantId },
+    select: { name: true },
+  });
+  if (!tenant) return { ok: false, error: "That workspace no longer exists." };
+
+  const invite = await createInvite({ tenantId, email, role: "OWNER" });
+  if (!invite.ok) return { ok: false, error: invite.error };
+
+  try {
+    await sendInviteEmail({
+      invite: invite.invite,
+      tenantName: tenant.name,
+      invitedBy: "The Wezesha Restock team",
+    });
+  } catch {
+    // Same rule as the workspace's own invite form: the row is written before
+    // the email goes out, so a delivery failure would otherwise leave a pending
+    // invite nobody holds a link to, reading as "they were invited".
+    await cancelInvite(tenantId, invite.invite.token);
+    return { ok: false, error: "We couldn't send the invite email, so nothing was invited. Try again in a moment." };
+  }
+
+  await recordAdminEvent({
+    tenantId,
+    action: "owner_invited",
+    admin,
+    meta: { email: invite.invite.email },
+  });
+
+  revalidatePath("/admin/tenant/[id]", "page");
+  return { ok: true, email: invite.invite.email };
 }
 
 export async function exitWorkspace(): Promise<void> {
