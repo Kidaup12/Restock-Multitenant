@@ -45,6 +45,18 @@ export type SetupDepth = {
   signals: SetupSignals;
   /** What unlocks the next level, or null once everything is on. */
   nextUnlock: SetupUnlock | null;
+  /**
+   * Locations whose role we GUESSED from their name and nobody has confirmed.
+   *
+   * Deliberately not a rung on the ladder: the rungs unlock capabilities, and
+   * this unlocks nothing — it is a correctness check the shop alone can settle.
+   * It matters because the role decides which stock counts as sellable
+   * (`Product.currentStock` is the branch-only rollup), so a warehouse guessed
+   * from a name like "Industrial Area" hides that stock from the forecast, and
+   * a shop guessed the other way sells stock it cannot reach. Every location on
+   * every live workspace is currently an unconfirmed guess.
+   */
+  locationsToConfirm: number;
 };
 
 /** Pre-aggregated inputs the pure signal logic reads. */
@@ -145,7 +157,7 @@ export async function setupDepth(tenantId: string): Promise<SetupDepth> {
   const [conn, config, locations, products, revenueRows] = await Promise.all([
     db.shopifyConnection.findFirst({ select: { uninstalledAt: true } }),
     db.tenantConfig.findFirst({ select: { posFeedUrl: true, posIngestSecretHash: true } }),
-    db.location.findMany({ select: { locationType: true } }),
+    db.location.findMany({ select: { locationType: true, roleStatus: true } }),
     db.product.findMany({
       where: { ...BUYABLE_PRODUCT_WHERE },
       select: { id: true, costSource: true, costKes: true, supplierId: true },
@@ -198,5 +210,10 @@ export async function setupDepth(tenantId: string): Promise<SetupDepth> {
 
   const signals = computeSetupSignals(input);
   const { level, nextUnlock } = decideSetupLevel(signals);
-  return { level, signals, nextUnlock };
+  // A single location is the case that bites hardest: guessed as a warehouse,
+  // NOTHING is sellable and the buy list asks the shop to reorder its whole
+  // catalogue. So an unconfirmed one counts even when there is only one.
+  const locationsToConfirm = locations.filter((l) => l.roleStatus !== "confirmed").length;
+
+  return { level, signals, nextUnlock, locationsToConfirm };
 }

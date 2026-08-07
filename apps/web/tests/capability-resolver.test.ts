@@ -44,6 +44,7 @@ function makeCtx(over: Overrides = {}): CapabilityContext {
         posOrMultiLocation: level >= 3,
       },
       nextUnlock: null,
+    locationsToConfirm: 0,
     },
     limits,
   };

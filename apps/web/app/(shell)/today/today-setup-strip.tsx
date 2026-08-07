@@ -31,7 +31,7 @@ const SIGNAL_ORDER: { key: SetupSignal; label: string }[] = [
 ];
 
 export async function TodaySetupStrip({ tenantId }: { tenantId: string }) {
-  const { level, signals, nextUnlock } = await setupDepth(tenantId);
+  const { level, signals, nextUnlock, locationsToConfirm } = await setupDepth(tenantId);
   const done = SIGNAL_ORDER.filter(({ key }) => signals[key]).length;
   const nudgeHref = nextUnlock ? NUDGE_HREF[nextUnlock.signal] : undefined;
   const nudge = nextUnlock ? (
@@ -46,9 +46,38 @@ export async function TodaySetupStrip({ tenantId }: { tenantId: string }) {
     </>
   ) : null;
 
+  /**
+   * Confirming what each location is FOR — shown above the ladder, because it
+   * is not a rung: it unlocks nothing and it can be wrong in a way the ladder
+   * cannot express. The role decides which stock counts as sellable, so a
+   * shopfront guessed as a warehouse hides its stock from the forecast, and a
+   * warehouse guessed as a shopfront has the buy list counting stock nobody can
+   * sell. We guess it from the location's name at sync time; only the shop
+   * knows.
+   */
+  const confirmLocations =
+    locationsToConfirm > 0 ? (
+      <Link
+        href="/settings/locations"
+        className="flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm text-ink-muted hover:text-ink"
+      >
+        <span className="mt-0.5 text-accent-ink [&_svg]:size-4">
+          <BulbIcon />
+        </span>
+        <span>
+          <span className="font-medium text-ink">
+            Check {locationsToConfirm === 1 ? "your location" : `your ${locationsToConfirm} locations`}
+          </span>{" "}
+          — we guessed which {locationsToConfirm === 1 ? "one is a shop and which a store room" : "are shops and which are store rooms"} from
+          their names. That decides which stock the buy list counts as sellable.
+        </span>
+      </Link>
+    ) : null;
+
   return (
     <Card className="px-5 py-4">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {confirmLocations}
+      <div className="mt-3 flex flex-col gap-4 first:mt-0 sm:flex-row sm:items-center sm:justify-between">
         {/* Wraps at every level. On a 390px phone the label, the level badge,
             the counter and four signals in one non-wrapping row pushed the
             document to 485px wide, so first-run Today scrolled sideways and
