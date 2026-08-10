@@ -60,4 +60,14 @@ describe.skipIf(!runnable)("Today's two revenue figures (seeded local db)", () =
     expect(chart.windowDays).toBe(30);
     expect(chart.series.length).toBeLessThanOrEqual(30);
   });
+  it("the tile and the chart round the delta the same way", async () => {
+    // They agreed on the money after the window fix and still printed "-14.9%"
+    // beside "-15%" — the same number at two precisions, side by side.
+    const { deltaPercent } = await import("../lib/data/delta-percent");
+    expect(deltaPercent(85_000, 100_000)).toBe(-15);
+    expect(deltaPercent(100_000, 100_000)).toBe(0);
+    expect(deltaPercent(100_000, 0)).toBeNull();
+    // Whatever the inputs, one function means one answer.
+    expect(deltaPercent(599_900, 704_810)).toBe(deltaPercent(599_900, 704_810));
+  });
 });
