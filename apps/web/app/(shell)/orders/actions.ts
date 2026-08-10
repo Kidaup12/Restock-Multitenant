@@ -55,7 +55,7 @@ export async function sendPoAction(input: { poId: string }): Promise<PoActionRes
   const ctx = await actorContext();
   if (!ctx) return err("You don't have ordering access in this workspace.");
 
-  const result = await sendPoToSupplier(ctx.tenantId, input.poId);
+  const result = await sendPoToSupplier(ctx.tenantId, input.poId, ctx.actor);
   if (!result.ok) {
     const messages = {
       not_found: "That purchase order no longer exists.",
