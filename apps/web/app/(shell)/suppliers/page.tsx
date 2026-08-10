@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonTableRows } from "@/components/ui/skeleton";
 import {
+  getAssignableProducts,
   getSupplierOptions,
   getSuppliers,
   getUnassignedByBrand,
@@ -56,16 +57,18 @@ export default async function SuppliersPage() {
 }
 
 async function SuppliersData({ tenantId, canManage }: { tenantId: string; canManage: boolean }) {
-  const [rows, unassignedBrands, supplierOptions] = await Promise.all([
+  const [rows, unassignedBrands, supplierOptions, assignableProducts] = await Promise.all([
     getSuppliers(tenantId),
     getUnassignedByBrand(tenantId),
     getSupplierOptions(tenantId),
+    getAssignableProducts(tenantId),
   ]);
   return (
     <SuppliersView
       rows={rows}
       unassignedBrands={unassignedBrands}
       supplierOptions={supplierOptions}
+      assignableProducts={assignableProducts}
       canManage={canManage}
     />
   );

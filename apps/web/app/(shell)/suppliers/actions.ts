@@ -104,17 +104,44 @@ function emptyToNull(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
-export async function createSupplierAction(input: SupplierInput): Promise<SupplierActionResult> {
+export async function createSupplierAction(
+  input: SupplierInput & { productIds?: string[] }
+): Promise<SupplierActionResult> {
   const ctx = await actorContext();
   if (!ctx) return err("You don't have settings access in this workspace.");
   const parsed = parseSupplier(input);
   if (!parsed.ok) return err(parsed.error);
 
-  const db = prismaForTenant(ctx.tenantId);
-  const supplier = await db.supplier.create({ data: { tenantId: ctx.tenantId, ...parsed.data } });
-  await audit(ctx.tenantId, supplier.id, "created", ctx.actor, { name: supplier.name });
+  const ids = [...new Set((input.productIds ?? []).filter((id) => typeof id === "string" && id))];
+  if (ids.length > ASSIGN_MAX) return err(`Assign up to ${ASSIGN_MAX} products at a time.`);
+
+  // Create and assign in ONE transaction. Two calls from the browser could
+  // half-apply — a supplier saved with none of the products the owner picked,
+  // which reads as the assignment silently failing.
+  const { supplier, assigned } = await prismaForTenantTx(ctx.tenantId, async (tx) => {
+    const created = await tx.supplier.create({ data: { tenantId: ctx.tenantId, ...parsed.data } });
+    if (ids.length === 0) return { supplier: created, assigned: 0 };
+    // Resolved on the tenant client: an id from another workspace comes back
+    // empty rather than being reassigned into this one.
+    const found = await tx.product.findMany({ where: { id: { in: ids } }, select: { id: true } });
+    if (found.length === 0) return { supplier: created, assigned: 0 };
+    const result = await tx.product.updateMany({
+      where: { id: { in: found.map((p) => p.id) } },
+      data: { supplierId: created.id },
+    });
+    return { supplier: created, assigned: result.count };
+  });
+
+  await audit(ctx.tenantId, supplier.id, "created", ctx.actor, { name: supplier.name, products: assigned });
   revalidatePath("/suppliers");
-  return { ok: true, message: `Added ${supplier.name}.` };
+  if (assigned > 0) revalidatePath("/stock");
+  return {
+    ok: true,
+    message:
+      assigned > 0
+        ? `Added ${supplier.name} with ${assigned} product${assigned === 1 ? "" : "s"}.`
+        : `Added ${supplier.name}.`,
+  };
 }
 
 export async function updateSupplierAction(

@@ -191,6 +191,37 @@ export async function getUnassignedByBrand(tenantId: string): Promise<Unassigned
     .sort((a, b) => b.productCount - a.productCount || a.vendor.localeCompare(b.vendor));
 }
 
+export type AssignableProduct = {
+  id: string;
+  sku: string;
+  title: string;
+  /** Who it currently belongs to, so picking it is a visible reassignment. */
+  supplierName: string | null;
+};
+
+/**
+ * Candidates for "what do I buy from this supplier?" at the moment the supplier
+ * is being created — so there is no supplier id to sort by yet.
+ *
+ * Same ceiling and the same deliberate non-restriction as the post-creation
+ * picker: a shop assigning suppliers is tidying its catalogue, and hiding
+ * drafts or deactivated rows would leave items it could never fix.
+ */
+export async function getAssignableProducts(tenantId: string): Promise<AssignableProduct[]> {
+  const db = prismaForTenant(tenantId);
+  const rows = await db.product.findMany({
+    take: PICKER_LIMIT,
+    orderBy: [{ title: "asc" }],
+    select: { id: true, sku: true, title: true, supplier: { select: { name: true } } },
+  });
+  return rows.map((p) => ({
+    id: p.id,
+    sku: p.sku,
+    title: p.title,
+    supplierName: p.supplier?.name ?? null,
+  }));
+}
+
 export type SupplierOption = { id: string; name: string };
 
 /** Active suppliers for the assign/form pickers. */
