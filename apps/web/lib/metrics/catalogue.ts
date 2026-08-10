@@ -67,7 +67,6 @@ export async function getCatalogueMetrics(
         currentStock: true,
         costKes: true,
         priceKes: true,
-        shopifyCreatedAt: true,
         active: true,
         notForSale: true,
         shopifyStatus: true,
@@ -113,7 +112,6 @@ export async function getCatalogueMetrics(
         id: p.id,
         history: historyByProduct.get(p.id) ?? [],
         priceKes: p.priceKes,
-        createdAt: p.shopifyCreatedAt,
       })),
     asOf
   );
