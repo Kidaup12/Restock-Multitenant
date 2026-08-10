@@ -1,5 +1,6 @@
 import { BUYABLE_PRODUCT_WHERE, isSellable, prismaForTenant } from "@wezesha/db";
-import { expandPromoWindowsToDays } from "@wezesha/forecast";
+import { detectSpikes, expandPromoWindowsToDays } from "@wezesha/forecast";
+import { SPIKE_IGNORE_KIND, spikeKey } from "@/lib/signals/spikes";
 
 /**
  * Reads for the declared-signals screen: the promos and closed days an owner has
@@ -206,4 +207,97 @@ function scopeLabelOf(
   if (scope === "brand" && scopeValue) return `${scopeValue} (brand)`;
   if (scope === "category" && scopeValue) return `${scopeValue} (category)`;
   return "Everything in the shop";
+}
+
+/** A day the shop sold far above its own normal, with no promo logged to explain
+ *  it. Surfaced as a question, never applied on its own — only the owner knows
+ *  whether it was a promotion or a one-off. */
+export type SpikeSuggestion = {
+  productId: string;
+  sku: string;
+  title: string;
+  dayKey: string;
+  dayLabel: string;
+  quantity: number;
+  /** The product's own normal units/day, for the comparison sentence. */
+  baseline: number;
+  multiple: number;
+};
+
+/** How many to put in front of the owner at once — this is a nudge, not a queue. */
+const MAX_SPIKE_SUGGESTIONS = 5;
+/** Enough history for the detector's 60-day baseline plus its 14-day lookback. */
+const SPIKE_HISTORY_DAYS = 90;
+
+/**
+ * Unexplained demand spikes, as questions for the owner.
+ *
+ * An un-logged spike — an influencer post, a bulk buyer, a flash sale nobody
+ * recorded — bleeds into the baseline and quietly inflates every future order
+ * for that product. The engine's guardrail caps the worst of it; labelling the
+ * day as a promotion is the actual fix, because promo days are then left out of
+ * the run rate.
+ *
+ * The detector already knew how to find these (`detectSpikes`); nothing called
+ * it, so the shop was still relying on the owner remembering. Days already
+ * inside a declared promo are skipped by the detector, and days the owner has
+ * answered "one-off" are skipped here.
+ */
+export async function getSpikeSuggestions(
+  tenantId: string,
+  now: Date = new Date()
+): Promise<SpikeSuggestion[]> {
+  const db = prismaForTenant(tenantId);
+  const since = new Date(now.getTime() - SPIKE_HISTORY_DAYS * DAY_MS);
+
+  const [salesRows, promoRows, dismissedRows, productRows] = await Promise.all([
+    db.salesHistory.findMany({
+      where: { date: { gte: since, lte: now } },
+      select: { productId: true, date: true, quantity: true, revenueKes: true },
+    }),
+    db.promo.findMany({
+      where: { deletedAt: null },
+      select: { startDate: true, endDate: true },
+    }),
+    db.ignoreRule.findMany({ where: { kind: SPIKE_IGNORE_KIND }, select: { value: true } }),
+    db.product.findMany({
+      where: BUYABLE_PRODUCT_WHERE,
+      select: { id: true, sku: true, title: true },
+    }),
+  ]);
+
+  const dismissed = new Set(dismissedRows.map((r) => r.value));
+  const promoWindows = promoRows.map((p) => ({ start: p.startDate, end: p.endDate }));
+  const productById = new Map(productRows.map((p) => [p.id, p]));
+
+  const historyByProduct = new Map<string, { date: Date; quantity: number; revenueKes: number }[]>();
+  for (const row of salesRows) {
+    if (!productById.has(row.productId)) continue; // not a product we'd buy again
+    let list = historyByProduct.get(row.productId);
+    if (!list) historyByProduct.set(row.productId, (list = []));
+    list.push(row);
+  }
+
+  const out: SpikeSuggestion[] = [];
+  for (const [productId, history] of historyByProduct) {
+    const product = productById.get(productId)!;
+    for (const spike of detectSpikes(history, promoWindows, now)) {
+      const dayKey = dayKeyOf(spike.date);
+      if (dismissed.has(spikeKey(productId, dayKey))) continue;
+      out.push({
+        productId,
+        sku: product.sku,
+        title: product.title,
+        dayKey,
+        dayLabel: dayFormat.format(spike.date),
+        quantity: Math.round(spike.quantity),
+        baseline: Math.round(spike.baseline * 10) / 10,
+        multiple: spike.multiple,
+      });
+    }
+  }
+
+  // Biggest surprise first, then most recent — the ones worth a moment's thought.
+  out.sort((a, b) => b.multiple - a.multiple || b.dayKey.localeCompare(a.dayKey));
+  return out.slice(0, MAX_SPIKE_SUGGESTIONS);
 }

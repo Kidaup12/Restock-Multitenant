@@ -1,6 +1,7 @@
-import { getDeclaredSignals } from "@/lib/data/signals";
+import { getDeclaredSignals, getSpikeSuggestions } from "@/lib/data/signals";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { SignalsView } from "./signals-view";
+import { SpikeSuggestions } from "./spike-suggestions";
 
 /**
  * Loads what's been declared and leads with the effect in plain terms — the
@@ -13,10 +14,17 @@ export async function SignalsSection({
   tenantId: string;
   canManage: boolean;
 }) {
-  const data = await getDeclaredSignals(tenantId);
+  const [data, spikes] = await Promise.all([
+    getDeclaredSignals(tenantId),
+    getSpikeSuggestions(tenantId),
+  ]);
 
   return (
     <div className="space-y-6">
+      {/* Ahead of the explainer: this is the one thing on the page that needs an
+          answer rather than a read. */}
+      <SpikeSuggestions suggestions={spikes} canManage={canManage} />
+
       <Card>
         <CardHeader title="Why this matters" />
         <CardContent className="space-y-3 pt-0 text-sm text-ink-secondary">
