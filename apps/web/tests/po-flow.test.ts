@@ -158,6 +158,11 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
     expect(sent?.actorUserId).toBe("u-sender");
     expect(sent?.actorName).toBe("The sender");
 
+    // ...and the order's own screen names them. The audit row alone is a
+    // ledger nobody reads; "Created by X / Sent by —" is what the shop sees.
+    const detail = await getPoDetail(tenantId, orbitPoId, { canViewCosts: true });
+    expect(detail?.sentByName).toBe("The sender");
+
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
     const message = sendEmailMock.mock.calls[0]![0];
     expect(message.to).toBe("orders@orbit-imports.example");

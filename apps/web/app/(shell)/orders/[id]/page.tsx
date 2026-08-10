@@ -60,7 +60,14 @@ export default async function PoDetailPage({
     {
       label: "Sent",
       at: po.sentAt,
-      extra: po.expectedAt ? `expected ${day(po.expectedAt)}` : null,
+      // Who sent it matters as much as when: this is the moment the shop
+      // committed money to a supplier, and Created already names its actor.
+      extra: [
+        po.sentByName ? `by ${po.sentByName}` : null,
+        po.expectedAt ? `expected ${day(po.expectedAt)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
     },
     po.cancelledAt
       ? { label: "Cancelled", at: po.cancelledAt, extra: null }
