@@ -51,11 +51,20 @@ export async function ReorderTable({
   // how old the plan is.
   const freshness = planFreshnessLabel(reorder.runDate);
 
+  // The count is every product needing restocking, not the handful this card
+  // has room for — the planner reports the same number, and the two screens
+  // must not disagree on the first question of the morning.
+  const capped = reorder.rows.length < reorder.needingRestock;
+  const subtitle =
+    `${reorder.needingRestock} of ${reorder.totalPredicted} forecast products need restocking` +
+    (capped ? ` · ${reorder.rows.length} most urgent shown` : "") +
+    ` · ${freshness.short}`;
+
   return (
     <Card>
       <CardHeader
         title="Reorder needed"
-        subtitle={`${reorder.rows.length} of ${reorder.totalPredicted} forecast products · ${freshness.short}`}
+        subtitle={subtitle}
         action={
           <Link href="/plan" className="text-sm font-medium text-accent-ink hover:underline">
             Open Restock planner
@@ -91,7 +100,9 @@ export async function ReorderTable({
                     <TableCell className="font-medium text-ink">{row.title}</TableCell>
                     <TableCell numeric>{row.onHandUnits}</TableCell>
                     <TableCell numeric>
-                      {row.onHandUnits <= 0 ? "—" : `${row.daysUntilStockout}d`}
+                      {row.onHandUnits <= 0 || row.daysUntilStockout == null
+                        ? "—"
+                        : `${row.daysUntilStockout}d`}
                     </TableCell>
                     <TableCell>
                       <Badge tone={badge.tone}>{badge.label}</Badge>

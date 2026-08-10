@@ -1,4 +1,5 @@
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
+import { getBuyList } from "@/lib/data/plan";
 import { trailingWindow } from "@/lib/data/trailing-window";
 import { moneyAtRest } from "@/lib/metrics";
 
@@ -94,71 +95,62 @@ export type ReorderRow = {
   sku: string;
   title: string;
   onHandUnits: number;
-  daysUntilStockout: number;
+  /** Null when the run rate is ~zero and no stockout is in sight. */
+  daysUntilStockout: number | null;
   urgency: string;
   recommendedQty: number;
-  /** recommendedQty x unit cost — what placing this order costs. Null when the
-   *  caller can't view costs. */
+  /** What placing this line costs — the buy list's own figure, so it carries the
+   *  supplier MOQ floor and the same redaction. Null when the caller can't view
+   *  costs. */
   orderCostKes: number | null;
 };
 
 export type ReorderNeeded = {
   forecastRunId: string;
   runDate: Date;
-  /** Products the latest run wants ordered, most urgent first. */
+  /** Products the latest run wants ordered, most urgent first. Capped — this is
+   *  a dashboard card, not the buy list. Count with `needingRestock`. */
   rows: ReorderRow[];
+  /** How many products need restocking in total. `rows` is the top few of
+   *  these; reporting `rows.length` instead said "8 of 30" on a morning the
+   *  planner said 14, because the cap was applied before anything counted. */
+  needingRestock: number;
   /** Total products covered by the run (for the "n of m" subtitle). */
   totalPredicted: number;
 };
 
-const URGENCY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-
-/** The latest forecast run's reorder list, or null when no run exists yet. */
+/**
+ * The latest run's reorder list, or null when no run exists yet.
+ *
+ * One definition of "needs restocking", shared with the planner. Today used to
+ * apply a filter of its own AND cap the list before counting it, so the two
+ * screens answered the morning's first question with different numbers over
+ * different products: "8 of 30" on a day the planner said 14. The dashboard now
+ * shows the top few of the planner's own active rows, so the count and the
+ * membership agree by construction — and the held-back groups (already ordered,
+ * cost needs checking, too slow to stock now) are excluded from both.
+ */
 export async function getReorderNeeded(
   tenantId: string,
   { canViewCosts, limit = 8 }: { canViewCosts: boolean; limit?: number }
 ): Promise<ReorderNeeded | null> {
-  const db = prismaForTenant(tenantId);
-  const latest = await db.prediction.findFirst({
-    orderBy: { runDate: "desc" },
-    select: { forecastRunId: true, runDate: true },
-  });
-  if (!latest) return null;
-
-  const predictions = await db.prediction.findMany({
-    where: { forecastRunId: latest.forecastRunId },
-    select: {
-      productId: true,
-      daysUntilStockout: true,
-      urgency: true,
-      recommendedQty: true,
-      product: { select: { sku: true, title: true, costKes: true, currentStock: true } },
-    },
-  });
-
-  const rows = predictions
-    .filter((p) => p.recommendedQty > 0 || p.urgency === "critical" || p.urgency === "high")
-    .sort(
-      (a, b) =>
-        (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
-        a.daysUntilStockout - b.daysUntilStockout
-    )
-    .slice(0, limit)
-    .map((p) => ({
-      productId: p.productId,
-      sku: p.product.sku,
-      title: p.product.title,
-      onHandUnits: p.product.currentStock,
-      daysUntilStockout: p.daysUntilStockout,
-      urgency: p.urgency,
-      recommendedQty: Math.round(p.recommendedQty),
-      orderCostKes: canViewCosts ? Math.round(p.recommendedQty) * p.product.costKes : null,
-    }));
+  const buyList = await getBuyList(tenantId, { canViewCosts });
+  if (!buyList) return null;
 
   return {
-    forecastRunId: latest.forecastRunId,
-    runDate: latest.runDate,
-    rows,
-    totalPredicted: predictions.length,
+    forecastRunId: buyList.forecastRunId,
+    runDate: buyList.runDate,
+    rows: buyList.rows.slice(0, limit).map((r) => ({
+      productId: r.productId,
+      sku: r.sku,
+      title: r.title,
+      onHandUnits: r.onHandUnits,
+      daysUntilStockout: r.daysUntilStockout,
+      urgency: r.urgency,
+      recommendedQty: r.recommendedQty,
+      orderCostKes: r.lineTotalKes,
+    })),
+    needingRestock: buyList.rows.length,
+    totalPredicted: buyList.totalPredicted,
   };
 }
