@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import type { SupplierRow } from "@/lib/data/suppliers";
+import type { AssignableProduct, SupplierRow } from "@/lib/data/suppliers";
 import {
   createSupplierAction,
   updateSupplierAction,
@@ -25,11 +25,15 @@ const selectClass = cn(
 /** Add-by-hand / edit form for a supplier. Gated by canManage upstream. */
 export function SupplierForm({
   supplier,
+  assignableProducts,
   onResult,
   onClose,
 }: {
   /** null/undefined = a new supplier. */
   supplier?: SupplierRow | null;
+  /** Candidates for "what do I buy from them?", offered only while creating —
+   *  an existing supplier has its own picker with the current set already ticked. */
+  assignableProducts: AssignableProduct[];
   onResult: (result: SupplierActionResult) => void;
   onClose: () => void;
 }) {
@@ -48,6 +52,8 @@ export function SupplierForm({
   const [moq, setMoq] = useState(supplier?.moq != null ? String(supplier.moq) : "1");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [productSearch, setProductSearch] = useState("");
 
   function toNum(value: string): number | null {
     const trimmed = value.trim();
@@ -71,7 +77,7 @@ export function SupplierForm({
     startTransition(async () => {
       const result = editing
         ? await updateSupplierAction({ ...payload, supplierId: supplier!.id })
-        : await createSupplierAction(payload);
+        : await createSupplierAction({ ...payload, productIds: [...picked] });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -158,6 +164,65 @@ export function SupplierForm({
             />
           </Field>
         </div>
+
+        {/* Only while creating: an existing supplier has its own picker, which
+            arrives with the current set already ticked. Asking here saves the
+            owner adding a supplier and then hunting for it to attach anything. */}
+        {!editing && assignableProducts.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-ink">What do you buy from them?</p>
+            <p className="text-sm text-ink-muted">
+              Optional — you can do this later. Picking a product that already has a supplier moves
+              it to this one.
+            </p>
+            <Input
+              aria-label="Search products"
+              placeholder="Search by name or code"
+              value={productSearch}
+              onChange={(e) => setProductSearch(e.target.value)}
+            />
+            <ul className="max-h-56 divide-y divide-edge overflow-y-auto rounded-md border border-edge">
+              {assignableProducts
+                .filter((p) => {
+                  const q = productSearch.trim().toLowerCase();
+                  if (!q) return true;
+                  return `${p.title} ${p.sku}`.toLowerCase().includes(q);
+                })
+                .slice(0, 100)
+                .map((p) => (
+                  <li key={p.id} className="flex items-center gap-3 px-3 py-2">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-(--accent)"
+                      checked={picked.has(p.id)}
+                      aria-label={`Buy ${p.title} from this supplier`}
+                      onChange={() =>
+                        setPicked((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(p.id)) next.delete(p.id);
+                          else next.add(p.id);
+                          return next;
+                        })
+                      }
+                    />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm text-ink">{p.title}</span>
+                      <span className="block truncate font-mono text-xs text-ink-faint">
+                        {p.sku || "no SKU"}
+                        {p.supplierName ? ` · now with ${p.supplierName}` : ""}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+            </ul>
+            {picked.size > 0 && (
+              <p className="text-sm text-ink-secondary">
+                {picked.size} product{picked.size === 1 ? "" : "s"} will move to this supplier.
+              </p>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-2">
           <Button onClick={submit} loading={pending}>
             {editing ? "Save changes" : "Add supplier"}

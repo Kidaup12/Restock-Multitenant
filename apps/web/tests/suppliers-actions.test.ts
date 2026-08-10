@@ -27,6 +27,7 @@ vi.mock("@/lib/auth", () => ({
 import { prismaForTenant, prismaService } from "@wezesha/db";
 import {
   assignProductsToSupplierAction,
+  createSupplierAction,
   bulkAssignByBrandAction,
   deleteSupplierAction,
   adoptLearnedLeadAction,
@@ -401,6 +402,75 @@ describe.skipIf(!runnable)("suppliers actions (local db)", () => {
     expect(await setProductLeadTimeAction({ productId: foreign!, leadTimeDays: 10 })).toEqual({
       ok: false,
       error: "That product no longer exists.",
+    });
+  });
+  // ── create with products ───────────────────────────────────────────────────
+
+  it("creates a supplier and attaches the products picked in the same form", async () => {
+    // Creating and assigning used to be two trips: add the supplier, find it
+    // again, then attach. One transaction means a failure can't leave a
+    // supplier saved with none of the products the owner chose.
+    actAs(tenantA, null);
+    const p1 = await prismaService.product.create({
+      data: { tenantId: tenantA, sku: "CW-1", title: "Create With One", vendor: "CW" },
+      select: { id: true },
+    });
+    const p2 = await prismaService.product.create({
+      data: { tenantId: tenantA, sku: "CW-2", title: "Create With Two", vendor: "CW" },
+      select: { id: true },
+    });
+
+    const result = await createSupplierAction({
+      name: "Attached Supplier",
+      currency: "KES",
+      productIds: [p1.id, p2.id],
+    });
+    expect(result).toEqual({ ok: true, message: "Added Attached Supplier with 2 products." });
+
+    const created = await prismaService.supplier.findFirst({
+      where: { tenantId: tenantA, name: "Attached Supplier" },
+      select: { id: true },
+    });
+    const attached = await prismaService.product.findMany({
+      where: { supplierId: created!.id },
+      select: { sku: true },
+      orderBy: { sku: "asc" },
+    });
+    expect(attached.map((p) => p.sku)).toEqual(["CW-1", "CW-2"]);
+  });
+
+  it("creates the supplier with nothing attached when no products are picked", async () => {
+    actAs(tenantA, null);
+    const result = await createSupplierAction({ name: "Bare Supplier", currency: "KES" });
+    expect(result).toEqual({ ok: true, message: "Added Bare Supplier." });
+  });
+
+  it("ignores a product from another workspace rather than reassigning it", async () => {
+    actAs(tenantA, null);
+    const foreign = await prismaService.product.create({
+      data: { tenantId: tenantB, sku: "CW-FOREIGN", title: "Not Yours", vendor: "CW" },
+      select: { id: true },
+    });
+    const result = await createSupplierAction({
+      name: "Foreign Attempt",
+      currency: "KES",
+      productIds: [foreign.id],
+    });
+    // The supplier is still created — the id simply resolves to nothing on the
+    // tenant client, so nothing is moved.
+    expect(result).toEqual({ ok: true, message: "Added Foreign Attempt." });
+    const after = await prismaService.product.findUnique({
+      where: { id: foreign.id },
+      select: { supplierId: true },
+    });
+    expect(after!.supplierId, "another workspace's product must not move").toBeNull();
+  });
+
+  it("refuses a member without settings access", async () => {
+    actAs(tenantA, []);
+    expect(await createSupplierAction({ name: "Nope", currency: "KES" })).toEqual({
+      ok: false,
+      error: "You don't have settings access in this workspace.",
     });
   });
 });

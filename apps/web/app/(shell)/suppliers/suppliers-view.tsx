@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/table";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import { SPEED_BAND_LABEL, type SpeedBand } from "@/lib/suppliers/lead-time";
-import type { SupplierOption, SupplierRow, UnassignedBrand } from "@/lib/data/suppliers";
+import type { AssignableProduct, SupplierOption, SupplierRow, UnassignedBrand } from "@/lib/data/suppliers";
 import {
   deleteSupplierAction,
   adoptLearnedLeadAction,
@@ -105,11 +105,13 @@ export function SuppliersView({
   rows,
   unassignedBrands,
   supplierOptions,
+  assignableProducts,
   canManage,
 }: {
   rows: SupplierRow[];
   unassignedBrands: UnassignedBrand[];
   supplierOptions: SupplierOption[];
+  assignableProducts: AssignableProduct[];
   canManage: boolean;
 }) {
   const [query, setQuery] = useState("");
@@ -205,6 +207,7 @@ export function SuppliersView({
 
       {editing && canManage && (
         <SupplierForm
+          assignableProducts={assignableProducts}
           supplier={editing === "new" ? null : editing}
           onResult={handleResult}
           onClose={() => setEditing(null)}
