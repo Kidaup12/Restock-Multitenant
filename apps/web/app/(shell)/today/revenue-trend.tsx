@@ -1,3 +1,4 @@
+import { deltaPercent } from "@/lib/data/delta-percent";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -60,7 +61,7 @@ export async function RevenueTrend({
 
   const total = comparison.revenueKes;
   const perDay = total / comparison.windowDays;
-  const deltaPct = priorTotal > 0 ? Math.round(((total - priorTotal) / priorTotal) * 100) : null;
+  const deltaPct = deltaPercent(total, priorTotal);
   const spark = sparkline(series);
 
   return (

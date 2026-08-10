@@ -8,11 +8,13 @@ import { CostValue } from "@/components/ui/cost-value";
 import { formatNumber } from "@/lib/money";
 import { StatTile, type StatDelta } from "@/components/ui/stat-tile";
 import { getTodayMetrics } from "@/lib/data/today";
+import { deltaPercent } from "@/lib/data/delta-percent";
 
 function revenueDelta(current: number, prior: number): StatDelta {
-  if (prior <= 0) return { label: "No prior-period sales", tone: "neutral" };
-  const pct = ((current - prior) / prior) * 100;
-  const rounded = Math.round(pct * 10) / 10;
+  // Same helper the chart beneath uses — the two used to round differently and
+  // printed "-14.9%" beside "-15%".
+  const rounded = deltaPercent(current, prior);
+  if (rounded === null) return { label: "No prior-period sales", tone: "neutral" };
   if (rounded === 0) return { label: "Flat vs prior 30 days", tone: "neutral" };
   return {
     label: `${rounded > 0 ? "+" : ""}${rounded}% vs prior 30 days`,
