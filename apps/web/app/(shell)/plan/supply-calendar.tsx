@@ -21,13 +21,7 @@ import { loadSupplyCalendar } from "./calendar-actions";
  * redacted for a money-blind caller.
  */
 
-export function SupplyCalendarMode({
-  canViewCosts,
-  backLink,
-}: {
-  canViewCosts: boolean;
-  backLink: React.ReactNode;
-}) {
+export function SupplyCalendarMode({ canViewCosts }: { canViewCosts: boolean }) {
   const [calendar, setCalendar] = useState<SupplyCalendar | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -44,7 +38,6 @@ export function SupplyCalendarMode({
     return (
       <div className="space-y-4">
         <p className="text-sm text-negative">{error}</p>
-        <p className="text-sm text-ink-muted">{backLink}</p>
       </div>
     );
   }
@@ -52,7 +45,7 @@ export function SupplyCalendarMode({
   if (!calendar || pending) {
     return (
       <div className="space-y-4">
-        <p className="text-sm text-ink-muted">Building your ordering calendar… {backLink}</p>
+        <p className="text-sm text-ink-muted">Building your ordering calendar…</p>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <SkeletonCard lines={3} />
           <SkeletonCard lines={3} />
@@ -62,17 +55,15 @@ export function SupplyCalendarMode({
     );
   }
 
-  return <SupplyCalendarView calendar={calendar} canViewCosts={canViewCosts} backLink={backLink} />;
+  return <SupplyCalendarView calendar={calendar} canViewCosts={canViewCosts} />;
 }
 
 function SupplyCalendarView({
   calendar,
   canViewCosts,
-  backLink,
 }: {
   calendar: SupplyCalendar;
   canViewCosts: boolean;
-  backLink: React.ReactNode;
 }) {
   const { buckets, openCommitments } = calendar;
 
@@ -81,7 +72,7 @@ function SupplyCalendarView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink-muted">
           {calendar.totalItemCount} orders to place over the next {calendar.horizonMonths} months ·{" "}
-          <CostValue amount={calendar.totalCashKes} canViewCosts={canViewCosts} /> in all · {backLink}
+          <CostValue amount={calendar.totalCashKes} canViewCosts={canViewCosts} /> in all
         </p>
       </div>
 

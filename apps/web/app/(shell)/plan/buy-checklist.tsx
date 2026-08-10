@@ -430,12 +430,10 @@ export function BuyChecklist({
   buyList,
   canViewCosts,
   canOverride,
-  backLink,
 }: {
   buyList: BuyList;
   canViewCosts: boolean;
   canOverride: boolean;
-  backLink: React.ReactNode;
 }) {
   const currency = useCurrency();
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -574,7 +572,7 @@ export function BuyChecklist({
         <p className="text-sm text-ink-muted">
           {rows.length} products to order · full list costs{" "}
           <CostValue amount={view.totalCostKes} canViewCosts={canViewCosts} />
-          {view.excluded.length > 0 && <> · {view.excluded.length} held back</>} · {backLink}
+          {view.excluded.length > 0 && <> · {view.excluded.length} held back</>}
         </p>
         <ExportBar
           rows={rows}

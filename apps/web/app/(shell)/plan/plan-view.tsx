@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useState, useTransition } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BanknoteIcon, CalendarIcon, ClipboardIcon } from "@/components/icons";
 import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-features";
 import type { PlanFreshness as Freshness } from "@/lib/data/forecast-freshness";
@@ -21,6 +22,8 @@ import { SupplyCalendarMode } from "./supply-calendar";
  */
 
 type Mode = "choose" | "list" | "budget" | "calendar";
+
+const MODES: readonly Mode[] = ["choose", "list", "budget", "calendar"];
 
 function ModeCard({
   icon,
@@ -90,7 +93,29 @@ export function PlanView({
   /** Decided server-side, so the verdict cannot drift between render and hydration. */
   freshness: Freshness;
 }) {
-  const [mode, setMode] = useState<Mode>("choose");
+  // The mode lives in the URL, not in component state. It used to be state
+  // alone, which meant Back left the planner entirely instead of returning to
+  // the cards, and a mode could be neither linked nor reloaded into.
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const requested = searchParams.get("mode") as Mode | null;
+  const mode: Mode =
+    requested && MODES.includes(requested) && !(requested === "budget" && !canBudget)
+      ? requested
+      : "choose";
+
+  const setMode = useCallback(
+    (next: Mode) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === "choose") params.delete("mode");
+      else params.set("mode", next);
+      const query = params.toString();
+      router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
   const [scope, setScope] = useState<ScopeSelection>(EMPTY_SCOPE);
   const [savedScopes, setSavedScopes] = useState<SavedScope[]>([]);
   const [scopesBusy, startScopes] = useTransition();
@@ -179,13 +204,16 @@ export function PlanView({
     );
   }
 
-  const backLink = (
+  // A way out of every mode, at the top where navigation belongs. It used to be
+  // the tail of a grey summary sentence, which reads as prose rather than a way
+  // back. "Plan options" and not "Plan": the user never left /plan.
+  const backToOptions = (
     <button
       type="button"
       onClick={() => setMode("choose")}
       className="text-sm font-medium text-accent-ink hover:underline"
     >
-      Start over
+      ← All plan options
     </button>
   );
 
@@ -207,6 +235,7 @@ export function PlanView({
     };
     return (
       <div className="space-y-4">
+        {backToOptions}
         {freshness}
         <PlanDecisionHeader rows={filteredRows} canViewCosts={canViewCosts} />
         <ScopeBar
@@ -223,7 +252,6 @@ export function PlanView({
           buyList={filteredBuyList}
           canViewCosts={canViewCosts}
           canOverride={canOverride}
-          backLink={backLink}
         />
       </div>
     );
@@ -231,15 +259,17 @@ export function PlanView({
   if (mode === "calendar") {
     return (
       <div className="space-y-4">
+        {backToOptions}
         {freshness}
-        <SupplyCalendarMode canViewCosts={canViewCosts} backLink={backLink} />
+        <SupplyCalendarMode canViewCosts={canViewCosts} />
       </div>
     );
   }
   return (
     <div className="space-y-4">
+      {backToOptions}
       {freshness}
-      <BudgetPlanner canViewCosts={canViewCosts} backLink={backLink} />
+      <BudgetPlanner canViewCosts={canViewCosts} />
     </div>
   );
 }

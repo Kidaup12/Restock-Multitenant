@@ -37,13 +37,7 @@ const PLANNABLE_LABELS: Record<string, string> = {
 const dayLabel = (date: Date) =>
   new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
-export function BudgetPlanner({
-  canViewCosts,
-  backLink,
-}: {
-  canViewCosts: boolean;
-  backLink: React.ReactNode;
-}) {
+export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
   const currency = useCurrency();
   const [budget, setBudget] = useState("800000");
   const [split, setSplit] = useState<BudgetSplit | null>(null);
@@ -96,7 +90,7 @@ export function BudgetPlanner({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink-muted">
-          Spend where it earns most — deferrals come with their price. {backLink}
+          Spend where it earns most — deferrals come with their price.
         </p>
         {split && (
           <ExportBar
