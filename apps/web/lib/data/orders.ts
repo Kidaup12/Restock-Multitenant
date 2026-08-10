@@ -247,6 +247,11 @@ export type PoDetail = {
   receivedAt: Date | null;
   cancelledAt: Date | null;
   createdByName: string | null;
+  /** Who emailed it to the supplier. Read from the ledger rather than a column
+   *  on the order: sending is recorded there already, and a denormalised copy
+   *  would be a second place for the same fact to drift. Null for an order sent
+   *  before the send started naming its actor. */
+  sentByName: string | null;
   supplier: {
     id: string;
     name: string;
@@ -266,7 +271,7 @@ export async function getPoDetail(
   { canViewCosts }: { canViewCosts: boolean }
 ): Promise<PoDetail | null> {
   const db = prismaForTenant(tenantId);
-  const [po, locations] = await Promise.all([
+  const [po, locations, sentEvent] = await Promise.all([
     db.purchaseOrder.findFirst({
       where: { id: poId, deletedAt: null },
       select: {
@@ -304,10 +309,16 @@ export async function getPoDetail(
       orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
       select: { id: true, name: true, isPrimary: true },
     }),
+    db.auditEvent.findFirst({
+      where: { entity: "PurchaseOrder", entityId: poId, action: "ordered" },
+      orderBy: { createdAt: "desc" },
+      select: { actorName: true },
+    }),
   ]);
   if (!po) return null;
   return {
     ...po,
+    sentByName: sentEvent?.actorName ?? null,
     subtotalKes: canViewCosts ? po.subtotalKes : null,
     lines: po.lines.map((line) =>
       canViewCosts ? line : { ...line, unitCostKes: null, lineTotalKes: null }
