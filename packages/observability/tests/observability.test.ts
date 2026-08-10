@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { ErrorEvent, NodeOptions } from "@sentry/node";
 import {
   _resetForTests,
@@ -44,6 +44,20 @@ function makeRecorder() {
   })) as NonNullable<NodeOptions["transport"]>;
   return { envelopes, transport };
 }
+
+/**
+ * Load the SDK before any test is timed.
+ *
+ * `initObservability` reaches @sentry/node through a dynamic import, so the
+ * FIRST test to pass a DSN pays for pulling in the SDK and its OpenTelemetry
+ * instrumentation — 179 exports — through vitest's module pipeline. Warm that
+ * costs about a second; cold, at the tail of a full battery, it has taken 46,
+ * and the suite failed on a 30s budget while the behaviour under test was
+ * fine. Paying it here means each test measures the wrapper, not the loader.
+ */
+beforeAll(async () => {
+  await import("@sentry/node");
+}, 180_000);
 
 describe("env gating", () => {
   const savedDsn = process.env.SENTRY_DSN;
