@@ -3,7 +3,6 @@ import {
   daysOfStockRemaining,
   assignAbc,
   dailySalesValue,
-  NEW_PRODUCT_DAYS,
   type SalesPoint,
   type AbcCategory,
 } from "@wezesha/forecast";
@@ -97,35 +96,34 @@ export function moneyAtRest(costKes: number, sellableOnHand: number): number {
   return costKes * Math.max(0, sellableOnHand);
 }
 
-/** A product is "too new" to classify when Shopify created it inside the
- *  new-product window — it shows "—" rather than a misleading class. */
-function isTooNew(createdAt: Date | null | undefined, asOf: Date): boolean {
-  if (!createdAt) return false; // unknown age → treat as established
-  return asOf.getTime() - createdAt.getTime() < NEW_PRODUCT_DAYS * 86_400_000;
-}
-
 export type AbcItem = {
   id: string;
   history: SalesPoint[];
   priceKes: number;
-  /** Shopify creation date — drives the "—" too-new label. */
-  createdAt?: Date | null;
 };
 
 /**
  * ABC class for the whole catalogue in one pass — the SAME assignAbc/
  * dailySalesValue primitives the nightly forecast run uses, so a product's
  * displayed class matches the class that drove its ordering strategy. Products
- * with no sales value, or too new to rank, come back null ("—"); excluding them
- * from the Pareto cut does not change any ranked product's class (they only
- * ever sit in the zero-value tail).
+ * with no sales value come back null ("—"); excluding them from the Pareto cut
+ * does not change any ranked product's class (they only ever sit in the
+ * zero-value tail).
+ *
+ * Age is deliberately NOT a filter. It used to be: anything Shopify created
+ * inside the new-product window was dropped from the ranking, on the reasoning
+ * that a few days of sales make a misleading class. But the run applies no such
+ * filter, so the guard only hid, on this screen, a classification that was
+ * already in force on the buy list and already driving the per-class ordering
+ * policy. Worse, it was silent at the catalogue level: a shop whose products
+ * were all created inside the window — a fresh store, or a migrated catalogue —
+ * ranked nothing at all and lost the column entirely.
  */
 export function abcForCatalogue(
   items: AbcItem[],
   asOf: Date = new Date()
 ): Map<string, AbcCategory | null> {
   const rankable = items
-    .filter((it) => !isTooNew(it.createdAt, asOf))
     .map((it) => ({ id: it.id, revenue: dailySalesValue(it.history, it.priceKes, asOf) }))
     .filter((it) => it.revenue > 0);
   const classes = assignAbc(rankable);

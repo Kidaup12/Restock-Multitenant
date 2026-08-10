@@ -155,7 +155,6 @@ describe.skipIf(!runnable)("shared metric contract (seeded local db)", () => {
         id: p.id,
         history: historyByProduct.get(p.id) ?? [],
         priceKes: p.priceKes,
-        createdAt: p.shopifyCreatedAt,
       })),
       asOf
     );
@@ -170,6 +169,39 @@ describe.skipIf(!runnable)("shared metric contract (seeded local db)", () => {
     expect(classes.has("A")).toBe(true);
     expect(classes.has("B")).toBe(true);
     expect(classes.has("C")).toBe(true);
+  });
+
+  it("classifies a catalogue the store listed today, not just an aged one", async () => {
+    // The shape every real workspace has and no fixture had: the seed backdates
+    // shopifyCreatedAt by months, while a store connecting for the first time —
+    // or one whose catalogue was rebuilt — reports every product as days old.
+    // ABC used to drop those from the ranking on age alone, so the class column
+    // came back empty for the entire catalogue and nothing failed.
+    const tenantId = seeded.tenantId;
+    const before = await prismaService.product.findMany({
+      where: { tenantId },
+      select: { id: true, shopifyCreatedAt: true },
+    });
+    await prismaService.product.updateMany({
+      where: { tenantId },
+      data: { shopifyCreatedAt: new Date() },
+    });
+    try {
+      const metrics = await getCatalogueMetrics(tenantId);
+      const classed = [...metrics.values()].filter((m) => m.abc != null);
+      expect(classed.length, "a freshly listed catalogue must still be classified").toBeGreaterThan(0);
+      const classes = new Set(classed.map((m) => m.abc));
+      expect(classes.has("A")).toBe(true);
+    } finally {
+      await Promise.all(
+        before.map((p) =>
+          prismaService.product.update({
+            where: { id: p.id },
+            data: { shopifyCreatedAt: p.shopifyCreatedAt },
+          })
+        )
+      );
+    }
   });
 
   it("Today reads the same engine: stocked-out, dead stock and money-at-rest", async () => {
