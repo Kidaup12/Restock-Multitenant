@@ -580,6 +580,16 @@ function RowGroup({
               canViewCosts={canViewCosts}
               canManage={canManage}
             />
+            {/* The editor fixes this row; the product page explains it — a year
+                of months, the supplier's lead time, and what the run decided. */}
+            <div className="px-4 pb-4">
+              <Link
+                href={`/stock/${row.productId}`}
+                className="text-sm font-medium text-accent-ink hover:underline"
+              >
+                See this product in full →
+              </Link>
+            </div>
           </td>
         </tr>
       )}
