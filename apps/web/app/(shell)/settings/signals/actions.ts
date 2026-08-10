@@ -7,6 +7,7 @@ import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { recordClosure, removeClosure } from "@/lib/signals/closures";
 import { dayKeysInRange, MAX_CLOSURE_DAYS, MAX_PROMO_DAYS } from "@/lib/signals/dates";
+import { SPIKE_IGNORE_KIND, spikeKey } from "@/lib/signals/spikes";
 
 /**
  * Declaring the out-of-the-ordinary: a promotion the shop ran, or a day it was
@@ -214,4 +215,94 @@ export async function removeClosureDay(input: {
   revalidatePath("/settings/signals");
   revalidatePath("/sales");
   return { ok: true, message: "Removed — that day counts as trading again." };
+}
+
+/**
+ * Answer a "was this a promo?" question.
+ *
+ * Yes → a one-day promotion scoped to that product, so the engine leaves the day
+ * out of its run rate exactly as a hand-declared promo would. The day is
+ * identified by productId rather than SKU: the suggestion came from a product
+ * row, and a SKU can be blank or reused.
+ */
+export async function logSpikeAsPromo(input: {
+  productId: string;
+  dayKey: string;
+}): Promise<SignalActionResult> {
+  const auth = await manageContext();
+  if (!auth.ok) return err(auth.error);
+  const { tenantId, actor } = auth.ctx;
+
+  const days = dayKeysInRange(input.dayKey, input.dayKey, MAX_PROMO_DAYS);
+  if (days.length !== 1) return err("That date doesn't look right.");
+
+  const db = prismaForTenant(tenantId);
+  // Resolve on the tenant client: a product id from another workspace comes
+  // back empty rather than being written against this one.
+  const product = await db.product.findFirst({
+    where: { id: input.productId },
+    select: { id: true, sku: true, title: true },
+  });
+  if (!product) return err("That product is no longer in your catalogue.");
+  if (!product.sku) return err("That product has no code, so a promotion can't be scoped to it.");
+
+  const created = await db.promo.create({
+    data: {
+      tenantId,
+      startDate: dayMarker(days[0]!),
+      endDate: dayMarker(days[0]!),
+      scope: "sku",
+      scopeValue: product.sku,
+      promoType: "flash",
+      discountPct: 0,
+      notes: "Logged from an unusual sales day",
+    },
+    select: { id: true },
+  });
+
+  await prismaService.auditEvent.create({
+    data: {
+      tenantId,
+      entity: "Promo",
+      entityId: created.id,
+      action: "promo_declared",
+      actorUserId: actor.userId,
+      actorName: actor.name,
+      meta: { from: days[0]!, to: days[0]!, scope: "sku", scopeValue: product.sku, source: "spike_suggestion" },
+    },
+  });
+
+  revalidatePath("/settings/signals");
+  return { ok: true, message: `Logged — ${product.title} on that day is out of your normal sales rate.` };
+}
+
+/** No → remember the answer, so the same day stops being raised. */
+export async function dismissSpike(input: {
+  productId: string;
+  dayKey: string;
+}): Promise<SignalActionResult> {
+  const auth = await manageContext();
+  if (!auth.ok) return err(auth.error);
+  const { tenantId } = auth.ctx;
+
+  const days = dayKeysInRange(input.dayKey, input.dayKey, MAX_PROMO_DAYS);
+  if (days.length !== 1) return err("That date doesn't look right.");
+
+  const db = prismaForTenant(tenantId);
+  const product = await db.product.findFirst({
+    where: { id: input.productId },
+    select: { id: true },
+  });
+  if (!product) return err("That product is no longer in your catalogue.");
+
+  const value = spikeKey(product.id, days[0]!);
+  // Idempotent: asking twice is the same answer, not an error.
+  await db.ignoreRule.upsert({
+    where: { tenantId_kind_value: { tenantId, kind: SPIKE_IGNORE_KIND, value } },
+    create: { tenantId, kind: SPIKE_IGNORE_KIND, value },
+    update: {},
+  });
+
+  revalidatePath("/settings/signals");
+  return { ok: true, message: "Noted — we won't ask about that day again." };
 }
