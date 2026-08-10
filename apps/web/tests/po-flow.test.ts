@@ -143,8 +143,20 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
 
   it("emails the PO through the seam and stamps sent + expected", async () => {
     sendEmailMock.mockClear();
-    const result = await sendPoToSupplier(tenantId, orbitPoId);
+    const result = await sendPoToSupplier(tenantId, orbitPoId, {
+      userId: "u-sender",
+      name: "The sender",
+    });
     expect(result.ok).toBe(true);
+
+    // Sending is a money action and the ledger has to name who did it — every
+    // other PO action records an actor, and this one recorded a nameless row.
+    const sent = await prismaService.auditEvent.findFirst({
+      where: { tenantId, entity: "PurchaseOrder", entityId: orbitPoId, action: "ordered" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(sent?.actorUserId).toBe("u-sender");
+    expect(sent?.actorName).toBe("The sender");
 
     expect(sendEmailMock).toHaveBeenCalledTimes(1);
     const message = sendEmailMock.mock.calls[0]![0];

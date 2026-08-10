@@ -16,7 +16,11 @@ export type SendPoResult =
   | { ok: true; expectedAt: Date | null }
   | { ok: false; reason: "not_found" | "not_sendable" | "no_supplier_email" };
 
-export async function sendPoToSupplier(tenantId: string, poId: string): Promise<SendPoResult> {
+export async function sendPoToSupplier(
+  tenantId: string,
+  poId: string,
+  actor?: { userId: string; name: string | null }
+): Promise<SendPoResult> {
   const db = prismaForTenant(tenantId);
   const [po, tenant] = await Promise.all([
     db.purchaseOrder.findFirst({
@@ -94,6 +98,8 @@ export async function sendPoToSupplier(tenantId: string, poId: string): Promise<
       entity: "PurchaseOrder",
       entityId: po.id,
       action: "ordered",
+      actorUserId: actor?.userId ?? null,
+      actorName: actor?.name ?? null,
       meta: { poNumber: po.poNumber, to: po.supplier.email, expectedAt },
     },
   });
