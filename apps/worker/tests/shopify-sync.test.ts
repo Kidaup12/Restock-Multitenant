@@ -400,6 +400,32 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     await expect(failing(jobStub(tenantId))).rejects.toBeInstanceOf(UnrecoverableError);
   });
 
+  it("drops the cached token when Shopify rejects it mid-sync", async () => {
+    // The cache expires on the token's STATED lifetime, so a token revoked
+    // early stayed in memory and was re-presented every tick. Three rejections
+    // is AUTH_FAILURES_BEFORE_PAUSE, so a recoverable rejection could pause the
+    // store until someone redeployed the worker.
+    const invalidated: string[] = [];
+    const spyCache = {
+      get: async () => "token-from-cache",
+      invalidate: (shopDomain: string) => invalidated.push(shopDomain),
+      get size() {
+        return 0;
+      },
+    } as unknown as Parameters<typeof import("../src/shopify-sync").createShopifySyncProcessor>[0]["tokenCache"];
+
+    const authFailApi = { ...fakeApi, products: async () => Promise.reject(new ShopifyAuthError(401, SHOP)) };
+    const mod = await import("../src/shopify-sync");
+    const failing = mod.createShopifySyncProcessor({
+      publisher,
+      makeApi: () => authFailApi,
+      appUrl: "https://app.example",
+      tokenCache: spyCache,
+    });
+
+    await expect(failing(jobStub(tenantId))).rejects.toBeInstanceOf(UnrecoverableError);
+    expect(invalidated).toEqual([SHOP]);
+  });
   it("final failure persists a reconnect Notification for the bell", async () => {
     // The processor re-throws auth failures as UnrecoverableError — the hook
     // sees the wrapped error, exactly as BullMQ's failed event delivers it.
