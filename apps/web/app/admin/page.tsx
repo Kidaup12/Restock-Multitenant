@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { listPlatformAdmins } from "@/lib/admin/admins";
+import { AdminsCard } from "./admins-card";
 import { ProvisionForm } from "./provision-form";
 import {
   Table,
@@ -69,9 +71,12 @@ export default async function AdminFleetPage({
 }: {
   searchParams: Promise<{ sort?: string }>;
 }) {
-  await requireAdmin();
+  const admin = await requireAdmin();
   const sort = parseSort((await searchParams).sort);
-  const rows = sortFleet(await getFleet(), sort);
+  const [rows, admins] = await Promise.all([
+    getFleet().then((f) => sortFleet(f, sort)),
+    listPlatformAdmins(admin),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -96,6 +101,9 @@ export default async function AdminFleetPage({
           </div>
         }
       />
+
+      <AdminsCard admins={admins} />
+
 
       <ProvisionForm />
 

@@ -18,6 +18,11 @@ import { cancelInvite, createInvite, sendInviteEmail } from "@/lib/auth/invites"
 import { customerWorkspaceExists } from "@/lib/admin/fleet";
 import { provisionWorkspace } from "@/lib/admin/provision";
 import { hasStepUp } from "@/lib/admin/step-up";
+import {
+  grantPlatformAdmin,
+  revokePlatformAdmin,
+  type AdminMutationResult,
+} from "@/lib/admin/admins";
 import { STEP_UP_REQUIRED } from "@/lib/admin/step-up-contract";
 
 /**
@@ -227,4 +232,35 @@ export async function exitWorkspace(): Promise<void> {
   }
   await clearAdminTenantCookie();
   redirect("/admin");
+}
+
+/**
+ * Grant and revoke console access.
+ *
+ * Both sit behind step-up like every other mutation here, and a fallback admin
+ * (one holding access through ADMIN_EMAILS with no row of their own) cannot
+ * reach them: step-up has nowhere to hold their throttle, so `hasStepUp` is
+ * false for them by construction. That is the intended shape — the first admin
+ * comes from the bootstrap script, every one after that comes through here.
+ */
+export async function grantPlatformAdminAction(
+  formData: FormData
+): Promise<AdminMutationResult> {
+  const admin = await requireAdmin();
+  if (!(await hasStepUp(admin))) return { ok: false, error: STEP_UP_REQUIRED };
+
+  const result = await grantPlatformAdmin(admin, String(formData.get("email") ?? ""));
+  if (result.ok) revalidatePath("/admin");
+  return result;
+}
+
+export async function revokePlatformAdminAction(
+  formData: FormData
+): Promise<AdminMutationResult> {
+  const admin = await requireAdmin();
+  if (!(await hasStepUp(admin))) return { ok: false, error: STEP_UP_REQUIRED };
+
+  const result = await revokePlatformAdmin(admin, String(formData.get("userId") ?? ""));
+  if (result.ok) revalidatePath("/admin");
+  return result;
 }
