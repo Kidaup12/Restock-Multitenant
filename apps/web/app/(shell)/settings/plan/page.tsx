@@ -42,6 +42,7 @@ export default async function PlanPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Settings", href: "/settings" }, { label: "Plan" }]}
         title="Plan"
         description={`This workspace is on ${currentLabel}. Here's what each plan includes.`}
       />

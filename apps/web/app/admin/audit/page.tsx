@@ -61,6 +61,7 @@ export default async function AdminAuditPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Workspaces", href: "/admin" }, { label: "Audit log" }]}
         title="Audit log"
         description="Every recorded action across all workspaces — admin sessions included"
       />

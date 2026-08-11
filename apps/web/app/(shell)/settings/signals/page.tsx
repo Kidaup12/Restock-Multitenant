@@ -38,6 +38,7 @@ export default async function SignalsSettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Settings", href: "/settings" }, { label: "Promotions & closures" }]}
         title="Promotions & closures"
         description="Tell us when you were doing something out of the norm, so it doesn't skew what we tell you to buy"
       />

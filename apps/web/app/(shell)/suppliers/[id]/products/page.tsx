@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -43,13 +42,12 @@ export default async function SupplierProductsPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[
+          { label: "Suppliers", href: "/suppliers" },
+          { label: picker.supplierName },
+        ]}
         title={picker.supplierName}
         description="Tick everything you buy from them. A product can only sit with one supplier, so ticking moves it."
-        actions={
-          <Link href="/suppliers" className="text-sm text-ink-secondary hover:text-ink">
-            ← All suppliers
-          </Link>
-        }
       />
       {canManage ? (
         <ProductPicker

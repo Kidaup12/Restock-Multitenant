@@ -82,6 +82,7 @@ export default async function WorkspaceSettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Settings", href: "/settings" }, { label: "Workspace" }]}
         title="Workspace"
         description={`Currency, trading day, alerts, and how ${membership.tenant.name} buys`}
       />

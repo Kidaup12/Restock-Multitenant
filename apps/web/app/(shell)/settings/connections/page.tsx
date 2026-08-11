@@ -45,6 +45,7 @@ export default async function ConnectionsPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Settings", href: "/settings" }, { label: "Connections" }]}
         title="Connections"
         description="Data sources connected to this workspace"
       />

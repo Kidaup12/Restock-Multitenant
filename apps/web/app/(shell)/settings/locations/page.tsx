@@ -35,6 +35,7 @@ export default async function LocationsSettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Settings", href: "/settings" }, { label: "Locations" }]}
         title="Locations"
         description="Tell us what each location does — it drives cover, transfers, and the buy list"
       />

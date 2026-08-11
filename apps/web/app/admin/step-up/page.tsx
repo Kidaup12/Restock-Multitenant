@@ -34,6 +34,7 @@ export default async function StepUpPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Workspaces", href: "/admin" }, { label: "Confirm your password" }]}
         title="Confirm your password"
         description={
           workspace
