@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { OffboardCard } from "./offboard-card";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile } from "@/components/ui/stat-tile";
 import {
@@ -292,6 +293,12 @@ export default async function AdminTenantPage({
           </CardContent>
         )}
       </Card>
+
+      <OffboardCard
+        tenantId={detail.tenant.id}
+        slug={detail.tenant.slug}
+        name={detail.tenant.name}
+      />
     </div>
   );
 }
