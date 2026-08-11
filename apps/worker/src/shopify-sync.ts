@@ -481,16 +481,26 @@ async function syncOrders(
   // The denominator legitimately changes here: the phase started counting orders
   // fetched, and finishes counting the day-sets they bucket into.
   await onProgress?.(0, rows.length);
+
+  // The delete takes the whole product-day and cannot key on the branch: a
+  // re-sync has to be able to drop a branch that stopped trading. That makes it
+  // unsafe to interleave with the inserts — now that a day holds one row per
+  // branch, a later chunk's delete would take out the sibling an earlier chunk
+  // had just written, and the sync would report success one branch short.
+  // Clear every day first, then write.
+  const days = [
+    ...new Map(
+      rows.map((r) => [`${r.productId}|${r.date.getTime()}`, { productId: r.productId, date: r.date }])
+    ).values(),
+  ];
+  for (let i = 0; i < days.length; i += SALES_CHUNK) {
+    await prismaService.salesHistory.deleteMany({
+      where: { tenantId, channel: "shopify", OR: days.slice(i, i + SALES_CHUNK) },
+    });
+  }
   for (let i = 0; i < rows.length; i += SALES_CHUNK) {
     const chunk = rows.slice(i, i + SALES_CHUNK);
     await onProgress?.(i + chunk.length, rows.length);
-    await prismaService.salesHistory.deleteMany({
-      where: {
-        tenantId,
-        channel: "shopify",
-        OR: chunk.map((r) => ({ productId: r.productId, date: r.date })),
-      },
-    });
     await prismaService.salesHistory.createMany({ data: chunk });
   }
   return rows.length;
