@@ -1,6 +1,6 @@
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { getCatalogueMetrics } from "@/lib/metrics";
-import { getTodayMetrics } from "./today";
+import { DEFAULT_DEAD_STOCK_DAYS, getTodayMetrics } from "./today";
 
 /**
  * Insights-screen queries. Server-only: every function takes an explicit tenantId
@@ -369,6 +369,8 @@ export async function getPlanAdherence(
  *  below it the denominator is too thin to mean anything. */
 const MIN_SNAPSHOT_DAYS_PER_WEEK = 5;
 
+const DAY_MS = 86_400_000;
+
 export type StockoutWeek = {
   /** Monday (UTC) of the week. */
   weekStart: Date;
@@ -442,4 +444,155 @@ export async function getStockoutTrend(
   }
 
   return { weeks: out, trackingSince: earliest?.date ?? null };
+}
+
+export type ImpactMeasure = {
+  /** The first week we could measure after the shop started ordering. */
+  start: number;
+  /** The most recent week. */
+  now: number;
+  /** now − start. Negative is an improvement for both measures here, and the
+   *  card says so rather than hiding it. */
+  change: number;
+  startWeek: Date;
+  nowWeek: Date;
+};
+
+export type Impact = {
+  /** When measuring began: the shop can only be judged from its first order. */
+  since: Date | null;
+  emptyShelfPct: ImpactMeasure | null;
+  deadStockSkus: ImpactMeasure | null;
+  deadStockWindowDays: number;
+  /** First nightly snapshot on record — what limits how far back we can look. */
+  trackingSince: Date | null;
+  /** Why there is nothing to show yet, when there isn't. */
+  reason: "no_order_yet" | "too_early" | null;
+};
+
+/**
+ * "Has this made a difference?" — the two numbers the shop actually judges by:
+ * how often shelves are empty, and how many products have stopped selling while
+ * still taking up stock. First measurable week against the latest one.
+ *
+ * Deliberately not a shillings figure. Claiming money saved needs a
+ * counterfactual — what would have happened without us — which nothing here
+ * records, and a made-up number is the one thing the owner would quote back.
+ *
+ * Measuring starts at the first purchase order, not at sign-up: before the shop
+ * has ordered anything on our say-so there is nothing to take credit or blame
+ * for. Both measures ride the same weekly gate as the stockout trend, so a week
+ * with too few nightly snapshots is missing data, never a good week.
+ */
+export async function getImpact(tenantId: string): Promise<Impact> {
+  const db = prismaForTenant(tenantId);
+  const [firstPo, config, trend] = await Promise.all([
+    db.purchaseOrder.findFirst({
+      where: { deletedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true },
+    }),
+    db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } }),
+    getStockoutTrend(tenantId, { weeks: 26 }),
+  ]);
+
+  const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
+  const base = {
+    since: firstPo?.createdAt ?? null,
+    emptyShelfPct: null,
+    deadStockSkus: null,
+    deadStockWindowDays: windowDays,
+    trackingSince: trend.trackingSince,
+  };
+  if (!firstPo) return { ...base, reason: "no_order_yet" };
+
+  const sinceWeek = weekStartOf(firstPo.createdAt).getTime();
+  const weeks = trend.weeks.filter((w) => w.weekStart.getTime() >= sinceWeek);
+  if (weeks.length < 2) return { ...base, reason: "too_early" };
+
+  const first = weeks[0]!;
+  const last = weeks[weeks.length - 1]!;
+  const emptyShelfPct: ImpactMeasure = {
+    start: first.ratePct,
+    now: last.ratePct,
+    change: Math.round((last.ratePct - first.ratePct) * 10) / 10,
+    startWeek: first.weekStart,
+    nowWeek: last.weekStart,
+  };
+
+  const deadCounts = await deadStockByWeek(
+    tenantId,
+    [first.weekStart, last.weekStart],
+    windowDays
+  );
+  const startDead = deadCounts.get(first.weekStart.getTime());
+  const nowDead = deadCounts.get(last.weekStart.getTime());
+  const deadStockSkus: ImpactMeasure | null =
+    startDead == null || nowDead == null
+      ? null
+      : {
+          start: startDead,
+          now: nowDead,
+          change: nowDead - startDead,
+          startWeek: first.weekStart,
+          nowWeek: last.weekStart,
+        };
+
+  return { ...base, emptyShelfPct, deadStockSkus, reason: null };
+}
+
+/**
+ * Dead-stock SKU count as it stood at the end of each named week, from the
+ * nightly snapshot plus sales history — the same test Today applies to the
+ * present moment (something on the shelf, nothing sold inside the window), asked
+ * of a past date. Weeks with no snapshot are absent from the map, not zero.
+ */
+async function deadStockByWeek(
+  tenantId: string,
+  weekStarts: Date[],
+  windowDays: number
+): Promise<Map<number, number>> {
+  const db = prismaForTenant(tenantId);
+  const earliest = Math.min(...weekStarts.map((w) => w.getTime()));
+  const [snapshots, sales] = await Promise.all([
+    db.inventorySnapshot.findMany({
+      where: { date: { gte: new Date(earliest) } },
+      select: { date: true, productId: true, onHand: true },
+    }),
+    db.salesHistory.findMany({
+      where: { date: { gte: new Date(earliest - windowDays * DAY_MS) } },
+      select: { date: true, productId: true, quantity: true },
+    }),
+  ]);
+
+  const soldDates = new Map<string, number[]>();
+  for (const s of sales) {
+    if (s.quantity <= 0) continue;
+    const list = soldDates.get(s.productId);
+    if (list) list.push(s.date.getTime());
+    else soldDates.set(s.productId, [s.date.getTime()]);
+  }
+
+  const out = new Map<number, number>();
+  for (const weekStart of weekStarts) {
+    const weekEnd = weekStart.getTime() + 7 * DAY_MS;
+    // The week's most recent nightly snapshot is the shelf as it stood then.
+    let asOf = 0;
+    for (const row of snapshots) {
+      const t = row.date.getTime();
+      if (t >= weekStart.getTime() && t < weekEnd && t > asOf) asOf = t;
+    }
+    if (asOf === 0) continue;
+
+    const cutoff = asOf - windowDays * DAY_MS;
+    let dead = 0;
+    for (const row of snapshots) {
+      if (row.date.getTime() !== asOf || row.onHand <= 0) continue;
+      const dates = soldDates.get(row.productId);
+      const lastSold = dates ? Math.max(...dates.filter((d) => d <= asOf)) : Number.NEGATIVE_INFINITY;
+      if (!Number.isFinite(lastSold) || lastSold < cutoff) dead += 1;
+    }
+    out.set(weekStart.getTime(), dead);
+  }
+  return out;
 }
