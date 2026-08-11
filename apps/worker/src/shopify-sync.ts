@@ -707,7 +707,16 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       // is left reading as "running" for ever.
       await run.fail(err);
       if (err instanceof ShopifyAuthError) {
-        // Token revoked / app uninstalled: retrying is pointless.
+        // Drop the cached token before giving up. Shopify has just rejected it,
+        // and the cache only expires on the *stated* lifetime — so a token
+        // revoked early, or invalidated by a scope change, stayed in memory and
+        // was presented again every fifteen minutes. Three of those is
+        // AUTH_FAILURES_BEFORE_PAUSE, so a recoverable rejection could pause a
+        // store for the rest of the day and only a redeploy would clear it.
+        // `invalidate` was written for exactly this and had no caller on this
+        // path. Next tick re-mints instead of re-presenting a dead token.
+        tokens.invalidate(connection.shopDomain);
+        // Token revoked / app uninstalled: retrying THIS job is still pointless.
         throw new UnrecoverableError(err.message);
       }
       throw err;
