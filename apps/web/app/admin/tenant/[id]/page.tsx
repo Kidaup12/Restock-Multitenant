@@ -97,6 +97,7 @@ export default async function AdminTenantPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Workspaces", href: "/admin" }, { label: detail.tenant.name }]}
         title={detail.tenant.name}
         description={`${detail.tenant.slug} · read-only workspace view`}
         actions={

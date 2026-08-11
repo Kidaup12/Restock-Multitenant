@@ -50,6 +50,7 @@ export default async function PosSettingsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Settings", href: "/settings" }, { label: "Till sales" }]}
         title="Till sales"
         description="Send what you sell over the counter, so the forecast sees the whole shop"
       />

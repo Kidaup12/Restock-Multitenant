@@ -1,6 +1,5 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
-import Link from "next/link";
 import type { Metadata } from "next";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -56,13 +55,9 @@ export default async function ProductPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Stock", href: "/stock" }, { label: "Product" }]}
         title="Product"
         description="One product and everything about it"
-        actions={
-          <Link href="/stock" className="text-sm text-ink-secondary hover:text-ink">
-            ← All products
-          </Link>
-        }
       />
       <Suspense fallback={<SkeletonCard lines={8} />}>
         <ProductContent

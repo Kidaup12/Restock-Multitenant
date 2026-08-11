@@ -84,6 +84,7 @@ export default async function PoDetailPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Orders", href: "/orders" }, { label: po.poNumber }]}
         title={po.poNumber}
         description={po.supplier ? `Purchase order for ${po.supplier.name}` : "Purchase order"}
         actions={

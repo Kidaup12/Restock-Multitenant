@@ -80,6 +80,7 @@ export default async function TeamPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        breadcrumbs={[{ label: "Settings", href: "/settings" }, { label: "Team" }]}
         title="Team"
         description={`Who has access to ${membership.tenant.name}`}
       />
