@@ -101,7 +101,10 @@ export async function LocationView({
                   <TableHead>Product</TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead numeric>On hand</TableHead>
-                  {location.showCover && <TableHead numeric>Cover</TableHead>}
+                  {/* Shop-wide, and it says so: the figure is total sellable
+                      stock against the shop's run rate. A per-branch number
+                      needs sales attributed to the branch. */}
+                  {location.showCover && <TableHead numeric>Cover (shop)</TableHead>}
                   <TableHead numeric>Value</TableHead>
                 </TableHeader>
                 <TableBody>

@@ -364,8 +364,10 @@ export type LocationLine = {
   onHand: number;
   /** onHand x unit cost. Null when the caller can't view costs. */
   valueKes: number | null;
-  /** Days of cover for this SKU AT THIS BRANCH; null when there's no run rate
-   *  to judge against or the location doesn't sell (Holds/En-route/Ignore). */
+  /** Days of cover for this SKU ACROSS THE SHOP's selling locations — not this
+   *  branch alone, which needs sales attributed per location to be knowable.
+   *  Null when there's no run rate to judge against or the location doesn't sell
+   *  (Holds/En-route/Ignore). */
   daysCover: number | null;
   /** Negative on-hand — oversold; flagged, never hidden. */
   oversold: boolean;
@@ -453,10 +455,22 @@ export async function getStockByLocation(
         const oversold = units < 0;
         let daysCover: number | null = null;
         if (showCover) {
-          const total = sellsTotal.get(level.product.id) ?? 0;
+          // Cover here is the SHOP's, not this branch's, and the column says so.
+          //
+          // Two faults, one line. It apportioned the run rate by the branch's
+          // share of stock — `rate x units/total` — then divided the branch's
+          // units by it, which cancels: every branch showed total/rate whatever
+          // it held (55 units and 25 units of the same SKU both read 72999d).
+          // And computing cover here at all bypassed the engine's own capped
+          // figure, so a genuine but tiny rate printed two centuries of cover
+          // where every other screen shows the sentinel-free number.
+          //
+          // Now it reads the shared metric, like the by-product view does. A
+          // real per-branch figure needs sales attributed to the branch, which
+          // is what SalesHistory cannot yet do everywhere.
           const rate = rateFor(level.product.id);
-          const branchRate = total > 0 ? rate * (Math.max(units, 0) / total) : 0;
-          daysCover = branchRate > 0 ? Math.floor(units / branchRate) : null;
+          const cover = metrics.get(level.product.id)?.coverDays ?? null;
+          daysCover = rate > NO_RATE_EPSILON ? cover : null;
         }
         return {
           productId: level.product.id,
