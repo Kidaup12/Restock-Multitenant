@@ -17,6 +17,8 @@ import {
 import { cancelInvite, createInvite, sendInviteEmail } from "@/lib/auth/invites";
 import { customerWorkspaceExists } from "@/lib/admin/fleet";
 import { provisionWorkspace } from "@/lib/admin/provision";
+import { exportTenantJson } from "@/lib/offboarding/export";
+import { deleteTenant } from "@/lib/offboarding/delete";
 import { hasStepUp } from "@/lib/admin/step-up";
 import {
   grantPlatformAdmin,
@@ -263,4 +265,67 @@ export async function revokePlatformAdminAction(
   const result = await revokePlatformAdmin(admin, String(formData.get("userId") ?? ""));
   if (result.ok) revalidatePath("/admin");
   return result;
+}
+
+/**
+ * Offboarding from the operator side.
+ *
+ * Export and delete already existed as routes, but both gated on being OWNER of
+ * the ACTIVE workspace — so removing a departing client's workspace needed
+ * either their credentials or a Membership row written by hand (which is how it
+ * was done on 2026-08-10). A platform admin can now do it for any workspace,
+ * behind step-up, without ever joining it.
+ *
+ * The domain guards are untouched and still do the real work: `deleteTenant`
+ * refuses unless the typed slug matches AND a fresh export exists in the ledger.
+ * That ordering is the point — no restore drill has ever been performed against
+ * the hosted database (tester issue #24), so the export IS the recovery plan
+ * until one has.
+ */
+export type ExportWorkspaceResult =
+  | { ok: true; filename: string; json: string }
+  | { ok: false; error: string };
+
+export async function exportWorkspaceAction(formData: FormData): Promise<ExportWorkspaceResult> {
+  const admin = await requireAdmin();
+  if (!(await hasStepUp(admin))) return { ok: false, error: STEP_UP_REQUIRED };
+
+  const tenantId = String(formData.get("tenantId") ?? "");
+  if (!tenantId || !(await customerWorkspaceExists(tenantId))) notFound();
+
+  const tenant = await prismaForTenant(tenantId).tenant.findUnique({
+    where: { id: tenantId },
+    select: { slug: true },
+  });
+  if (!tenant) notFound();
+
+  // Records the "exported" audit row as a side effect — which is exactly what
+  // unlocks deletion for the next 24 hours.
+  const json = await exportTenantJson(tenantId, { userId: admin.userId, name: admin.name });
+  return { ok: true, filename: `wezesha-export-${tenant.slug}.json`, json };
+}
+
+export type DeleteWorkspaceResult = { ok: true } | { ok: false; error: string };
+
+export async function deleteWorkspaceAction(formData: FormData): Promise<DeleteWorkspaceResult> {
+  const admin = await requireAdmin();
+  if (!(await hasStepUp(admin))) return { ok: false, error: STEP_UP_REQUIRED };
+
+  const tenantId = String(formData.get("tenantId") ?? "");
+  const confirmSlug = String(formData.get("confirmSlug") ?? "");
+  if (!tenantId || !(await customerWorkspaceExists(tenantId))) notFound();
+
+  const result = await deleteTenant({
+    tenantId,
+    confirmSlug,
+    // Not a rubber stamp: deleteTenant independently requires a fresh export
+    // row in the ledger, so this flag cannot on its own delete anything.
+    exportConfirmed: true,
+    actorUserId: admin.userId,
+    actorName: admin.name,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath("/admin");
+  return { ok: true };
 }
