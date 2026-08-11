@@ -200,4 +200,26 @@ describe("tenant-safety/require-tenant-scope", () => {
       ],
     });
   });
+
+  it("covers the single-row writes, not just the bulk ones", () => {
+    // The gap a 2026-08-11 audit found: on the BYPASSRLS client an update or
+    // delete keyed only on an id is invisible to RLS, and was invisible here
+    // too — the one combination with no second guard behind it.
+    tester.run("require-tenant-scope", rule, {
+      valid: [
+        "prismaService.product.update({ where: { id, tenantId }, data: { costKes } });",
+        "prismaService.product.delete({ where: { tenantId_sku: { tenantId, sku } } });",
+      ],
+      invalid: [
+        {
+          code: "prismaService.product.update({ where: { id }, data: { costKes } });",
+          errors: [{ message: "prismaService.product.update() must filter by tenantId." }],
+        },
+        {
+          code: "prismaService.product.delete({ where: { id } });",
+          errors: [{ message: "prismaService.product.delete() must filter by tenantId." }],
+        },
+      ],
+    });
+  });
 });

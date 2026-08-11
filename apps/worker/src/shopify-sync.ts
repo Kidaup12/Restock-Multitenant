@@ -559,7 +559,6 @@ async function resolveAccessToken(
   connection: { shopDomain: string; accessToken: string; authMode: string },
   tokens: ReturnType<typeof createTokenCache>
 ): Promise<string> {
-  // eslint-disable-next-line tenant-safety/require-tenant-scope -- keyed on the tenantId the job carries; the worker has no session to scope by.
   const credential = await prismaService.shopifyAppCredential.findUnique({
     where: { tenantId },
     select: { clientId: true, apiSecret: true },

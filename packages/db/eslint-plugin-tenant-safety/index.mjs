@@ -10,8 +10,15 @@
 // net. A tripwire, not a proof.
 
 // Methods whose first argument carries a `where` filter that must name the
-// tenant. `groupBy` also takes `by`, and `updateMany`/`deleteMany` write —
-// the `where` requirement is identical for all of them.
+// tenant. `groupBy` also takes `by`, and the writes carry the same requirement:
+// a `where` that does not name the tenant is the same hole whether it selects
+// rows to read or rows to change.
+//
+// The single-row writes were missing here until a 2026-08-11 audit: on the
+// service client (BYPASSRLS) an `update({ where: { id } })` with no tenantId is
+// invisible to RLS *and* to this rule, which is the one combination with no
+// second guard behind it. They are covered now — where the id genuinely came
+// from a tenant-scoped read moments earlier, an inline disable states that.
 const WHERE_SCOPED_METHODS = new Set([
   "findMany",
   "findFirst",
@@ -21,7 +28,9 @@ const WHERE_SCOPED_METHODS = new Set([
   "count",
   "aggregate",
   "groupBy",
+  "update",
   "updateMany",
+  "delete",
   "deleteMany",
 ]);
 
