@@ -65,6 +65,18 @@ describe.skipIf(!runnable)("forecast crons (real redis + db)", () => {
     await connection.quit();
   });
 
+  it("forecasts every half hour, clear of the sync minutes", () => {
+    // A once-a-night run meant the buy list was built before the day it was
+    // trading in: sell out at 9am and the plan still said covered until 2am.
+    const [minutes, hours] = cron.FORECAST_PATTERN.split(" ");
+    expect(hours).toBe("*");
+    const at = minutes!.split(",").map(Number);
+    expect(at).toHaveLength(2);
+    expect(at[1]! - at[0]!).toBe(30);
+    // The Shopify sync ticks on :00/:15/:30/:45 — a forecast must not start in
+    // the same minute as the catalogue pull it wants to read.
+    for (const minute of at) expect(minute % 15).not.toBe(0);
+  });
   it("registers the nightly + monthly schedules idempotently", async () => {
     await cron.registerForecastCronSchedules(queue);
     await cron.registerForecastCronSchedules(queue);
@@ -73,7 +85,7 @@ describe.skipIf(!runnable)("forecast crons (real redis + db)", () => {
     const monthly = schedulers.filter((s) => s.key === cron.MONTHLY_BACKTEST_SCHEDULER);
     expect(nightly).toHaveLength(1);
     expect(monthly).toHaveLength(1);
-    expect(nightly[0]!.pattern).toBe(cron.NIGHTLY_FORECAST_PATTERN);
+    expect(nightly[0]!.pattern).toBe(cron.FORECAST_PATTERN);
     expect(monthly[0]!.pattern).toBe(cron.MONTHLY_BACKTEST_PATTERN);
     await queue.removeJobScheduler(cron.NIGHTLY_FORECAST_SCHEDULER);
     await queue.removeJobScheduler(cron.MONTHLY_BACKTEST_SCHEDULER);
@@ -82,7 +94,7 @@ describe.skipIf(!runnable)("forecast crons (real redis + db)", () => {
   it("schedules off the sync-tick minute", () => {
     // The Shopify sync ticks every 15 minutes from :00, and the monthly backtest
     // used to start in the same minute as the 03:00 full-sync cursor clear.
-    for (const pattern of [cron.NIGHTLY_FORECAST_PATTERN, cron.MONTHLY_BACKTEST_PATTERN]) {
+    for (const pattern of [cron.FORECAST_PATTERN, cron.MONTHLY_BACKTEST_PATTERN]) {
       expect(Number(pattern.split(" ")[0])).not.toBe(0);
     }
   });

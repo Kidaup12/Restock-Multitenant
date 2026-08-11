@@ -23,10 +23,24 @@ import { publishEvent } from "@wezesha/realtime";
 export const FORECAST_CRON_QUEUE = "forecast-crons";
 
 export const NIGHTLY_FORECAST_SCHEDULER = "nightly-forecast";
-/** ~02:00 worker-local — backs the spec's "forecast from last night 02:00".
- *  Off the hour because the Shopify sync ticks every 15 minutes and the run has
- *  no reason to start in the same minute as a catalogue pull. */
-export const NIGHTLY_FORECAST_PATTERN = "7 2 * * *";
+/**
+ * Every half hour, at :07 and :37.
+ *
+ * It ran once at 02:07 and the shop saw a buy list built before the day it was
+ * trading in — sell out at 9am and the plan still said you were covered until
+ * the next night. The offsets keep it clear of the Shopify sync on :00/:15/:30/
+ * :45, so a run reads a catalogue pull that has finished rather than one in
+ * flight.
+ *
+ * Safe to run this often because of two decisions already in place: the enqueue
+ * guard gives one tenant at most one running forecast (no overlap), and the
+ * append-only ForecastRecommendation history is keyed on the run DAY with
+ * skipDuplicates — so re-running refines the live plan while the day's first ask
+ * stands, and adherence figures computed last week cannot shift. The name stays
+ * "nightly" only where it is a BullMQ scheduler id: changing that would orphan
+ * the registered scheduler rather than replace it.
+ */
+export const FORECAST_PATTERN = "7,37 * * * *";
 
 export const MONTHLY_BACKTEST_SCHEDULER = "monthly-backtest";
 /** After the nightly run and clear of the 03:00 full-sync cursor clear, which it
@@ -68,7 +82,7 @@ export function createForecastCronQueue(connection: Redis): ForecastCronQueue {
 export async function registerForecastCronSchedules(queue: ForecastCronQueue): Promise<void> {
   await queue.upsertJobScheduler(
     NIGHTLY_FORECAST_SCHEDULER,
-    { pattern: NIGHTLY_FORECAST_PATTERN },
+    { pattern: FORECAST_PATTERN },
     { name: FORECAST_DISPATCH_JOB, opts: FORECAST_JOB_OPTIONS }
   );
   await queue.upsertJobScheduler(
