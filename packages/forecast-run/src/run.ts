@@ -270,10 +270,14 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
 
   // Cross-product steps the pure pipeline leaves to the caller.
   const knobs = resolveForecastKnobs(config);
+  // This is the ONE place a product's current ABC class is decided; the column
+  // it writes is what every screen reads. `now` is passed explicitly rather than
+  // left to default: a run replayed with a fixed clock must rank against the
+  // run's own date, not against whenever it happens to be executed.
   const abcByProduct = assignAbc(
     products.map((p) => ({
       id: p.id,
-      revenue: dailySalesValue(historyByProduct.get(p.id) ?? [], p.priceKes),
+      revenue: dailySalesValue(historyByProduct.get(p.id) ?? [], p.priceKes, now),
     }))
   );
   const activePromos: ActivePromo[] = promos;

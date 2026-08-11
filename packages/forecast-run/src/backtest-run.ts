@@ -76,6 +76,11 @@ export async function runBacktest(
     list.push(row);
   }
 
+  // Not a second producer of the CURRENT class: the backtest scores past months
+  // and needs the classes as they stood over the history it replays, which is
+  // why it ranks its own slice rather than reading Product.abcCategory (today's
+  // letter, written by the nightly run). Nothing user-facing reads these — they
+  // only bucket accuracy scores inside BacktestRun.
   const abcByProduct = assignAbc(
     products.map((p) => ({
       id: p.id,

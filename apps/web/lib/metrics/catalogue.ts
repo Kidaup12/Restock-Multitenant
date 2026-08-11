@@ -1,6 +1,5 @@
-import { isBuyable, prismaForTenant } from "@wezesha/db";
+import { prismaForTenant } from "@wezesha/db";
 import {
-  abcForCatalogue,
   coverDays,
   moneyAtRest,
   revenueByWindow,
@@ -72,6 +71,7 @@ export async function getCatalogueMetrics(
         shopifyStatus: true,
         publishedAt: true,
         missingFromShopifyAt: true,
+        abcCategory: true,
       },
     }),
     db.salesHistory.findMany({
@@ -105,17 +105,12 @@ export async function getCatalogueMetrics(
   }
   const snapshotsSince = firstSnapshot?.date ?? undefined;
 
-  const abc = abcForCatalogue(
-    products
-      .filter(isBuyable)
-      .map((p) => ({
-        id: p.id,
-        history: historyByProduct.get(p.id) ?? [],
-        priceKes: p.priceKes,
-      })),
-    asOf
-  );
-
+  // ABC is READ, never recomputed here. The nightly run classifies the catalogue
+  // and writes Product.abcCategory, and that column is what the buy list orders
+  // on and what the per-class service levels are applied from. Recomputing it
+  // live gave the same product a different letter on Stock than on Plan — two
+  // clocks, one label — and the letter the screens showed was not the one that
+  // had driven the order. One producer: the run.
   const out = new Map<string, ProductMetrics>();
   for (const p of products) {
     const history = historyByProduct.get(p.id) ?? [];
@@ -127,7 +122,7 @@ export async function getCatalogueMetrics(
       coverDays: coverDays(p.currentStock, rate),
       revenueKes: revenueByWindow(history, asOf),
       moneyAtRestKes: moneyAtRest(p.costKes, p.currentStock),
-      abc: abc.get(p.id) ?? null,
+      abc: (p.abcCategory as AbcCategory | null) ?? null,
     });
   }
   return out;
