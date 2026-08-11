@@ -15,7 +15,7 @@ import type { Role } from "@wezesha/db";
 import { cn } from "@/lib/cn";
 import { markWelcomed } from "@/lib/auth-actions";
 import { Button } from "@/components/ui/button";
-import { tourStepsForRole, STEP_ROUTES, type TourStep } from "@/components/tour/steps";
+import { tourStepsForRole, routeForStep, STEP_ROUTES, type TourStep } from "@/components/tour/steps";
 
 /**
  * In-house interactive tour engine, no dependencies. Steps point at
@@ -79,6 +79,8 @@ export function TourProvider({
   const [cardStyle, setCardStyle] = useState<React.CSSProperties | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const autoStarted = useRef(false);
+  /** Step key whose one navigation has already been spent. */
+  const navigatedFor = useRef<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -95,6 +97,9 @@ export function TourProvider({
       (s) => STEP_ROUTES[s.key] || findTarget(s)
     );
     if (chosen.length === 0) return;
+    // A replay from the profile menu starts at step one again, and that step is
+    // owed its navigation even though a previous run already spent it.
+    navigatedFor.current = null;
     setIndex(0);
     setRect(null);
     setCardStyle(null);
@@ -117,13 +122,18 @@ export function TourProvider({
     return () => clearTimeout(timer);
   }, [autoStart, start]);
 
-  // Walk into the step's page. Navigating changes the page behind the
-  // spotlight; the target (a sidebar item, present on every page) stays put
-  // while the content the tour is describing loads underneath.
+  // Walk into the step's page, ONCE per step. Navigating changes the page
+  // behind the spotlight; the target (a sidebar item, present on every page)
+  // stays put while the content the tour is describing loads underneath.
+  //
+  // Re-deciding on every pathname change made the tour a trap: click Suppliers
+  // during step one and this effect fired again and pushed you back to Today,
+  // so the app was unusable until the tour was skipped. Remembering which step
+  // already had its navigation leaves the person's own clicks alone.
   useEffect(() => {
-    if (!step) return;
-    const route = STEP_ROUTES[step.key];
-    if (route && pathname !== route) router.push(route);
+    const route = routeForStep(step, pathname, navigatedFor.current);
+    if (step) navigatedFor.current = step.key;
+    if (route) router.push(route);
   }, [step, pathname, router]);
 
   // Bring the step's target into view.

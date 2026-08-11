@@ -36,6 +36,27 @@ export const STEP_ROUTES: Record<string, string> = {
   settings: "/settings",
 };
 
+/**
+ * Where the engine should send the browser for a step, or null to stay put.
+ *
+ * Each step gets ONE navigation, when it becomes the current step. The engine
+ * used to re-decide this on every pathname change, which meant a person who
+ * clicked a sidebar link mid-tour was pulled straight back to the step's page —
+ * the tour held the app hostage until it was skipped. Their navigation wins now;
+ * the spotlight follows, because every step targets something the shell keeps on
+ * screen anyway.
+ */
+export function routeForStep(
+  step: Pick<TourStep, "key"> | null,
+  pathname: string,
+  navigatedForKey: string | null,
+): string | null {
+  if (!step) return null;
+  if (navigatedForKey === step.key) return null;
+  const route = STEP_ROUTES[step.key];
+  return route && route !== pathname ? route : null;
+}
+
 const step = (
   key: string,
   target: readonly string[],
