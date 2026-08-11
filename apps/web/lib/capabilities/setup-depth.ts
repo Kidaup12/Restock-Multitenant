@@ -40,6 +40,13 @@ export type SetupUnlock = {
   detail: string;
 };
 
+export type PendingLocation = {
+  id: string;
+  name: string;
+  /** What the sync guessed from the name — the button that is already selected. */
+  guessedType: string | null;
+};
+
 export type SetupDepth = {
   level: SetupLevel;
   signals: SetupSignals;
@@ -57,6 +64,9 @@ export type SetupDepth = {
    * every live workspace is currently an unconfirmed guess.
    */
   locationsToConfirm: number;
+  /** The unconfirmed ones themselves, so the prompt can be answered where it is
+   *  asked instead of sending the owner to another screen to do it. */
+  locationsPending: PendingLocation[];
 };
 
 /** Pre-aggregated inputs the pure signal logic reads. */
@@ -157,7 +167,7 @@ export async function setupDepth(tenantId: string): Promise<SetupDepth> {
   const [conn, config, locations, products, revenueRows] = await Promise.all([
     db.shopifyConnection.findFirst({ select: { uninstalledAt: true } }),
     db.tenantConfig.findFirst({ select: { posFeedUrl: true, posIngestSecretHash: true } }),
-    db.location.findMany({ select: { locationType: true, roleStatus: true } }),
+    db.location.findMany({ select: { id: true, name: true, locationType: true, roleStatus: true } }),
     db.product.findMany({
       where: { ...BUYABLE_PRODUCT_WHERE },
       select: { id: true, costSource: true, costKes: true, supplierId: true },
@@ -213,7 +223,13 @@ export async function setupDepth(tenantId: string): Promise<SetupDepth> {
   // A single location is the case that bites hardest: guessed as a warehouse,
   // NOTHING is sellable and the buy list asks the shop to reorder its whole
   // catalogue. So an unconfirmed one counts even when there is only one.
-  const locationsToConfirm = locations.filter((l) => l.roleStatus !== "confirmed").length;
+  const pending = locations.filter((l) => l.roleStatus !== "confirmed");
+  const locationsToConfirm = pending.length;
+  const locationsPending: PendingLocation[] = pending.map((l) => ({
+    id: l.id,
+    name: l.name,
+    guessedType: l.locationType,
+  }));
 
-  return { level, signals, nextUnlock, locationsToConfirm };
+  return { level, signals, nextUnlock, locationsToConfirm, locationsPending };
 }

@@ -45,6 +45,7 @@ function makeCtx(over: Overrides = {}): CapabilityContext {
       },
       nextUnlock: null,
     locationsToConfirm: 0,
+    locationsPending: [],
     },
     limits,
   };
