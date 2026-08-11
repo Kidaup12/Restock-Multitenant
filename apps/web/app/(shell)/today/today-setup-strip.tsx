@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { BulbIcon, CheckIcon, ChevronRightIcon } from "@/components/icons";
+import { ConfirmLocations } from "./confirm-locations";
 import { setupDepth, type SetupSignal } from "@/lib/capabilities/setup-depth";
 
 /**
@@ -31,7 +32,7 @@ const SIGNAL_ORDER: { key: SetupSignal; label: string }[] = [
 ];
 
 export async function TodaySetupStrip({ tenantId }: { tenantId: string }) {
-  const { level, signals, nextUnlock, locationsToConfirm } = await setupDepth(tenantId);
+  const { level, signals, nextUnlock, locationsToConfirm, locationsPending } = await setupDepth(tenantId);
   const done = SIGNAL_ORDER.filter(({ key }) => signals[key]).length;
   const nudgeHref = nextUnlock ? NUDGE_HREF[nextUnlock.signal] : undefined;
   const nudge = nextUnlock ? (
@@ -56,23 +57,8 @@ export async function TodaySetupStrip({ tenantId }: { tenantId: string }) {
    * knows.
    */
   const confirmLocations =
-    locationsToConfirm > 0 ? (
-      <Link
-        href="/settings/locations"
-        className="flex items-start gap-2 rounded-md bg-surface-2 px-3 py-2 text-sm text-ink-muted hover:text-ink"
-      >
-        <span className="mt-0.5 text-accent-ink [&_svg]:size-4">
-          <BulbIcon />
-        </span>
-        <span>
-          <span className="font-medium text-ink">
-            Check {locationsToConfirm === 1 ? "your location" : `your ${locationsToConfirm} locations`}
-          </span>{" "}
-          — we guessed which {locationsToConfirm === 1 ? "one is a shop and which a store room" : "are shops and which are store rooms"} from
-          their names. That decides which stock the buy list counts as sellable.
-        </span>
-      </Link>
-    ) : null;
+    locationsToConfirm > 0 ? <ConfirmLocations locations={locationsPending} /> : null;
+
 
   return (
     <Card className="px-5 py-4">
