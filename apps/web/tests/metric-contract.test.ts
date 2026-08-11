@@ -8,7 +8,7 @@ import {
   type SeedResult,
 } from "../../../packages/db/scripts/seed-dev";
 import { runForecast } from "@/lib/forecast-run/run";
-import { getCatalogueMetrics, runRate, abcForCatalogue, moneyAtRest } from "@/lib/metrics";
+import { getCatalogueMetrics, runRate, moneyAtRest } from "@/lib/metrics";
 import { deriveFacetOptions } from "@/lib/facets";
 import { getTodayMetrics } from "@/lib/data/today";
 import { getStockCatalogue } from "@/lib/data/stock";
@@ -128,44 +128,27 @@ describe.skipIf(!runnable)("shared metric contract (seeded local db)", () => {
     }
   });
 
-  it("ABC comes from the forecast primitives and spreads across the catalogue", async () => {
+  it("ABC is the run's persisted class, read and never recomputed", async () => {
     const tenantId = seeded.tenantId;
-    const asOf = new Date();
-    const [metrics, catalogue, products, sales] = await Promise.all([
-      getCatalogueMetrics(tenantId, { asOf }),
+    const [metrics, catalogue, persisted] = await Promise.all([
+      getCatalogueMetrics(tenantId),
       getStockCatalogue(tenantId, { canViewCosts: true }),
       prismaService.product.findMany({
         where: { tenantId, active: true },
-        select: { id: true, priceKes: true, shopifyCreatedAt: true },
-      }),
-      prismaService.salesHistory.findMany({
-        where: { tenantId, date: { gte: new Date(asOf.getTime() - 365 * DAY_MS) } },
-        select: { productId: true, date: true, quantity: true, revenueKes: true, channel: true },
+        select: { id: true, abcCategory: true },
       }),
     ]);
 
-    const historyByProduct = new Map<string, SalesPoint[]>();
-    for (const row of sales) {
-      const list = historyByProduct.get(row.productId) ?? [];
-      list.push(row);
-      historyByProduct.set(row.productId, list);
-    }
-    const expected = abcForCatalogue(
-      products.map((p) => ({
-        id: p.id,
-        history: historyByProduct.get(p.id) ?? [],
-        priceKes: p.priceKes,
-      })),
-      asOf
-    );
-
+    // One producer: the nightly run writes Product.abcCategory, every screen
+    // reads it. Recomputing live gave the same product one letter on Plan and
+    // another on Stock, and the letter shown was not the one that ordered.
     const catalogueAbc = new Map(catalogue.map((r) => [r.productId, r.abc]));
-    for (const p of products) {
-      expect(metrics.get(p.id)!.abc).toBe(expected.get(p.id) ?? null);
-      expect(catalogueAbc.get(p.id)).toBe(expected.get(p.id) ?? null);
+    for (const p of persisted) {
+      expect(metrics.get(p.id)!.abc).toBe(p.abcCategory ?? null);
+      if (catalogueAbc.has(p.id)) expect(catalogueAbc.get(p.id)).toBe(p.abcCategory ?? null);
     }
     // A real catalogue produces a spread, not one bucket.
-    const classes = new Set([...metrics.values()].map((m) => m.abc));
+    const classes = new Set(persisted.map((p) => p.abcCategory).filter(Boolean));
     expect(classes.has("A")).toBe(true);
     expect(classes.has("B")).toBe(true);
     expect(classes.has("C")).toBe(true);
@@ -187,6 +170,10 @@ describe.skipIf(!runnable)("shared metric contract (seeded local db)", () => {
       data: { shopifyCreatedAt: new Date() },
     });
     try {
+      // The guard belongs to the RUN now that nothing classifies live, so the
+      // run has to happen against the fresh-catalogue shape for this to mean
+      // anything — reading the column alone would pass on yesterday's letters.
+      await runForecast(tenantId);
       const metrics = await getCatalogueMetrics(tenantId);
       const classed = [...metrics.values()].filter((m) => m.abc != null);
       expect(classed.length, "a freshly listed catalogue must still be classified").toBeGreaterThan(0);
@@ -251,9 +238,14 @@ describe.skipIf(!runnable)("shared metric contract (seeded local db)", () => {
     expect(deadOption?.count).toBeGreaterThanOrEqual(DEAD_SKUS.length);
     expect(options.supplierGroup).toEqual([]);
 
-    // ABC is a facet too — A/B/C for ranked products, plus a 'none' bucket for
-    // the dormant dead SKUs (no class), always listed last.
+    // ABC is a facet too. The classes are the run's, so a product that sells
+    // nothing is a C here rather than a "—": the run ranks it into the tail and
+    // applies the tail's lean sizing to it, and the screen showing "—" while the
+    // engine ordered it as a C was the disagreement worth removing. The 'none'
+    // bucket therefore only appears when the run has genuinely left a product
+    // unranked — and when it does, it sorts last.
     expect(options.abc.map((o) => o.value)).toEqual(expect.arrayContaining(["A", "B", "C"]));
-    expect(options.abc[options.abc.length - 1]!.value).toBe("__none__");
+    const none = options.abc.findIndex((o) => o.value === "__none__");
+    if (none >= 0) expect(none).toBe(options.abc.length - 1);
   });
 });

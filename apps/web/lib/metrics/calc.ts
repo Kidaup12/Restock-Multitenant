@@ -1,11 +1,4 @@
-import {
-  runRateDaily,
-  daysOfStockRemaining,
-  assignAbc,
-  dailySalesValue,
-  type SalesPoint,
-  type AbcCategory,
-} from "@wezesha/forecast";
+import { runRateDaily, daysOfStockRemaining, type SalesPoint } from "@wezesha/forecast";
 
 /**
  * The SHARED METRIC CONTRACT — the metric set defined once and computed the same
@@ -96,38 +89,18 @@ export function moneyAtRest(costKes: number, sellableOnHand: number): number {
   return costKes * Math.max(0, sellableOnHand);
 }
 
-export type AbcItem = {
-  id: string;
-  history: SalesPoint[];
-  priceKes: number;
-};
 
 /**
- * ABC class for the whole catalogue in one pass — the SAME assignAbc/
- * dailySalesValue primitives the nightly forecast run uses, so a product's
- * displayed class matches the class that drove its ordering strategy. Products
- * with no sales value come back null ("—"); excluding them from the Pareto cut
- * does not change any ranked product's class (they only ever sit in the
- * zero-value tail).
+ * There is deliberately NO ABC function here any more.
  *
- * Age is deliberately NOT a filter. It used to be: anything Shopify created
- * inside the new-product window was dropped from the ranking, on the reasoning
- * that a few days of sales make a misleading class. But the run applies no such
- * filter, so the guard only hid, on this screen, a classification that was
- * already in force on the buy list and already driving the per-class ordering
- * policy. Worse, it was silent at the catalogue level: a shop whose products
- * were all created inside the window — a fresh store, or a migrated catalogue —
- * ranked nothing at all and lost the column entirely.
+ * The catalogue used to classify live, alongside the nightly run doing the same
+ * work over its own clock. The same product could then be an A on Plan and a B
+ * on Stock on the same morning, and the letter the screens showed was not the
+ * one that had driven the order — the run's class is what the buy list ranks on
+ * and what the per-class service levels are applied from.
+ *
+ * One producer: `packages/forecast-run` classifies and writes
+ * `Product.abcCategory`; every screen reads that column (see catalogue.ts). A
+ * product the run has not ranked reads null and shows "—", which is the honest
+ * answer rather than a second opinion computed on the spot.
  */
-export function abcForCatalogue(
-  items: AbcItem[],
-  asOf: Date = new Date()
-): Map<string, AbcCategory | null> {
-  const rankable = items
-    .map((it) => ({ id: it.id, revenue: dailySalesValue(it.history, it.priceKes, asOf) }))
-    .filter((it) => it.revenue > 0);
-  const classes = assignAbc(rankable);
-  const out = new Map<string, AbcCategory | null>();
-  for (const it of items) out.set(it.id, classes[it.id] ?? null);
-  return out;
-}

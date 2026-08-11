@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { assignAbc, dailySalesValue, type SalesPoint } from "@wezesha/forecast";
+import { type SalesPoint } from "@wezesha/forecast";
 import {
-  abcForCatalogue,
   coverDays,
   moneyAtRest,
   revenueByWindow,
@@ -94,58 +93,5 @@ describe("moneyAtRest — cost × sellable on-hand", () => {
 
   it("clamps oversold (negative) positions to zero", () => {
     expect(moneyAtRest(100, -3)).toBe(0);
-  });
-});
-
-describe("abcForCatalogue — Pareto by sales value, with the '—' overlay", () => {
-  // Ten established items of equal value → 70/20/10 cut = 7 A, 2 B, 1 C.
-  const established = Array.from({ length: 10 }, (_, i) => ({
-    id: `p${i}`,
-    history: dailyHistory(365, 1, 100),
-    priceKes: 100,
-  }));
-  const zeroValue = { id: "zero", history: [] as SalesPoint[], priceKes: 100 };
-
-  it("cuts equal-value items 7/2/1 into A/B/C", () => {
-    const abc = abcForCatalogue(established, ASOF);
-    const counts = { A: 0, B: 0, C: 0 };
-    for (const cls of abc.values()) if (cls) counts[cls] += 1;
-    expect(counts).toEqual({ A: 7, B: 2, C: 1 });
-  });
-
-  it("labels a product with no sales value '—' (null) and excludes it from the cut", () => {
-    const abc = abcForCatalogue([...established, zeroValue], ASOF);
-    expect(abc.get("zero")).toBeNull();
-    // Excluding it leaves the ten established items ranked exactly as before.
-    const counts = { A: 0, B: 0, C: 0 };
-    for (const id of established.map((e) => e.id)) counts[abc.get(id)!] += 1;
-    expect(counts).toEqual({ A: 7, B: 2, C: 1 });
-  });
-
-  it("ranks a product that sells, however recently the store listed it", () => {
-    // This assertion is the inverse of the one it replaced. Age used to drop a
-    // product from the ranking on its own, so a catalogue listed entirely
-    // within the new-product window ranked NOTHING and the class column went
-    // blank — which is what every workspace in production actually looked like.
-    const abc = abcForCatalogue([...established, { id: "fresh", history: dailyHistory(20, 5, 100), priceKes: 100 }], ASOF);
-    expect(abc.get("fresh")).not.toBeNull();
-  });
-
-  it("still classifies when every product in the catalogue is newly listed", () => {
-    const allFresh = Array.from({ length: 10 }, (_, i) => ({
-      id: `n${i}`,
-      history: dailyHistory(20, 1, 100),
-      priceKes: 100,
-    }));
-    const abc = abcForCatalogue(allFresh, ASOF);
-    expect([...abc.values()].filter((c) => c != null)).toHaveLength(10);
-  });
-
-  it("matches the forecast run's assignAbc/dailySalesValue for ranked products", () => {
-    const abc = abcForCatalogue(established, ASOF);
-    const expected = assignAbc(
-      established.map((e) => ({ id: e.id, revenue: dailySalesValue(e.history, e.priceKes, ASOF) }))
-    );
-    for (const e of established) expect(abc.get(e.id)).toBe(expected[e.id]);
   });
 });

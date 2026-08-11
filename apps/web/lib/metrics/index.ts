@@ -4,11 +4,9 @@ export {
   revenueForWindow,
   revenueByWindow,
   moneyAtRest,
-  abcForCatalogue,
   METRIC_WINDOWS,
   type MetricWindow,
   type AbcCategory,
-  type AbcItem,
   type SalesPoint,
 } from "./calc";
 
