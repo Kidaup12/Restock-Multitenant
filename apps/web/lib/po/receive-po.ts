@@ -2,9 +2,19 @@ import { prismaForTenantTx, prismaService, isSellable, sellableUnits } from "@we
 
 /**
  * Line-by-line receiving with partial quantities. One tenant transaction:
- * line receivedQty/receivedAt, stock into the chosen location, product
- * currentStock recomputed from level sums, linked queue rows completed, PO
- * status advanced.
+ * line receivedQty/receivedAt, linked queue rows completed, PO status advanced.
+ *
+ * **Receiving does not move stock when the store owns it.** Adding the delivery
+ * to the level here read as a stock increase for about fifteen minutes and was
+ * then wiped: the sync writes Shopify's ABSOLUTE on-hand over ours every cycle
+ * (apps/worker/src/shopify-sync.ts), so a receipt of 10 took the shelf from 3 to
+ * 13 and back to 3 without anyone touching it — and the buy list went back to
+ * asking for units the owner had just booked in. Claiming a number we cannot
+ * keep is worse than showing the store's, so the receipt is recorded against the
+ * purchase order and the shelf stays whatever the shop's own system reports.
+ *
+ * A location the sync does not own has no other source of truth, so receiving
+ * still writes stock there — that is the only case where our number is the number.
  *
  * The supplier's TYPED lead time is deliberately left untouched here. A received
  * delivery used to overwrite Supplier.leadTimeAvgDays with the re-learned
@@ -19,7 +29,15 @@ import { prismaForTenantTx, prismaService, isSellable, sellableUnits } from "@we
 export type ReceiveEntry = { lineId: string; qty: number };
 
 export type ReceivePoResult =
-  | { ok: true; status: string; receivedUnits: number }
+  | {
+      ok: true;
+      status: string;
+      receivedUnits: number;
+      /** True when the shelf figure is the store's to report, so this receipt
+       *  deliberately left stock alone. The screen says so rather than letting
+       *  the owner expect a number that will not move. */
+      stockFollowsStore: boolean;
+    }
   | {
       ok: false;
       reason: "not_found" | "not_receivable" | "bad_location" | "bad_line" | "bad_qty" | "empty";
@@ -66,9 +84,12 @@ export async function receivePoLines(
     // RLS scopes the lookup — a location id from another tenant resolves to nothing.
     const location = await tx.location.findFirst({
       where: { id: locationId },
-      select: { id: true },
+      select: { id: true, shopifyLocationId: true },
     });
     if (!location) return { ok: false, reason: "bad_location" };
+    // The sync owns every location it created, and overwrites on-hand and
+    // available from the store on each run.
+    const stockFollowsStore = location.shopifyLocationId !== null;
 
     const lineById = new Map(po.lines.map((l) => [l.id, l]));
     for (const entry of receipts) {
@@ -90,6 +111,13 @@ export async function receivePoLines(
         where: { id: line.id },
         data: { receivedQty: nextQty, receivedAt: now },
       });
+      line.receivedQty = nextQty;
+      receivedUnits += entry.qty;
+      if (nextQty >= line.quantity) fullyReceivedProducts.push(line.productId);
+      // Where the store reports the shelf, the receipt stops here: the next sync
+      // would overwrite anything written below within fifteen minutes.
+      if (stockFollowsStore) continue;
+
       // Stock arriving on a PO is both physically present and sellable, so both
       // columns move. Raw SQL rather than Prisma's `increment` for `available`:
       // it is nullable, and `NULL + n` is NULL in SQL, so an increment on a row
@@ -111,9 +139,6 @@ export async function receivePoLines(
         UPDATE "InventoryLevel"
            SET "available" = COALESCE("available", "onHand" - ${entry.qty}) + ${entry.qty}
          WHERE "locationId" = ${locationId} AND "productId" = ${line.productId}`;
-      line.receivedQty = nextQty;
-      receivedUnits += entry.qty;
-      if (nextQty >= line.quantity) fullyReceivedProducts.push(line.productId);
     }
 
     // currentStock is SELLABLE on-hand — the sum of what can actually be sold
@@ -122,7 +147,9 @@ export async function receivePoLines(
     // cannot be sold twice). Both halves matter: summing every level would let
     // received warehouse stock inflate sellable cover, and summing on-hand would
     // undo the sync's committed-unit subtraction on every receipt.
-    const touched = [...new Set(receipts.map((e) => lineById.get(e.lineId)!.productId))];
+    const touched = stockFollowsStore
+      ? []
+      : [...new Set(receipts.map((e) => lineById.get(e.lineId)!.productId))];
     for (const productId of touched) {
       const levels = await tx.inventoryLevel.findMany({
         where: { productId },
@@ -165,7 +192,12 @@ export async function receivePoLines(
     // median is derived from this receipt history at read time and adopted only
     // by the owner's explicit "use learned" action (see file header).
 
-    return { ok: true, status: allFull ? "received" : "partially_received", receivedUnits };
+    return {
+      ok: true,
+      status: allFull ? "received" : "partially_received",
+      receivedUnits,
+      stockFollowsStore,
+    };
   });
 
   if (result.ok) {
@@ -177,7 +209,12 @@ export async function receivePoLines(
         action: "received",
         actorUserId: actor?.userId ?? null,
         actorName: actor?.name ?? null,
-        meta: { locationId, receivedUnits: result.receivedUnits, status: result.status },
+        meta: {
+          locationId,
+          receivedUnits: result.receivedUnits,
+          status: result.status,
+          stockFollowsStore: result.stockFollowsStore,
+        },
       },
     });
   }

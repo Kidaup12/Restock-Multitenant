@@ -219,7 +219,15 @@ describe.skipIf(!runnable)("purchase-order flow (seeded local db)", () => {
       [{ lineId: can.id, qty: 25 }],
       primary.id
     );
-    expect(result).toEqual({ ok: true, status: "partially_received", receivedUnits: 25 });
+    // The seed's locations are not the sync's, so this receipt still writes
+    // stock — see receive-stock-ownership.test.ts for the connected-store case,
+    // which is the one every production workspace takes.
+    expect(result).toEqual({
+      ok: true,
+      status: "partially_received",
+      receivedUnits: 25,
+      stockFollowsStore: false,
+    });
 
     const after = (await getPoDetail(tenantId, orbitPoId, { canViewCosts: true }))!;
     expect(after.status).toBe("partially_received");
