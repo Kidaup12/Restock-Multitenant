@@ -5,6 +5,12 @@ import { Prisma, prismaForTenant, prismaForTenantTx, prismaService } from "@weze
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { learnedLeadMedianDays } from "@/lib/suppliers/lead-time";
+import {
+  applicableSupplierWrites,
+  previewSupplierImport,
+  type ImportSupplier,
+  type SupplierImportPreview,
+} from "@/lib/suppliers/import";
 
 /**
  * Suppliers actions. Every action re-resolves the caller's membership and
@@ -14,11 +20,11 @@ import { learnedLeadMedianDays } from "@/lib/suppliers/lead-time";
  * no tenant role can filter it.
  */
 
-export type SupplierActionResult =
-  | { ok: true; message?: string }
+export type SupplierActionResult<T = undefined> =
+  | { ok: true; message?: string; data?: T }
   | { ok: false; error: string };
 
-const err = (error: string): SupplierActionResult => ({ ok: false, error });
+const err = (error: string): SupplierActionResult<never> => ({ ok: false, error });
 
 const CURRENCIES = ["KES", "USD", "CNY", "AED"] as const;
 
@@ -29,6 +35,8 @@ async function actorContext() {
   if (!hasPermission(membership, "manage_settings")) return null;
   return {
     tenantId: membership.tenantId,
+    /** What an imported row without a currency column falls back to. */
+    currency: membership.tenant?.currency ?? "USD",
     actor: {
       userId: session.user.id,
       name: membership.displayName ?? session.user.name ?? session.user.email,
@@ -401,6 +409,131 @@ export async function deleteSupplierAction(input: {
       outcome.unlinked > 0
         ? `Removed ${outcome.supplier.name}. ${outcome.unlinked} products now need a supplier.`
         : `Removed ${outcome.supplier.name}.`,
+  };
+}
+
+/** Live suppliers a CSV row can match. Soft-deleted rows are left out on
+ *  purpose: matching one would quietly resurrect a supplier the owner removed. */
+async function loadImportSuppliers(tenantId: string): Promise<ImportSupplier[]> {
+  const db = prismaForTenant(tenantId);
+  return db.supplier.findMany({ where: { deletedAt: null }, select: { id: true, name: true } });
+}
+
+/** Dry-run: classify every row without writing anything. */
+export async function previewSupplierImportAction(input: {
+  csv: string;
+}): Promise<SupplierActionResult<SupplierImportPreview>> {
+  const ctx = await actorContext();
+  if (!ctx) return err("You don't have settings access in this workspace.");
+  if (!input.csv?.trim()) return err("Paste some rows or choose a file first.");
+
+  const preview = previewSupplierImport(input.csv, await loadImportSuppliers(ctx.tenantId));
+  if ("error" in preview) return err(preview.error);
+  return { ok: true, data: preview };
+}
+
+export type SupplierImportResult = {
+  created: number;
+  updated: number;
+  invalid: number;
+  repeat: number;
+};
+
+/**
+ * Apply the import. Re-previews server-side against the live supplier list, so
+ * the write is the deterministic outcome of the same rules the preview showed
+ * and a client-edited plan can't reach the database.
+ *
+ * A field the file didn't give is left alone on an existing supplier — an import
+ * without an email column must not blank every email. Creates fall back to the
+ * workspace currency for the one field the row can't leave unset.
+ */
+export async function applySupplierImportAction(input: {
+  csv: string;
+}): Promise<SupplierActionResult<SupplierImportResult>> {
+  const ctx = await actorContext();
+  if (!ctx) return err("You don't have settings access in this workspace.");
+  if (!input.csv?.trim()) return err("Paste some rows or choose a file first.");
+
+  const preview = previewSupplierImport(input.csv, await loadImportSuppliers(ctx.tenantId));
+  if ("error" in preview) return err(preview.error);
+
+  const writes = applicableSupplierWrites(preview);
+  if (writes.length === 0) return err("No usable rows in that file — check the notes on each row.");
+
+  // One transaction for the whole file: a half-applied supplier list is worse
+  // than none, because the owner can't tell which half landed. The default 5s
+  // budget is short for a few hundred rows.
+  const { created, updated } = await prismaForTenantTx(
+    ctx.tenantId,
+    async (tx) => {
+      let created = 0;
+      let updated = 0;
+      for (const w of writes) {
+        if (w.kind === "create") {
+          await tx.supplier.create({
+            data: {
+              tenantId: ctx.tenantId,
+              name: w.data.name,
+              email: w.data.email,
+              country: w.data.country,
+              currency: w.data.currency ?? ctx.currency,
+              supplierGroup: w.data.supplierGroup,
+              notes: w.data.notes,
+              leadTimeAvgDays: w.data.leadTimeAvgDays,
+              ...(w.data.leadTimeStdDays == null ? {} : { leadTimeStdDays: w.data.leadTimeStdDays }),
+              ...(w.data.moq == null ? {} : { moq: w.data.moq }),
+            },
+          });
+          created++;
+        } else {
+          const res = await tx.supplier.updateMany({
+            where: { id: w.supplierId, deletedAt: null },
+            data: definedOnly({
+              name: w.data.name,
+              email: w.data.email,
+              country: w.data.country,
+              currency: w.data.currency,
+              supplierGroup: w.data.supplierGroup,
+              notes: w.data.notes,
+              leadTimeAvgDays: w.data.leadTimeAvgDays,
+              leadTimeStdDays: w.data.leadTimeStdDays,
+              moq: w.data.moq,
+            }),
+          });
+          updated += res.count;
+        }
+      }
+      return { created, updated };
+    },
+    { timeout: 30_000 }
+  );
+
+  const result: SupplierImportResult = {
+    created,
+    updated,
+    invalid: preview.summary.invalid,
+    repeat: preview.summary.repeat,
+  };
+  // One row for the file, not one per supplier: the ledger should read as the
+  // single action the owner took.
+  await audit(ctx.tenantId, "-", "imported", ctx.actor, { action: "supplier_import", ...result });
+  revalidatePath("/suppliers");
+  return {
+    ok: true,
+    data: result,
+    message: `Imported ${created} new supplier${created === 1 ? "" : "s"}${updated > 0 ? `, updated ${updated}` : ""}.`,
+  };
+}
+
+/** Drop the keys the file left blank so an update never overwrites a saved value
+ *  with nothing. The consequence is deliberate: an import can fill a field in or
+ *  change it, never clear it — clearing stays an explicit edit on the form. */
+function definedOnly<T extends Record<string, unknown>>(
+  data: T
+): { [K in keyof T]?: NonNullable<T[K]> } {
+  return Object.fromEntries(Object.entries(data).filter(([, v]) => v != null)) as {
+    [K in keyof T]?: NonNullable<T[K]>;
   };
 }
 

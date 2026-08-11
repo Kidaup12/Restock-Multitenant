@@ -25,6 +25,7 @@ import {
 } from "./actions";
 import { BulkAssignBar } from "./bulk-assign-bar";
 import { SupplierForm } from "./supplier-form";
+import { SupplierImport } from "./supplier-import";
 
 type SortKey = "name" | "group" | "leadTyped" | "learned" | "moq" | "products" | "onTime";
 
@@ -120,6 +121,7 @@ export function SuppliersView({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<SupplierRow | "new" | null>(null);
+  const [importing, setImporting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -205,6 +207,8 @@ export function SuppliersView({
         onResult={handleResult}
       />
 
+      {importing && canManage && <SupplierImport onClose={() => setImporting(false)} />}
+
       {editing && canManage && (
         <SupplierForm
           assignableProducts={assignableProducts}
@@ -229,6 +233,11 @@ export function SuppliersView({
                 aria-label="Search suppliers"
               />
               <ExportBar rows={visible} columns={exportColumns} filename="suppliers" />
+              {canManage && !importing && (
+                <Button size="sm" variant="ghost" onClick={() => setImporting(true)}>
+                  Import CSV
+                </Button>
+              )}
               {canManage && editing !== "new" && (
                 <Button size="sm" onClick={() => setEditing("new")}>
                   Add supplier
@@ -241,12 +250,17 @@ export function SuppliersView({
           {rows.length === 0 ? (
             <EmptyState
               title="No suppliers yet"
-              description="Add a supplier by hand, then assign products to it by brand."
+              description="Import your supplier list as a CSV, or add one by hand, then assign products by brand."
               action={
                 canManage ? (
-                  <Button size="sm" onClick={() => setEditing("new")}>
-                    Add supplier
-                  </Button>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <Button size="sm" onClick={() => setEditing("new")}>
+                      Add supplier
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setImporting(true)}>
+                      Import CSV
+                    </Button>
+                  </div>
                 ) : undefined
               }
             />
