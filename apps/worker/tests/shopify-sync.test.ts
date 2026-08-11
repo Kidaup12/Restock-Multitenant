@@ -1109,3 +1109,136 @@ describe.skipIf(!runnable)("catalogue notices (real db + redis)", () => {
     expect(await notices()).toHaveLength(1);
   });
 });
+
+const CHUNK_SLUG = "sales-chunk-test";
+const CHUNK_SHOP = "chunk-test-store.myshopify.com";
+
+// One product, two branches, on the SAME day — with enough other trading days
+// between them to push the two rows into different write chunks.
+const CHUNK_DAY = "2026-06-04";
+const chunkCatalogue: ShopifyProductNode[] = [
+  {
+    id: "gid://shopify/Product/101",
+    title: "Argan Oil 100ml",
+    variants: [
+      { id: "gid://shopify/ProductVariant/201", sku: "ARG-100", title: "Default Title", price: "1200" },
+    ],
+  },
+];
+const chunkLocations: ShopifyLocationNode[] = [
+  { id: "gid://shopify/Location/9001", name: "Kilimani Store", isActive: true, inventoryLevels: [] },
+  { id: "gid://shopify/Location/9002", name: "Westlands Store", isActive: true, inventoryLevels: [] },
+];
+
+function chunkLine(quantity: number) {
+  return [
+    {
+      quantity,
+      product: { id: "gid://shopify/Product/101" },
+      originalUnitPriceSet: { shopMoney: { amount: "1200" } },
+    },
+  ];
+}
+
+// Midday so the tenant's day never shifts under the UTC date.
+const chunkOrders: ShopifyOrderNode[] = [
+  {
+    id: "gid://shopify/Order/1",
+    processedAt: `${CHUNK_DAY}T09:00:00Z`,
+    fulfillments: [{ location: { id: "gid://shopify/Location/9001" } }],
+    lineItems: chunkLine(2),
+  },
+  // 600 other trading days for the same product — each its own bucket, none
+  // colliding with CHUNK_DAY.
+  ...Array.from({ length: 600 }, (_, i) => ({
+    id: `gid://shopify/Order/${100 + i}`,
+    processedAt: `${new Date(Date.UTC(2024, 0, 2 + i, 12)).toISOString()}`,
+    lineItems: chunkLine(1),
+  })),
+  {
+    id: "gid://shopify/Order/2",
+    processedAt: `${CHUNK_DAY}T15:00:00Z`,
+    fulfillments: [{ location: { id: "gid://shopify/Location/9002" } }],
+    lineItems: chunkLine(3),
+  },
+];
+
+describe.skipIf(!runnable)("sales writes across chunk boundaries (real db + redis)", () => {
+  let prismaService: typeof import("@wezesha/db").prismaService;
+  let publisher: Redis;
+  let tenantId: string;
+
+  beforeAll(async () => {
+    process.env.TOKEN_ENCRYPTION_KEY ??= crypto.randomBytes(32).toString("base64");
+    ({ prismaService } = await import("@wezesha/db"));
+    const mod = await import("../src/shopify-sync");
+
+    publisher = new Redis(redisUrl!);
+    const processor = mod.createShopifySyncProcessor({
+      publisher,
+      makeApi: () => ({
+        ensureWebhooks: async () => {},
+        shopSettings: async () => ({ currencyCode: null }),
+        products: async () => chunkCatalogue,
+        locations: async () => chunkLocations,
+        orders: async () => chunkOrders,
+      }),
+    });
+
+    await prismaService.tenant.deleteMany({ where: { slug: CHUNK_SLUG } });
+    const tenant = await prismaService.tenant.create({
+      data: { name: "Chunk Test", slug: CHUNK_SLUG, timezone: "Africa/Nairobi" },
+    });
+    tenantId = tenant.id;
+    await prismaService.shopifyConnection.create({
+      data: {
+        tenantId,
+        shopDomain: CHUNK_SHOP,
+        accessToken: encryptToken(TOKEN),
+        authMode: "token",
+        scopes: "read_products",
+      },
+    });
+    await processor(jobStub(tenantId));
+  });
+
+  afterAll(async () => {
+    await prismaService.tenant.deleteMany({ where: { slug: CHUNK_SLUG } });
+    await prismaService.$disconnect();
+    await publisher.quit();
+  });
+
+  it("keeps both branches of a day whose rows land in different chunks", async () => {
+    // The write goes out in chunks, and the clear cannot key on the branch — a
+    // re-sync has to be able to drop a branch that no longer traded — so it
+    // takes the whole day. Interleave the two and a later chunk's delete takes
+    // out the sibling branch an earlier chunk just wrote, silently, on a run
+    // that reports success.
+    const product = await prismaService.product.findFirstOrThrow({
+      where: { tenantId, sku: "ARG-100" },
+    });
+    const locations = await prismaService.location.findMany({ where: { tenantId } });
+    const byCore = new Map(locations.map((l) => [l.shopifyLocationId, l.id]));
+
+    const rows = await prismaService.salesHistory.findMany({
+      where: { tenantId, productId: product.id, date: new Date(`${CHUNK_DAY}T00:00:00.000Z`) },
+    });
+
+    expect(new Map(rows.map((r) => [r.locationId, r.quantity]))).toEqual(
+      new Map([
+        [byCore.get("9001"), 2],
+        [byCore.get("9002"), 3],
+      ])
+    );
+  });
+
+  it("still writes every other trading day exactly once", async () => {
+    const product = await prismaService.product.findFirstOrThrow({
+      where: { tenantId, sku: "ARG-100" },
+    });
+    const total = await prismaService.salesHistory.count({
+      where: { tenantId, productId: product.id },
+    });
+    expect(total).toBe(602);
+  });
+});
