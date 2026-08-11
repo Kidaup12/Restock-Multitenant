@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import crypto from "node:crypto";
 import { UnrecoverableError, type Job } from "bullmq";
 import { Redis } from "ioredis";
@@ -425,6 +425,42 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
 
     await expect(failing(jobStub(tenantId))).rejects.toBeInstanceOf(UnrecoverableError);
     expect(invalidated).toEqual([SHOP]);
+  });
+  it("falls back to BETTER_AUTH_URL for the webhook callback, and says so when neither is set", async () => {
+    // Two variables held the same value and only one was set on the worker, so
+    //  skipped registration in silence: zero webhooks were ever
+    // received on any store, for the life of the deployment, while the
+    // fifteen-minute poll made everything look healthy.
+    const mod = await import("../src/shopify-sync");
+    const before = { app: process.env.SHOPIFY_APP_URL, auth: process.env.BETTER_AUTH_URL };
+    try {
+      delete process.env.SHOPIFY_APP_URL;
+      process.env.BETTER_AUTH_URL = "https://app.example.test/";
+      webhookCalls.length = 0;
+      await mod.createShopifySyncProcessor({ publisher, makeApi: () => fakeApi })(jobStub(tenantId));
+      expect(webhookCalls).toEqual(["https://app.example.test/api/webhooks/shopify"]);
+
+      // Neither set: no registration, but it is announced rather than silent.
+      delete process.env.BETTER_AUTH_URL;
+      webhookCalls.length = 0;
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await mod.createShopifySyncProcessor({ publisher, makeApi: () => fakeApi })(jobStub(tenantId));
+      expect(webhookCalls).toEqual([]);
+      expect(warn.mock.calls.flat().join(" ")).toContain("webhooks not registered");
+      warn.mockRestore();
+
+      // An explicit value still wins over the fallback.
+      process.env.SHOPIFY_APP_URL = "https://explicit.example.test";
+      process.env.BETTER_AUTH_URL = "https://auth.example.test";
+      webhookCalls.length = 0;
+      await mod.createShopifySyncProcessor({ publisher, makeApi: () => fakeApi })(jobStub(tenantId));
+      expect(webhookCalls).toEqual(["https://explicit.example.test/api/webhooks/shopify"]);
+    } finally {
+      if (before.app === undefined) delete process.env.SHOPIFY_APP_URL;
+      else process.env.SHOPIFY_APP_URL = before.app;
+      if (before.auth === undefined) delete process.env.BETTER_AUTH_URL;
+      else process.env.BETTER_AUTH_URL = before.auth;
+    }
   });
   it("final failure persists a reconnect Notification for the bell", async () => {
     // The processor re-throws auth failures as UnrecoverableError — the hook

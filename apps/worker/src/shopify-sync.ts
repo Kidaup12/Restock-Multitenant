@@ -634,9 +634,26 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
     });
 
     try {
-      const appUrl = options.appUrl ?? process.env.SHOPIFY_APP_URL;
+      // Where Shopify should call US back. Despite the name, SHOPIFY_APP_URL is
+      // our own public origin, not anything of Shopify's.
+      //
+      // It falls back to BETTER_AUTH_URL because that is the same value by
+      // definition — the public origin of the web app — and keeping two
+      // variables that must always agree is what broke this: BETTER_AUTH_URL was
+      // set on the worker, SHOPIFY_APP_URL was not, so `if (appUrl)` skipped
+      // registration in silence and **not one webhook was ever received** on any
+      // store. The poll every fifteen minutes hid it completely.
+      //
+      // The explicit variable still wins where the two genuinely differ.
+      const appUrl = options.appUrl ?? process.env.SHOPIFY_APP_URL ?? process.env.BETTER_AUTH_URL;
       if (appUrl) {
         await api.ensureWebhooks(`${appUrl.replace(/\/$/, "")}/api/webhooks/shopify`);
+      } else {
+        // Say so. A silent skip is why this went unnoticed for the life of the
+        // deployment; the sync itself succeeds either way.
+        console.warn(
+          `worker: no SHOPIFY_APP_URL or BETTER_AUTH_URL — webhooks not registered for tenant ${tenantId}; falling back to the scheduled poll`
+        );
       }
 
       const runStart = new Date();
