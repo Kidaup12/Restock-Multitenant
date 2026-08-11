@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonCard, SkeletonStatTile, SkeletonTableRows } from "@/components/ui/skeleton";
 import { ForecastScorecard } from "./forecast-scorecard";
+import { ImpactCard } from "./impact-card";
 import { ShelfHealth } from "./shelf-health";
 import { StockoutTrend } from "./stockout-trend";
 
@@ -121,6 +122,15 @@ export default async function InsightsPage({
         </Suspense>
       ) : (
         <div className="space-y-6">
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading impact summary">
+                <SkeletonCard lines={3} />
+              </div>
+            }
+          >
+            <ImpactCard tenantId={membership.tenantId} />
+          </Suspense>
           <Suspense
             fallback={
               <div role="status" aria-label="Loading forecast scorecard">

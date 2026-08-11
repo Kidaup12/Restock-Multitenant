@@ -142,7 +142,7 @@ export function SupplierImport({ onClose }: { onClose: () => void }) {
             Added {applied.created} supplier{applied.created === 1 ? "" : "s"}
             {applied.updated > 0 && `, updated ${applied.updated}`}.
             {applied.invalid + applied.repeat > 0 &&
-              ` Skipped ${applied.invalid} unusable and ${applied.repeat} repeated row${applied.invalid + applied.repeat === 1 ? "" : "s"}.`}
+              ` Skipped ${applied.invalid + applied.repeat} row${applied.invalid + applied.repeat === 1 ? "" : "s"}: ${applied.invalid} unusable, ${applied.repeat} repeated.`}
           </div>
         )}
 
