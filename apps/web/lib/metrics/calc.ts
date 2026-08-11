@@ -1,4 +1,9 @@
-import { runRateDaily, daysOfStockRemaining, type SalesPoint } from "@wezesha/forecast";
+import {
+  runRateDaily,
+  daysOfStockRemaining,
+  NO_STOCKOUT_DAYS,
+  type SalesPoint,
+} from "@wezesha/forecast";
 
 /**
  * The SHARED METRIC CONTRACT — the metric set defined once and computed the same
@@ -46,11 +51,20 @@ export function runRate(
 /**
  * Cover (days left) — the ONE formula: sellable stock ÷ run rate, floored.
  * Recomputed live from current stock, so it reflects today's shelf even when
- * the last forecast run is stale. A ~zero run rate returns the engine's 999
- * "effectively forever" sentinel.
+ * the last forecast run is stale.
+ *
+ * Clamped to the engine's 999 "effectively forever" sentinel. The engine only
+ * returns that sentinel below 0.0001/day — about one unit every 27 years — so a
+ * product that genuinely sells, but rarely, came through as a real number: a
+ * live workspace showed **72999d** of cover, and 109499d beside it. Both are
+ * arithmetically right and useless to a shop owner, and they read as a glitch
+ * rather than as "you will never run out of this".
+ *
+ * Anything at or past the sentinel means the same thing, so it says the same
+ * thing, and every screen's existing handling of 999 applies.
  */
 export function coverDays(sellableOnHand: number, dailyRunRate: number): number {
-  return daysOfStockRemaining(sellableOnHand, dailyRunRate);
+  return Math.min(daysOfStockRemaining(sellableOnHand, dailyRunRate), NO_STOCKOUT_DAYS);
 }
 
 /** Revenue (KES) over a trailing window, all channels. */

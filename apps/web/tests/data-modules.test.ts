@@ -208,6 +208,73 @@ describe.skipIf(!runnable)("data modules (seeded local db)", () => {
     }
   });
 
+  it("reports cover shop-wide, and never the no-rate sentinel", async () => {
+    // The by-location cover used to apportion the run rate by the branch share
+    // of stock and then divide the branch stock by it, which cancels — every
+    // location showed total/rate whatever it held. It also skipped the epsilon
+    // guard the by-product view uses, so a barely-selling SKU rendered five
+    // figures of days (72999d was live on 11 Aug).
+    // Production shape the seed lacks: a product that genuinely sells, but
+    // barely — one unit a year ago. Its rate is real and tiny, which is what
+    // produced 72999d on a live workspace. Without this the assertions below
+    // cannot tell a capped figure from a hand-rolled division.
+    const slow = await prismaService.product.create({
+      data: {
+        tenantId: seeded.tenantId,
+        sku: "SLOW-COVER-1",
+        title: "Barely Sells",
+        vendor: "House",
+        currentStock: 40,
+        costKes: 100,
+        priceKes: 200,
+      },
+    });
+    const sellsLocation = await prismaService.location.findFirst({
+      where: { tenantId: seeded.tenantId, locationType: "branch" },
+      select: { id: true },
+    });
+    await prismaService.inventoryLevel.create({
+      data: { tenantId: seeded.tenantId, locationId: sellsLocation!.id, productId: slow.id, onHand: 40, available: 40 },
+    });
+    await prismaService.salesHistory.create({
+      data: {
+        tenantId: seeded.tenantId,
+        productId: slow.id,
+        date: new Date(Date.now() - 300 * 86_400_000),
+        quantity: 1,
+        revenueKes: 200,
+        channel: "shopify",
+      },
+    });
+
+    try {
+    const [locations, catalogue] = await Promise.all([
+      getStockByLocation(seeded.tenantId, { canViewCosts: true }),
+      getStockCatalogue(seeded.tenantId, { canViewCosts: true }),
+    ]);
+    const coverBySku = new Map(catalogue.map((r) => [r.sku, r.daysCover]));
+    // The fixture has to actually be slow, or this proves nothing.
+    expect(catalogue.find((r) => r.sku === "SLOW-COVER-1")).toBeDefined();
+
+    for (const location of locations) {
+      if (!location.showCover) {
+        for (const line of location.lines) expect(line.daysCover).toBeNull();
+        continue;
+      }
+      for (const line of location.lines) {
+        if (line.daysCover === null) continue;
+        // One number, one definition: the same cover the catalogue reports.
+        expect(line.daysCover).toBe(coverBySku.get(line.sku) ?? line.daysCover);
+        // No sentinel, no two-century cover.
+        expect(line.daysCover).toBeLessThan(3650);
+      }
+    }
+    } finally {
+      await prismaService.salesHistory.deleteMany({ where: { productId: slow.id } });
+      await prismaService.inventoryLevel.deleteMany({ where: { productId: slow.id } });
+      await prismaService.product.delete({ where: { id: slow.id } });
+    }
+  });
   it("returns empty results for a tenant with no data (tenant-scoped clients)", async () => {
     const empty = await prismaService.tenant.create({
       data: { name: "Empty Probe", slug: "screens-data-empty-probe" },
