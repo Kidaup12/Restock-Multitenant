@@ -28,7 +28,20 @@ const eslintConfig = defineConfig([
     // The admin console reads across every workspace by design (fleet health,
     // the audit ledger). Reached only through requireAdmin; never imported by a
     // tenant-facing page. A per-tenant client could not answer these questions.
-    files: ["lib/admin/**/*.ts"],
+    //
+    // Named files, not the whole directory: `lib/admin/**` exempted code nobody
+    // had read yet, including whatever landed there next — and something did
+    // (the console-access grant/revoke). These five are the surfaces that span
+    // tenants or work on tables with no tenantId at all (PlatformAdmin, User,
+    // Account). A new file here is covered by the rule until it earns a line on
+    // this list.
+    files: [
+      "lib/admin/fleet.ts",
+      "lib/admin/audit.ts",
+      "lib/admin/step-up.ts",
+      "lib/admin/provision.ts",
+      "lib/admin/admins.ts",
+    ],
     rules: { "tenant-safety/require-tenant-scope": "off" },
   },
   {

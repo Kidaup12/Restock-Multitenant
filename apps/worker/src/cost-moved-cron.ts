@@ -104,7 +104,7 @@ export async function checkTenantCostMoves(
 
     // First observation: establish the baseline, never alert on it.
     if (baseline == null || !(baseline > 0)) {
-      await prismaService.product.update({ where: { id: p.id }, data: { lastSyncedCostKes: p.costKes } });
+      await prismaService.product.updateMany({ where: { id: p.id, tenantId }, data: { lastSyncedCostKes: p.costKes } });
       rebaselined++;
       continue;
     }
@@ -112,8 +112,8 @@ export async function checkTenantCostMoves(
     const pct = ((p.costKes - baseline) / baseline) * 100;
     if (Math.abs(pct) > COST_MOVE_THRESHOLD_PCT) {
       const rounded = Math.round(pct);
-      await prismaService.product.update({
-        where: { id: p.id },
+      await prismaService.product.updateMany({
+        where: { id: p.id, tenantId },
         data: { costMovedPct: rounded, costMovedAt: now, lastSyncedCostKes: p.costKes },
       });
       flagged++;
@@ -138,7 +138,7 @@ export async function checkTenantCostMoves(
 
     // No sharp move — drift the baseline to the current cost.
     if (p.costKes !== baseline) {
-      await prismaService.product.update({ where: { id: p.id }, data: { lastSyncedCostKes: p.costKes } });
+      await prismaService.product.updateMany({ where: { id: p.id, tenantId }, data: { lastSyncedCostKes: p.costKes } });
       rebaselined++;
     }
   }

@@ -262,7 +262,7 @@ jobs:
         run: npm run -w @wezesha/queue test
 
   lint:
-    name: web — eslint
+    name: eslint (web + worker)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -276,6 +276,13 @@ jobs:
 
       - name: Lint (apps/web)
         run: npm run -w web lint
+
+      # The tenant-safety rule is the second guard behind RLS, and the worker
+      # runs almost entirely on the BYPASSRLS client — where it is the ONLY
+      # guard. It went unrun in CI until 2026-08-11, and three unscoped writes
+      # had accumulated behind that gap.
+      - name: Lint (apps/worker)
+        run: npm run -w @wezesha/worker lint
 
   web-build:
     name: web — next build

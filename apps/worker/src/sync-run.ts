@@ -156,7 +156,10 @@ export class SyncRunReporter {
   private async write(data: Record<string, unknown>): Promise<void> {
     if (!this.id) return;
     try {
-      await prismaService.syncRun.update({ where: { id: this.id }, data });
+      // Scoped by tenant as well as id: the reporter already knows whose run
+      // this is, and on the BYPASSRLS client an id-only write has nothing
+      // behind it if the id is ever wrong.
+      await prismaService.syncRun.updateMany({ where: { id: this.id, tenantId: this.tenantId }, data });
     } catch (err) {
       console.error(`worker: could not update sync run ${this.id}`, err);
     }
