@@ -89,14 +89,22 @@ describe("per-branch attribution (item 8 — current behaviour, pinned)", () => 
     expect([...buckets.values()][0]).toMatchObject({ quantity: 4, locationId: "loc-kilimani" });
   });
 
-  it("loses the branch on a day that traded at two — the gap to close", () => {
+  it("keeps both branches on a day that traded at two", () => {
     const buckets = bucketSalesByProductDay(twoBranchDay, coreMap, utcDay, locMap);
     const rows = [...buckets.values()];
-    // One row, no location: the day the shop was busiest is the day it cannot
-    // say where the demand was.
+    // Was one unattributed row until 2026-08-11: the day the shop was busiest
+    // was the day it could not say where the demand came from.
+    expect(rows).toHaveLength(2);
+    const byLocation = new Map(rows.map((r) => [r.locationId, r.quantity]));
+    expect(byLocation.get("loc-kilimani")).toBe(4);
+    expect(byLocation.get("loc-westlands")).toBe(6);
+  });
+
+  it("still declines to guess when an order carries no branch", () => {
+    const noLocation = [{ ...twoBranchDay[0]!, fulfillments: [] }];
+    const rows = [...bucketSalesByProductDay(noLocation, coreMap, utcDay, locMap).values()];
     expect(rows).toHaveLength(1);
     expect(rows[0]!.locationId).toBeNull();
-    expect(rows[0]!.quantity).toBe(10);
   });
 
   it("never changes the total units, however the day is split", () => {
@@ -113,14 +121,14 @@ describe("per-branch attribution (item 8 — current behaviour, pinned)", () => 
 describe("bucketSalesByProductDay", () => {
   it("sums quantity + revenue per (product, day)", () => {
     const buckets = bucketSalesByProductDay(orders, coreMap, utcDay);
-    expect(buckets.get("local-1|2026-06-04")).toEqual({
+    expect(buckets.get("local-1|2026-06-04|")).toEqual({
       productId: "local-1", dateKey: "2026-06-04", quantity: 5, revenue: 500, locationId: null,
     });
   });
 
   it("keeps separate products on the same day separate", () => {
     const buckets = bucketSalesByProductDay(orders, coreMap, utcDay);
-    expect(buckets.get("local-2|2026-06-04")).toEqual({
+    expect(buckets.get("local-2|2026-06-04|")).toEqual({
       productId: "local-2", dateKey: "2026-06-04", quantity: 1, revenue: 50, locationId: null,
     });
   });
@@ -143,12 +151,12 @@ describe("bucketSalesByProductDay", () => {
       } as ShopifyOrderNode,
     ];
 
-    expect(bucketSalesByProductDay(lateNight, coreMap, nairobiDay).get("local-1|2026-06-05")).toMatchObject({
+    expect(bucketSalesByProductDay(lateNight, coreMap, nairobiDay).get("local-1|2026-06-05|")).toMatchObject({
       dateKey: "2026-06-05",
       quantity: 2,
     });
     // The old behaviour, kept visible so the difference is the point.
-    expect(bucketSalesByProductDay(lateNight, coreMap, utcDay).get("local-1|2026-06-04")).toMatchObject({
+    expect(bucketSalesByProductDay(lateNight, coreMap, utcDay).get("local-1|2026-06-04|")).toMatchObject({
       dateKey: "2026-06-04",
     });
   });
@@ -173,7 +181,7 @@ describe("bucketSalesByProductDay", () => {
         ],
       } as ShopifyOrderNode,
     ];
-    expect(bucketSalesByProductDay(withRefund, coreMap, utcDay).get("local-1|2026-06-10")).toMatchObject({
+    expect(bucketSalesByProductDay(withRefund, coreMap, utcDay).get("local-1|2026-06-10|")).toMatchObject({
       quantity: 1,
       revenue: 100,
     });
@@ -238,7 +246,7 @@ describe("bucketSalesByProductDay", () => {
         ],
       } as ShopifyOrderNode,
     ];
-    expect(bucketSalesByProductDay(twice, coreMap, utcDay).get("local-1|2026-06-13")).toMatchObject({
+    expect(bucketSalesByProductDay(twice, coreMap, utcDay).get("local-1|2026-06-13|")).toMatchObject({
       quantity: 7,
       revenue: 350,
     });
@@ -293,10 +301,10 @@ describe("bucketSalesByProductDay", () => {
       },
     ];
     const buckets = bucketSalesByProductDay(backdated, coreMap, utcDay);
-    expect(buckets.get("local-1|2026-05-10")).toEqual({
+    expect(buckets.get("local-1|2026-05-10|")).toEqual({
       productId: "local-1", dateKey: "2026-05-10", quantity: 1, revenue: 100, locationId: null,
     });
-    expect(buckets.get("local-1|2026-06-04")).toEqual({
+    expect(buckets.get("local-1|2026-06-04|")).toEqual({
       productId: "local-1", dateKey: "2026-06-04", quantity: 2, revenue: 200, locationId: null,
     });
   });
@@ -309,7 +317,7 @@ describe("bucketSalesByProductDay", () => {
         lineItems: [{ quantity: 1, product: { id: "1" }, originalUnitPriceSet: { shopMoney: { amount: "10" } } }],
       },
     ];
-    expect(bucketSalesByProductDay(bare, coreMap, utcDay).get("local-1|2026-06-05")?.quantity).toBe(1);
+    expect(bucketSalesByProductDay(bare, coreMap, utcDay).get("local-1|2026-06-05|")?.quantity).toBe(1);
   });
 
   it("attributes a sale to the VARIANT's row, not an arbitrary sibling", () => {
@@ -334,8 +342,8 @@ describe("bucketSalesByProductDay", () => {
       },
     ];
     const buckets = bucketSalesByProductDay(sameProduct, coreMap, utcDay, undefined, variantMap);
-    expect(buckets.get("local-shade-b|2026-06-06")?.quantity).toBe(2);
-    expect(buckets.has("local-1|2026-06-06")).toBe(false);
+    expect(buckets.get("local-shade-b|2026-06-06|")?.quantity).toBe(2);
+    expect(buckets.has("local-1|2026-06-06|")).toBe(false);
   });
 
   it("falls back to the product map for a line with no variant", () => {
@@ -349,7 +357,7 @@ describe("bucketSalesByProductDay", () => {
       },
     ];
     const buckets = bucketSalesByProductDay(noVariant, coreMap, utcDay, undefined, new Map());
-    expect(buckets.get("local-1|2026-06-07")?.quantity).toBe(1);
+    expect(buckets.get("local-1|2026-06-07|")?.quantity).toBe(1);
   });
 });
 

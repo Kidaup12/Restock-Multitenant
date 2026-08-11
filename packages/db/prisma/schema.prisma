@@ -492,7 +492,12 @@ model SalesHistory {
   product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   location Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
 
-  @@unique([productId, date, channel])
+  // locationId is part of the key so a product-day can hold one row PER BRANCH.
+  // Note Postgres treats NULLs as DISTINCT here, so two unattributed rows for
+  // the same product-day would both be allowed — every writer must therefore
+  // clear the day before inserting it (the sync deletes by product+date first,
+  // and the till feed keys on its own channel).
+  @@unique([productId, date, channel, locationId])
   @@index([tenantId, date])
   @@index([tenantId, locationId])
 }

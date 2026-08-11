@@ -18,10 +18,9 @@ export type DayBucket = {
   dateKey: string; // YYYY-MM-DD (UTC)
   quantity: number;
   revenue: number;
-  // Fulfilment location (local Location.id) when every contributing order that
-  // day shipped from the SAME branch; null when unknown or the day mixed
-  // branches. The (product, day, channel) row is one row, so a mixed day can
-  // only be attributed once — we decline rather than guess. See the sync.
+  // Fulfilment location (local Location.id) for this bucket; null when the order
+  // carried no single location. One bucket PER branch per product-day, so a day
+  // split across branches keeps both — the unique key carries locationId.
   locationId: string | null;
 };
 
@@ -78,9 +77,6 @@ export function bucketSalesByProductDay(
   productIdByVariantCore?: Map<string, string>
 ): Map<string, DayBucket> {
   const buckets = new Map<string, DayBucket>();
-  // Track each bucket's contributing locations so a day is attributed only when
-  // it stays on one branch. "" marks an unattributable contribution.
-  const seenLocs = new Map<string, Set<string>>();
   for (const order of orders) {
     // A cancelled order never became a sale, so it must not create demand the
     // forecast then tries to replace.
@@ -110,26 +106,17 @@ export function bucketSalesByProductDay(
         : 0;
       const revenue = Number.isFinite(unit) ? unit * qty : 0;
 
-      const key = `${productId}|${dateKey}`;
+      // Keyed by BRANCH as well as product and day. A day that traded at two
+      // branches is two rows now, not one unattributed row — losing the busiest
+      // days was exactly what made a per-branch rate impossible.
+      const key = `${productId}|${dateKey}|${loc ?? ""}`;
       const existing = buckets.get(key);
       if (existing) {
         existing.quantity += qty;
         existing.revenue += revenue;
       } else {
-        buckets.set(key, { productId, dateKey, quantity: qty, revenue, locationId: null });
+        buckets.set(key, { productId, dateKey, quantity: qty, revenue, locationId: loc });
       }
-      let locs = seenLocs.get(key);
-      if (!locs) seenLocs.set(key, (locs = new Set()));
-      locs.add(loc ?? "");
-    }
-  }
-  // A bucket is attributed only when all its contributions came from exactly one
-  // real branch (no unattributed contribution mixed in).
-  for (const [key, bucket] of buckets) {
-    const locs = seenLocs.get(key)!;
-    if (locs.size === 1) {
-      const only = [...locs][0]!;
-      bucket.locationId = only === "" ? null : only;
     }
   }
   return buckets;
