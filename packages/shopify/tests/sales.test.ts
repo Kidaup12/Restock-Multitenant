@@ -47,6 +47,69 @@ const orders: ShopifyOrderNode[] = [
   },
 ];
 
+/**
+ * Per-branch attribution — the gap item 8 exists to close.
+ *
+ * A day that traded at two branches currently collapses to ONE row with no
+ * location, because SalesHistory allows one row per (product, day, channel) and
+ * the bucketer declines to guess which branch it belonged to. So the busiest
+ * days — the ones where every branch sold — are exactly the days that carry no
+ * location, and a per-branch run rate cannot be computed from them.
+ *
+ * The assertion that matters when this changes is the LAST one: however the rows
+ * are split, the units must still sum to what the shop actually sold. Widening
+ * the unique key without that check is how a migration turns one sale into two
+ * and has the buy list order double.
+ */
+describe("per-branch attribution (item 8 — current behaviour, pinned)", () => {
+  const twoBranchDay: ShopifyOrderNode[] = [
+    {
+      id: "kilimani",
+      createdAt: "2026-06-04T09:00:00Z",
+      fulfillments: [{ location: { id: "gid://shopify/Location/10" } }],
+      lineItems: [
+        { quantity: 4, product: { id: "gid://shopify/Product/1" }, originalUnitPriceSet: { shopMoney: { amount: "100" } } },
+      ],
+    },
+    {
+      id: "westlands",
+      createdAt: "2026-06-04T15:00:00Z",
+      fulfillments: [{ location: { id: "gid://shopify/Location/20" } }],
+      lineItems: [
+        { quantity: 6, product: { id: "gid://shopify/Product/1" }, originalUnitPriceSet: { shopMoney: { amount: "100" } } },
+      ],
+    },
+  ];
+  const locMap = new Map<string, string>([["10", "loc-kilimani"], ["20", "loc-westlands"]]);
+
+  it("attributes a single-branch day to that branch", () => {
+    const oneBranch = [twoBranchDay[0]!];
+    const buckets = bucketSalesByProductDay(oneBranch, coreMap, utcDay, locMap);
+    expect([...buckets.values()]).toHaveLength(1);
+    expect([...buckets.values()][0]).toMatchObject({ quantity: 4, locationId: "loc-kilimani" });
+  });
+
+  it("loses the branch on a day that traded at two — the gap to close", () => {
+    const buckets = bucketSalesByProductDay(twoBranchDay, coreMap, utcDay, locMap);
+    const rows = [...buckets.values()];
+    // One row, no location: the day the shop was busiest is the day it cannot
+    // say where the demand was.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.locationId).toBeNull();
+    expect(rows[0]!.quantity).toBe(10);
+  });
+
+  it("never changes the total units, however the day is split", () => {
+    // The guard for the migration. Widening the key must redistribute these
+    // units, never mint new ones: a double count here inflates the run rate,
+    // and the run rate is what sizes every order on the buy list.
+    const rows = [...bucketSalesByProductDay(twoBranchDay, coreMap, utcDay, locMap).values()];
+    const units = rows.reduce((sum, r) => sum + r.quantity, 0);
+    const revenue = rows.reduce((sum, r) => sum + r.revenue, 0);
+    expect(units).toBe(10);
+    expect(revenue).toBe(1000);
+  });
+});
 describe("bucketSalesByProductDay", () => {
   it("sums quantity + revenue per (product, day)", () => {
     const buckets = bucketSalesByProductDay(orders, coreMap, utcDay);
