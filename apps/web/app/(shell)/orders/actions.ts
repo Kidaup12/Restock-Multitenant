@@ -97,12 +97,17 @@ export async function receivePoAction(input: {
   }
   revalidatePath("/orders");
   revalidatePath(`/orders/${input.poId}`);
+  const booked =
+    result.status === "received"
+      ? `Received ${result.receivedUnits} units — delivery complete.`
+      : `Received ${result.receivedUnits} units — remainder still expected.`;
   return {
     ok: true,
-    message:
-      result.status === "received"
-        ? `Received ${result.receivedUnits} units — delivery complete.`
-        : `Received ${result.receivedUnits} units — remainder still expected.`,
+    // Say plainly that the shelf figure is the store's. Silently leaving stock
+    // unchanged after booking in a delivery reads as the receipt not working.
+    message: result.stockFollowsStore
+      ? `${booked} Stock stays as your store reports it — add the delivery there and it shows here after the next sync.`
+      : booked,
   };
 }
 
