@@ -43,6 +43,7 @@ export {
 export type { ProductLifecycle, ProductStatus } from "./product-lifecycle";
 export {
   OUTSTANDING_PO_STATUSES,
+  earliestEtaByProduct,
   effectiveOnOrder,
   outstandingByProduct,
   outstandingUnits,
