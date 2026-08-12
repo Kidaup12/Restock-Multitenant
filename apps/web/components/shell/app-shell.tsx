@@ -11,7 +11,7 @@ import {
   TAB_BAR_LABEL,
 } from "@/components/shell/nav-config";
 import { NavItem } from "@/components/shell/nav-item";
-import { ConnectionBanner } from "@/components/shell/connection-banner";
+import { ConnectionBanner, type Staleness } from "@/components/shell/connection-banner";
 import type { ConnectionState } from "@/lib/admin/fleet";
 import { RouteLoadingProvider } from "@/components/shell/route-loading";
 import { NotificationBell } from "@/components/shell/notification-bell";
@@ -77,7 +77,7 @@ export function AppShell({
   isPlatformAdmin: boolean;
   /* Whether this shop's data is still moving, and whether this caller can fix
      it. Null when there is no active workspace to have a connection. */
-  connection: { state: ConnectionState; canFix: boolean } | null;
+  connection: { state: ConnectionState; canFix: boolean; stale: Staleness | null } | null;
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -203,7 +203,11 @@ export function AppShell({
           </header>
 
           {connection && (
-            <ConnectionBanner state={connection.state} canFix={connection.canFix} />
+            <ConnectionBanner
+              state={connection.state}
+              canFix={connection.canFix}
+              stale={connection.stale}
+            />
           )}
 
           <main className="flex-1 px-4 py-6 pb-24 md:px-8 md:py-8 md:pb-10">

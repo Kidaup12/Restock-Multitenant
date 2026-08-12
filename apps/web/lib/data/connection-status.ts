@@ -20,21 +20,41 @@ export type ConnectionStatus = {
   state: ConnectionState;
   /** Null when no store was ever connected. */
   shopDomain: string | null;
+  /**
+   * When a sync phase last COMPLETED, across resources — the newest ingest
+   * cursor. A connection can be perfectly "live" and still be sending nothing,
+   * which is the case the shop was never told about. Null = never synced.
+   *
+   * The cursor rather than the run: it only advances after a phase succeeds, so
+   * a store that fails every 15 minutes cannot look fresh.
+   */
+  lastSyncedAt: Date | null;
 };
 
 /** One indexed read on a unique tenantId — this runs on every authenticated
  *  render, so it stays a single lookup and selects three columns. */
 export async function getConnectionStatus(tenantId: string): Promise<ConnectionStatus> {
   const db = prismaForTenant(tenantId);
-  const connection = await db.shopifyConnection.findFirst({
-    select: { shopDomain: true, uninstalledAt: true, syncPausedAt: true },
-  });
+  const [connection, freshest] = await Promise.all([
+    db.shopifyConnection.findFirst({
+      select: { shopDomain: true, uninstalledAt: true, syncPausedAt: true },
+    }),
+    db.ingestCursor.findFirst({
+      where: { source: "shopify" },
+      orderBy: { cursor: "desc" },
+      select: { cursor: true },
+    }),
+  ]);
 
-  if (!connection) return { state: "none", shopDomain: null };
+  if (!connection) return { state: "none", shopDomain: null, lastSyncedAt: null };
   const state: ConnectionState = connection.uninstalledAt
     ? "uninstalled"
     : connection.syncPausedAt
       ? "paused"
       : "live";
-  return { state, shopDomain: connection.shopDomain };
+  return {
+    state,
+    shopDomain: connection.shopDomain,
+    lastSyncedAt: freshest?.cursor ?? null,
+  };
 }
