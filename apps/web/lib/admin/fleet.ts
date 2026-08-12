@@ -12,21 +12,16 @@ import { CUSTOMER_TENANTS_WHERE, prismaService } from "@wezesha/db";
 export const SYNC_RESOURCES = ["products", "inventory", "orders"] as const;
 export type SyncResource = (typeof SYNC_RESOURCES)[number];
 
-/** A resource cursor older than this is flagged stale on the dashboard (M4's
- *  staleness rule surfaced fleet-wide). */
-export const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+/** The staleness rule now lives in `lib/sync/staleness.ts` because the SHOP is
+ *  told as well as the operator — re-exported so this module stays the fleet's
+ *  single import and the two surfaces cannot drift to different thresholds. */
+export { STALE_AFTER_MS, isStale } from "@/lib/sync/staleness";
 
 /** "paused" is a store the app still holds a connection for but has stopped
  *  syncing, because its token kept being refused. It reported as "live" until
  *  this existed, which is the most misleading answer available: the fleet is
  *  the one screen whose job is to show that a shop's data has stopped moving. */
 export type ConnectionState = "live" | "paused" | "uninstalled" | "none";
-
-/** Never-synced or older than the threshold. Clock lives here, not in
- *  components — react-hooks/purity bans Date.now() during render. */
-export function isStale(at: Date | null, now: number = Date.now()): boolean {
-  return !at || now - at.getTime() > STALE_AFTER_MS;
-}
 
 export type FleetRow = {
   tenantId: string;

@@ -5,6 +5,7 @@ import { planAllows } from "@/lib/capabilities/plan-features";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getUnreadCount } from "@/lib/notifications/data";
 import { getConnectionStatus } from "@/lib/data/connection-status";
+import { isStale, staleDays } from "@/lib/sync/staleness";
 import { AppShell } from "@/components/shell/app-shell";
 
 const roleLabels: Record<Role, string> = {
@@ -75,6 +76,11 @@ export default async function ShellLayout({
               // Pointing a member at a screen they cannot open is worse than
               // pointing them nowhere: the message still shows, the link does not.
               canFix: hasPermission(membership, "manage_settings"),
+              // The clock is resolved here, on the server: the banner is a
+              // render path and react-hooks/purity bans Date.now() inside one.
+              stale: isStale(connectionStatus.lastSyncedAt)
+                ? { days: staleDays(connectionStatus.lastSyncedAt) }
+                : null,
             }
           : null
       }
