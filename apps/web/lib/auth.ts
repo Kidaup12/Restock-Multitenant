@@ -27,6 +27,11 @@ export const auth = betterAuth({
   },
   plugins: [
     emailOTP({
+      // Sign-IN only. Without this the endpoint mails a code to any address on
+      // request and verifying it creates the account — an unauthenticated
+      // account-creation and unmetered outbound-email path. A workspace is
+      // reached by invite or by /signup, never by asking for a code.
+      disableSignUp: true,
       async sendVerificationOTP({ email, otp }) {
         await sendEmail({
           to: email,
