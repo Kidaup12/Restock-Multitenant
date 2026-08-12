@@ -57,6 +57,40 @@ function SyncCell({ row, at }: { row: FleetRow; at: Date | null }) {
   );
 }
 
+/**
+ * Failures and abandoned runs — the half a cursor cannot report.
+ *
+ * Cursors advance only on success, so a store failing every fifteen minutes
+ * showed a fresh timestamp and a green row until the 24-hour line finally
+ * tripped. The error text matters as much as the count: "token revoked" and
+ * "rate limited" need different people.
+ */
+function RunHealthCell({ row }: { row: FleetRow }) {
+  if (!isConnected(row.connection.state)) return <span className="text-ink-faint">—</span>;
+  if (row.recentFailures === 0 && row.strandedRuns === 0) {
+    return <span className="text-ink-faint">ok</span>;
+  }
+  return (
+    <div className="space-y-0.5">
+      {row.recentFailures > 0 && (
+        <div className="font-medium text-negative">
+          {row.recentFailures} failed
+          {row.lastError && (
+            <span className="block max-w-56 truncate font-normal text-ink-muted" title={row.lastError}>
+              {row.lastError}
+            </span>
+          )}
+        </div>
+      )}
+      {row.strandedRuns > 0 && (
+        // Not a data problem — a worker was killed mid-run, almost always by a
+        // deploy. Worth showing so "still running" is never mistaken for alive.
+        <div className="text-warning">{row.strandedRuns} abandoned</div>
+      )}
+    </div>
+  );
+}
+
 const connectionBadge = {
   live: <Badge tone="positive">Connected</Badge>,
   // Still installed, but nothing is syncing until someone reconnects it —
@@ -124,6 +158,7 @@ export default async function AdminFleetPage({
               {SYNC_RESOURCES.map((r) => (
                 <TableHead key={r}>{r} sync</TableHead>
               ))}
+              <TableHead>Runs</TableHead>
               <TableHead numeric>Open alerts</TableHead>
               <TableHead>Last forecast</TableHead>
               <TableHead>
@@ -154,6 +189,9 @@ export default async function AdminFleetPage({
                       <SyncCell row={row} at={row.lastSync[r]} />
                     </TableCell>
                   ))}
+                  <TableCell className="text-xs">
+                    <RunHealthCell row={row} />
+                  </TableCell>
                   <TableCell numeric>
                     {row.openNotifications > 0 ? (
                       <span className="font-medium text-warning">{row.openNotifications}</span>

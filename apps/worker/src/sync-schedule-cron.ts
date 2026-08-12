@@ -1,7 +1,7 @@
 import { Queue, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { CUSTOMER_TENANTS_WHERE, prismaService } from "@wezesha/db";
-import { enqueueSyncOnce, type SyncQueue } from "@wezesha/queue";
+import { STRANDED_RUN_AFTER_MS, enqueueSyncOnce, type SyncQueue } from "@wezesha/queue";
 
 /**
  * Keeps every connected shop's Shopify data current without anyone pressing a
@@ -127,9 +127,36 @@ export async function markTenantsForFullSync(): Promise<number> {
   return count;
 }
 
+/**
+ * Close runs the worker was killed in the middle of.
+ *
+ * The processor closes its row on success and on failure, so a row still
+ * marked `running` an hour later means the process died — a redeploy, almost
+ * always, since a sync takes about three minutes and the platform's shutdown
+ * grace is far shorter. Ten of these had accumulated in production across four
+ * workspaces.
+ *
+ * Closed as FAILED rather than deleted. The row is evidence: the Connections
+ * screen and the admin fleet both need to show that a run did not finish, and
+ * a row claiming to be "running" three days on is simply lying about it.
+ */
+export async function reapStrandedRuns(now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - STRANDED_RUN_AFTER_MS);
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- sweep across every workspace by design; the filter is age and status, and scoping it per tenant would only mean running the same update N times.
+  const { count } = await prismaService.syncRun.updateMany({
+    where: { status: "running", startedAt: { lt: cutoff } },
+    data: {
+      status: "failed",
+      finishedAt: now,
+      error: "Interrupted — the worker restarted before this run finished.",
+    },
+  });
+  return count;
+}
+
 /** Drop finished sync runs past the retention window. Running rows are left
- *  alone whatever their age — a stuck run is something the Connections screen
- *  should keep showing, not something to tidy away. */
+ *  alone whatever their age — reapStrandedRuns closes those first, so anything
+ *  still open here is genuinely in flight. */
 export async function pruneSyncRuns(now: Date = new Date()): Promise<number> {
   const cutoff = new Date(now.getTime() - SYNC_RUN_RETENTION_DAYS * DAY_MS);
   // eslint-disable-next-line tenant-safety/require-tenant-scope -- retention sweep across every workspace by design; the filter is age, and scoping it per tenant would only mean running the same delete N times.
@@ -162,8 +189,13 @@ export function createSyncScheduleWorker(
       }
       if (job.name === SHOPIFY_FULL_SYNC_JOB) {
         const marked = await markTenantsForFullSync();
+        // Reap before pruning: a stranded row has to be closed before the
+        // retention sweep, which only ever deletes finished runs.
+        const reaped = await reapStrandedRuns();
         const pruned = await pruneSyncRuns();
-        console.log(`worker: full-sync mark — ${marked} cursors cleared, ${pruned} sync runs pruned`);
+        console.log(
+          `worker: full-sync mark — ${marked} cursors cleared, ${reaped} stranded runs closed, ${pruned} sync runs pruned`
+        );
       }
     },
     { connection: options.connection }
