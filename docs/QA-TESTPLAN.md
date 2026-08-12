@@ -193,9 +193,70 @@ downloaded file is a failure.
 
 ---
 
+## Changed on 12 August — worth testing first
+
+Nine fixes shipped this day. Four of them change what you see on a screen, and **three of those
+will look like something is missing unless you know they were deliberate**. Read this section
+before filing anything against Stock, Plan or the money-blind role.
+
+### New behaviour to check
+
+**Stock you have already ordered now shows as on order.** Previously the column read the store's
+own "incoming" count only, so a shop that had sent a purchase order saw a dash and was told to buy
+the same stock again. It now takes whichever is larger — the store's count, or the units still owed
+on your own sent POs.
+
+- Where: Stock catalogue, the Plan buy list, and a product's own page. All three should agree.
+- On the deployed app, Wezesha Dev Store: *Nivea Fresh Natural Deodorant Spray 150ml* should read
+  **28**, *Nice & Lovely Rich Body Lotion 500ml* should read **15**, both with an ETA of **24 Aug**.
+- A product with no purchase order should still read `—`. If everything shows a number, that is a
+  bug.
+
+**The arrival date column is populated.** It used to be blank for every product in the system — it
+read a field nothing ever wrote. It now comes from the promised date on the purchase order, so it
+appears only where a PO carries one.
+
+**A shop is now warned when its data stops updating.** If a store is connected but has sent nothing
+for over 24 hours, a banner appears above every screen. Hard to trigger on demand — the honest test
+is that a *healthy* store shows **no** banner, and that a disconnected store still shows the
+disconnect message rather than this one.
+
+### Deliberate changes that look like regressions
+
+**A money-blind member sees fewer markers on Stock.** The "Suspect cost", "Missing cost" and "Held
+off the buy list" dots and filter chips no longer appear for that role, and the cost-source label
+("typed" / "Shopify") under the masked figure is gone. This is a fix, not a loss: "sold at or below
+cost" is a fact about cost even though it carries no figure, and the filter chip listed exactly
+those products. **Owners and admins still see all of it** — check both roles before filing.
+
+**`/costs` shows "Not available on your account" for a member.** Every figure on that screen is a
+cost fact, so the screen is gated rather than emptied. The nav link is still visible; that part is
+untidy and known.
+
+**The supply calendar lists suppliers in a different order for a member than for an owner.** The
+owner's order is by spend. A member's is by number of items, because keeping the spend order with
+the numbers hidden still hands over the ranking. Same reasoning the buy list already used.
+
+**Requesting a sign-in code for an unknown email now does nothing.** It used to mail a code to any
+address and create an account when that code was used. Sign-in codes are for existing accounts only;
+new people arrive by invite or `/signup`.
+
+### Not visible, but changed
+
+Errors are now recorded automatically for the background services, tagged with the workspace they
+came from. The web app is configured and will start reporting the first time it hits an error.
+
+---
+
 ## Known gaps — please don't file these
 
-Verified against the code on 28 July. Anything not on this list is fair game.
+Verified against the code on 28 July, and **not fully re-checked since** — a few entries below have
+since been fixed and simply never removed. If something on this list looks like it works now, it
+probably does; say so rather than assuming the list is right. Anything not on this list is fair game.
+
+Two known to be **out of date** as of 12 August: the guided tour's locked-screen step and the Today
+setup strip both had work done on them, and sync progress now shows while a sync runs. Treat those
+three as testable rather than excused.
 
 **No store but ours can install the app.** The Shopify app has no distribution method selected, so
 any store outside our Partner organisation gets "This app can't be installed yet." That blocks the
