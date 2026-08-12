@@ -50,3 +50,34 @@ export function outstandingByProduct(
 export function effectiveOnOrder(shopifyOnOrder: number, outstandingPoUnits: number): number {
   return Math.max(shopifyOnOrder, outstandingPoUnits);
 }
+
+/**
+ * When inbound stock is due, per product: the EARLIEST promised date among the
+ * outstanding POs that carry one.
+ *
+ * Derived rather than stored. `Product.expectedArrivalAt` exists in the schema
+ * and was read by two screens, but nothing ever wrote it — the PO paths write
+ * `Order.expectedArrivalAt`, a different model — so the catalogue printed
+ * "no ETA" against every product it had on order. A denormalised copy also has
+ * to be cleared when a PO is cancelled or received; deriving it cannot go stale.
+ *
+ * Earliest rather than latest: it answers "when does something arrive", which
+ * is what the shelf cares about. A PO with no promised date contributes none.
+ */
+export function earliestEtaByProduct(
+  lines: {
+    productId: string;
+    quantity: number;
+    receivedQty: number;
+    purchaseOrder: { expectedAt: Date | null };
+  }[]
+): Map<string, Date> {
+  const byProduct = new Map<string, Date>();
+  for (const line of lines) {
+    const eta = line.purchaseOrder.expectedAt;
+    if (!eta || outstandingUnits(line) === 0) continue;
+    const current = byProduct.get(line.productId);
+    if (!current || eta < current) byProduct.set(line.productId, eta);
+  }
+  return byProduct;
+}

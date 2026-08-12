@@ -1,4 +1,13 @@
-import { LIFECYCLE_LABELS, heldReason, prismaForTenant, productLifecycle } from "@wezesha/db";
+import {
+  LIFECYCLE_LABELS,
+  OUTSTANDING_PO_STATUSES,
+  earliestEtaByProduct,
+  effectiveOnOrder,
+  heldReason,
+  outstandingByProduct,
+  prismaForTenant,
+  productLifecycle,
+} from "@wezesha/db";
 import { leadDaysFor } from "@wezesha/forecast";
 import { runRate, coverDays, revenueByWindow } from "@/lib/metrics";
 import { resolveCost } from "@/lib/cost/resolve";
@@ -115,7 +124,6 @@ export async function getProductDetail(
       abcCategory: true,
       currentStock: true,
       onOrder: true,
-      expectedArrivalAt: true,
       priceKes: true,
       costKes: true,
       costSource: true,
@@ -134,11 +142,25 @@ export async function getProductDetail(
 
   const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (HISTORY_MONTHS - 1), 1));
 
-  const [sales, latestPrediction] = await Promise.all([
+  const [sales, poLines, latestPrediction] = await Promise.all([
     db.salesHistory.findMany({
       where: { productId, date: { gte: since } },
       select: { date: true, quantity: true, revenueKes: true, channel: true },
       orderBy: { date: "asc" },
+    }),
+    // Our own outstanding POs: the inbound units this product actually has, and
+    // where its ETA comes from (see @wezesha/db/inbound).
+    db.purchaseOrderLine.findMany({
+      where: {
+        productId,
+        purchaseOrder: { status: { in: [...OUTSTANDING_PO_STATUSES] }, deletedAt: null },
+      },
+      select: {
+        productId: true,
+        quantity: true,
+        receivedQty: true,
+        purchaseOrder: { select: { expectedAt: true } },
+      },
     }),
     db.prediction.findFirst({
       where: { productId },
@@ -174,6 +196,14 @@ export async function getProductDetail(
     priceKes: product.priceKes,
   });
   const lifecycle = productLifecycle(product);
+  // Shopify's incoming count OR our own outstanding POs, whichever is larger,
+  // with the ETA taken from the earliest PO that promised one. The ETA used to
+  // read Product.expectedArrivalAt, which nothing has ever written.
+  const inboundUnits = effectiveOnOrder(
+    product.onOrder,
+    outstandingByProduct(poLines).get(productId) ?? 0
+  );
+  const inboundEta = earliestEtaByProduct(poLines).get(productId) ?? null;
 
   return {
     productId: product.id,
@@ -190,8 +220,8 @@ export async function getProductDetail(
     shopifyStatus: product.shopifyStatus,
 
     onHandUnits: product.currentStock,
-    onOrderUnits: product.onOrder,
-    expectedArrivalLabel: product.expectedArrivalAt ? dayFormat.format(product.expectedArrivalAt) : null,
+    onOrderUnits: inboundUnits,
+    expectedArrivalLabel: inboundEta ? dayFormat.format(inboundEta) : null,
     runRatePerDay: Math.round(rate * 100) / 100,
     // The engine's no-stockout-in-sight sentinel must never print as a day count.
     daysCover: rate > 0 && cover < 999 ? cover : null,

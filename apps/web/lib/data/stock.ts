@@ -1,7 +1,11 @@
 import {
+  OUTSTANDING_PO_STATUSES,
+  earliestEtaByProduct,
+  effectiveOnOrder,
   heldReason,
   isBuyable,
   LIFECYCLE_LABELS,
+  outstandingByProduct,
   prismaForTenant,
   productLifecycle,
   roleOf,
@@ -157,7 +161,7 @@ export async function getStockCatalogue(
   { canViewCosts }: { canViewCosts: boolean }
 ): Promise<CatalogueRow[]> {
   const db = prismaForTenant(tenantId);
-  const [products, levels, locations, metrics] = await Promise.all([
+  const [products, levels, locations, metrics, poLines] = await Promise.all([
     db.product.findMany({
       select: {
         id: true,
@@ -200,8 +204,23 @@ export async function getStockCatalogue(
     }),
     db.location.findMany({ select: { id: true, locationType: true } }),
     getCatalogueMetrics(tenantId),
+    // Stock we ordered ourselves: the units the catalogue must count as inbound,
+    // and the only place its ETA comes from.
+    db.purchaseOrderLine.findMany({
+      where: {
+        purchaseOrder: { status: { in: [...OUTSTANDING_PO_STATUSES] }, deletedAt: null },
+      },
+      select: {
+        productId: true,
+        quantity: true,
+        receivedQty: true,
+        purchaseOrder: { select: { expectedAt: true } },
+      },
+    }),
   ]);
 
+  const outstandingPoUnits = outstandingByProduct(poLines);
+  const etaByProduct = earliestEtaByProduct(poLines);
   const roleByLocation = new Map(locations.map((l) => [l.id, roleOf(l)]));
   const holds = new Map<string, number>();
   for (const lvl of levels) {
@@ -285,8 +304,8 @@ export async function getStockCatalogue(
       lifecycleLabel: LIFECYCLE_LABELS[lifecycle],
       buyable,
       lifecycleReason: heldReason(p),
-      onOrderUnits: p.onOrder,
-      expectedArrivalAt: p.expectedArrivalAt,
+      onOrderUnits: effectiveOnOrder(p.onOrder, outstandingPoUnits.get(p.id) ?? 0),
+      expectedArrivalAt: etaByProduct.get(p.id) ?? null,
       syncError: p.syncError,
       syncErrorAt: p.syncErrorAt,
       leadDays,

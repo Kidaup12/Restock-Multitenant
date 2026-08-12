@@ -71,15 +71,56 @@ describe.skipIf(!runnable)("product lifecycle on the catalogue (seeded local db)
         { ...base, sku: DRAFT_SKU, title: "Unreleased Serum", shopifyStatus: "draft", currentStock: 3 },
         { ...base, sku: REMOVED_SKU, title: "Vanished Cleanser", missingFromShopifyAt: new Date(), currentStock: 7 },
         { ...base, sku: SYNC_SKU, title: "Stuck Mascara", currentStock: 5, syncError: SYNC_MESSAGE, syncErrorAt: new Date() },
-        { ...base, sku: INBOUND_SKU, title: "Empty Shelf Toner", currentStock: 0, onOrder: INBOUND_UNITS, expectedArrivalAt: INBOUND_ETA },
+        { ...base, sku: INBOUND_SKU, title: "Empty Shelf Toner", currentStock: 0, onOrder: INBOUND_UNITS },
         { ...base, sku: VARIANT_SKUS[0]!, title: "Velvet Lipstick", variantTitle: "Shade 03", shopifyProductId: VARIANT_GROUP, currentStock: 9 },
         { ...base, sku: VARIANT_SKUS[1]!, title: "Velvet Lipstick", variantTitle: "Shade 07", shopifyProductId: VARIANT_GROUP, currentStock: 4 },
       ],
     });
+    // The ETA comes from the purchase order that promised it, never from a
+    // column on Product — that one exists in the schema but has no writer, so
+    // seeding it here made this test pass against a screen that shows "no ETA"
+    // for every product in production.
+    //
+    // Outstanding is set BELOW Shopify's count on purpose: the units must still
+    // resolve to 24 (MAX, not a sum) while the date comes from the PO.
+    const inboundProduct = await prismaService.product.findFirstOrThrow({
+      where: { tenantId: seeded.tenantId, sku: INBOUND_SKU },
+      select: { id: true, sku: true, title: true },
+    });
+    await prismaService.purchaseOrder.create({
+      data: {
+        tenantId: seeded.tenantId,
+        poNumber: "PO-LC-INBOUND",
+        status: "sent",
+        sentAt: new Date(),
+        expectedAt: INBOUND_ETA,
+        lines: {
+          create: {
+            tenantId: seeded.tenantId,
+            productId: inboundProduct.id,
+            sku: inboundProduct.sku,
+            title: inboundProduct.title,
+            quantity: 10,
+            receivedQty: 0,
+            unitCostKes: 400,
+            lineTotalKes: 4000,
+          },
+        },
+      },
+    });
+
     rows = await getStockCatalogue(seeded.tenantId, { canViewCosts: true });
   }, 120_000);
 
   afterAll(async () => {
+    const po = await prismaService.purchaseOrder.findFirst({
+      where: { tenantId: seeded.tenantId, poNumber: "PO-LC-INBOUND" },
+      select: { id: true },
+    });
+    if (po) {
+      await prismaService.purchaseOrderLine.deleteMany({ where: { purchaseOrderId: po.id } });
+      await prismaService.purchaseOrder.delete({ where: { id: po.id } });
+    }
     await prismaService.product.deleteMany({
       where: { tenantId: seeded.tenantId, sku: { in: FIXTURE_SKUS } },
     });
