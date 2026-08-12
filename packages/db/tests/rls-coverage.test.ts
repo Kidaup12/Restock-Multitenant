@@ -60,10 +60,21 @@ describe("rls coverage census", () => {
 
       for (const table of tenantTables) {
         const { rows: sec } = await client.query(
-          `SELECT rowsecurity FROM pg_tables WHERE schemaname = 'public' AND tablename = $1`,
+          `SELECT t.rowsecurity, c.relforcerowsecurity AS forced
+             FROM pg_tables t
+             JOIN pg_class c ON c.relname = t.tablename
+              AND c.relnamespace = 'public'::regnamespace
+            WHERE t.schemaname = 'public' AND t.tablename = $1`,
           [table]
         );
         expect(sec[0]?.rowsecurity, `${table}: ROW LEVEL SECURITY must be enabled`).toBe(true);
+        // ENABLE exempts the table's owner from its own policies. That is only
+        // survivable while the app role owns nothing — and a restore is exactly
+        // where that stops being true, since whoever runs pg_restore owns what
+        // it recreates. FORCE removes the exemption; BYPASSRLS (postgres,
+        // wezesha_service) still outranks it, so migrations and the worker are
+        // unaffected.
+        expect(sec[0]?.forced, `${table}: RLS must be FORCEd, not merely enabled`).toBe(true);
 
         const { rows: pol } = await client.query(
           `SELECT qual, with_check FROM pg_policies
