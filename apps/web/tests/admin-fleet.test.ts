@@ -27,6 +27,9 @@ function fleetStub(overrides: Partial<FleetRow>): FleetRow {
     connection: { state: "none", shopDomain: null },
     lastSync: { products: null, inventory: null, orders: null },
     stalenessMs: null,
+    recentFailures: 0,
+    lastError: null,
+    strandedRuns: 0,
     openNotifications: 0,
     lastForecastRunAt: null,
     ...overrides,
@@ -54,6 +57,30 @@ describe("sortFleet", () => {
     expect(isStale(null, now)).toBe(true);
     expect(isStale(new Date(now - STALE_AFTER_MS - 1), now)).toBe(true);
     expect(isStale(new Date(now - HOUR), now)).toBe(false);
+  });
+
+  it("puts a failing store above a merely stale one", () => {
+    // The gap this closes: cursors move only on SUCCESS, so a store failing
+    // every 15 minutes carried a fresh timestamp and sorted to the bottom until
+    // a full day had passed. Two production tenants had ~250 failed runs each
+    // that this screen never showed.
+    const failingNow = fleetStub({
+      tenantId: "failing",
+      connection: { state: "live", shopDomain: "a.myshopify.com" },
+      stalenessMs: 5 * 60_000, // synced five minutes ago
+      recentFailures: 12,
+      lastError: "token revoked or app uninstalled",
+    });
+    const quietlyStale = fleetStub({
+      tenantId: "stale",
+      connection: { state: "live", shopDomain: "b.myshopify.com" },
+      stalenessMs: 3 * 24 * HOUR,
+    });
+
+    expect(sortFleet([quietlyStale, failingNow], "staleness").map((r) => r.tenantId)).toEqual([
+      "failing",
+      "stale",
+    ]);
   });
 
   it("name and created sorts do what they say", () => {

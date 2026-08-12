@@ -234,4 +234,43 @@ describe.skipIf(!runnable)("shopify sync schedule (real redis + db)", () => {
     expect(left.filter((r) => r.status === "running")).toHaveLength(1);
     expect(left.every((r) => r.finishedAt === null || r.finishedAt > old)).toBe(true);
   });
+
+  it("closes a run the worker was killed inside, and spares one still working", async () => {
+    // Ten of these had built up in production: the processor closes its row on
+    // success and on failure, so a row still "running" an hour later means the
+    // process died mid-flight — a redeploy. Left alone they accumulate forever
+    // and read as "syncing now".
+    await prismaService.syncRun.deleteMany({ where: { tenantId: connectedId } });
+    const now = new Date();
+    const abandoned = await prismaService.syncRun.create({
+      data: {
+        tenantId: connectedId,
+        source: "shopify",
+        status: "running",
+        startedAt: new Date(now.getTime() - 3 * 3_600_000),
+      },
+    });
+    // The boundary case that stops this eating live work: a sync takes about
+    // three minutes, so one that started a minute ago is genuinely in flight.
+    const inFlight = await prismaService.syncRun.create({
+      data: {
+        tenantId: connectedId,
+        source: "shopify",
+        status: "running",
+        startedAt: new Date(now.getTime() - 60_000),
+      },
+    });
+
+    expect(await cron.reapStrandedRuns(now)).toBe(1);
+
+    const closed = await prismaService.syncRun.findUniqueOrThrow({ where: { id: abandoned.id } });
+    expect(closed.status).toBe("failed");
+    expect(closed.finishedAt).not.toBeNull();
+    // The row stays as evidence and says what happened — deleting it would take
+    // the Connections screen's only record of a run that did not finish.
+    expect(closed.error).toContain("Interrupted");
+
+    const untouched = await prismaService.syncRun.findUniqueOrThrow({ where: { id: inFlight.id } });
+    expect(untouched.status).toBe("running");
+  });
 });

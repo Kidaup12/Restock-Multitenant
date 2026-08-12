@@ -8,6 +8,20 @@ export const SYNC_QUEUE = "sync";
  *  exponentially. */
 export const SYNC_ATTEMPTS = 6;
 
+/**
+ * A run still marked `running` past this age was abandoned, not still working.
+ *
+ * The processor closes its row on success and on failure, so the only way one
+ * survives is the process dying mid-flight — a redeploy, almost always, since
+ * a sync takes about three minutes and the platform's shutdown grace is far
+ * shorter. An hour is generous enough that a slow real run is never libelled.
+ *
+ * Lives here because two sides need the same number: the worker that closes
+ * them, and the admin fleet that shows them. Two copies would drift, and the
+ * screen would disagree with the sweep about what counts as abandoned.
+ */
+export const STRANDED_RUN_AFTER_MS = 60 * 60 * 1000;
+
 export interface SyncJobData {
   tenantId: string;
   source: string;

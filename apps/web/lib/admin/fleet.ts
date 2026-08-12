@@ -1,4 +1,5 @@
 import { CUSTOMER_TENANTS_WHERE, prismaService } from "@wezesha/db";
+import { STRANDED_RUN_AFTER_MS } from "@wezesha/queue";
 
 /**
  * Fleet queries for the admin console — the sanctioned cross-tenant read
@@ -39,7 +40,35 @@ export type FleetRow = {
   stalenessMs: number | null;
   openNotifications: number;
   lastForecastRunAt: Date | null;
+  /**
+   * Runs that ended in an error inside the failure window, and the newest
+   * message among them.
+   *
+   * The fleet used to read cursors alone, which move only on SUCCESS — so a
+   * store failing every fifteen minutes looked identical to a healthy one for a
+   * full day, until the 24-hour staleness line finally tripped. Two production
+   * tenants had accumulated ~250 failed runs each that this screen never showed.
+   */
+  recentFailures: number;
+  lastError: string | null;
+  /**
+   * Runs still marked `running` long after any real sync would have finished.
+   * The processor closes its row on both paths, so one of these means the
+   * worker was killed mid-flight — a redeploy, almost always. Harmless to the
+   * data, but they are the difference between "syncing now" and "died an hour
+   * ago", and nothing else surfaces them.
+   */
+  strandedRuns: number;
 };
+
+/** How far back a failed run still counts as news. Shorter than the staleness
+ *  line on purpose: failures are the early warning, staleness is the symptom
+ *  that eventually follows. */
+export const FAILURE_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+/** Abandoned-run threshold — shared with the worker that closes them, so the
+ *  screen and the sweep cannot disagree about what counts as abandoned. */
+export { STRANDED_RUN_AFTER_MS as STRANDED_AFTER_MS } from "@wezesha/queue";
 
 /** A store the app holds a usable connection row for. Paused counts: its data
  *  exists and is going stale, which is precisely what the fleet must show — it
@@ -67,7 +96,7 @@ function worstStaleness(
 export async function getFleet(now: number = Date.now()): Promise<FleetRow[]> {
   // Cross-tenant on purpose: the fleet view is the whole point of this module
   // (see file header). Four queries total, joined in memory by tenantId.
-  const [tenants, cursors, unread, forecastRuns] = await Promise.all([
+  const [tenants, cursors, unread, forecastRuns, troubleRuns] = await Promise.all([
     prismaService.tenant.findMany({
       // The platform workspace is ours, not a shop: it has no connection and
       // never syncs, so it would sit at the top of a list sorted by staleness.
@@ -92,6 +121,17 @@ export async function getFleet(now: number = Date.now()): Promise<FleetRow[]> {
       by: ["tenantId"],
       _max: { runDate: true },
     }),
+    // Failures and abandoned runs, the two things cursors can never report.
+    prismaService.syncRun.findMany({
+      where: {
+        OR: [
+          { status: "failed", startedAt: { gte: new Date(now - FAILURE_WINDOW_MS) } },
+          { status: "running", startedAt: { lt: new Date(now - STRANDED_RUN_AFTER_MS) } },
+        ],
+      },
+      select: { tenantId: true, status: true, error: true, startedAt: true },
+      orderBy: { startedAt: "desc" },
+    }),
   ]);
 
   const cursorsByTenant = new Map<string, Map<string, Date>>();
@@ -102,6 +142,22 @@ export async function getFleet(now: number = Date.now()): Promise<FleetRow[]> {
   }
   const unreadByTenant = new Map(unread.map((n) => [n.tenantId, n._count._all]));
   const runByTenant = new Map(forecastRuns.map((r) => [r.tenantId, r._max.runDate]));
+
+  // Ordered newest-first by the query, so the first error seen per tenant is the
+  // latest one.
+  const failuresByTenant = new Map<string, { count: number; error: string | null }>();
+  const strandedByTenant = new Map<string, number>();
+  for (const run of troubleRuns) {
+    if (run.status === "failed") {
+      const seen = failuresByTenant.get(run.tenantId);
+      failuresByTenant.set(run.tenantId, {
+        count: (seen?.count ?? 0) + 1,
+        error: seen?.error ?? run.error,
+      });
+    } else {
+      strandedByTenant.set(run.tenantId, (strandedByTenant.get(run.tenantId) ?? 0) + 1);
+    }
+  }
 
   return tenants.map((t) => {
     const state: ConnectionState = !t.shopifyConnection
@@ -128,6 +184,9 @@ export async function getFleet(now: number = Date.now()): Promise<FleetRow[]> {
       stalenessMs: worstStaleness(state, lastSync, now),
       openNotifications: unreadByTenant.get(t.id) ?? 0,
       lastForecastRunAt: runByTenant.get(t.id) ?? null,
+      recentFailures: failuresByTenant.get(t.id)?.count ?? 0,
+      lastError: failuresByTenant.get(t.id)?.error ?? null,
+      strandedRuns: strandedByTenant.get(t.id) ?? 0,
     };
   });
 }
@@ -143,7 +202,14 @@ export function sortFleet(rows: FleetRow[], sort: FleetSort): FleetRow[] {
   } else if (sort === "created") {
     sorted.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   } else {
-    sorted.sort((a, b) => (b.stalenessMs ?? -1) - (a.stalenessMs ?? -1));
+    // Health, not just age. A store failing right now is the more urgent row
+    // even though its cursor is minutes old — sorting on staleness alone put it
+    // at the bottom until a full day had passed.
+    sorted.sort(
+      (a, b) =>
+        Number(b.recentFailures > 0) - Number(a.recentFailures > 0) ||
+        (b.stalenessMs ?? -1) - (a.stalenessMs ?? -1)
+    );
   }
   return sorted;
 }
