@@ -119,7 +119,7 @@ export function ProductDetailView({
               <Figure
                 label="Unit cost"
                 value={<CostValue amount={detail.unitCostKes} canViewCosts={canViewCosts} />}
-                note={detail.costSource}
+                note={detail.costSource ?? undefined}
               />
               <Figure
                 label="Cash in this stock"

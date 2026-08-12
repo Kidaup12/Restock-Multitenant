@@ -516,7 +516,7 @@ function RowGroup({
         <TableCell numeric>
           <span className="inline-flex flex-col items-end">
             <CostValue amount={row.costKes} canViewCosts={canViewCosts} />
-            <span className="text-xs text-ink-faint">{SOURCE_SHORT[row.costSource]}</span>
+            <span className="text-xs text-ink-faint">{row.costSource ? SOURCE_SHORT[row.costSource] : null}</span>
           </span>
         </TableCell>
         <TableCell numeric className={canViewCosts && row.marginPct != null && row.marginPct < 0 ? "font-semibold text-negative" : undefined}>

@@ -128,6 +128,21 @@ export default async function CostsPage() {
   const canViewCosts = hasPermission(membership, "view_costs");
   const canManage = hasPermission(membership, "manage_settings");
 
+  // Every figure on this screen is a cost fact — coverage percentages, how many
+  // products are held off the buy list, the source split. Redacting them field
+  // by field would leave an empty page, so the screen itself is the gate.
+  if (!canViewCosts) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Costs" description="Cost coverage and upload" />
+        <EmptyState
+          title="Not available on your account"
+          description="Buying prices are hidden for your role. Ask an owner or admin if you need them."
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader title="Costs" description="Cost coverage, upload/paste and cost-moved alerts" />

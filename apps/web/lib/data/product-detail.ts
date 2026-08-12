@@ -58,7 +58,7 @@ export type ProductDetail = {
   priceKes: number;
   /** Null for a money-blind caller. */
   unitCostKes: number | null;
-  costSource: string;
+  costSource: string | null;
   stockValueKes: number | null;
 
   supplierName: string | null;
@@ -198,7 +198,9 @@ export async function getProductDetail(
 
     priceKes: product.priceKes,
     unitCostKes: canViewCosts ? product.costKes : null,
-    costSource: cost.source,
+    // Rendered as the note under the masked figure — "typed" or "missing" tells
+    // a money-blind reader whether a cost exists and who set it.
+    costSource: canViewCosts ? cost.source : null,
     stockValueKes: canViewCosts ? Math.max(0, product.currentStock) * product.costKes : null,
 
     supplierName: product.supplier?.name ?? null,
