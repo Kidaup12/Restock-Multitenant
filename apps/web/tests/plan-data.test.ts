@@ -59,6 +59,63 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     await prismaService.$disconnect();
   });
 
+  it("counts our own sent POs as on order, not just Shopify's incoming", async () => {
+    // The nightly run already sized against outstanding POs; this screen read
+    // Product.onOrder alone. Between sending a PO and the store recording the
+    // delivery, the owner saw "On order: —" for stock they had already bought,
+    // and the what-if re-sizer recommended those units a second time.
+    //
+    // The seed has no purchase orders at all, so the fixture IS the test — an
+    // assertion made against the seed as-is passes whatever the code does.
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0];
+    expect(target, "need at least one buy-list row").toBeTruthy();
+
+    const product = await prismaService.product.findUniqueOrThrow({
+      where: { id: target!.productId },
+      select: { id: true, sku: true, title: true, onOrder: true },
+    });
+    expect(target!.onOrderUnits).toBe(product.onOrder); // today's behaviour
+
+    // Outstanding is set STRICTLY ABOVE whatever Shopify reports, so MAX must
+    // resolve to the PO. Sized off the live value rather than assuming zero —
+    // every seeded product already has something inbound.
+    const outstanding = product.onOrder + 25;
+    const po = await prismaService.purchaseOrder.create({
+      data: {
+        tenantId: seeded.tenantId,
+        poNumber: `PO-INBOUND-${Date.now()}`,
+        status: "sent",
+        sentAt: new Date(),
+        lines: {
+          create: {
+            tenantId: seeded.tenantId,
+            productId: product.id,
+            sku: product.sku,
+            title: product.title,
+            quantity: outstanding + 15,
+            receivedQty: 15, // partially received, so the remainder is what counts
+            unitCostKes: 100,
+            lineTotalKes: 100 * (outstanding + 15),
+          },
+        },
+      },
+    });
+
+    try {
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      const row = [...after!.rows, ...after!.excluded].find(
+        (r) => r.productId === product.id
+      );
+      expect(row, "the product must still be on the list somewhere").toBeTruthy();
+      expect(row!.onOrderUnits).toBe(outstanding);
+      expect(row!.onOrderUnits).toBeGreaterThan(product.onOrder); // it actually moved
+    } finally {
+      await prismaService.purchaseOrderLine.deleteMany({ where: { purchaseOrderId: po.id } });
+      await prismaService.purchaseOrder.delete({ where: { id: po.id } });
+    }
+  });
+
   it("prices a supplier minimum into the plan, not just into the purchase order", async () => {
     // #18. The floor was applied when the PO was written and nowhere else, so a
     // plan showing KES 1.08M of buying wrote KES 1.24M of orders. The owner

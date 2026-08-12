@@ -42,6 +42,12 @@ export {
 } from "./product-lifecycle";
 export type { ProductLifecycle, ProductStatus } from "./product-lifecycle";
 export {
+  OUTSTANDING_PO_STATUSES,
+  effectiveOnOrder,
+  outstandingByProduct,
+  outstandingUnits,
+} from "./inbound";
+export {
   CUSTOMER_TENANTS_WHERE,
   PLATFORM_TENANT_ID,
   PLATFORM_TENANT_SLUG,

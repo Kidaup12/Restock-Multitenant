@@ -1,6 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { Redis } from "ioredis";
-import { BUYABLE_PRODUCT_WHERE, isSellable, prismaForTenantTx } from "@wezesha/db";
+import {
+  BUYABLE_PRODUCT_WHERE,
+  OUTSTANDING_PO_STATUSES,
+  effectiveOnOrder,
+  isSellable,
+  outstandingByProduct,
+  prismaForTenantTx,
+} from "@wezesha/db";
 import {
   assignAbc,
   dailySalesValue,
@@ -211,47 +218,26 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
     { maxWait: 30_000, timeout: 120_000 }
   );
 
-  /**
-   * Units we have ordered from a supplier and not yet received.
-   *
-   * `Product.onOrder` carries SHOPIFY's view — stock at an en-route location
-   * plus Shopify's own `incoming`. It knows nothing about a purchase order we
-   * sent ourselves, and most stock in transit got there because of one. So
-   * between sending a PO and the shop recording it in Shopify, the forecast saw
-   * an un-ordered product and told the owner to buy it again.
-   *
-   * Combined with MAX rather than a sum, because these are two views of the
-   * same physical stock: once the shop does record the delivery as incoming,
-   * adding them would count it twice and suppress a reorder that is really due.
-   *
-   * Draft POs are excluded — nothing has been ordered yet, and the buy list
-   * warns about those separately. Cancelled and fully received ones drop out on
-   * their status or their received quantity.
-   */
-  const outstandingPoUnits = new Map<string, number>();
-  {
-    const poLines = await prismaForTenantTx(tenantId, (tx) =>
+  // Units we ordered ourselves and have not received. Why this exists and why
+  // it combines with MAX rather than a sum lives with the rule, in
+  // packages/db/src/inbound.ts — the buy list reads the same one.
+  const outstandingPoUnits = outstandingByProduct(
+    await prismaForTenantTx(tenantId, (tx) =>
       tx.purchaseOrderLine.findMany({
         where: {
           purchaseOrder: {
-            status: { in: ["sent", "partially_received"] },
+            status: { in: [...OUTSTANDING_PO_STATUSES] },
             deletedAt: null,
           },
         },
         select: { productId: true, quantity: true, receivedQty: true },
       })
-    );
-    for (const l of poLines) {
-      const outstanding = Math.max(0, l.quantity - l.receivedQty);
-      if (outstanding > 0) {
-        outstandingPoUnits.set(l.productId, (outstandingPoUnits.get(l.productId) ?? 0) + outstanding);
-      }
-    }
-  }
+    )
+  );
 
   /** What is genuinely inbound for this product, from either source. */
   const inboundFor = (product: { id: string; onOrder: number }): number =>
-    Math.max(product.onOrder, outstandingPoUnits.get(product.id) ?? 0);
+    effectiveOnOrder(product.onOrder, outstandingPoUnits.get(product.id) ?? 0);
 
   const historyByProduct = new Map<string, SalesPoint[]>();
   for (const row of sales) {

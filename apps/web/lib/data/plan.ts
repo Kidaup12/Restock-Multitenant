@@ -1,4 +1,10 @@
-import { prismaForTenant, prismaForTenantTx } from "@wezesha/db";
+import {
+  OUTSTANDING_PO_STATUSES,
+  effectiveOnOrder,
+  outstandingByProduct,
+  prismaForTenant,
+  prismaForTenantTx,
+} from "@wezesha/db";
 import { applyMoq } from "@/lib/po/po-math";
 import {
   allocateByBudget,
@@ -407,9 +413,14 @@ export async function getBuyList(
   //   - a DRAFT purchase-order line → keep active, but warn on double-ordering.
   const openOrderProductIds = new Set<string>();
   const draftPoProductIds = new Set<string>();
+  // Units on a SENT PO are stock the shop has already paid for. The nightly run
+  // counts them; this screen used to read Shopify's column alone, so between
+  // sending a PO and the store recording the delivery it printed "On order: —"
+  // and the what-if re-sizer recommended the same units again.
+  let outstandingPoUnits = new Map<string, number>();
   if (lookupIds.length > 0) {
     const productIds = lookupIds;
-    const [openOrders, draftLines] = await Promise.all([
+    const [openOrders, draftLines, sentLines] = await Promise.all([
       db.order.findMany({
         where: {
           productId: { in: productIds },
@@ -425,9 +436,17 @@ export async function getBuyList(
         },
         select: { productId: true },
       }),
+      db.purchaseOrderLine.findMany({
+        where: {
+          productId: { in: productIds },
+          purchaseOrder: { status: { in: [...OUTSTANDING_PO_STATUSES] }, deletedAt: null },
+        },
+        select: { productId: true, quantity: true, receivedQty: true },
+      }),
     ]);
     for (const o of openOrders) if (o.productId) openOrderProductIds.add(o.productId);
     for (const l of draftLines) draftPoProductIds.add(l.productId);
+    outstandingPoUnits = outstandingByProduct(sentLines);
   }
 
   // Titles for cold-start borrows. Tenant-scoped through the same client, so a
@@ -460,6 +479,12 @@ export async function getBuyList(
       // deadline the owner acts on, so an unknown lead resolves to the shared
       // assumption rather than to zero, which would say "order it the day the
       // shelf empties".
+      // Shopify's incoming count OR our own outstanding POs, whichever is
+      // larger — the same rule the nightly run sizes with (@wezesha/db/inbound).
+      const inboundUnits = effectiveOnOrder(
+        product.onOrder,
+        outstandingPoUnits.get(p.productId) ?? 0
+      );
       const measuredLeadDays = leadDaysFor(product, product.supplier);
       const leadDays = measuredLeadDays ?? ASSUMED_LEAD_DAYS;
       const daysLeftToOrder = p.daysUntilStockout - leadDays;
@@ -490,7 +515,7 @@ export async function getBuyList(
               finalForecast30d: p.finalForecast30d * demandMultiplier,
               safetyStock: p.safetyStock,
               currentStock: product.currentStock,
-              onOrder: product.onOrder,
+              onOrder: inboundUnits,
               coverDays:
                 coverDays != null
                   ? Math.max(coverDays, measuredLeadDays ?? 0)
@@ -515,7 +540,7 @@ export async function getBuyList(
         // Sellable on-hand: Product.currentStock is the single source shared with
         // Today and Stock (the Sells-only rollup) — never a second sum here.
         onHandUnits: product.currentStock,
-        onOrderUnits: product.onOrder,
+        onOrderUnits: inboundUnits,
         daysUntilStockout: stockoutDaysLeft(p.daysUntilStockout),
         daysLeftToOrder,
         leadDays,
