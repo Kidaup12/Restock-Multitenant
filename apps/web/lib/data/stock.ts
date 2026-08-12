@@ -96,9 +96,10 @@ export type CatalogueRow = {
   // ── Cost chain + inventory-truth (this slice) ──────────────────────────────
   /** Owner-defined category (the Category facet); null = uncategorised. */
   customCategory: string | null;
-  /** Resolved cost source with zero-as-missing applied — always shown (a source
-   *  label / data-quality signal, not a KES amount). */
-  costSource: CostSource;
+  /** Resolved cost source with zero-as-missing applied. Null for a money-blind
+   *  caller: "there is a typed cost" is a cost fact even though it carries no
+   *  figure. */
+  costSource: CostSource | null;
   /** Owner-marked tester/display/damaged: stays in the catalogue, out of
    *  sellable cover / money band / buy list. */
   notForSale: boolean;
@@ -131,6 +132,11 @@ export type CatalogueRow = {
   /** Margin % of price (loud red when negative). Null when there's no price, or
    *  the caller can't view costs. */
   marginPct: number | null;
+  // The next four are cost facts wearing a boolean. "Sold at or below cost",
+  // "has no cost", "its cost jumped" are exactly what money-blindness withholds
+  // — the figure is the smaller half of the disclosure. All false/null for a
+  // money-blind caller, which also keeps them out of the catalogue's health
+  // chips (`rowHealthKeys`), where they were filterable by URL.
   /** Cost is missing/zero (held off the buy list). */
   missingCost: boolean;
   /** Cost is present but >= price (suspect). */
@@ -138,7 +144,7 @@ export type CatalogueRow = {
   /** Held off the buy list (engine's plannable rule). */
   heldOffBuyList: boolean;
   /** A synced cost jumped sharply — the attention signal (signed %); null = no
-   *  active alert. Not a KES amount, so shown regardless of cost visibility. */
+   *  active alert. */
   costMovedPct: number | null;
   costMovedAt: Date | null;
   /** This product projected onto every metadata facet (brand, type, category,
@@ -225,7 +231,16 @@ export async function getStockCatalogue(
       createdAt: p.shopifyCreatedAt,
     };
   });
-  const facetById = new Map(buildFacetItems(facetRows).map((f) => [f.productId, f]));
+  // `missing_cost` is a health flag derived from the cost itself, and the facet
+  // feeds the catalogue's filter chips — leaving it in hands a money-blind
+  // member a chip that selects exactly the products with no cost. The other
+  // flags (supplier, SKU, negative, new, dead) carry no cost fact.
+  const facetById = new Map(
+    buildFacetItems(facetRows).map((f) => [
+      f.productId,
+      canViewCosts ? f : { ...f, health: f.health.filter((h) => h !== "missing_cost") },
+    ])
+  );
 
   return products.map((p) => {
     const m = metrics.get(p.id);
@@ -264,7 +279,7 @@ export async function getStockCatalogue(
       moneyAtRestKes: canViewCosts ? (m?.moneyAtRestKes ?? 0) : null,
       abc: m?.abc ?? null,
       customCategory: p.customCategory,
-      costSource: cost.source,
+      costSource: canViewCosts ? cost.source : null,
       notForSale: p.notForSale,
       lifecycle,
       lifecycleLabel: LIFECYCLE_LABELS[lifecycle],
@@ -277,9 +292,12 @@ export async function getStockCatalogue(
       leadDays,
       verdict: buyable ? coverVerdict(sellable, daysCover, leadDays) : null,
       marginPct: canViewCosts && cost.costKes > 0 ? marginPct(cost.costKes, p.priceKes) : null,
-      missingCost: buyable && cost.suspectReason === "missing",
-      suspectCost: buyable && suspectCostPresent({ costKes: p.costKes, costSource: p.costSource, priceKes: p.priceKes }),
-      heldOffBuyList: cost.heldOffBuyList,
+      missingCost: canViewCosts && buyable && cost.suspectReason === "missing",
+      suspectCost:
+        canViewCosts &&
+        buyable &&
+        suspectCostPresent({ costKes: p.costKes, costSource: p.costSource, priceKes: p.priceKes }),
+      heldOffBuyList: canViewCosts && cost.heldOffBuyList,
       // Cost-blind to the flag as well as the figure. The catalogue derives a
       // "cost moved" facet from these, and a chip that filters to exactly the
       // products whose buying price jumped names them — the percentage is the

@@ -215,17 +215,28 @@ export async function getSupplyCalendar(
 }
 
 /** Null out every KES figure for a money-blind caller — dates, supplier names,
- *  and item/PO counts survive, the money does not. */
+ *  and item/PO counts survive, the money does not.
+ *
+ *  The ORDER has to change too. Both lists were sorted by spend, so nulling the
+ *  figures and leaving the sequence hands a member the same ranking with the
+ *  numbers filed off — the top row is still the biggest cheque. Re-rank on what
+ *  a money-blind caller is allowed to know: how many items / POs, then name.
+ *  Same reasoning as `byUrgencyCostFree` on the buy list. */
 function redactCalendar(calendar: SupplyCalendar): SupplyCalendar {
+  const byCountThenName = <T extends { itemCount: number; supplierName: string | null }>(a: T, b: T) =>
+    b.itemCount - a.itemCount || (a.supplierName ?? "").localeCompare(b.supplierName ?? "");
+
   return {
     ...calendar,
     buckets: calendar.buckets.map((b) => ({
       ...b,
       cashKes: null,
-      suppliers: b.suppliers.map((s) => ({ ...s, cashKes: null })),
+      suppliers: b.suppliers.map((s) => ({ ...s, cashKes: null })).sort(byCountThenName),
     })),
     totalCashKes: null,
-    openCommitments: calendar.openCommitments.map((c) => ({ ...c, committedKes: null })),
+    openCommitments: calendar.openCommitments
+      .map((c) => ({ ...c, committedKes: null }))
+      .sort((a, b) => b.poCount - a.poCount || (a.supplierName ?? "").localeCompare(b.supplierName ?? "")),
     openCommittedKes: null,
   };
 }

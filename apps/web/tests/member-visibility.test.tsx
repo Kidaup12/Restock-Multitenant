@@ -8,6 +8,7 @@ import { MoneyGate } from "../components/money-gate";
 import { formatCompact } from "../lib/money";
 import { getReorderNeeded, getTodayMetrics } from "../lib/data/today";
 import { getStockByLocation, getStockCatalogue } from "../lib/data/stock";
+import { getProductDetail } from "../lib/data/product-detail";
 import {
   getBuyList,
   redactBudgetSplit,
@@ -94,6 +95,44 @@ function costNumbers(payload: unknown, path = "$"): string[] {
       found.push(`${path}.${key}=${value}`);
     }
     found.push(...costNumbers(value, `${path}.${key}`));
+  }
+  return found;
+}
+
+/** Keys that answer a question about cost without carrying a figure: does this
+ *  product have one, where did it come from, is it above the selling price.
+ *  A truthy value on any of them is as much a disclosure as the number. */
+const COST_DERIVED_KEYS = new Set([
+  "costSource",
+  "missingCost",
+  "suspectCost",
+  "heldOffBuyList",
+  "costMovedPct",
+  "costMovedAt",
+]);
+
+/** The companion to costNumbers, and the one that would have caught the leak it
+ *  missed: cost facts expressed as a boolean or a label. `costNumbers` only
+ *  matches numeric keys ending in "Kes", so `suspectCost: true` — true exactly
+ *  when cost >= price — sailed through it, and through the catalogue's filter
+ *  chips with it. Must also come back empty for a money-blind caller. */
+function costSignals(payload: unknown, path = "$"): string[] {
+  if (payload === null || typeof payload !== "object") return [];
+  if (payload instanceof Date) return [];
+  if (Array.isArray(payload)) {
+    return payload.flatMap((item, i) => costSignals(item, `${path}[${i}]`));
+  }
+  const found: string[] = [];
+  for (const [key, value] of Object.entries(payload)) {
+    if (COST_DERIVED_KEYS.has(key) && value !== null && value !== false && value !== undefined) {
+      found.push(`${path}.${key}=${String(value)}`);
+    }
+    // The catalogue ships health flags as a string array, so the cost-derived
+    // one has to be caught by value rather than by key.
+    if (key === "health" && Array.isArray(value) && value.includes("missing_cost")) {
+      found.push(`${path}.health[missing_cost]`);
+    }
+    found.push(...costSignals(value, `${path}.${key}`));
   }
   return found;
 }
@@ -284,6 +323,75 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
 
     expect(costNumbers(await getStockCatalogue(seeded.tenantId, { canViewCosts: true })).length)
       .toBeGreaterThan(0);
+  });
+
+  it("stock payloads carry no cost SIGNALS for a member either", async () => {
+    // The half costNumbers is blind to. `suspectCost` is true exactly when cost
+    // >= price and `costSource` says whether a cost exists at all — neither is a
+    // number, both answer a question about cost, and the catalogue turned the
+    // first into a filter chip that selected precisely those products.
+    //
+    // THE SEED HAS NEITHER SHAPE: every seeded product carries a healthy cost
+    // below its price, so asserting `suspectCost === false` against it passes
+    // whatever the code does. The fixture below is what gives this test teeth —
+    // without it the only assertion doing work is `costSource`.
+    const [dear, costless] = await prismaService.product.findMany({
+      where: { tenantId: seeded.tenantId, ...BUYABLE_PRODUCT_WHERE },
+      orderBy: { sku: "asc" },
+      take: 2,
+    });
+    await prismaService.product.update({
+      where: { id: dear!.id },
+      data: { costKes: dear!.priceKes + 50, costSource: "manual" },
+    });
+    await prismaService.product.update({
+      where: { id: costless!.id },
+      data: { costKes: 0, costSource: null },
+    });
+
+    try {
+      const ownerRows = await getStockCatalogue(seeded.tenantId, { canViewCosts: true });
+      // Prove the fixture landed before trusting anything it is meant to catch.
+      expect(ownerRows.find((r) => r.productId === dear!.id)!.suspectCost).toBe(true);
+      expect(ownerRows.find((r) => r.productId === costless!.id)!.missingCost).toBe(true);
+      expect(ownerRows.find((r) => r.productId === costless!.id)!.facet.health).toContain(
+        "missing_cost"
+      );
+
+      const rows = await getStockCatalogue(seeded.tenantId, { canViewCosts: false });
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row.costSource, row.sku).toBeNull();
+        expect(row.suspectCost, row.sku).toBe(false);
+        expect(row.missingCost, row.sku).toBe(false);
+        expect(row.heldOffBuyList, row.sku).toBe(false);
+        expect(row.facet.health, row.sku).not.toContain("missing_cost");
+      }
+      expect(costSignals(rows)).toEqual([]);
+      expect(costSignals(ownerRows).length).toBeGreaterThan(0);
+    } finally {
+      await prismaService.product.update({
+        where: { id: dear!.id },
+        data: { costKes: dear!.costKes, costSource: dear!.costSource },
+      });
+      await prismaService.product.update({
+        where: { id: costless!.id },
+        data: { costKes: costless!.costKes, costSource: costless!.costSource },
+      });
+    }
+  });
+
+  it("product detail hides where the cost came from, not just the figure", async () => {
+    const product = await prismaService.product.findFirstOrThrow({
+      where: { tenantId: seeded.tenantId, ...BUYABLE_PRODUCT_WHERE },
+    });
+    const [member, owner] = await Promise.all([
+      getProductDetail(seeded.tenantId, product.id, { canViewCosts: false }),
+      getProductDetail(seeded.tenantId, product.id, { canViewCosts: true }),
+    ]);
+    expect(member!.costSource).toBeNull();
+    expect(owner!.costSource).not.toBeNull(); // vacuity guard
+    expect(costSignals(member)).toEqual([]);
   });
 
   it("the catalogue's cost-moved flag is hidden from a member, not just its figure", async () => {

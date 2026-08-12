@@ -84,7 +84,7 @@ export function RowEditor({
           <div className="text-xs font-medium tracking-wider text-ink-muted uppercase">Cost</div>
           <div className="flex items-center gap-2 text-sm">
             <CostValue amount={row.costKes} canViewCosts={canViewCosts} />
-            <span className="text-ink-muted">· {SOURCE_LABEL[row.costSource]}</span>
+            {row.costSource && <span className="text-ink-muted">· {SOURCE_LABEL[row.costSource]}</span>}
           </div>
           {row.costMovedPct != null && (
             <Badge tone="warning">Cost moved {formatMovePct(row.costMovedPct)}</Badge>

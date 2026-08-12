@@ -137,29 +137,50 @@ describe.skipIf(!runnable)("supply calendar (seeded local db)", () => {
       const mb = member.buckets[i]!;
       expect(mb.itemCount).toBe(ob.itemCount);
       expect(mb.monthStart.getTime()).toBe(ob.monthStart.getTime());
-      expect(mb.suppliers.map((s) => [s.supplierName, s.itemCount])).toEqual(
-        ob.suppliers.map((s) => [s.supplierName, s.itemCount])
-      );
+      // Compared as a set: the ORDER deliberately differs (the member's is
+      // re-ranked by item count so the cash ranking is not readable through it
+      // — see the ordering test below). Membership and counts must still match.
+      const byName = (rows: { supplierName: string | null; itemCount: number }[]) =>
+        rows
+          .map((s) => [s.supplierName, s.itemCount] as const)
+          .sort((a, b) => (a[0] ?? "").localeCompare(b[0] ?? ""));
+      expect(byName(mb.suppliers)).toEqual(byName(ob.suppliers));
     });
   });
 
-  it("orders suppliers by cash for both roles, not just the one that can see it", async () => {
-    // Regression: the calendar used to build on a redacted buy list, so every
-    // group summed to zero cash for a member and the sort fell through to
-    // count-then-name. Both roles must walk the suppliers in the same order,
-    // and that order must be the cash ranking — otherwise staff and owner work
-    // a restock list with different priorities.
+  it("ranks by cash for an owner and by item count for a member", async () => {
+    // This assertion used to require BOTH roles to walk the suppliers in the
+    // cash order, on the reasoning that staff and owner should not work a
+    // restock list with different priorities. That reasoning leaks: nulling the
+    // figures while keeping the sequence hands a money-blind member the exact
+    // spend ranking with the numbers filed off, and the top row is still the
+    // biggest cheque. The buy list settled the same tension the other way with
+    // `byUrgencyCostFree`; the calendar now matches it.
     const now = new Date();
     const [owner, member] = await Promise.all([
       getSupplyCalendar(seeded.tenantId, { canViewCosts: true, now, horizonMonths: HORIZON }),
       getSupplyCalendar(seeded.tenantId, { canViewCosts: false, now, horizonMonths: HORIZON }),
     ]);
 
+    // Vacuity guard: a single-supplier calendar orders identically under any
+    // rule and would prove nothing either way.
+    expect(owner.buckets.some((b) => b.suppliers.length > 1)).toBe(true);
+
     for (const [i, ob] of owner.buckets.entries()) {
       const cash = ob.suppliers.map((s) => s.cashKes ?? 0);
       expect(cash).toEqual([...cash].sort((a, b) => b - a));
-      expect(member.buckets[i]!.suppliers.map((s) => s.supplierName)).toEqual(
-        ob.suppliers.map((s) => s.supplierName)
+
+      // The member's order is derivable from what a member is allowed to see.
+      const mb = member.buckets[i]!;
+      const counts = mb.suppliers.map((s) => s.itemCount);
+      expect(counts).toEqual([...counts].sort((a, b) => b - a));
+      expect(mb.suppliers.every((s) => s.cashKes === null)).toBe(true);
+    }
+
+    // Same suppliers, same counts — this re-ranks, it does not hide anyone.
+    for (const [i, ob] of owner.buckets.entries()) {
+      expect(new Set(member.buckets[i]!.suppliers.map((s) => s.supplierName))).toEqual(
+        new Set(ob.suppliers.map((s) => s.supplierName))
       );
     }
   });
