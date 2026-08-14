@@ -2,12 +2,13 @@ import { prismaForTenant, prismaService } from "@wezesha/db";
 import { sendEmail } from "@/lib/email";
 import { buildPoDocument } from "@/lib/po/po-model";
 import { poEmailHtml, poEmailSubject, poEmailText } from "@/lib/po/po-email";
+import { poPdfBytes, poPdfFilename } from "@/lib/po/po-pdf";
 
 /**
- * "Email to supplier": render the PO document to an HTML + text email through
- * the sendEmail seam, then mark the PO sent. Send-then-mark ordering: a failed
- * send leaves the PO in draft (retryable); the worst retry case is a duplicate
- * email, never a "sent" PO the supplier never saw.
+ * "Email to supplier": render the PO document to an HTML + text email with the
+ * order attached as a PDF, send it through the sendEmail seam, and mark the PO
+ * sent. A failed send leaves the PO in draft (retryable); the worst retry case
+ * is a duplicate email, never a "sent" PO the supplier never saw.
  */
 
 const DAY_MS = 86_400_000;
@@ -53,6 +54,17 @@ export async function sendPoToSupplier(
   const lead = po.supplier.leadTimeAvgDays;
   const expectedAt = lead != null ? new Date(sentAt.getTime() + lead * DAY_MS) : null;
 
+  // The supplier is quoting against these figures — the send action is what
+  // authorises the costs to leave the building, not the viewing member — so the
+  // supplier-facing document always carries them.
+  const doc = buildPoDocument({ ...po, sentAt, expectedAt }, tenant.name, { canViewCosts: true });
+  // Render the attachment before the claim below, not after it. Generation is
+  // the one step here that does real work on data nobody validated (line count,
+  // odd titles); after the claim, a failure would depend on the rollback also
+  // landing to avoid a PO marked sent with nothing delivered. Before it, there
+  // is nothing to roll back — the row is untouched and still draft.
+  const pdf = await poPdfBytes(doc);
+
   // Claim the PO BEFORE the email goes out. Read-then-send-then-mark let two
   // admins, two tabs or a double-click each read "draft" and each email the
   // supplier — one real order placed twice, with a single PO showing as sent.
@@ -64,16 +76,15 @@ export async function sendPoToSupplier(
   });
   if (claim.count === 0) return { ok: false, reason: "not_sendable" };
 
-  // The supplier is quoting against these figures — the send action is what
-  // authorises the costs to leave the building, not the viewing member — so the
-  // supplier-facing document always carries them.
-  const doc = buildPoDocument({ ...po, sentAt, expectedAt }, tenant.name, { canViewCosts: true });
   try {
     await sendEmail({
       to: po.supplier.email,
       subject: poEmailSubject(doc),
       text: poEmailText(doc),
       html: poEmailHtml(doc),
+      attachments: [{ filename: poPdfFilename(doc), content: pdf }],
+      tenantId,
+      kind: "purchase_order",
     });
   } catch (err) {
     // Hand the claim back so the owner can retry, rather than leaving a PO that
