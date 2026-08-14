@@ -410,12 +410,49 @@ function driftTitle(row: SupplierRow): string {
   return `Deliveries are running ${delta} day${delta === 1 ? "" : "s"} ${dir} than the ${row.leadTimeTypedDays}d you set.`;
 }
 
+/**
+ * On-time grades a delivery against the date promised when the order went out,
+ * and that date is only set when the supplier had a lead time at the time. So a
+ * supplier with plenty of deliveries and no lead time scores nothing — which
+ * used to look exactly like a supplier with no deliveries. Say which it is, and
+ * what fixes it.
+ */
+function onTimeGap(row: SupplierRow): { label: string; help: string } | null {
+  if (row.onTimePct != null) return null;
+  if (row.onTimeStatus === "awaiting_completion") {
+    return {
+      label: "On-time pending",
+      help: "On-time is scored once a delivery is fully checked in.",
+    };
+  }
+  if (row.onTimeStatus !== "no_promised_date") return null;
+  if (row.leadTimeTypedDays != null) {
+    return {
+      label: "On-time from your next order",
+      help: "These orders went out before this supplier had a delivery time, so there was no promised date to judge them against. Orders you send from now on are scored.",
+    };
+  }
+  return {
+    label: "On-time needs a lead time",
+    help:
+      row.learnedLeadDays != null
+        ? `Nothing was promised on these orders, so no delivery can be called on time. Give this supplier a delivery time — "Use learned" takes the ${row.learnedLeadDays} days these deliveries actually took — and orders you send from now on are scored.`
+        : "Nothing was promised on these orders, so no delivery can be called on time. Add this supplier's usual delivery time under Edit, and orders you send from now on are scored.",
+  };
+}
+
 function ScoreBadges({ row }: { row: SupplierRow }) {
   if (row.deliveriesTracked === 0) {
     return <span className="text-xs text-ink-faint">No deliveries yet</span>;
   }
+  const gap = onTimeGap(row);
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
+      {gap && (
+        <span className="text-xs text-ink-muted" title={gap.help}>
+          {gap.label}
+        </span>
+      )}
       {row.onTimePct != null && (
         <Badge tone={row.onTimePct >= 80 ? "positive" : row.onTimePct >= 50 ? "warning" : "negative"}>
           On-time {row.onTimePct}%

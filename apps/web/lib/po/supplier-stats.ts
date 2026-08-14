@@ -25,11 +25,30 @@ export type ScorablePo = {
   lines: { quantity: number; receivedQty: number }[];
 };
 
+/**
+ * Why on-time is or isn't a number. On-time compares a delivery against the
+ * date promised when the order was sent, and that date only exists when the
+ * supplier had a lead time at send time — so a supplier nobody typed one for
+ * can take any number of deliveries and never score. Absence alone doesn't say
+ * which of these it is, and the three have different answers for the shop.
+ */
+export type OnTimeStatus =
+  /** onTimePct is a real figure. */
+  | "scored"
+  /** Nothing delivered yet — nothing to grade. */
+  | "no_deliveries"
+  /** Deliveries booked in, none finished — grading waits for the last unit. */
+  | "awaiting_completion"
+  /** Finished deliveries, none carrying a promised date. Fixed by a lead time. */
+  | "no_promised_date";
+
 export type SupplierScore = {
   /** Sent POs that have at least one receipt. */
   deliveredPos: number;
   /** received-on-or-before-expectedAt share of completed POs with an ETA. null = no data. */
   onTimePct: number | null;
+  /** Why onTimePct is null, so a screen can say so instead of showing a hole. */
+  onTimeStatus: OnTimeStatus;
   /** sum(receivedQty) / sum(quantity) across POs with any receipt. null = no data. */
   fillRatePct: number | null;
   /** Mean actual lead time (days) over completed deliveries. null = no data. */
@@ -81,9 +100,18 @@ export function computeSupplierScore(pos: ScorablePo[]): SupplierScore {
   }
 
   const lead = leadTimeStats(leadSamples);
+  const onTimeStatus: OnTimeStatus =
+    etaJudged > 0
+      ? "scored"
+      : deliveredPos === 0
+        ? "no_deliveries"
+        : leadSamples.length === 0
+          ? "awaiting_completion"
+          : "no_promised_date";
   return {
     deliveredPos,
     onTimePct: etaJudged > 0 ? Math.round((onTime / etaJudged) * 100) : null,
+    onTimeStatus,
     fillRatePct: orderedUnits > 0 ? Math.round((receivedUnits / orderedUnits) * 100) : null,
     learnedLeadDays: lead ? lead.avg : null,
   };
