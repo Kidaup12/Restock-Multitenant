@@ -66,3 +66,88 @@ export async function setLocationRole(input: {
   revalidatePath("/stock");
   return { ok: true };
 }
+
+/**
+ * Point a POS till at a branch, so its sales land in that branch's run rate.
+ * Upsert on (tenant, till name) — re-pointing a till is a correction, not a
+ * second row. Same gate and scoping as the role action: the location is read
+ * through the tenant client first, so an id from another tenant is invisible.
+ */
+export async function mapTillToLocation(input: {
+  warehouseName: string;
+  locationId: string;
+}): Promise<LocationActionResult> {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+  if (!membership) return err("You're not in a workspace.");
+  if (!hasPermission(membership, "manage_settings")) {
+    return err("You don't have settings access.");
+  }
+  const warehouseName = input.warehouseName.trim();
+  if (!warehouseName) return err("Pick a till.");
+
+  const db = prismaForTenant(membership.tenantId);
+  const location = await db.location.findUnique({
+    where: { id: input.locationId },
+    select: { id: true, name: true },
+  });
+  if (!location) return err("That branch no longer exists.");
+
+  await db.warehouseLocationMap.upsert({
+    where: { tenantId_warehouseName: { tenantId: membership.tenantId, warehouseName } },
+    create: { tenantId: membership.tenantId, warehouseName, locationId: location.id },
+    update: { locationId: location.id },
+  });
+
+  await prismaService.auditEvent.create({
+    data: {
+      tenantId: membership.tenantId,
+      entity: "WarehouseLocationMap",
+      entityId: warehouseName,
+      action: "till_mapped",
+      actorUserId: session.user.id,
+      actorName: membership.displayName ?? session.user.name ?? session.user.email,
+      meta: { till: warehouseName, locationId: location.id, locationName: location.name },
+    },
+  });
+
+  // The prompt to do this lives on Sales; the result shows on both screens.
+  revalidatePath("/settings/locations");
+  revalidatePath("/sales");
+  return { ok: true };
+}
+
+/** Undo a mapping — the till's sales go back to counting for no branch. */
+export async function unmapTill(input: { warehouseName: string }): Promise<LocationActionResult> {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+  if (!membership) return err("You're not in a workspace.");
+  if (!hasPermission(membership, "manage_settings")) {
+    return err("You don't have settings access.");
+  }
+
+  const db = prismaForTenant(membership.tenantId);
+  const existing = await db.warehouseLocationMap.findFirst({
+    where: { warehouseName: input.warehouseName.trim() },
+    select: { id: true, warehouseName: true, locationId: true },
+  });
+  if (!existing) return err("That till isn't mapped.");
+
+  await db.warehouseLocationMap.delete({ where: { id: existing.id } });
+
+  await prismaService.auditEvent.create({
+    data: {
+      tenantId: membership.tenantId,
+      entity: "WarehouseLocationMap",
+      entityId: existing.warehouseName,
+      action: "till_unmapped",
+      actorUserId: session.user.id,
+      actorName: membership.displayName ?? session.user.name ?? session.user.email,
+      meta: { till: existing.warehouseName, locationId: existing.locationId },
+    },
+  });
+
+  revalidatePath("/settings/locations");
+  revalidatePath("/sales");
+  return { ok: true };
+}

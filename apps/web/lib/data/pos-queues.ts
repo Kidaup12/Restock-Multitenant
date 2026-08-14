@@ -146,6 +146,57 @@ export type UnmappedTill = {
   salesCount: number;
 };
 
+export type TillMappingRow = {
+  /** Raw till name as the POS sends it — the key of the mapping. */
+  warehouse: string;
+  salesCount: number;
+  /** Branch it feeds, or null while it's unmapped. */
+  locationId: string | null;
+  locationName: string | null;
+};
+
+/**
+ * Every till the POS has ever sent, mapped or not, for the Locations screen —
+ * unmapped first (those are the ones costing a branch its run rate), then by
+ * sales volume. Mapped tills with no sales still list, so a mapping can be
+ * corrected or removed.
+ */
+export async function getTillMappings(tenantId: string): Promise<TillMappingRow[]> {
+  const db = prismaForTenant(tenantId);
+  const [grouped, maps, locations] = await Promise.all([
+    db.posSale.groupBy({ by: ["warehouse"], where: { warehouse: { not: null } }, _count: { _all: true } }),
+    db.warehouseLocationMap.findMany({ select: { warehouseName: true, locationId: true } }),
+    db.location.findMany({ select: { id: true, name: true } }),
+  ]);
+
+  const locationName = new Map(locations.map((l) => [l.id, l.name]));
+  const mapped = new Map(maps.map((m) => [normalizeSku(m.warehouseName), m]));
+  const counts = new Map<string, { warehouse: string; salesCount: number }>();
+  for (const g of grouped) {
+    if (g.warehouse == null) continue;
+    counts.set(normalizeSku(g.warehouse), { warehouse: g.warehouse, salesCount: g._count._all });
+  }
+  // A mapped till with no sales yet still needs a row to be editable.
+  for (const [key, m] of mapped) {
+    if (!counts.has(key)) counts.set(key, { warehouse: m.warehouseName, salesCount: 0 });
+  }
+
+  return [...counts.entries()]
+    .map(([key, c]) => {
+      const map = mapped.get(key);
+      return {
+        warehouse: c.warehouse,
+        salesCount: c.salesCount,
+        locationId: map?.locationId ?? null,
+        locationName: map ? (locationName.get(map.locationId) ?? null) : null,
+      };
+    })
+    .sort((a, b) => {
+      if ((a.locationId == null) !== (b.locationId == null)) return a.locationId == null ? -1 : 1;
+      return b.salesCount - a.salesCount;
+    });
+}
+
 /**
  * POS warehouses/tills that sold but aren't mapped to a Location — their sales
  * count in channel totals but no branch's run rate (spec §3). One attention row
