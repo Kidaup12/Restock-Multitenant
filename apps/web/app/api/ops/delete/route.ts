@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { activeMembership, getSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { deleteTenant } from "@/lib/offboarding/delete";
+import { withCapture } from "@/lib/observability/wrap";
 
 /**
  * Delete the active workspace — permanent, cascading, unrecoverable.
@@ -17,7 +18,7 @@ import { deleteTenant } from "@/lib/offboarding/delete";
  *
  * Body: { confirmSlug: string, exportConfirmed: true }
  */
-export async function POST(request: Request): Promise<NextResponse> {
+export const POST = withCapture(async (request: Request) => {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -58,4 +59,4 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }
   return NextResponse.json({ ok: true });
-}
+});

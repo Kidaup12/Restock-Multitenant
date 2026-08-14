@@ -10,6 +10,7 @@ import {
   isComplianceTopic,
   redactShop,
 } from "@/lib/shopify/compliance";
+import { withCapture } from "@/lib/observability/wrap";
 
 /**
  * Shopify webhook receiver. Enqueue-only: verify, dedupe, kick a worker job,
@@ -37,6 +38,12 @@ import {
  * credential is left alone) precisely so a late shop/redact still verifies;
  * only full offboarding, which deletes the tenant, closes that door — and a
  * deleted tenant has nothing left to redact.
+ *
+ * Capture reports what this route throws (the re-raised WebhookEvent insert)
+ * still as a non-2xx, so Shopify's retry is unchanged. The report carries no
+ * tenant tag: the caller is Shopify, not a session, and the tenant is only
+ * known after the signature check — the delivery headers are unauthenticated
+ * and must not become the tag.
  */
 
 const SYNC_TOPICS = new Set(["products/update", "inventory_levels/update", "orders/create"]);
@@ -60,7 +67,7 @@ function deletedProductId(raw: string): string | null {
   return core || null;
 }
 
-export async function POST(req: NextRequest): Promise<NextResponse> {
+export const POST = withCapture(async (req: NextRequest) => {
   const webhookId = req.headers.get("x-shopify-webhook-id") ?? "";
   const topic = req.headers.get("x-shopify-topic") ?? "";
   const shopDomain = (req.headers.get("x-shopify-shop-domain") ?? "").toLowerCase();
@@ -180,4 +187,4 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   return NextResponse.json({ ok: true });
-}
+});

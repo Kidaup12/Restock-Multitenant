@@ -3,6 +3,7 @@ import { prismaForTenant } from "@wezesha/db";
 import { adminFromHeaders } from "@/lib/admin/gate";
 import { recordAdminEvent } from "@/lib/admin/audit";
 import { enqueueShopifySync } from "@/lib/shopify/queue";
+import { withCapture } from "@/lib/observability/wrap";
 
 /**
  * Admin re-run of a customer's sync. Same no-overlap contract as the tenant's
@@ -13,7 +14,7 @@ import { enqueueShopifySync } from "@/lib/shopify/queue";
  *
  * Non-admins get 404, not 401/403: this surface does not advertise itself.
  */
-export async function POST(req: Request): Promise<NextResponse> {
+export const POST = withCapture(async (req: Request) => {
   const admin = await adminFromHeaders(req.headers);
   if (!admin) return NextResponse.json({ error: "not found" }, { status: 404 });
 
@@ -47,4 +48,4 @@ export async function POST(req: Request): Promise<NextResponse> {
     console.error("admin sync enqueue failed", err);
     return NextResponse.json({ error: "Could not reach the job queue." }, { status: 503 });
   }
-}
+});

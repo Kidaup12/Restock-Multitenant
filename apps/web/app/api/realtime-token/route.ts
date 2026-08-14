@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { activeMembership, getSession } from "@/lib/auth";
+import { withCapture } from "@/lib/observability/wrap";
 
 /**
  * Connection details for the realtime gateway: { url, token, workspaceId }.
@@ -16,7 +17,7 @@ import { activeMembership, getSession } from "@/lib/auth";
  * after checking the session's memberships. url is null when no gateway is
  * configured or the user has no workspace — the client hooks stay idle.
  */
-export async function GET() {
+export const GET = withCapture(async () => {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -32,4 +33,4 @@ export async function GET() {
     token: session.session.token,
     workspaceId: membership?.tenantId ?? null,
   });
-}
+}, { route: "/api/realtime-token" });

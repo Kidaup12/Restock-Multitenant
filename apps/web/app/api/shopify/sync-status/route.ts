@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prismaForTenant } from "@wezesha/db";
 import { tenantActor } from "@/lib/shopify/membership";
 import { toSyncRunView } from "@/lib/shopify/sync-run";
+import { withCapture } from "@/lib/observability/wrap";
 
 /**
  * The current (or most recent) sync run. The Connections screen polls this when
@@ -11,7 +12,7 @@ import { toSyncRunView } from "@/lib/shopify/sync-run";
  * Ungated beyond membership, matching sync-now: progress is not cost data, and
  * a member watching a sync is the normal case.
  */
-export async function GET(): Promise<NextResponse> {
+export const GET = withCapture(async () => {
   const actor = await tenantActor();
   if (!actor) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
@@ -20,4 +21,4 @@ export async function GET(): Promise<NextResponse> {
     orderBy: { startedAt: "desc" },
   });
   return NextResponse.json({ run: toSyncRunView(run, new Date()) });
-}
+}, { route: "/api/shopify/sync-status" });

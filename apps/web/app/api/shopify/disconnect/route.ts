@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prismaForTenant } from "@wezesha/db";
 import { canManageConnections, tenantActor } from "@/lib/shopify/membership";
+import { withCapture } from "@/lib/observability/wrap";
 
 /**
  * In-app disconnect: stamps uninstalledAt so syncs and webhooks stop treating
@@ -8,7 +9,7 @@ import { canManageConnections, tenantActor } from "@/lib/shopify/membership";
  * runs the OAuth flow again and reuses the same row. Merchant-side uninstalls
  * arrive separately via the app/uninstalled webhook.
  */
-export async function POST(): Promise<NextResponse> {
+export const POST = withCapture(async () => {
   const actor = await tenantActor();
   if (!actor) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   if (!canManageConnections(actor)) {
@@ -23,4 +24,4 @@ export async function POST(): Promise<NextResponse> {
     return NextResponse.json({ error: "No live Shopify connection." }, { status: 400 });
   }
   return NextResponse.json({ ok: true });
-}
+}, { route: "/api/shopify/disconnect" });

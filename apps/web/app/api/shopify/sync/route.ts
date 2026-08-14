@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { prismaForTenant } from "@wezesha/db";
 import { tenantActor } from "@/lib/shopify/membership";
 import { enqueueShopifySync } from "@/lib/shopify/queue";
+import { withCapture } from "@/lib/observability/wrap";
 
 /**
  * Sync-now. The response IS the no-overlap guard's verdict: `enqueued: false`
  * with the blocking job's state when a sync is already queued or running, so
  * the UI can say so instead of silently double-clicking into nothing.
  */
-export async function POST(): Promise<NextResponse> {
+export const POST = withCapture(async () => {
   const actor = await tenantActor();
   if (!actor) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
@@ -24,4 +25,4 @@ export async function POST(): Promise<NextResponse> {
     console.error("shopify sync enqueue failed", err);
     return NextResponse.json({ error: "Could not reach the job queue." }, { status: 503 });
   }
-}
+}, { route: "/api/shopify/sync" });
