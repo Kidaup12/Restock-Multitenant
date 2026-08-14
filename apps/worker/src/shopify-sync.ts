@@ -764,7 +764,7 @@ const CATALOGUE_NOTICE_DEDUP_MS = 12 * 60 * 60 * 1000;
 /** How long a sync-failure notice suppresses an identical one. Same window as the
  *  catalogue notice, and for the same reason: a condition that persists is worth
  *  re-raising twice a day, not four times an hour. */
-const SYNC_FAILURE_NOTICE_DEDUP_MS = 12 * 60 * 60 * 1000;
+export const SYNC_FAILURE_NOTICE_DEDUP_MS = 12 * 60 * 60 * 1000;
 
 /** Consecutive auth failures before the scheduler stops trying a store. Three
  *  rather than one: a 403 immediately after an install can be scope propagation
