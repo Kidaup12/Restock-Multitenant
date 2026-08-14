@@ -51,6 +51,9 @@ export default async function ShellLayout({
               name: membership.tenant.name,
               roleLabel: roleLabels[membership.role],
               role: membership.role,
+              // The nav filters on effective permissions, not the role preset —
+              // a member granted view_costs outright should see the Costs link.
+              permissions: membership.permissions,
               // Already loaded — activeMembership includes the tenant — so this
               // costs nothing and every money figure below can read it.
               currency: membership.tenant.currency,

@@ -4,9 +4,10 @@ import { useState } from "react";
 import Link from "next/link";
 import type { Role } from "@wezesha/db";
 import { cn } from "@/lib/cn";
+import type { PermissionSource } from "@/lib/auth/permissions";
 import { ChevronsLeftIcon, DotsIcon } from "@/components/icons";
 import {
-  NAV_DESTINATIONS,
+  navFor,
   TAB_BAR_HREFS,
   TAB_BAR_LABEL,
 } from "@/components/shell/nav-config";
@@ -25,18 +26,21 @@ import { CurrencyProvider } from "@/components/currency-provider";
 import { RealtimeConnectionProvider } from "@/components/realtime-connection";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
-/* Desktop rail = every destination; mobile tab bar = the promoted few plus a
- * "More" entry for the overflow. Both derive from the shared nav config so a new
- * destination surfaces everywhere at once. */
-const sidebarNav = NAV_DESTINATIONS;
-
-const tabNav = [
-  ...NAV_DESTINATIONS.filter((d) => TAB_BAR_HREFS.includes(d.href)).map((d) => ({
-    ...d,
-    label: TAB_BAR_LABEL[d.href] ?? d.label,
-  })),
-  { href: "/more", label: "More", icon: <DotsIcon />, tourKey: "nav-more" },
-];
+/* Desktop rail = every destination this caller can use; mobile tab bar = the
+ * promoted few plus a "More" entry for the overflow. Both derive from the shared
+ * nav config so a new destination surfaces everywhere at once. */
+function navsFor(membership: PermissionSource | null) {
+  const sidebarNav = navFor(membership);
+  return {
+    sidebarNav,
+    tabNav: [
+      ...sidebarNav
+        .filter((d) => TAB_BAR_HREFS.includes(d.href))
+        .map((d) => ({ ...d, label: TAB_BAR_LABEL[d.href] ?? d.label })),
+      { href: "/more", label: "More", icon: <DotsIcon />, tourKey: "nav-more" },
+    ],
+  };
+}
 
 export type ShellUser = {
   name: string;
@@ -49,6 +53,9 @@ export type ShellWorkspace = {
   name: string;
   roleLabel: string;
   role: Role;
+  /** The membership's permission override, if it has one. Omitted = inherit the
+   *  role preset, which is what a membership with no override resolves to. */
+  permissions?: unknown;
   /** Workspace currency; every money figure in the shell renders in it. */
   currency: string;
   /** Whether this workspace's plan can open Insights — the tour skips the step
@@ -81,6 +88,9 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const { sidebarNav, tabNav } = navsFor(
+    workspace ? { role: workspace.role, permissions: workspace.permissions ?? null } : null,
+  );
 
   return (
     <CurrencyProvider currency={workspace?.currency}>

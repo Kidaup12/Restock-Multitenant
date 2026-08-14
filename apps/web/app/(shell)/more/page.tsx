@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ChevronRightIcon } from "@/components/icons";
+import { activeMembership, requireSession } from "@/lib/auth";
 import {
-  NAV_DESTINATIONS,
+  navFor,
   TAB_BAR_HREFS,
 } from "@/components/shell/nav-config";
 import { Card } from "@/components/ui/card";
@@ -12,11 +13,14 @@ export const metadata: Metadata = {
   title: "More",
 };
 
-/* Mobile overflow: every sidebar destination the bottom tab bar doesn't already
- * carry. Derived from the shared nav config so it can't fall out of sync. */
-const links = NAV_DESTINATIONS.filter((d) => !TAB_BAR_HREFS.includes(d.href));
+export default async function MorePage() {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+  /* Mobile overflow: every sidebar destination the bottom tab bar doesn't
+   * already carry. Derived from the shared nav config, through the same filter
+   * as the sidebar, so it can't offer what the rail withholds. */
+  const links = navFor(membership).filter((d) => !TAB_BAR_HREFS.includes(d.href));
 
-export default function MorePage() {
   return (
     <div className="space-y-6">
       <PageHeader title="More" />
