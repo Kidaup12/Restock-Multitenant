@@ -140,7 +140,9 @@ export function SignalsView({
                 <TableHead>Kind</TableHead>
                 <TableHead numeric>Discount</TableHead>
                 <TableHead numeric>Days left out</TableHead>
-                {canManage && <TableHead>{""}</TableHead>}
+                {/* Always here so the table has one shape; the remove button
+                    inside it stays with the permission. */}
+                <TableHead>{""}</TableHead>
               </TableHeader>
               <TableBody>
                 {promos.map((promo) => {
@@ -162,8 +164,8 @@ export function SignalsView({
                         {promo.discountPct > 0 ? `${promo.discountPct}%` : "—"}
                       </TableCell>
                       <TableCell numeric>{promo.daysExcluded}</TableCell>
-                      {canManage && (
-                        <TableCell>
+                      <TableCell>
+                        {canManage && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -177,8 +179,8 @@ export function SignalsView({
                             <TrashIcon className="size-3.5" />
                             Remove
                           </Button>
-                        </TableCell>
-                      )}
+                        )}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
@@ -205,7 +207,7 @@ export function SignalsView({
                 <TableHead>Location</TableHead>
                 <TableHead>Why</TableHead>
                 <TableHead>Effect on your rate</TableHead>
-                {canManage && <TableHead>{""}</TableHead>}
+                <TableHead>{""}</TableHead>
               </TableHeader>
               <TableBody>
                 {closures.map((closure) => (
@@ -225,8 +227,8 @@ export function SignalsView({
                         <Badge tone="neutral">Still counts — another shop traded</Badge>
                       )}
                     </TableCell>
-                    {canManage && (
-                      <TableCell>
+                    <TableCell>
+                      {canManage && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -245,8 +247,8 @@ export function SignalsView({
                           <TrashIcon className="size-3.5" />
                           Remove
                         </Button>
-                      </TableCell>
-                    )}
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

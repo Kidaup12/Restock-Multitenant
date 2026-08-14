@@ -170,7 +170,9 @@ export function TeamView({
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Joined</TableHead>
-              {canManage && <TableHead>{""}</TableHead>}
+              {/* Always here so the table has one shape; the remove button
+                  inside it stays with the permission. */}
+              <TableHead>{""}</TableHead>
             </TableHeader>
             <TableBody>
               {rows.map((member) => (
@@ -214,35 +216,31 @@ export function TeamView({
                     )}
                   </TableCell>
                   <TableCell>{member.joined}</TableCell>
-                  {canManage && (
-                    <TableCell numeric>
-                      {member.canRemove && (
-                        <button
-                          type="button"
-                          aria-label={`Remove ${member.name}`}
-                          disabled={pending}
-                          onClick={() => {
-                            if (
-                              window.confirm(
-                                `Remove ${member.name} from this workspace?`,
-                              )
-                            ) {
-                              run(() =>
-                                removeMember({ membershipId: member.id }),
-                              );
-                            }
-                          }}
-                          className={cn(
-                            "grid size-8 place-items-center rounded-md text-ink-muted transition-colors",
-                            "outline-accent hover:bg-negative-soft hover:text-negative focus-visible:outline-2 focus-visible:outline-offset-2",
-                            "disabled:pointer-events-none disabled:opacity-60",
-                          )}
-                        >
-                          <TrashIcon className="size-4" />
-                        </button>
-                      )}
-                    </TableCell>
-                  )}
+                  <TableCell numeric>
+                    {canManage && member.canRemove && (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${member.name}`}
+                        disabled={pending}
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Remove ${member.name} from this workspace?`,
+                            )
+                          ) {
+                            run(() => removeMember({ membershipId: member.id }));
+                          }
+                        }}
+                        className={cn(
+                          "grid size-8 place-items-center rounded-md text-ink-muted transition-colors",
+                          "outline-accent hover:bg-negative-soft hover:text-negative focus-visible:outline-2 focus-visible:outline-offset-2",
+                          "disabled:pointer-events-none disabled:opacity-60",
+                        )}
+                      >
+                        <TrashIcon className="size-4" />
+                      </button>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
