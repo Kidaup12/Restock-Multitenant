@@ -278,7 +278,9 @@ export function SuppliersView({
                 {sortHead("MOQ", "moq", true)}
                 {sortHead("Products", "products", true)}
                 <TableHead>Scorecard</TableHead>
-                {canManage && <TableHead>Actions</TableHead>}
+                {/* The column is always here so the table reads the same for
+                    everyone; the buttons inside it stay with the permission. */}
+                <TableHead>Actions</TableHead>
               </TableHeader>
               <TableBody>
                 {visible.map((row) => (
@@ -369,8 +371,8 @@ export function SuppliersView({
                     <TableCell>
                       <ScoreBadges row={row} />
                     </TableCell>
-                    {canManage && (
-                      <TableCell>
+                    <TableCell>
+                      {canManage && (
                         <div className="flex items-center gap-1.5">
                           <Button
                             variant="ghost"
@@ -390,8 +392,8 @@ export function SuppliersView({
                             Remove
                           </Button>
                         </div>
-                      </TableCell>
-                    )}
+                      )}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
