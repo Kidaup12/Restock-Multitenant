@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import type { ProductDetail } from "@/lib/data/product-detail";
+import { TrustChips } from "@/app/(shell)/plan/buy-checklist";
 
 /**
  * One product's whole story: what it is, what it's doing, what the run thinks,
@@ -94,6 +95,17 @@ export function ProductDetailView({
                         detail.prediction.confidenceWord}
                     </Badge>
                   )}
+                  {/* The plan's own cold-start chip, rendered from the plan's
+                      component so the two screens can't drift apart: a product
+                      the run called too new, or sized off a borrowed shape,
+                      says so here too. */}
+                  <TrustChips
+                    row={{
+                      confidence: null,
+                      coldStart: detail.prediction.coldStart,
+                      borrowedFromTitle: detail.prediction.borrowedFromTitle,
+                    }}
+                  />
                 </div>
                 <p className="text-sm text-ink-secondary">{detail.prediction.reasoning}</p>
                 <p className="text-xs text-ink-faint">

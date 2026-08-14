@@ -11,6 +11,7 @@ import {
 import { leadDaysFor } from "@wezesha/forecast";
 import { runRate, coverDays, revenueByWindow } from "@/lib/metrics";
 import { resolveCost } from "@/lib/cost/resolve";
+import type { PlanColdStart } from "@/lib/data/plan";
 
 /**
  * One product, everything about it, on one screen.
@@ -87,8 +88,20 @@ export type ProductDetail = {
     reasoning: string;
     daysUntilStockout: number | null;
     runLabel: string;
+    /** The run's cold-start state, the same fact the plan chips. Null when the
+     *  number came from this product's own sales. */
+    coldStart: PlanColdStart | null;
+    /** For a borrowed run, the product whose shape it borrowed. Null when the
+     *  proxy has since been deleted — the chip degrades to "a similar product". */
+    borrowedFromTitle: string | null;
   } | null;
 };
+
+/** `Prediction.coldStart` is a free String column, so it is narrowed rather than
+ *  trusted — the same states the plan recognises. */
+const COLD_START_STATES = new Set<string>(["too_new", "borrowed"]);
+const asColdStart = (v: string | null): PlanColdStart | null =>
+  v && COLD_START_STATES.has(v) ? (v as PlanColdStart) : null;
 
 /** Month buckets for the last `HISTORY_MONTHS`, oldest first, zero-filled — a
  *  gap in sales is information, so it must render as a zero and not vanish. */
@@ -172,9 +185,22 @@ export async function getProductDetail(
         reasoning: true,
         daysUntilStockout: true,
         runDate: true,
+        coldStart: true,
+        borrowedFromProductId: true,
       },
     }),
   ]);
+
+  // Title for a cold-start borrow. Tenant-scoped through the same client, so a
+  // foreign id resolves to nothing; there is no FK on borrowedFromProductId, so
+  // a proxy that has since been deleted simply comes back null and the chip
+  // degrades to "a similar product" (same rule as the plan).
+  const borrowedFrom = latestPrediction?.borrowedFromProductId
+    ? await db.product.findFirst({
+        where: { id: latestPrediction.borrowedFromProductId },
+        select: { title: true },
+      })
+    : null;
 
   const buckets = emptyMonths(now);
   for (const row of sales) {
@@ -250,6 +276,8 @@ export async function getProductDetail(
           daysUntilStockout:
             latestPrediction.daysUntilStockout >= 999 ? null : latestPrediction.daysUntilStockout,
           runLabel: dayFormat.format(latestPrediction.runDate),
+          coldStart: asColdStart(latestPrediction.coldStart),
+          borrowedFromTitle: borrowedFrom?.title ?? null,
         }
       : null,
   };
