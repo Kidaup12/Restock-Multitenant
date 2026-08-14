@@ -5,11 +5,12 @@ import { poAmount, poDate, type PoDocumentData } from "@/lib/po/po-model";
  * block, lines, totals, terms. Styled self-contained (no shell chrome) so the
  * print route can isolate it with @media print.
  *
- * PDF note: "email as PDF" ships as this print view + the browser's own
- * print-to-PDF instead of server-side PDF generation. A pdf library means a
- * rendering engine dependency and a second layout to maintain for the same
- * document; the print view is one layout that is the screen view. Revisit
- * only if suppliers reject HTML mail + printable link in practice.
+ * PDF note: the supplier's copy goes out as a real PDF attachment, generated
+ * server-side in lib/po/po-pdf.ts — this view is the screen and print surface
+ * for the shop, not the supplier's document. Both render the same
+ * PoDocumentData, which is what keeps a second layout from becoming a second
+ * set of numbers; tests/po-pdf.test.tsx compares the two renderings cell by
+ * cell. Changing a figure here means changing it there.
  */
 export function PoDocument({ doc }: { doc: PoDocumentData }) {
   return (
