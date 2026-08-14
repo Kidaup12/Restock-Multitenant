@@ -543,7 +543,7 @@ export function BuyChecklist({
     { header: "MOQ", cell: (r) => r.moq },
     { header: "Lead days", cell: (r) => r.leadDays },
     { header: "In stock", cell: (r) => r.onHandUnits },
-    { header: "On order", cell: (r) => r.onOrderUnits },
+    { header: "En route", cell: (r) => r.onOrderUnits },
     { header: "Run/day", cell: (r) => r.runRatePerDay },
     { header: "Days left", cell: (r) => r.daysUntilStockout },
     { header: "Order by", cell: (r) => dayLabel(r.orderByDate) },
@@ -681,7 +681,10 @@ export function BuyChecklist({
                     <th scope="col" className="w-10 px-4 py-3" aria-label="Tick to order" />
                     <th scope="col" className={TH}>Product</th>
                     <th scope="col" className={cn(TH, "hidden md:table-cell")}>Supplier</th>
-                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>On order</th>
+                    {/* Stock on its way, however it was set in motion — an
+                        en-route transfer or the store's own incoming count, not
+                        only a purchase order this shop raised. */}
+                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>En route</th>
                     <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>MOQ</th>
                     <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>Lead</th>
                     <th scope="col" className={cn(TH_NUM, "hidden md:table-cell")}>Run/day</th>

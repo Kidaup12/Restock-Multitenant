@@ -408,6 +408,16 @@ export type LocationLine = {
   daysCover: number | null;
   /** Negative on-hand — oversold; flagged, never hidden. */
   oversold: boolean;
+  /** Units en route to THE SHOP, not to this branch — the same shop-wide figure
+   *  the catalogue shows, and the column says so. There is no destination branch
+   *  to read: Product.onOrder rolls up en-route stock and Shopify's incoming
+   *  across the shop, and a purchase order names a supplier, not a branch. Named
+   *  for the shared rule (effectiveOnOrder); it renders as "En route", because
+   *  most of what it counts is already moving rather than merely ordered. */
+  onOrderUnits: number;
+  /** When that stock is due; null when nothing is en route or the supplier gave
+   *  no date. */
+  expectedArrivalAt: Date | null;
 };
 
 export type LocationStock = {
@@ -440,17 +450,35 @@ export async function getStockByLocation(
   { canViewCosts }: { canViewCosts: boolean }
 ): Promise<LocationStock[]> {
   const db = prismaForTenant(tenantId);
-  const [locations, metrics] = await Promise.all([
+  const [locations, metrics, poLines] = await Promise.all([
     db.location.findMany({
       orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
       include: {
         inventoryLevels: {
-          include: { product: { select: { id: true, sku: true, title: true, costKes: true } } },
+          include: {
+            product: { select: { id: true, sku: true, title: true, costKes: true, onOrder: true } },
+          },
         },
       },
     }),
     getCatalogueMetrics(tenantId),
+    // Stock we ordered ourselves — half of the inbound rule, and the only place
+    // an arrival date comes from.
+    db.purchaseOrderLine.findMany({
+      where: {
+        purchaseOrder: { status: { in: [...OUTSTANDING_PO_STATUSES] }, deletedAt: null },
+      },
+      select: {
+        productId: true,
+        quantity: true,
+        receivedQty: true,
+        purchaseOrder: { select: { expectedAt: true } },
+      },
+    }),
   ]);
+
+  const outstandingPoUnits = outstandingByProduct(poLines);
+  const etaByProduct = earliestEtaByProduct(poLines);
 
   const rateFor = (productId: string) => metrics.get(productId)?.runRate ?? 0;
 
@@ -517,6 +545,13 @@ export async function getStockByLocation(
           valueKes: canViewCosts ? units * level.product.costKes : null,
           daysCover,
           oversold,
+          // Through the shared rule, so this screen and the catalogue cannot
+          // report different inbound for the same product.
+          onOrderUnits: effectiveOnOrder(
+            level.product.onOrder,
+            outstandingPoUnits.get(level.product.id) ?? 0
+          ),
+          expectedArrivalAt: etaByProduct.get(level.product.id) ?? null,
         };
       }),
     };

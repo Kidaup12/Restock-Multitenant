@@ -188,7 +188,7 @@ describe.skipIf(!runnable)("product lifecycle on the catalogue (seeded local db)
     );
     expect(html).toContain("Sells/day");
     expect(html).toContain("Cover");
-    expect(html).toContain("On order");
+    expect(html).toContain("En route");
 
     // An empty shelf with stock en route shows the units and the date, so it
     // does not read as something to order again.
@@ -245,7 +245,7 @@ describe.skipIf(!runnable)("product lifecycle on the catalogue (seeded local db)
     // The new columns are units, rates and dates — nothing that reads as money.
     expect(kesDigits(html)).toHaveLength(0);
     expect(html).toContain(MASK);
-    expect(html).toContain("On order");
+    expect(html).toContain("En route");
     expect(html).toContain(String(INBOUND_UNITS));
   });
 });

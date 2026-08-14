@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { formatNumber } from "@/lib/money";
+import { formatEta } from "@/lib/dates";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/cn";
 import {
@@ -28,7 +29,7 @@ const roleLabels: Record<LocationRole, string> = {
 const roleCaptions: Record<LocationRole, string> = {
   sells: "Counts as on-hand you can sell.",
   holds: "Warehouse stock — distributable, not counted as sellable cover.",
-  enroute: "Incoming (on order) — not counted as on-hand.",
+  enroute: "Stock en route to the shop — not counted as on-hand.",
   ignore: "Excluded from every number.",
 };
 
@@ -101,10 +102,15 @@ export async function LocationView({
                   <TableHead>Product</TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead numeric>On hand</TableHead>
-                  {/* Shop-wide, and it says so: the figure is total sellable
-                      stock against the shop's run rate. A per-branch number
-                      needs sales attributed to the branch. */}
-                  {location.showCover && <TableHead numeric>Cover (shop)</TableHead>}
+                  {/* Both of these are shop-wide, and they say so. Cover is
+                      total sellable stock against the shop's run rate — a
+                      per-branch number needs sales attributed to the branch.
+                      En route has no branch either: it counts stock already
+                      moving plus what suppliers still owe the shop, and neither
+                      names a destination. The columns stay put whatever the
+                      location holds, so the table reads the same everywhere. */}
+                  <TableHead numeric>Cover (shop)</TableHead>
+                  <TableHead numeric>En route (shop)</TableHead>
                   <TableHead numeric>Value</TableHead>
                 </TableHeader>
                 <TableBody>
@@ -115,11 +121,23 @@ export async function LocationView({
                       <TableCell numeric className={cn(line.oversold && "text-negative")}>
                         {line.onHand}
                       </TableCell>
-                      {location.showCover && (
-                        <TableCell numeric>
-                          <CoverCell daysCover={line.daysCover} oversold={line.oversold} />
-                        </TableCell>
-                      )}
+                      <TableCell numeric>
+                        <CoverCell daysCover={line.daysCover} oversold={line.oversold} />
+                      </TableCell>
+                      <TableCell numeric className="text-ink-muted">
+                        {line.onOrderUnits > 0 ? (
+                          <span className="inline-flex flex-col items-end">
+                            <span className="text-ink">{line.onOrderUnits}</span>
+                            {/* An empty shelf with stock en route is not a
+                                re-order — the date is what tells them apart. */}
+                            <span className="text-xs text-ink-faint">
+                              {line.expectedArrivalAt ? formatEta(line.expectedArrivalAt) : "no ETA"}
+                            </span>
+                          </span>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
                       <TableCell numeric>
                         <CostValue amount={line.valueKes} canViewCosts={canViewCosts} />
                       </TableCell>

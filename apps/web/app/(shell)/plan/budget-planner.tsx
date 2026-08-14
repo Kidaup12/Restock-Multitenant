@@ -215,7 +215,7 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
                 subtitle="What waiting costs: sales the forecast expects each item to miss while it sits stocked out over the next 30 days."
               />
               <div className="mt-2 pb-2">
-                <BudgetTable rows={split.deferred} canViewCosts={canViewCosts} showAtRisk />
+                <BudgetTable rows={split.deferred} canViewCosts={canViewCosts} />
               </div>
             </Card>
           )}
@@ -245,14 +245,12 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
   );
 }
 
-function BudgetTable({
+export function BudgetTable({
   rows,
   canViewCosts,
-  showAtRisk = false,
 }: {
   rows: BuyListRow[];
   canViewCosts: boolean;
-  showAtRisk?: boolean;
 }) {
   const currency = useCurrency();
   return (
@@ -266,7 +264,7 @@ function BudgetTable({
         <TableHead numeric>Qty</TableHead>
         <TableHead numeric className="hidden lg:table-cell">Rev · 30d ({currency})</TableHead>
         <TableHead numeric>Line total</TableHead>
-        {showAtRisk && <TableHead numeric>At risk (30d)</TableHead>}
+        <TableHead numeric>At risk (30d)</TableHead>
       </TableHeader>
       <TableBody>
         {rows.map((row) => {
@@ -303,15 +301,13 @@ function BudgetTable({
               <TableCell numeric>
                 <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
               </TableCell>
-              {showAtRisk && (
-                <TableCell numeric>
-                  {(row.atRiskKes ?? 0) > 0 ? (
-                    <CostValue amount={row.atRiskKes} canViewCosts={canViewCosts} className="text-negative" />
-                  ) : (
-                    "—"
-                  )}
-                </TableCell>
-              )}
+              <TableCell numeric>
+                {(row.atRiskKes ?? 0) > 0 ? (
+                  <CostValue amount={row.atRiskKes} canViewCosts={canViewCosts} className="text-negative" />
+                ) : (
+                  "—"
+                )}
+              </TableCell>
             </TableRow>
           );
         })}
