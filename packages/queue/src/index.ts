@@ -42,16 +42,35 @@ export function syncJobId({ tenantId, source }: SyncJobData): string {
   return `sync:${tenantId}:${source}`;
 }
 
+/** Ceiling on a rate-limited wait before jitter. Longer than the ordinary cap
+ *  because a provider still saying "later" after several tries means minutes,
+ *  not seconds — but bounded so the six-attempt budget can't stretch to hours. */
+const RATE_LIMIT_CAP_MS = 5 * 60_000;
+
+/** Widest the jitter stretches a rate-limited wait, as a fraction. Only ever
+ *  added, never subtracted: coming back before the provider's Retry-After is a
+ *  worse failure than waiting a little too long. */
+const RATE_LIMIT_JITTER = 0.25;
+
 /**
  * Backoff for failed sync attempts, wired into the worker as the "custom"
  * BullMQ backoff strategy. A provider rate limit (any error carrying a numeric
- * `retryAfterMs`, e.g. ShopifyRateLimitedError) is respected verbatim;
- * everything else waits 2^attempt seconds capped at one minute.
+ * `retryAfterMs`, e.g. ShopifyRateLimitedError) waits at least that long, then
+ * doubles per attempt and lands somewhere random in the window above it — a 429
+ * storm hands every tenant the same Retry-After, and retrying in lockstep just
+ * rebuilds the storm. Everything else waits 2^attempt seconds capped at one
+ * minute. `rand` is injectable so the spread is testable.
  */
-export function syncBackoffDelay(attemptsMade: number, err: unknown): number {
+export function syncBackoffDelay(
+  attemptsMade: number,
+  err: unknown,
+  rand: () => number = Math.random
+): number {
   const retryAfterMs = (err as { retryAfterMs?: unknown } | undefined)?.retryAfterMs;
   if (typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
-    return Math.ceil(retryAfterMs);
+    const cap = Math.max(RATE_LIMIT_CAP_MS, retryAfterMs);
+    const escalated = Math.min(cap, retryAfterMs * 2 ** attemptsMade);
+    return Math.ceil(escalated * (1 + rand() * RATE_LIMIT_JITTER));
   }
   return Math.min(60_000, 2 ** attemptsMade * 1000);
 }
