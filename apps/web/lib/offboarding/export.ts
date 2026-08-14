@@ -71,6 +71,10 @@ export const EXPORTED_MODELS: ReadonlyArray<{
   { model: "SyncRun", delegate: "syncRun" },
   { model: "Notification", delegate: "notification" },
   { model: "AuditEvent", delegate: "auditEvent" },
+  // Envelopes only — the ledger never holds a message body, so there is nothing
+  // to omit here. Rows with no tenant (sign-in codes) belong to no workspace and
+  // the RLS policy keeps them out of every export by construction.
+  { model: "EmailLog", delegate: "emailLog" },
 ];
 
 async function* exportChunks(
