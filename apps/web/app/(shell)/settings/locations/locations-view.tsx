@@ -20,7 +20,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { setLocationRole, type LocationActionResult } from "./actions";
+import type { TillMappingRow } from "@/lib/data/pos-queues";
+import {
+  mapTillToLocation,
+  setLocationRole,
+  unmapTill,
+  type LocationActionResult,
+} from "./actions";
 
 export type LocationRow = {
   id: string;
@@ -47,6 +53,95 @@ const selectClass = cn(
   "outline-accent focus-visible:outline-2 focus-visible:outline-offset-2",
   "disabled:pointer-events-none disabled:opacity-60",
 );
+
+/**
+ * Till → branch mapping. A till whose sales aren't pointed at a branch counts
+ * in the shop totals but in no branch's run rate, so the Sales screen nags
+ * about it and sends the owner here.
+ */
+export function TillsView({
+  tills,
+  locations,
+  canManage,
+}: {
+  tills: TillMappingRow[];
+  locations: { id: string; name: string }[];
+  canManage: boolean;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const unmappedCount = tills.filter((t) => t.locationId == null).length;
+
+  function run(action: () => Promise<LocationActionResult>) {
+    setError(null);
+    startTransition(async () => {
+      const result = await action();
+      if (!result.ok) setError(result.error);
+    });
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title="Tills"
+        subtitle="Point each till at the branch it sits in, so its sales count towards that branch's run rate."
+        action={unmappedCount > 0 ? <Badge tone="warning">{unmappedCount} unmapped</Badge> : undefined}
+      />
+      <CardContent className="p-0 pt-4">
+        {error && (
+          <p role="alert" className="mx-5 mb-3 rounded-md bg-negative-soft px-3 py-2 text-sm text-negative">
+            {error}
+          </p>
+        )}
+        <Table>
+          <TableHeader>
+            <TableHead>Till</TableHead>
+            <TableHead>Branch</TableHead>
+            <TableHead numeric>Sales</TableHead>
+          </TableHeader>
+          <TableBody>
+            {tills.map((till) => (
+              <TableRow key={till.warehouse}>
+                <TableCell className="font-medium text-ink">
+                  <span className="inline-flex items-center gap-2">
+                    {till.warehouse}
+                    {till.locationId == null && <Badge tone="warning">Not mapped</Badge>}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <select
+                    aria-label={`Branch for ${till.warehouse}`}
+                    value={till.locationId ?? ""}
+                    disabled={!canManage || pending}
+                    onChange={(e) =>
+                      run(() =>
+                        e.target.value === ""
+                          ? unmapTill({ warehouseName: till.warehouse })
+                          : mapTillToLocation({
+                              warehouseName: till.warehouse,
+                              locationId: e.target.value,
+                            }),
+                      )
+                    }
+                    className={selectClass}
+                  >
+                    <option value="">Not mapped — sales count for no branch</option>
+                    {locations.map((location) => (
+                      <option key={location.id} value={location.id}>
+                        {location.name}
+                      </option>
+                    ))}
+                  </select>
+                </TableCell>
+                <TableCell numeric>{formatNumber(till.salesCount)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+}
 
 export function LocationsView({
   rows,

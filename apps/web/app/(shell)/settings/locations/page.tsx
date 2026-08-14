@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getLocationRoles } from "@/lib/locations/data";
+import { getTillMappings } from "@/lib/data/pos-queues";
 import { LayersIcon } from "@/components/icons";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
-import { LocationsView } from "./locations-view";
+import { LocationsView, TillsView } from "./locations-view";
 
 export const metadata: Metadata = {
   title: "Locations",
@@ -30,7 +31,10 @@ export default async function LocationsSettingsPage() {
 
   const canManage = hasPermission(membership, "manage_settings");
   const canViewCosts = hasPermission(membership, "view_costs");
-  const data = await getLocationRoles(membership.tenantId, { canViewCosts });
+  const [data, tills] = await Promise.all([
+    getLocationRoles(membership.tenantId, { canViewCosts }),
+    getTillMappings(membership.tenantId),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -52,6 +56,15 @@ export default async function LocationsSettingsPage() {
           canViewCosts={canViewCosts}
           assumedCount={data.assumedCount}
           ignoreStockValueKes={data.ignoreStockValueKes}
+        />
+      )}
+      {/* Tills need mapping even in a one-location shop — unmapped sales still
+          miss that branch's run rate — so this sits outside the roles branch. */}
+      {tills.length > 0 && (
+        <TillsView
+          tills={tills}
+          locations={data.rows.map((row) => ({ id: row.id, name: row.name }))}
+          canManage={canManage}
         />
       )}
     </div>
