@@ -82,6 +82,41 @@ export function buildPoDocument(
   };
 }
 
+/** A PO's lateness slice — the columns every overdue surface reads. */
+export type LatePoStatus = {
+  status: string;
+  expectedAt: Date | null;
+  /** Set only when every line is fully received (see lib/po/receive-po.ts). */
+  receivedAt: Date | null;
+};
+
+/** Statuses where the shop is still waiting on the supplier. Deliberately an
+ *  allow-list: a status nobody is waiting on (draft — never sent, so nothing was
+ *  promised; cancelled; the dormant QB ones) can never be chased, so it can
+ *  never be late. */
+const AWAITING_DELIVERY = ["sent", "partially_received"];
+
+/**
+ * Is this delivery overdue right now — promised day passed, stock still
+ * outstanding? One rule for every PO surface, and the only "overdue" here that
+ * is about the supplier: the planner's means the last safe day to *order* has
+ * passed. A partially received PO stays late (the missing units are the ones
+ * that become a stockout); a completed one never is, however late it landed —
+ * that is history the supplier scorecard grades, not something to chase.
+ */
+export function isPoLate(po: LatePoStatus, now: Date): boolean {
+  if (po.expectedAt == null || po.receivedAt != null) return false;
+  if (!AWAITING_DELIVERY.includes(po.status)) return false;
+  // The ETA carries the send time of day (sentAt + lead days) but the shop is
+  // only ever shown the date, so the supplier gets the whole promised day.
+  const dayAfterEta = new Date(
+    po.expectedAt.getFullYear(),
+    po.expectedAt.getMonth(),
+    po.expectedAt.getDate() + 1
+  );
+  return now.getTime() >= dayAfterEta.getTime();
+}
+
 /** "23 Jul 2026" — the document's date style, stable across renderers. */
 export function poDate(date: Date): string {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
