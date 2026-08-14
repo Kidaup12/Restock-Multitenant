@@ -153,9 +153,13 @@ export async function getProductDetail(
   });
   if (!product) return null;
 
-  const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (HISTORY_MONTHS - 1), 1));
+  // A full 365 days of sales, which is what the run rate is defined over — the
+  // month buckets start later (see emptyMonths) and simply ignore the rest. A
+  // shorter fetch here fed the rate a shorter history than the stock list feeds
+  // it, and the same product read differently on the two screens.
+  const since = new Date(now.getTime() - 365 * 86_400_000);
 
-  const [sales, poLines, latestPrediction] = await Promise.all([
+  const [sales, poLines, latestPrediction, emptyShelfDays, firstSnapshot] = await Promise.all([
     db.salesHistory.findMany({
       where: { productId, date: { gte: since } },
       select: { date: true, quantity: true, revenueKes: true, channel: true },
@@ -189,6 +193,15 @@ export async function getProductDetail(
         borrowedFromProductId: true,
       },
     }),
+    // The days the nightly snapshot found an empty shelf, and how far back that
+    // proof reaches — the in-stock denominator behind the run rate. The stock
+    // list has always passed these (see lib/metrics/catalogue.ts); this page did
+    // not, so a product that had been out read slower here than in the list.
+    db.inventorySnapshot.findMany({
+      where: { productId, date: { gte: since }, onHand: { lte: 0 } },
+      select: { date: true },
+    }),
+    db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
   ]);
 
   // Title for a cold-start borrow. Tenant-scoped through the same client, so a
@@ -213,7 +226,12 @@ export async function getProductDetail(
 
   // The same shared formulas the catalogue and the plan use — a product page
   // that computed its own rate would be a second source for the same number.
-  const rate = runRate(sales, now);
+  const rate = runRate(
+    sales,
+    now,
+    emptyShelfDays.map((s) => s.date),
+    firstSnapshot?.date ?? undefined
+  );
   const cover = coverDays(product.currentStock, rate);
   const revenue = revenueByWindow(sales, now);
   const cost = resolveCost({
