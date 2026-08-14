@@ -67,6 +67,8 @@ export async function sendWeeklySummary(
     to: recipient.email,
     subject: `Weekly stock summary — ${summary.tenantName}`,
     text: renderWeeklySummary(summary),
+    tenantId,
+    kind: "weekly_summary",
   });
   return true;
 }

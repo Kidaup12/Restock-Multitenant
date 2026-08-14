@@ -272,5 +272,7 @@ export async function sendInviteEmail(input: {
       `${input.invitedBy} invited you to join ${input.tenantName} as ${roleLabel}.\n\n` +
       `Accept the invite:\n\n${url}\n\n` +
       `The link expires in 7 days. If you weren't expecting this, ignore this email.`,
+    tenantId: input.invite.tenantId,
+    kind: "invite",
   });
 }

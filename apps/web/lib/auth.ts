@@ -22,6 +22,9 @@ export const auth = betterAuth({
         to: user.email,
         subject: "Reset your Wezesha Restock password",
         text: `Follow this link to choose a new password:\n\n${url}\n\nIf you didn't request this, ignore this email — your password is unchanged.`,
+        // No tenant: the reset is addressed to an account, which may belong to
+        // several workspaces or none. Naming one here would be a guess.
+        kind: "password_reset",
       });
     },
   },
@@ -37,6 +40,9 @@ export const auth = betterAuth({
           to: email,
           subject: "Your Wezesha Restock sign-in code",
           text: `Your sign-in code is ${otp}. It expires in 5 minutes.`,
+          // No tenant: the code is mailed before any session, so no workspace
+          // has been resolved yet.
+          kind: "sign_in_code",
         });
       },
     }),
