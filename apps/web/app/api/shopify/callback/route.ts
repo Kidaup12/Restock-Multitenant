@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import crypto from "node:crypto";
-import { Prisma, prismaForTenant } from "@wezesha/db";
+import { Prisma, prismaForTenantTx } from "@wezesha/db";
 import {
   encryptToken,
   exchangeCodeForToken,
@@ -11,6 +11,7 @@ import { STATE_COOKIE, STATE_COOKIE_PATH } from "@/lib/shopify/cookies";
 import { credentialsForTenant } from "@/lib/shopify/credentials";
 import { canManageConnections, tenantActor } from "@/lib/shopify/membership";
 import { enqueueShopifySync } from "@/lib/shopify/queue";
+import { resetCursorsOnStoreChange } from "@/lib/shopify/store-switch";
 import { withCapture } from "@/lib/observability/wrap";
 
 /**
@@ -74,28 +75,33 @@ export const GET = withCapture(async (req: NextRequest) => {
   }
 
   try {
-    const db = prismaForTenant(actor.tenantId);
-    await db.shopifyConnection.upsert({
-      where: { tenantId: actor.tenantId },
-      create: {
-        tenantId: actor.tenantId,
-        shopDomain: shop,
-        accessToken: encryptToken(token.accessToken),
-        scopes: token.scopes,
-      },
-      update: {
-        shopDomain: shop,
-        accessToken: encryptToken(token.accessToken),
-        scopes: token.scopes,
-        installedAt: new Date(),
-        uninstalledAt: null,
-        // A fresh token is the reconnect the auth-failure pause was waiting for.
-        // Without this the scheduler keeps skipping a store that now works.
-        authFailureCount: 0,
-        syncPausedAt: null,
-        lastAuthError: null,
-        lastAuthErrorAt: null,
-      },
+    await prismaForTenantTx(actor.tenantId, async (tx) => {
+      // Authorising a DIFFERENT store leaves the previous one's high-water marks
+      // behind, and the next sync would run as a delta against a store we have
+      // never pulled. Same transaction as the upsert.
+      await resetCursorsOnStoreChange(tx, actor.tenantId, shop);
+      await tx.shopifyConnection.upsert({
+        where: { tenantId: actor.tenantId },
+        create: {
+          tenantId: actor.tenantId,
+          shopDomain: shop,
+          accessToken: encryptToken(token.accessToken),
+          scopes: token.scopes,
+        },
+        update: {
+          shopDomain: shop,
+          accessToken: encryptToken(token.accessToken),
+          scopes: token.scopes,
+          installedAt: new Date(),
+          uninstalledAt: null,
+          // A fresh token is the reconnect the auth-failure pause was waiting for.
+          // Without this the scheduler keeps skipping a store that now works.
+          authFailureCount: 0,
+          syncPausedAt: null,
+          lastAuthError: null,
+          lastAuthErrorAt: null,
+        },
+      });
     });
   } catch (err) {
     // shopDomain is globally unique — another workspace already owns this store.
