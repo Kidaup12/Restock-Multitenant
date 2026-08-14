@@ -48,6 +48,11 @@ in-store POS ───┘        (Product.currentStock = on-hand)        │    
 - **The worker** also runs cost-moved detection, POS sales-gap detection, plan-limit checks and the
   weekly summary email, and performs Shopify OAuth sync. Realtime events flow web ⇄ ws-gateway ⇄
   worker via Redis.
+- **Signals are censored from the run rate.** Past-promo spike days and days on which every
+  Sells-role location was closed are excluded before the baseline rate is computed
+  (`packages/forecast-run/src/run.ts`), alongside stockout gaps — a partial closure is deliberately
+  left in. Owners declare promos and closures at `/settings/signals`, which also proposes spikes it
+  found for confirmation.
 - **On-hand history.** A nightly snapshot (01:00, ahead of the forecast) writes one
   `InventorySnapshot` row per active product per UTC day from `Product.currentStock`, pruned to ~400
   days. Stockout rate and dead stock week over week are read off it; nothing else records on-hand
@@ -90,8 +95,13 @@ The supplier PO email carries cost by design (it goes to the supplier).
 `develop` deploy, which Vercel publishes as a Preview — `main` is the Production Branch. Commits are
 atomic and conventional (`feat`/`fix`/`refactor`/`chore`/`docs`/`test`). Test on production-like
 infra, not just local. Deploy targets: **Vercel** (web), **Supabase** (Postgres), **Railway**
-(worker + ws-gateway + Redis); Dockerfiles + `docker-compose.staging.yml` for rehearsal. See
-`deploy/RUNBOOK.md` + `deploy/ENVIRONMENT.md`.
+(worker + ws-gateway + Redis); Dockerfiles + `docker-compose.staging.yml` for rehearsal.
+
+**The two platforms track different branches.** Vercel's Production Branch is `main` and every
+other branch — `develop` included — publishes as a Preview. Both Railway services deploy from
+`develop`. So merging to `develop` ships the worker and gateway but not the web app, and pushing
+`main` ships the web app against whatever the worker is already running. Anything that spans the
+two has to reach both. See `deploy/RUNBOOK.md` + `deploy/ENVIRONMENT.md`.
 
 ## Testing / QA
 
@@ -117,22 +127,34 @@ render regressions aren't caught by the current suites.
 | Costs & coverage (money-blind) | `/costs` | Surfaced |
 | Suppliers & lead times | `/suppliers` | Surfaced (in nav) |
 | Sales / POS reconciliation | `/sales` | Surfaced |
-| Connections (Shopify/QB/POS) | `/settings/connections` | Surfaced (from Settings) |
-| Locations & roles, Team | `/settings/locations`, `/settings/team` | Surfaced |
+| Connections (Shopify) | `/settings/connections` | Surfaced (from Settings), with live sync progress. Shopify only — there is no QuickBooks connector |
+| Till sales / POS ingest status | `/settings/pos` | Surfaced (from Settings) |
+| Signals — declare promos and shop-closure days | `/settings/signals` | Surfaced (from Settings), incl. suggested spikes to confirm |
+| Locations & roles, Team, Plan, Workspace | `/settings/locations`, `/settings/team`, `/settings/plan`, `/settings/workspace` | Surfaced |
 | Own profile; mobile nav overflow | `/profile`, `/more` | Surfaced |
 | Cross-tenant operator console (audit log, per-tenant view) | `/admin`, `/admin/audit`, `/admin/tenant/[id]` | Surfaced, but 404s unless the account holds a live `PlatformAdmin` row (or, while that table is empty, is in `ADMIN_EMAILS`) |
-| Insights (proof/accuracy) | `/insights` | **Placeholder — deferred** |
-| Forecast trust surfaces (confidence render, cold-start queue, "tell the forecast", receipts, what-changed) | — | **Built + tested in the engine; UI deferred** |
+| Insights — shelf health, stockout trend, money-at-rest impact, forecast accuracy scorecard | `/insights` (two tabs: "Where you stand", "Is it working?") | Surfaced, in nav. Gated to the **Growth** plan and above — a workspace on a lower tier sees a locked card, not the data |
+| Forecast confidence + cold-start | rendered on `/plan` rows and `/stock/[productId]` | Surfaced (chips + one-line explanation per row) |
+| Owner priors ("tell the forecast"), receipts, what-changed | — | **Engine + API only, no UI.** `/api/forecast/priors` is the sole consumer of `lib/forecast-trust/priors.ts`; nothing renders it |
 
 ## Known gaps / in progress (be honest with reviewers)
 
-- **Forecast intelligence is engine-only.** Confidence words, cold-start, backtest, and the owner
-  "tell the forecast" priors are coded + unit-tested but not yet rendered. Insights is a placeholder.
-- **Planner depth.** `/plan` works (checklist + budget modes, per-line "why", CSV/PDF, money-blind)
-  but the richer buy-list from the reference build is in progress — cover-horizon sizing, scope
-  filters, exclude-already-ordered + double-order warnings, MOQ rounding, supplier-grouped draft POs,
-  sales-target mode, a supply calendar.
-- **Signals (promo / closure normalization).** Stockout gaps are removed from the run-rate; **past
-  promo spikes and shop-closure days are not yet excluded**, and there's no UI yet for an owner to
-  declare a promo/closure. Late/backdated data does reconcile (date-keyed history + re-run).
+- **Owner priors are engine-only.** The "tell the forecast" priors (`packages/forecast/src/owner-prior.ts`,
+  wrapped by `apps/web/lib/forecast-trust/priors.ts`) are coded, tested and exposed at
+  `/api/forecast/priors`, but no screen writes or shows them. Confidence, cold-start and the
+  backtest scorecard *are* rendered (see the route map).
+- **Planner depth.** `/plan` has cover-horizon sizing, scope filters, exclude-already-ordered with
+  double-order warnings, MOQ floors, sales-uplift sizing and the supply calendar. Two residuals:
+  **pack-size rounding doesn't exist** (`applyMoq` in `apps/web/lib/po/po-math.ts` is
+  `max(qty, moq)` — a floor, not rounding to a case multiple), and **supplier-grouped draft POs are
+  built but live on `/orders`** with no link from `/plan`; the planner's "add to order" writes
+  pending rows and leaves you to find the queue. Scope filters cover class, category, supplier and
+  lead-time band — not location or status. "Size for a sales push" is a percent uplift on demand,
+  not a KES revenue target you can type.
+- **QuickBooks doesn't exist.** The cost resolver keeps a `qb` priority tier and `PurchaseOrder`
+  keeps `qbConfirmedAt` / `qbDocRef` / `qbSuggestion` as an evidence track, but there is no
+  connector and the Costs page hides the QuickBooks surfaces until there is one. "From QuickBooks"
+  can still appear as a cost source on Stock where a row carries it.
+- **POS/till connectors aren't started.** `/api/pos/ingest` and the reconciliation screens exist;
+  nothing connects to a real till system yet.
 - **No end-to-end tests** and **no ML backtest sidecar** (the engine is pure TypeScript).

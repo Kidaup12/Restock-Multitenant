@@ -26,6 +26,11 @@ npm run dev          # the web app on http://localhost:3000
 npm run -w @wezesha/worker dev   # (optional) crons + sync; needs Redis
 ```
 
+The worker reads `apps/worker/.env` (created by setup from `apps/worker/.env.example`).
+Every cron group in there is **off** unless set to `1`, so a worker started as-is runs no
+nightly work — it processes queued sync jobs and nothing else. Turn on the one you're
+testing; the file says what each does.
+
 Seeded sign-ins (same shop, three roles): **owner** `owner@wezesha.test` / `Owner12345!` · **admin**
 `admin@wezesha.test` / `Admin12345!` · **member/staff** `staff@wezesha.test` / `Staff12345!`
 (money-blind). See `docs/QA-TESTPLAN.md`.
@@ -63,6 +68,13 @@ clone is still testable end to end. The link you need is in that terminal.
 | `npm run db:up` / `npm run db:down` | Start / stop Postgres + Redis |
 | `npm run migrate` | Apply DB migrations |
 | `npm run seed` | Reload the demo tenant (rebuilds it each run) |
+| `npm run bootstrap:admin -- <email>` | Grant that account the operator console at `/admin` |
+
+`bootstrap:admin` is the one thing `npm run setup` deliberately leaves undone — `/admin`
+is closed to everyone until an account is granted it, and who gets cross-tenant access is
+a choice rather than a default. Run it against a seeded sign-in (`owner@wezesha.test`) to
+see the console locally. It only works for an account that already exists and has a
+password, because every privileged action in the console asks for that password again.
 
 ## A store big enough to judge the forecast
 
@@ -100,7 +112,8 @@ It prints the secret once (only the hash is stored) and the POS bridge sends it 
 1. `npm install`
 2. `docker compose up -d db redis`
 3. `cp packages/db/.env.example packages/db/.env` (defaults point at localhost:5434)
-4. `cp apps/web/.env.example apps/web/.env.local` (fill secrets)
+4. `cp apps/web/.env.example apps/web/.env.local` (fill secrets) and, if you're running
+   the worker, `cp apps/worker/.env.example apps/worker/.env`
 5. `npm run -w @wezesha/db db:migrate:deploy`
 6. `npm run -w @wezesha/db db:generate`
 7. `npm run seed`

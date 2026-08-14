@@ -91,10 +91,16 @@ opening the screen.
 
 ---
 
-## Contacts
+## Who decides what
 
-Fill in before this is needed, not during:
+Roles, not names — put the current person against each one in the vault entry, where it
+can be kept current without a commit.
 
-- **Who decides to notify merchants:** _PLACEHOLDER_
-- **Who can rotate production credentials:** _PLACEHOLDER_
-- **Merchant-facing contact address:** see `apps/web/lib/legal.ts`
+- **Deciding to notify merchants:** the engagement lead. Not the engineer who found the
+  incident, and not a decision to make alone at 2am — but if the lead can't be reached
+  within an hour and merchant data is exposed, notify.
+- **Rotating production credentials:** the platform operator — the person holding the
+  Supabase, Railway and Vercel account owner logins and the secrets vault. Rotation
+  needs all three (DB role passwords, `TOKEN_ENCRYPTION_KEY`, `BETTER_AUTH_SECRET`), so
+  nobody else can complete it halfway.
+- **Merchant-facing contact address:** see `apps/web/lib/legal.ts`.
