@@ -32,7 +32,24 @@ export type ConnectionView = {
    *  scheduler stopped trying. The app still holds a connection; only a
    *  reconnect makes it usable again. */
   syncPausedAt: string | null;
+  /** How the store got its token: "oauth" (our app, via the install round trip)
+   *  or "token" (pasted from an app the shop made in its own admin). Absent
+   *  reads as oauth, the same default the column carries. */
+  authMode?: string;
 };
+
+/** The primary-button look on an anchor. The two ways back out of a broken
+ *  connection are real destinations — Shopify's install, or the token box
+ *  further down this card — so they are links, and the page says in its markup
+ *  which one a store is being sent to. */
+const RECOVERY_LINK_CLASS = cn(
+  "inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-medium",
+  "bg-accent text-on-accent transition-colors hover:bg-accent-strong",
+  "outline-accent focus-visible:outline-2 focus-visible:outline-offset-2",
+);
+
+/** Anchor target for the token box, so the recovery link can jump straight to it. */
+const TOKEN_PANEL_ID = "shopify-token-connect";
 
 type LastSyncRow = { resource: string; syncedAt: string | null };
 
@@ -117,6 +134,19 @@ export function ShopifyConnectionCard({
   const live = connection !== null && connection.uninstalledAt === null;
   // Still installed as far as the app knows, but every request is being refused.
   const paused = live && connection.syncPausedAt !== null;
+  /**
+   * Whether the install round trip can actually complete for this store.
+   *
+   * It reads this workspace's client ID and secret before it does anything
+   * else, and redirects straight back to ?error=no_app_credentials when there
+   * are none. A store connected by pasting an Admin API token has none by
+   * definition — that is the trade — so "Reconnect" was sending exactly the
+   * stores that use the token route on a lap of the building. An OAuth store
+   * whose credentials were since removed lands in the same place. Either way
+   * the way back is the token box below, and it is the route that always works.
+   */
+  const canReinstall =
+    connection !== null && connection.authMode !== "token" && appCredentialsConfigured;
   const syncing = syncActive;
   const onActiveChange = useCallback((value: boolean) => setSyncActive(value), []);
   const onSettled = useCallback((status?: SyncRunView["status"]) => {
@@ -298,7 +328,7 @@ export function ShopifyConnectionCard({
    * "no connection yet" made it unreachable exactly when it was needed.
    */
   const tokenConnectPanel = (
-    <div className="space-y-3 border-t border-edge pt-4">
+    <div id={TOKEN_PANEL_ID} className="scroll-mt-4 space-y-3 border-t border-edge pt-4">
       <div>
         <h3 className="text-sm font-medium text-ink">
           {connection === null ? "Connect with your own app" : "Connect with your own app instead"}
@@ -558,9 +588,11 @@ export function ShopifyConnectionCard({
           <div className="space-y-4">
             {paused && (
               <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">
-                Automatic syncs are paused — the store kept refusing our access token.
-                Reconnect the store to resume. Stock and sales figures below are from
-                the last sync that worked.
+                Automatic syncs are paused — the store kept refusing our access token.{" "}
+                {canReinstall
+                  ? "Reconnect the store to resume."
+                  : "Paste a fresh token below to resume."}{" "}
+                Stock and sales figures below are from the last sync that worked.
               </p>
             )}
             <dl className="grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2">
@@ -630,15 +662,33 @@ export function ShopifyConnectionCard({
                   Disconnect
                 </Button>
               )}
-              {canManage && (!live || paused) && (
-                <Button
-                  onClick={() => startInstall(connection.shopDomain)}
-                  loading={busy === "install"}
-                  disabled={busy !== null}
-                >
-                  Reconnect
-                </Button>
-              )}
+              {/* The way back matches the way in: a store that installed our
+                  app reinstalls it, a store that pasted a token pastes another.
+                  The stored domain is already normalised, so the install link
+                  needs no validating detour. */}
+              {canManage &&
+                (!live || paused) &&
+                (canReinstall ? (
+                  <a
+                    className={RECOVERY_LINK_CLASS}
+                    href={`/api/shopify/install?shop=${encodeURIComponent(connection.shopDomain)}`}
+                    // A full-page hop to Shopify shows nothing for a second or
+                    // two, and a second press lands on "that install link had
+                    // gone stale" — which describes the FIRST press.
+                    onClick={() =>
+                      setNotice({
+                        tone: "positive",
+                        text: `Taking you to ${connection.shopDomain} to approve access…`,
+                      })
+                    }
+                  >
+                    Reconnect
+                  </a>
+                ) : (
+                  <a className={RECOVERY_LINK_CLASS} href={`#${TOKEN_PANEL_ID}`}>
+                    Paste a new token
+                  </a>
+                ))}
             </div>
 
             {/* A store that cannot sync needs a way back that does not depend on

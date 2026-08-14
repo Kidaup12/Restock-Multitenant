@@ -62,6 +62,9 @@ export default async function ConnectionsPage({
                 syncPausedAt: connection.syncPausedAt
                   ? formatUtc(connection.syncPausedAt)
                   : null,
+                // Decides which recovery the card offers a broken store — the
+                // install round trip cannot complete for a token connection.
+                authMode: connection.authMode,
               }
             : null
         }
