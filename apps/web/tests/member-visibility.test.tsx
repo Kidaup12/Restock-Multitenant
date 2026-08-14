@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { readFileSync, readdirSync } from "node:fs";
+import ts from "typescript";
 import { isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BUYABLE_PRODUCT_WHERE, prismaService } from "@wezesha/db";
@@ -18,8 +20,14 @@ import {
   type BuyListRow,
 } from "../lib/data/plan";
 import { getInsightsOverview } from "../lib/data/insights";
-import { getCostMovedAlerts } from "../lib/data/costs";
+import { getCostCoverage, getCostMovedAlerts } from "../lib/data/costs";
 import { getUnreadCount, listNotifications } from "../lib/notifications/data";
+import {
+  COST_COLUMNS,
+  COST_SURFACES,
+  COST_SURFACE_DIR,
+  surfaceKey,
+} from "../lib/cost/surfaces";
 import { getDistributionProposal } from "../lib/data/transfers";
 
 // ReorderTable links to /stock; next/link needs an app-router context that a
@@ -153,6 +161,88 @@ function findElements(node: unknown, type: unknown, found: unknown[] = []): unkn
 }
 
 let seeded: SeedResult;
+
+/**
+ * The surfaces this suite covers are DERIVED, not restated. `lib/data` is
+ * scanned for exported functions that touch a cost column and the result is
+ * compared with `lib/cost/surfaces.ts`; a new cost-bearing getter fails
+ * here on the day it lands, whether or not its author knew this file existed.
+ *
+ * Scope, stated plainly: this checks the data layer, where redaction happens.
+ * A component that renders a cost it was handed is not scanned, and neither is
+ * a leak by derivation — a rank, a partition or a percentage computed FROM
+ * costs carries no cost column and no scan will see it. Those are the tests
+ * further down, written by hand, and they stay that way.
+ */
+describe("cost-surface manifest", () => {
+  /** Exported functions in `dir` whose body names a cost column. Deliberately
+   *  broader than the lint rule, which only looks at Prisma `select` literals:
+   *  a false positive here costs one manifest line, not a disabled build rule. */
+  function scanCostSurfaces(dir: string): string[] {
+    const found: string[] = [];
+    for (const file of readdirSync(dir).filter((f) => f.endsWith(".ts"))) {
+      const path = `${dir}/${file}`;
+      const source = ts.createSourceFile(
+        path,
+        readFileSync(path, "utf8"),
+        ts.ScriptTarget.Latest,
+        true
+      );
+      for (const statement of source.statements) {
+        const exported = ts
+          .getModifiers(statement as ts.HasModifiers)
+          ?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword);
+        if (!exported) continue;
+
+        let fn: ts.SignatureDeclaration | undefined;
+        let name: string | undefined;
+        if (ts.isFunctionDeclaration(statement)) {
+          fn = statement;
+          name = statement.name?.text;
+        } else if (ts.isVariableStatement(statement)) {
+          const declaration = statement.declarationList.declarations[0];
+          const init = declaration?.initializer;
+          if (init && (ts.isArrowFunction(init) || ts.isFunctionExpression(init))) {
+            fn = init;
+            name = declaration!.name.getText(source);
+          }
+        }
+        const body = (fn as ts.FunctionLikeDeclaration | undefined)?.body;
+        if (!fn || !body || !name) continue;
+
+        const text = body.getText(source);
+        if (COST_COLUMNS.some((column) => new RegExp(`\\b${column}\\b`).test(text))) {
+          found.push(surfaceKey({ module: path.replace(/\.ts$/, ""), getter: name }));
+        }
+      }
+    }
+    return found.sort();
+  }
+
+  it("declares every cost-bearing getter in lib/data — no more, no less", () => {
+    const scanned = scanCostSurfaces(COST_SURFACE_DIR);
+    expect(scanned.length).toBeGreaterThan(0); // a scan that found nothing proves nothing
+    expect(scanned).toEqual(COST_SURFACES.map(surfaceKey).sort());
+  });
+
+  it("names, for each surface, a suite that exercises it money-blind", () => {
+    for (const surface of COST_SURFACES) {
+      const proof = readFileSync(surface.provenBy, "utf8");
+      expect(proof, `${surface.provenBy} never calls ${surface.getter}`).toContain(surface.getter);
+      expect(proof, `${surface.provenBy} never runs anything money-blind`).toContain(
+        "canViewCosts: false"
+      );
+    }
+  });
+
+  it("keeps the lint rule's cost columns and the manifest's identical", async () => {
+    // The rule is a plain-JS ESLint plugin and cannot import the manifest, so
+    // the list exists twice. A column taught to one and not the other would
+    // leave a real gap in whichever half was forgotten.
+    const { COST_COLUMNS: ruleColumns } = await import("../eslint-rules/cost-visibility.mjs");
+    expect([...ruleColumns].sort()).toEqual([...COST_COLUMNS].sort());
+  });
+});
 
 describe("permission chain", () => {
   it("MEMBER preset lacks view_costs (what the pages key canViewCosts on)", () => {
@@ -646,6 +736,29 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
         data: { costMovedPct: product.costMovedPct, costMovedAt: product.costMovedAt },
       });
     }
+  });
+
+  it("costs screen: the coverage tile keeps its revenue share from a member", async () => {
+    // Found by the manifest check below — this getter had no money-blind row
+    // anywhere. `trustedRevenuePct` is the share of trailing revenue carried by
+    // products whose cost we trust: a weighting of costs by money, and the one
+    // figure on the tile that a member must not have.
+    const [member, owner] = await Promise.all([
+      getCostCoverage(seeded.tenantId, { canViewCosts: false }),
+      getCostCoverage(seeded.tenantId, { canViewCosts: true }),
+    ]);
+    expect(member.trustedRevenuePct).toBeNull();
+    expect(owner.trustedRevenuePct).not.toBeNull(); // vacuity guard
+    expect(costNumbers(member)).toEqual([]);
+
+    // The rest of the tile is the same for both, on purpose: how many products
+    // have a cost on file at all is a data-completeness fact about the
+    // workspace, naming no product and carrying no figure. Asserted so the
+    // choice is visible rather than assumed — if it should tighten, this is the
+    // line that changes.
+    expect(member.products).toBe(owner.products);
+    expect(member.trustedProductPct).toBe(owner.trustedProductPct);
+    expect(member.sourceSplit).toEqual(owner.sourceSplit);
   });
 
   it("notification feed: cost alerts stay off a member's bell, badge included", async () => {

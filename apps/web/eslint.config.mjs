@@ -4,6 +4,7 @@ import nextTs from "eslint-config-next/typescript";
 // Local plugin, imported by path: @wezesha/db exports only runtime entry points
 // and a lint rule has no business in the package's public surface.
 import tenantSafety from "../../packages/db/eslint-plugin-tenant-safety/index.mjs";
+import costVisibility from "./eslint-rules/cost-visibility.mjs";
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -23,6 +24,40 @@ const eslintConfig = defineConfig([
     files: ["**/*.{ts,tsx}"],
     plugins: { "tenant-safety": tenantSafety },
     rules: { "tenant-safety/require-tenant-scope": "error" },
+  },
+  {
+    // The money-blindness companion to the rule above. Tenant isolation has RLS
+    // behind it; cost-blindness has only the author's memory, so an exported
+    // getter that selects a cost column without a `canViewCosts` parameter is a
+    // build failure. Applies everywhere a getter can live, not just lib/data —
+    // moving a file must not quietly drop its cover.
+    files: ["**/*.{ts,tsx}"],
+    plugins: { "cost-visibility": costVisibility },
+    rules: { "cost-visibility/require-cost-gate": "error" },
+  },
+  {
+    // Four helpers that read cost columns and are not the surface the guarantee
+    // is made at. Named one by one, never by directory: a new file next to any
+    // of them is covered by the rule until it earns its own line here.
+    //
+    //   lib/metrics/catalogue.ts   The metrics contract. Returns moneyAtRestKes
+    //     raw on purpose; its two consumers (lib/data/stock.ts,
+    //     lib/data/insights.ts) both null it for a money-blind caller.
+    //   lib/capabilities/setup-depth.ts   Reads costSource/costKes to answer
+    //     "does this workspace have costs on file for the revenue that matters"
+    //     — a workspace-level setup signal, naming no product and carrying no
+    //     figure. It drives the onboarding nudge every role sees.
+    //   lib/po/create-po.ts, lib/po/send-po.ts   Building and sending a
+    //     purchase order IS the act of committing to costs; the supplier
+    //     document is authorised by the send, not by who is looking. Both are
+    //     reached only through a permission-checked server action.
+    files: [
+      "lib/metrics/catalogue.ts",
+      "lib/capabilities/setup-depth.ts",
+      "lib/po/create-po.ts",
+      "lib/po/send-po.ts",
+    ],
+    rules: { "cost-visibility/require-cost-gate": "off" },
   },
   {
     // The admin console reads across every workspace by design (fleet health,
