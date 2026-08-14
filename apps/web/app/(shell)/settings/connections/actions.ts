@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { Prisma, prismaForTenant, prismaService } from "@wezesha/db";
+import { Prisma, prismaForTenant, prismaForTenantTx, prismaService } from "@wezesha/db";
 import {
   createShopifyClient,
   decryptToken,
@@ -13,6 +13,7 @@ import {
 } from "@wezesha/shopify";
 import { enqueueShopifySync } from "@/lib/shopify/queue";
 import { tenantActor, canManageConnections } from "@/lib/shopify/membership";
+import { resetCursorsOnStoreChange } from "@/lib/shopify/store-switch";
 
 /**
  * Connect a Shopify store by pasting an Admin API access token.
@@ -100,30 +101,35 @@ export async function connectShopifyWithToken(input: {
   }
 
   try {
-    const db = prismaForTenant(actor.tenantId);
-    await db.shopifyConnection.upsert({
-      where: { tenantId: actor.tenantId },
-      create: {
-        tenantId: actor.tenantId,
-        shopDomain,
-        accessToken: encryptToken(accessToken),
-        // What the store actually granted, not what we asked for.
-        scopes: probe.grantedScopes.join(","),
-        authMode: "token",
-      },
-      update: {
-        shopDomain,
-        accessToken: encryptToken(accessToken),
-        scopes: probe.grantedScopes.join(","),
-        authMode: "token",
-        installedAt: new Date(),
-        uninstalledAt: null,
-        // A token that just proved itself clears any earlier give-up state.
-        authFailureCount: 0,
-        syncPausedAt: null,
-        lastAuthError: null,
-        lastAuthErrorAt: null,
-      },
+    await prismaForTenantTx(actor.tenantId, async (tx) => {
+      // A different store means the stored high-water marks describe data this
+      // workspace no longer has. Same transaction as the upsert: the two must
+      // not be able to disagree.
+      await resetCursorsOnStoreChange(tx, actor.tenantId, shopDomain);
+      await tx.shopifyConnection.upsert({
+        where: { tenantId: actor.tenantId },
+        create: {
+          tenantId: actor.tenantId,
+          shopDomain,
+          accessToken: encryptToken(accessToken),
+          // What the store actually granted, not what we asked for.
+          scopes: probe.grantedScopes.join(","),
+          authMode: "token",
+        },
+        update: {
+          shopDomain,
+          accessToken: encryptToken(accessToken),
+          scopes: probe.grantedScopes.join(","),
+          authMode: "token",
+          installedAt: new Date(),
+          uninstalledAt: null,
+          // A token that just proved itself clears any earlier give-up state.
+          authFailureCount: 0,
+          syncPausedAt: null,
+          lastAuthError: null,
+          lastAuthErrorAt: null,
+        },
+      });
     });
   } catch (e) {
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
