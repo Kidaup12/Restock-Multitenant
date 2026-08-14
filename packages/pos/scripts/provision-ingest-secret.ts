@@ -32,6 +32,7 @@ async function main(): Promise<void> {
     return;
   }
 
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- operator CLI: the slug names the tenant to provision and is typed at the command line, so there is no session tenant to scope by.
   const tenant = await prismaService.tenant.findUnique({
     where: { slug },
     select: { id: true, name: true, tenantConfig: { select: { posFeedSlug: true } } },

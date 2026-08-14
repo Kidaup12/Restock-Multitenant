@@ -43,16 +43,31 @@ const SINGLE_ROW_LOOKUPS = new Set([
   "findUniqueOrThrow",
 ]);
 
+// Nested keys the scope search must not descend into, because naming the scope
+// column inside one of them does not scope the query:
+//   - `NOT`, `none` and `isNot` invert what they contain. `NOT: { id: t }` names
+//     the scope key and means every tenant *except* that one — the exact
+//     inverse of a scope, read as a scope. This is the case that motivated the
+//     list (2026-08-13 audit): a slug existence probe passed the rule silently.
+//   - `OR` splits it. Only some branches of `OR: [{ tenantId }, { sku }]` need
+//     hold, so the query still selects rows the tenant does not own.
+// A filter that legitimately uses one of these still names its tenant at the
+// top level beside it (`{ tenantId, OR: [...] }`), which the direct-key check
+// catches before any descent happens. Excluding them costs nothing there.
+const NON_SCOPING_KEYS = new Set(["NOT", "none", "isNot", "OR"]);
+
 /** Does this object literal name `key` directly, or one level down inside a
  *  nested object/array value? The nesting allows Prisma's compound unique
  *  keys (`where: { tenantId_sku: { tenantId, sku } }`) and `AND: [{ tenantId }]`
- *  without opening the door to arbitrarily deep, unreadable filters. */
+ *  without opening the door to arbitrarily deep, unreadable filters — and never
+ *  descends through an inverting or disjunctive key (see NON_SCOPING_KEYS). */
 function namesKey(objectExpression, key, depth = 1) {
   if (objectExpression?.type !== "ObjectExpression") return false;
   return objectExpression.properties.some((p) => {
     if (p.type !== "Property") return false;
     if (p.key?.name === key || p.key?.value === key) return true;
     if (depth === 0) return false;
+    if (NON_SCOPING_KEYS.has(p.key?.name ?? p.key?.value)) return false;
     if (p.value?.type === "ObjectExpression") return namesKey(p.value, key, depth - 1);
     if (p.value?.type === "ArrayExpression") {
       return p.value.elements.some((el) => namesKey(el, key, depth - 1));

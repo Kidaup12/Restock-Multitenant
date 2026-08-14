@@ -140,6 +140,14 @@ export async function setPosFeedSlug(input: { slug: string }): Promise<PosAction
   // resolver, so their till would resolve to us and stop working. findMany
   // rather than a single-row lookup: resolving one tenant is the sanctioned
   // resolver's job, and this is an existence probe, not a resolution.
+  //
+  // It has to span tenants — the question is precisely "does a workspace other
+  // than mine own this slug?", which a tenant-scoped client cannot answer. The
+  // `NOT` is the exclusion of self, not a scope, so the rule is right to report
+  // it. Nothing about another workspace leaves this function: the result is
+  // narrowed to a single id, read only for its length, and the caller sees one
+  // boolean. The unique index below is the actual guard.
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- cross-tenant slug collision check; returns a boolean, never another tenant's data
   const shadowed = await prismaService.tenant.findMany({
     where: { slug, NOT: { id: ctx.tenantId } },
     select: { id: true },

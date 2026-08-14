@@ -64,6 +64,7 @@ export async function ingestPosSales(args: {
   sales: PosSaleInput[];
 }): Promise<PosIngestResult | null> {
   const { tenantId } = args;
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- reads the caller's own tenant by the id authenticatePosFeed already proved; the blanket ban on single-row tenant lookups is what trips here.
   const tenant = await prismaService.tenant.findUnique({
     where: { id: tenantId },
     select: { timezone: true },
