@@ -1,6 +1,5 @@
 "use server";
 
-import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
 import { prismaForTenant } from "@wezesha/db";
@@ -8,11 +7,9 @@ import { toPlanTier } from "@/lib/capabilities/plan-features";
 import { requireAdmin } from "@/lib/admin/gate";
 import { recordAdminEvent } from "@/lib/admin/audit";
 import {
-  ADMIN_TENANT_COOKIE,
   ADMIN_TENANT_TTL_MS,
-  clearAdminTenantCookie,
+  endAdminWorkspace,
   setAdminTenantCookie,
-  verifyAdminTenant,
 } from "@/lib/admin/impersonation";
 import { cancelInvite, createInvite, sendInviteEmail } from "@/lib/auth/invites";
 import { customerWorkspaceExists } from "@/lib/admin/fleet";
@@ -30,7 +27,9 @@ import { STEP_UP_REQUIRED } from "@/lib/admin/step-up-contract";
 /**
  * Workspace entry/exit for the admin console. Entering is the audited event:
  * one impersonation_start row per grant (not per page view — the grant IS the
- * session), one impersonation_end when the admin explicitly leaves.
+ * session), and one impersonation_end for every way of giving that grant back —
+ * leaving, signing out, or entering somewhere else on top of it. Expiry is the
+ * exception and says so at ADMIN_TENANT_TTL_MS.
  *
  * Everything here that changes something asks for the password first. Reads do
  * not: gate the fleet and the audit log too and an admin keeps a grant warm all
@@ -50,6 +49,11 @@ export async function enterWorkspace(formData: FormData): Promise<void> {
   if (!(await hasStepUp(admin))) {
     redirect(`/admin/step-up?enter=${encodeURIComponent(tenantId)}`);
   }
+
+  // Entering re-signs the cookie, so any visit already open ends here — with no
+  // click and no sign-out of its own to record it. Closing it first keeps the
+  // ledger balanced: one start, one end, in the order they happened.
+  await endAdminWorkspace(admin, "superseded");
 
   await recordAdminEvent({
     tenantId,
@@ -225,14 +229,7 @@ export async function inviteWorkspaceOwner(formData: FormData): Promise<InviteOw
 
 export async function exitWorkspace(): Promise<void> {
   const admin = await requireAdmin();
-  // End event only when a live grant exists; an expired grant already ended
-  // itself (start rows carry their expiresAt, so the window stays auditable).
-  const value = (await cookies()).get(ADMIN_TENANT_COOKIE)?.value;
-  const tenantId = verifyAdminTenant(value);
-  if (tenantId) {
-    await recordAdminEvent({ tenantId, action: "impersonation_end", admin });
-  }
-  await clearAdminTenantCookie();
+  await endAdminWorkspace(admin, "exit");
   redirect("/admin");
 }
 

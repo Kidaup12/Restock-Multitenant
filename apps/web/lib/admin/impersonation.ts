@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 import type { AppSession } from "@/lib/auth";
-import { isPlatformAdmin } from "@/lib/admin/gate";
+import { isPlatformAdmin, type AdminActor } from "@/lib/admin/gate";
+import { recordAdminEvent } from "@/lib/admin/audit";
 
 /**
  * Admin workspace entry ("impersonation") — membership-free, time-boxed, and
@@ -22,7 +23,16 @@ import { isPlatformAdmin } from "@/lib/admin/gate";
 
 export const ADMIN_TENANT_COOKIE = "wz-admin-tenant";
 
-/** Entry expires after 30 minutes; re-entering re-signs a fresh grant. */
+/**
+ * Entry expires after 30 minutes; re-entering re-signs a fresh grant.
+ *
+ * The cookie's maxAge is this same window, so a lapsed grant is already gone
+ * from the browser: there is no later admin request holding it in which to
+ * notice the expiry and write a closing row. What the ledger records instead is
+ * the bound — every impersonation_start carries `meta.expiresAt`, which is the
+ * exact instant a visit with no end row stopped working. That is a fact we know;
+ * a row written whenever we next happened to look would be a timestamp we don't.
+ */
 export const ADMIN_TENANT_TTL_MS = 30 * 60 * 1000;
 
 function secret(): string {
@@ -96,6 +106,52 @@ export async function clearAdminTenantCookie(): Promise<void> {
     path: "/admin",
     maxAge: 0,
   });
+}
+
+/**
+ * How an open visit ended, as it lands in the ledger's `meta.reason`.
+ *
+ * All three are things a person did inside a request we were serving, so the
+ * row's own timestamp is the real departure time. Expiry is not on this list
+ * and has no reason code — see the note on the TTL above.
+ */
+export type WorkspaceExitReason =
+  /** The admin clicked Leave. */
+  | "exit"
+  /** The admin signed out while still inside a workspace. */
+  | "sign_out"
+  /** A second entry re-signed the cookie, ending the visit it replaced. */
+  | "superseded";
+
+/**
+ * Close an open workspace visit and drop the grant.
+ *
+ * Every path that takes a grant away goes through here, so a departure is
+ * recorded when it happens rather than only when an admin remembers to click
+ * Leave. Before this, sign-out and re-entry both cleared the cookie in silence,
+ * and the ledger carried starts that never closed.
+ *
+ * Only a grant that still verifies produces a row: an already-lapsed cookie has
+ * no visit left to close, and `admin` is null when the caller could not confirm
+ * who is leaving — an unattributable end row is worse than none on a ledger
+ * whose whole job is naming the actor. The clear runs either way, so a failed
+ * ledger write is loud but never leaves a signed cookie naming a customer.
+ *
+ * Returns the tenant whose visit was closed, or null if none was open.
+ */
+export async function endAdminWorkspace(
+  admin: AdminActor | null,
+  reason: WorkspaceExitReason
+): Promise<string | null> {
+  const tenantId = verifyAdminTenant((await cookies()).get(ADMIN_TENANT_COOKIE)?.value);
+  try {
+    if (tenantId && admin) {
+      await recordAdminEvent({ tenantId, action: "impersonation_end", admin, meta: { reason } });
+    }
+  } finally {
+    await clearAdminTenantCookie();
+  }
+  return tenantId;
 }
 
 /**

@@ -21,6 +21,9 @@ const WRITE_MARKERS = [
   "recordAdminEvent",
   "provisionWorkspace(",
   "setAdminTenantCookie",
+  // Writes the impersonation_end row on its callers' behalf; without it here, an
+  // action could reach the ledger through a helper and read as a pure clear.
+  "endAdminWorkspace",
 ];
 
 /**
@@ -32,6 +35,11 @@ const DELIBERATELY_UNGUARDED = [
   // leave an admin holding an expired step-up inside someone's workspace with
   // no way to leave, which is worse than the write it would prevent.
   "actions.ts:exitWorkspace",
+  // The same way out, reached by signing out instead of clicking Leave. It runs
+  // as the session is being torn down, so a step-up check could only ever refuse
+  // — leaving a signed cookie naming a customer on a machine nobody is signed
+  // in to. It closes the visit and deletes; it cannot reach tenant data.
+  "sign-out-actions.ts:clearAdminCookies",
   // This IS the step-up: it verifies the password and mints the grant. Its own
   // guards are the throttle and the gate.
   "step-up-actions.ts:confirmStepUp",
