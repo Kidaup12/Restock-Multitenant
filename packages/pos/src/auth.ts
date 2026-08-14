@@ -48,10 +48,12 @@ type FeedTenant = { id: string; secretHash: string | null };
  *  nothing downstream sees a tenant until the secret has been verified. */
 async function resolveFeedTenant(slug: string): Promise<FeedTenant | null> {
   const [byFeedSlug, byTenantSlug] = await Promise.all([
+    // eslint-disable-next-line tenant-safety/require-tenant-scope -- resolving which tenant a feed slug belongs to is what this function is for; there is no tenant to scope by yet. Authentication happens at the secret compare below, not here.
     prismaService.tenantConfig.findFirst({
       where: { posFeedSlug: slug },
       select: { tenantId: true, posIngestSecretHash: true },
     }),
+    // eslint-disable-next-line tenant-safety/require-tenant-scope -- same slug resolution against the tenant's own slug; returns only the id and the hash to compare against.
     prismaService.tenant.findUnique({
       where: { slug },
       select: { id: true, tenantConfig: { select: { posIngestSecretHash: true } } },

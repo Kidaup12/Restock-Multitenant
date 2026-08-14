@@ -262,7 +262,7 @@ jobs:
         run: npm run -w @wezesha/queue test
 
   lint:
-    name: eslint (web + worker)
+    name: eslint (web + worker + pos + ws-gateway)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -283,6 +283,15 @@ jobs:
       # had accumulated behind that gap.
       - name: Lint (apps/worker)
         run: npm run -w @wezesha/worker lint
+
+      # Both also reach the database on the BYPASSRLS client and had no rule
+      # running over them at all: the POS feed resolves a tenant from an
+      # unauthenticated slug, and the gateway authorises every socket.
+      - name: Lint (packages/pos)
+        run: npm run -w @wezesha/pos lint
+
+      - name: Lint (apps/ws-gateway)
+        run: npm run -w @wezesha/ws-gateway lint
 
   web-build:
     name: web — next build

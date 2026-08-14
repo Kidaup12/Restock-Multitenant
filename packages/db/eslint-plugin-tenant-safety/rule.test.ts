@@ -201,6 +201,45 @@ describe("tenant-safety/require-tenant-scope", () => {
     });
   });
 
+  it("does not read an exclusion or a disjunction as a scope", () => {
+    // `NOT: { id: t }` names the scope key while meaning its exact inverse —
+    // every tenant except this one. One level of nesting exists for compound
+    // keys and `AND`, and those two keys alone; a filter that inverts or splits
+    // the branch it names is not a scope.
+    tester.run("require-tenant-scope", rule, {
+      valid: [
+        // The two shapes the one level of nesting exists for. If either of
+        // these starts reporting, the exclusion has been drawn too wide.
+        "prismaService.product.findUniqueOrThrow({ where: { tenantId_sku: { tenantId, sku } } });",
+        "prismaService.product.findMany({ where: { AND: [{ tenantId }] } });",
+        // An exclusion or a disjunction is fine beside a tenant named at the
+        // top level — the scope is the outer key, not the branch.
+        "prismaService.product.findMany({ where: { tenantId, NOT: { id } } });",
+        "prismaService.salesHistory.deleteMany({ where: { tenantId, channel: 'pos', OR: rows } });",
+      ],
+      invalid: [
+        {
+          code: "prismaService.tenant.findMany({ where: { slug, NOT: { id: t } } });",
+          errors: [{ message: "prismaService.tenant.findMany() must filter by id." }],
+        },
+        {
+          code: "prismaService.product.findMany({ where: { NOT: { tenantId: t } } });",
+          errors: [{ message: "prismaService.product.findMany() must filter by tenantId." }],
+        },
+        {
+          // Only one branch names the tenant, so the other selects rows it
+          // does not own.
+          code: "prismaService.product.findMany({ where: { OR: [{ tenantId }, { sku }] } });",
+          errors: [{ message: "prismaService.product.findMany() must filter by tenantId." }],
+        },
+        {
+          code: "prismaService.order.findFirst({ where: { lines: { none: { tenantId } } } });",
+          errors: [{ message: "prismaService.order.findFirst() must filter by tenantId." }],
+        },
+      ],
+    });
+  });
+
   it("covers the single-row writes, not just the bulk ones", () => {
     // The gap a 2026-08-11 audit found: on the BYPASSRLS client an update or
     // delete keyed only on an id is invisible to RLS, and was invisible here
