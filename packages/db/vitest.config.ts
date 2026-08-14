@@ -7,6 +7,7 @@ export default defineConfig({
     globalSetup: ["tests/require-infra.ts"],
     // The isolation suite seeds and asserts against one database — no parallel files.
     fileParallelism: false,
-    passWithNoTests: true,
+    // No passWithNoTests: a glob that matches nothing must fail, not report the
+    // isolation gate green while asserting nothing.
   },
 });
