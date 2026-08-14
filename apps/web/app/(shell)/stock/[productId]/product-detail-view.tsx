@@ -62,7 +62,7 @@ export function ProductDetailView({
           <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Figure label="On hand" value={`${detail.onHandUnits}`} />
             <Figure
-              label="On order"
+              label="En route"
               value={detail.onOrderUnits > 0 ? `${detail.onOrderUnits}` : "—"}
               note={detail.onOrderUnits > 0 ? (detail.expectedArrivalLabel ?? "no ETA") : undefined}
             />

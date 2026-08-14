@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { formatNumber } from "@/lib/money";
+import { formatEta } from "@/lib/dates";
 import { useCurrency } from "@/components/currency-provider";
 import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
 import {
@@ -58,9 +59,13 @@ import type { OwnerFlags } from "./owner-flags";
  * revalidate after an edit.
  */
 
-/** ETA on inbound stock — same day/month form the rest of the app uses. */
-function formatEta(date: Date): string {
-  return new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+/** How many columns the table has, for the colSpan an expanded row must reach.
+ *  The data columns are fixed — Product · ABC · Cost · Margin · On hand · In
+ *  warehouse · En route · Sells/day · Cover · Cash tied up · Revenue · Verdict —
+ *  and only the tick column an editor sees varies. Derived in one place so the
+ *  count cannot drift from the header. */
+export function catalogueColCount(canManage: boolean): number {
+  return 12 + (canManage ? 1 : 0);
 }
 
 export function CatalogueView({
@@ -144,11 +149,6 @@ export function CatalogueView({
   const hrefFor = (patch: Partial<CatalogueQuery>) =>
     `/stock${catalogueQueryToSearch(withQuery(query, patch))}`;
 
-  // Product · ABC · Cost · Margin · On hand · On order · Sells/day · Cover ·
-  // Cash tied up · Revenue · Verdict, plus the optional warehouse column and
-  // the tick column an editor sees.
-  const colCount = 11 + (aggregates.hasWarehouseStock ? 1 : 0) + (canManage ? 1 : 0);
-
   return (
     <div className="space-y-4">
       {canViewCosts && aggregates.band && (
@@ -231,8 +231,8 @@ export function CatalogueView({
               <TableHead numeric>Cost</TableHead>
               <TableHead numeric>Margin</TableHead>
               <TableHead numeric>On hand</TableHead>
-              {aggregates.hasWarehouseStock && <TableHead numeric>In warehouse</TableHead>}
-              <TableHead numeric>On order</TableHead>
+              <TableHead numeric>In warehouse</TableHead>
+              <TableHead numeric>En route</TableHead>
               <TableHead numeric>Sells/day</TableHead>
               <TableHead numeric>Cover</TableHead>
               <TableHead numeric>Cash tied up</TableHead>
@@ -248,12 +248,10 @@ export function CatalogueView({
                     row={row}
                     open={open}
                     onToggle={() => setExpandedId(open ? null : row.productId)}
-                    hasWarehouseStock={aggregates.hasWarehouseStock}
                     canViewCosts={canViewCosts}
                     canManage={canManage}
                     categoryNames={categoryNames}
                     flags={ownerFlags[row.productId] ?? { active: true, activeOverride: false }}
-                    colCount={colCount}
                     picked={allMatching || picked.has(row.productId)}
                     onPick={canManage ? () => togglePicked(row.productId) : undefined}
                   />
@@ -443,16 +441,14 @@ function Pager({
 
 const SOURCE_SHORT: Record<string, string> = { manual: "typed", qb: "QuickBooks", shopify: "Shopify", missing: "missing" };
 
-function RowGroup({
+export function RowGroup({
   row,
   open,
   onToggle,
-  hasWarehouseStock,
   canViewCosts,
   canManage,
   categoryNames,
   flags,
-  colCount,
   picked,
   onPick,
 }: {
@@ -462,12 +458,10 @@ function RowGroup({
   picked: boolean;
   /** Undefined for a reader who cannot edit — no tick column at all. */
   onPick?: () => void;
-  hasWarehouseStock: boolean;
   canViewCosts: boolean;
   canManage: boolean;
   categoryNames: string[];
   flags: OwnerFlags;
-  colCount: number;
 }) {
   // Margin reveals cost, so it masks for a money-blind member — as a bare dot
   // mask (margin is a percentage, not money), keeping the cost mask distinct.
@@ -523,11 +517,9 @@ function RowGroup({
           {marginCell}
         </TableCell>
         <TableCell numeric>{row.onHandUnits}</TableCell>
-        {hasWarehouseStock && (
-          <TableCell numeric className="text-ink-muted">
-            {row.warehouseUnits > 0 ? row.warehouseUnits : "—"}
-          </TableCell>
-        )}
+        <TableCell numeric className="text-ink-muted">
+          {row.warehouseUnits > 0 ? row.warehouseUnits : "—"}
+        </TableCell>
         <TableCell numeric className="text-ink-muted">
           {row.onOrderUnits > 0 ? (
             <span className="inline-flex flex-col items-end">
@@ -572,7 +564,7 @@ function RowGroup({
       </TableRow>
       {open && (
         <tr>
-          <td colSpan={colCount} className="p-0">
+          <td colSpan={catalogueColCount(canManage)} className="p-0">
             <RowEditor
               row={row}
               categories={categoryNames}

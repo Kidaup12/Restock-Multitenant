@@ -221,9 +221,6 @@ export type CatalogueAggregates = {
    *  describes the file being exported rather than the page on screen. Null for
    *  a money-blind member, like every other cost figure. */
   matchedStockValueKes: number | null;
-  /** Any row in scope holding warehouse stock, which is what decides whether the
-   *  table shows the warehouse column at all. */
-  hasWarehouseStock: boolean;
 };
 
 /** Scope, then the three filters, then sort. Exported so the export action can
@@ -284,7 +281,6 @@ export function buildAggregates(
     matchedStockValueKes: canViewCosts
       ? matched.reduce((sum, r) => sum + (r.stockValueKes ?? 0), 0)
       : null,
-    hasWarehouseStock: scoped.some((r) => r.warehouseUnits > 0),
   };
 }
 
