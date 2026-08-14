@@ -77,7 +77,17 @@ export function ProductDetailView({
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
-          <CardHeader title="What the last run decided" />
+          {/* The figures in this card are the run's, frozen; the ones at the top
+              of the page are today's. Saying so here — before the reasoning, not
+              in a footnote under it — is what stops the two being read as one. */}
+          <CardHeader
+            title="What the last run decided"
+            subtitle={
+              detail.prediction
+                ? `As it stood on ${detail.prediction.runLabel} — the figures at the top of the page are today's`
+                : undefined
+            }
+          />
           <CardContent className="pt-0">
             {detail.prediction ? (
               <div className="space-y-3">
@@ -108,12 +118,12 @@ export function ProductDetailView({
                   />
                 </div>
                 <p className="text-sm text-ink-secondary">{detail.prediction.reasoning}</p>
-                <p className="text-xs text-ink-faint">
-                  {detail.prediction.daysUntilStockout != null
-                    ? `Runs out in about ${detail.prediction.daysUntilStockout} days · `
-                    : ""}
-                  computed {detail.prediction.runLabel}
-                </p>
+                {detail.prediction.daysUntilStockout != null && (
+                  <p className="text-xs text-ink-faint">
+                    Heading for a stockout in about {detail.prediction.daysUntilStockout} days on
+                    that day&apos;s stock.
+                  </p>
+                )}
               </div>
             ) : (
               <p className="text-sm text-ink-muted">

@@ -20,6 +20,7 @@ import {
   dampedWindow,
   daysOfStockRemaining,
   kingsSafetyStock,
+  NO_STOCKOUT_DAYS,
   reorderPoint,
   standardDeviation,
   urgencyFromDays,
@@ -369,30 +370,40 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   // An owner expectation is knowledge, not history — it never reads as "sure".
   if (override?.source === "owner_prior") word = leastConfident(word, "fairly_sure");
 
+  // The prose is read beside LIVE figures — the product page prints it under a
+  // run rate and a cover recomputed at request time. So it states the run's
+  // decision and never a units/day rate of its own (that question has one answer
+  // on screen, the live one), and the stock it did decide against is stamped as
+  // of the run rather than written in the present tense.
+  const stockAtRun =
+    daysLeft >= NO_STOCKOUT_DAYS
+      ? `Stock at the run was ${input.currentStock}, with no stockout in sight.`
+      : `Stock at the run was ${input.currentStock} — about ${daysLeft} days' cover then.`;
+
   const reasoning = (tooNew
     ? [
         "No sales history yet — too new to forecast; collect sales before ordering against a prediction.",
-        `Current stock ${input.currentStock}.`,
+        `Stock at the run was ${input.currentStock}.`,
       ]
     : override?.source === "borrowed"
       ? [
-          `Too new to forecast from its own sales — borrowing an established similar product's shape (${override.label}): ${dailyRate.toFixed(2)} units/day. Real sales take over as history builds.`,
+          `Too new to forecast from its own sales — borrowing an established similar product's shape (${override.label}): ${finalForecast30d.toFixed(0)} units over 30 days. Real sales take over as history builds.`,
           `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, lead time ${input.leadTimeAvg}±${input.leadTimeStd}d).`,
-          `Current stock ${input.currentStock} covers ~${daysLeft} days.`,
+          stockAtRun,
         ]
       : override?.source === "owner_prior"
         ? [
-            `Using the owner's expectation (${override.label}): ${finalForecast30d.toFixed(0)} units over 30 days, ${dailyRate.toFixed(2)} units/day.`,
+            `Using the owner's expectation (${override.label}): ${finalForecast30d.toFixed(0)} units over 30 days.`,
             `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, lead time ${input.leadTimeAvg}±${input.leadTimeStd}d); reorder point ${rop.toFixed(0)}.`,
-            `Current stock ${input.currentStock} covers ~${daysLeft} days.`,
+            stockAtRun,
           ]
         : [
             `Forecast ${finalForecast30d.toFixed(0)} units over 30 days from the ${
               isNew ? `last-${Math.max(1, Math.round(span))}-day rate (new product)` : "recency-weighted run rate (30/90/365-day blend)"
-            }: ${dailyRate.toFixed(2)} units/day.`,
+            }.`,
             wasCapped ? `Capped at ${capMultiple}× the best month (${best.toFixed(0)}) to block runaway numbers.` : "",
             `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, lead time ${input.leadTimeAvg}±${input.leadTimeStd}d); reorder point ${rop.toFixed(0)}.`,
-            `Current stock ${input.currentStock} covers ~${daysLeft} days.`,
+            stockAtRun,
           ]
   )
     .filter(Boolean)
