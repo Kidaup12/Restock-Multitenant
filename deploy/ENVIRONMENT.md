@@ -35,7 +35,7 @@ it embeds a password).
 | `SNAPSHOT_CRON` | `apps/worker/src/index.ts` (gates `apps/worker/src/snapshot-cron.ts`) | worker | Railway (`1` everywhere on-hand history is wanted — stockout-rate and dead-stock trends read off it) | config | unset — schedule OFF |
 | `SHOPIFY_SYNC_CRON` | `apps/worker/src/index.ts` (gates `apps/worker/src/sync-schedule-cron.ts`) | worker | Railway (`1` in production — without it a shop's data only refreshes when someone presses Sync now) | config | unset — schedule OFF |
 | `SHOPIFY_SYNC_PATTERN` | `apps/worker/src/sync-schedule-cron.ts` | worker | Railway (only to re-time the sync) | config | `*/15 * * * *`. Ten minutes is the floor worth considering: a tick does a full inventory refresh, and the app calls a run stalled once its progress has been quiet for ten |
-| `RESEND_API_KEY` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | secret | unset (mail is logged to the console, never sent — dev/CI/tests stay offline) |
+| `RESEND_API_KEY` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | secret | unset — outside production mail is logged to the console, never sent (dev/CI/tests stay offline). **With `NODE_ENV=production` every send throws instead** |
 | `EMAIL_FROM` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Vercel (web); Railway (worker) | config | unset (only read when `RESEND_API_KEY` is set; sender as `Name <address>` or a bare address) |
 | `ADMIN_EMAILS` | `apps/web/lib/admin/gate.ts` | web | Vercel | config (sensitive — names the operator accounts) | unset. Bootstrap only: it answers who is an admin while the `PlatformAdmin` table has no live row, and goes inert once one does. With both empty the console 404s for everyone — fail closed |
 | `SENTRY_DSN` | `packages/observability/src/index.ts` (via each service's init) | web (`apps/web/instrumentation.ts`) | Vercel | secret | unset (error tracking disabled — complete no-op) |
@@ -100,6 +100,13 @@ Notes:
   is a complete no-op (the SDK is not even loaded); nothing else changes. When DSNs
   arrive, set them and redeploy — no code change needed, and error tracking is only
   considered live once a deployed service has reported into the Sentry project.
+- **`RESEND_API_KEY` is required in production, on both web and worker.** Vercel and
+  Railway both run with `NODE_ENV=production`, and there a missing key makes every send
+  throw rather than fall back to the console. That is deliberate: the old silence let a
+  shop see a purchase order marked sent when nothing had left the building. Deploy
+  without the key and invites, sign-in codes, purchase orders, reconnect alerts and
+  weekly summaries all fail — loudly, and with a `failed` row in `EmailLog`. Set
+  `EMAIL_FROM` with it; a key without a sender throws too.
 - **`/api/health` (web) also reads `REDIS_URL`** to report the worker's heartbeat
   key (`ops:worker:heartbeat`); with no `REDIS_URL` the endpoint still works and
   reports `worker: null` (unknown).
@@ -200,7 +207,7 @@ Supabase specifics that are easy to get wrong:
 | `SHOPIFY_APP_URL` | prod origin | preview origin | tunnel origin |
 | `TOKEN_ENCRYPTION_KEY` | prod key (= worker's) | preview key (= staging worker's) | local key |
 | `SENTRY_DSN` | prod DSN (when provisioned) | preview DSN or unset | unset |
-| `RESEND_API_KEY` | prod key (= worker's) | preview key or unset (console fallback) | unset |
+| `RESEND_API_KEY` | prod key (= worker's) — **required; without it every send throws** | preview key or unset (console fallback) | unset |
 | `EMAIL_FROM` | prod sender | preview sender | unset |
 | `ADMIN_EMAILS` | bootstrap operator, until the first `PlatformAdmin` row | same or unset | unset |
 
@@ -239,8 +246,9 @@ previews must never hold prod credentials.
   six are off by default; a production worker with none of them set runs no nightly
   work at all
 - `POS_FEED_SECRET` — only when a tenant's POS feed URL is polled by the worker
-- `RESEND_API_KEY` — same key as web for the environment; unset makes the worker
-  log alerts/summaries to the console instead of sending them
+- `RESEND_API_KEY` — same key as web for the environment. Required on a production
+  worker: unset there makes every alert and summary throw (outside production it
+  falls back to the console)
 - `EMAIL_FROM` — same sender as web for the environment
 - `SENTRY_DSN` — when provisioned; unset keeps tracking a no-op
 

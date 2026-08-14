@@ -93,6 +93,8 @@ export async function sendIncidentAlert(options: {
         `Reason: ${reason}\n\n` +
         `Open Settings → Connections in Wezesha Restock to reconnect the store. ` +
         `You'll get one email per incident — syncs resuming resets the alert.`,
+      tenantId,
+      kind: "reconnect_alert",
     });
     return true;
   } catch (err) {
