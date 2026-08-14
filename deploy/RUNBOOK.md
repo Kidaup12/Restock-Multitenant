@@ -26,11 +26,19 @@ Environment variables are catalogued in `deploy/ENVIRONMENT.md` — this file on
 - **Docker build context is the repo root** (both Dockerfiles start
   `docker build -f apps/<svc>/Dockerfile .`) so the lockfile and workspace graph are
   visible; `npm ci -w <service>` prunes the install to that service's subtree.
-- **Railway config-as-code** is per-service `railway.json` (`apps/ws-gateway/railway.json`,
-  `apps/worker/railway.json`): Dockerfile builder + on-failure restart policy. Each
-  Railway service points at the same repo with its own **Config File Path** (step 4).
-  Root Directory stays the repo root — do not set it per service, or the Docker build
-  context loses the workspace graph.
+- **The two Railway services do not currently build from the Dockerfiles.** Both are
+  configured in the Railway UI with the Railpack builder, `npm ci` as the build
+  command, and an explicit start command (`npm run -w @wezesha/worker start`,
+  `npm run -w @wezesha/ws-gateway start`) — no Config File Path is set, so the
+  tracked `apps/worker/railway.json` and `apps/ws-gateway/railway.json` (Dockerfile
+  builder + on-failure restart policy) are inert in production. The Dockerfiles are
+  still what the local staging rehearsal and CI's `docker-build` job use, so they
+  are exercised, just not by Railway. Reconciling the two is an open decision —
+  either point each service at its `railway.json`, or drop the dead config. Until
+  then, believe the platform, not the file.
+- **Deploy branches differ per service.** Railway (worker + ws-gateway) deploys from
+  **`develop`**. Vercel (web) deploys Production from **`main`**. Pushing only one of
+  the two ships only half the change — see step 4 and step 5.
 - **Gateway health check is `GET /healthz`** on the ws port (200 with
   `{uptime, connections}`). The Dockerfile HEALTHCHECK probes it for docker-level
   supervision; set Railway's HTTP health check path to `/healthz` for the gateway
@@ -189,21 +197,27 @@ second.
 2. **Redis first:** Create → Database → **Redis**. Note the generated variables
    (`REDIS_URL`, and the private-network variant if shown).
 3. **ws-gateway service:** Create → GitHub Repo → select the repo.
-   - Settings → **Config File Path** → `apps/ws-gateway/railway.json` (this makes the
-     build use `apps/ws-gateway/Dockerfile` with the repo root as context; leave Root
-     Directory unset).
+   - Build: leave Root Directory unset. The live service uses the **Railpack**
+     builder with build command `npm ci` and start command
+     `npm run -w @wezesha/ws-gateway start`. Setting a Config File Path to
+     `apps/ws-gateway/railway.json` would switch it to the Dockerfile instead —
+     see the open decision in section 0 before changing it.
    - Variables: `REDIS_URL = ${{Redis.REDIS_URL}}` (prefer the private-URL reference
      if the plugin exposes one), plus `DATABASE_URL` and `SERVICE_DATABASE_URL` — the
      gateway authorizes each socket against the caller's session and resolves the
-     tenant through `Membership`, so it needs database access. Leave `WS_DEV_TOKEN`
-     unset in production; the gateway ignores it there anyway.
+     tenant through `Membership` (`apps/ws-gateway/src/auth.ts`), so it needs database
+     access. The import is lazy, so a gateway missing these starts and answers
+     `/healthz` normally and only fails when the first socket tries to authenticate.
+     Leave `WS_DEV_TOKEN` unset in production; the gateway ignores it there anyway.
    - Settings → Networking → **Generate Domain** (public). Note it: the browser and
      smoke tests connect to `wss://<gateway-domain>`, and it is the value of web's
      `NEXT_PUBLIC_WS_URL` in section 5.
-   - Deploy branch: `main` for production. (A second environment tracking `develop`
-     is optional; add later.)
+   - Deploy branch: **`develop`**. This is not the same branch Vercel publishes —
+     see step 5.
 4. **worker service:** Create → GitHub Repo → same repo.
-   - Settings → **Config File Path** → `apps/worker/railway.json`.
+   - Build: same as the gateway — Railpack, `npm ci`, start command
+     `npm run -w @wezesha/worker start`, no Config File Path, no Root Directory.
+   - Deploy branch: **`develop`**, same as the gateway.
    - Variables: `REDIS_URL = ${{Redis.REDIS_URL}}` (same reference), `DATABASE_URL`,
      `SERVICE_DATABASE_URL`, `TOKEN_ENCRYPTION_KEY` and `SHOPIFY_APP_URL`.
    - **Decide the schedules here.** Every cron group is off unless set to `1`:
@@ -229,6 +243,13 @@ second.
    (`cd ../.. && npm ci` so the workspace root installs; `next build`).
 4. Settings → Git → **Production Branch: `main`**. Every other branch — including
    `develop` — deploys as a Preview automatically.
+
+   > **The two platforms track different branches.** Vercel's production is `main`;
+   > both Railway services deploy `develop` (section 4). A change merged to `develop`
+   > and not to `main` ships the worker and gateway but leaves the web app on the old
+   > code; a change pushed to `main` alone ships the UI against an unchanged worker.
+   > Anything spanning web and worker — a schema change most of all — has to reach
+   > both, and migrations run before either (`deploy/ENVIRONMENT.md`).
 5. Environment variables per `deploy/ENVIRONMENT.md`, set for Production and Preview
    separately — previews never get prod credentials. **The build fails without these
    four**, so set them before the first deploy:
@@ -439,8 +460,10 @@ ______ · dump size ______ · surprises ______
 ## 9. Follow-ups (known, deliberate deferrals)
 
 - **Gateway `/healthz`:** done — the gateway serves `GET /healthz` (200,
-  `{uptime, connections}`) on its ws port and the Dockerfile HEALTHCHECK probes it.
-  Remaining owner step: point the Railway health check at `/healthz` (step 4).
+  `{uptime, connections}`) on its ws port. The Dockerfile HEALTHCHECK probes it, but
+  Railway isn't building from the Dockerfile (section 0), so that probe is not what
+  runs in production. Remaining owner step: point the Railway health check at
+  `/healthz` (step 4).
 - **Worker DB access:** done — the sync writes through the service client;
   `deploy/ENVIRONMENT.md` lists the worker's DB URLs.
 - **Uptime monitors:** the endpoints and heartbeat ship with the repo; creating
@@ -463,7 +486,8 @@ Everything above assumes these accounts/switches, which only the account owner c
 1. Supabase: create org/project, choose plan (PITR requires Pro), run prod-roles.sql,
    generate/record passwords.
 2. Railway: create project, provision Redis, connect the GitHub repo to two services,
-   set the two config-file paths, set variables, generate the gateway domain.
+   set each service's deploy branch to `develop`, set build/start commands, set
+   variables, generate the gateway domain.
 3. Vercel: import repo, set Root Directory, set Production Branch, set env vars.
 4. GitHub: no new secrets needed for CI today (the db job uses a service container);
    Railway/Vercel connect via their own GitHub apps.

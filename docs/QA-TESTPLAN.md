@@ -255,8 +255,8 @@ since been fixed and simply never removed. If something on this list looks like 
 probably does; say so rather than assuming the list is right. Anything not on this list is fair game.
 
 Two known to be **out of date** as of 12 August: the guided tour's locked-screen step and the Today
-setup strip both had work done on them, and sync progress now shows while a sync runs. Treat those
-three as testable rather than excused.
+setup strip both had work done on them. Treat both as testable rather than excused. Sync progress
+was on this list and has been removed — the Connections screen now reports a running sync live.
 
 **No store but ours can install the app.** The Shopify app has no distribution method selected, so
 any store outside our Partner organisation gets "This app can't be installed yet." That blocks the
@@ -280,13 +280,13 @@ store still sees shillings on every screen. Being fixed. (Two things that are *n
 show other currencies correctly: the currency picker on a supplier, and the currency on a purchase
 order.)
 
-**No sync progress yet.** While a sync runs, the Connections screen just says "never" for each
-resource until that stage finishes — on a big catalogue that's minutes of apparent silence. Being
-fixed; if you're testing after that lands, please test it hard.
-
-**QuickBooks doesn't exist.** It's named on the Settings hub, the Costs page header and a Costs card,
-and "from QuickBooks" appears as a cost source on Stock. There is no integration behind any of it.
-The Settings hub also promises a POS card on the Connections screen; there isn't one.
+**QuickBooks isn't surfaced.** There's no QuickBooks integration, and the Costs page no longer
+advertises one — the QuickBooks card and the "QuickBooks" chip in the cost-source split are both
+switched off there until a connector exists. Two places still say the word: "from QuickBooks" shows
+as a cost source on Stock for any row that carries it, and the schema keeps
+`PurchaseOrder.qbConfirmedAt` / `qbDocRef` / `qbSuggestion` as an evidence track. So treat it as
+*not surfaced yet*, not removed — if you see QuickBooks offered as something a shop can turn on,
+that's a bug worth filing.
 
 **POS/till connectors aren't started.** The ingest endpoint and the reconciliation screens exist,
 but nothing connects to a real till system yet.

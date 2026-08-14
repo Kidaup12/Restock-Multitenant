@@ -66,6 +66,7 @@ async function main() {
   step(3, "seeding local env files");
   seedEnv("packages/db/.env.example", "packages/db/.env");
   seedEnv("apps/web/.env.example", "apps/web/.env.local");
+  seedEnv("apps/worker/.env.example", "apps/worker/.env");
 
   step(4, "waiting for Postgres to accept connections");
   await waitForPostgres(compose);
@@ -85,6 +86,11 @@ Setup complete.
   Start the app:      npm run -w web dev
   Start the worker:   npm run -w @wezesha/worker dev   (crons + sync; needs Redis)
   Sign in:            owner@wezesha.test  /  Owner12345!   (also admin@ / staff@ — see docs/QA-TESTPLAN.md)
+
+The operator console at /admin is closed until an account is granted it. Not done
+here, because who gets cross-tenant access is a choice, not a default:
+
+  npm run bootstrap:admin -- owner@wezesha.test
 
 Docs: docs/QUICKSTART.md  ·  docs/ARCHITECTURE.md
 `);
