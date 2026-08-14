@@ -1,5 +1,5 @@
 import { prismaForTenant } from "@wezesha/db";
-import { buildPoDocument, type PoDocumentData } from "@/lib/po/po-model";
+import { buildPoDocument, isPoLate, type PoDocumentData } from "@/lib/po/po-model";
 import { computeSupplierScore, type SupplierScore } from "@/lib/po/supplier-stats";
 
 /**
@@ -182,6 +182,8 @@ export type PoListRow = {
   sentAt: Date | null;
   expectedAt: Date | null;
   receivedAt: Date | null;
+  /** Promised day passed with stock still outstanding (lib/po/po-model.ts). */
+  isLate: boolean;
 };
 
 export async function getPurchaseOrders(
@@ -205,6 +207,7 @@ export async function getPurchaseOrders(
       lines: { select: { quantity: true, receivedQty: true } },
     },
   });
+  const now = new Date();
   return pos.map((po) => ({
     id: po.id,
     poNumber: po.poNumber,
@@ -218,6 +221,7 @@ export async function getPurchaseOrders(
     sentAt: po.sentAt,
     expectedAt: po.expectedAt,
     receivedAt: po.receivedAt,
+    isLate: isPoLate(po, now),
   }));
 }
 
@@ -234,6 +238,36 @@ export type PoDetailLine = {
   receivedAt: Date | null;
 };
 
+/**
+ * What the email ledger says about the supplier's copy of an order.
+ *
+ * EmailLog carries no purchaseOrderId, so the rows have to be found by
+ * something already on them. The PO number is that something: it is unique per
+ * workspace (PurchaseOrder @@unique([tenantId, poNumber])) and the send path
+ * puts it in the subject, so the match is exact rather than a guess from
+ * timestamps and addresses — two orders emailed to the same supplier in the
+ * same minute stay distinguishable. RLS confines the search to this workspace.
+ *
+ * The trade is that this read depends on the subject the send path writes. The
+ * po-email-outcome suite pins that format, so a change to it fails a test
+ * rather than quietly blanking the screen.
+ */
+export type PoEmailOutcome = {
+  /** The last attempt's ledger status: sent | failed | skipped. */
+  status: string;
+  /** Address the send was addressed to. */
+  to: string;
+  at: Date;
+  /** Attempts before this one — a retry after a failure leaves both rows. */
+  earlierAttempts: number;
+};
+
+/** The fragment of a PO email's subject that identifies the order. Spaces on
+ *  both sides so PO-9 doesn't match PO-90. */
+export function poEmailLogSubjectMatch(poNumber: string): string {
+  return ` ${poNumber} `;
+}
+
 export type PoDetail = {
   id: string;
   poNumber: string;
@@ -246,12 +280,17 @@ export type PoDetail = {
   expectedAt: Date | null;
   receivedAt: Date | null;
   cancelledAt: Date | null;
+  /** Promised day passed with stock still outstanding (lib/po/po-model.ts). */
+  isLate: boolean;
   createdByName: string | null;
   /** Who emailed it to the supplier. Read from the ledger rather than a column
    *  on the order: sending is recorded there already, and a denormalised copy
    *  would be a second place for the same fact to drift. Null for an order sent
    *  before the send started naming its actor. */
   sentByName: string | null;
+  /** What happened to the supplier's email, from the ledger. Null when no
+   *  attempt was ever recorded for this order. */
+  email: PoEmailOutcome | null;
   supplier: {
     id: string;
     name: string;
@@ -316,9 +355,29 @@ export async function getPoDetail(
     }),
   ]);
   if (!po) return null;
+
+  const attempts = await db.emailLog.findMany({
+    where: {
+      kind: "purchase_order",
+      subject: { contains: poEmailLogSubjectMatch(po.poNumber) },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { status: true, to: true, createdAt: true },
+  });
+  const latest = attempts[0];
+
   return {
     ...po,
     sentByName: sentEvent?.actorName ?? null,
+    email: latest
+      ? {
+          status: latest.status,
+          to: latest.to,
+          at: latest.createdAt,
+          earlierAttempts: attempts.length - 1,
+        }
+      : null,
+    isLate: isPoLate(po, new Date()),
     subtotalKes: canViewCosts ? po.subtotalKes : null,
     lines: po.lines.map((line) =>
       canViewCosts ? line : { ...line, unitCostKes: null, lineTotalKes: null }

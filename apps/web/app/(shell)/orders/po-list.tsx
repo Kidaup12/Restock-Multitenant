@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { ClipboardIcon } from "@/components/icons";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -89,7 +90,12 @@ export async function PoList({
                       ? `Arrived ${day(po.receivedAt)}`
                       : po.expectedAt
                         ? day(po.expectedAt)
-                        : "—"}
+                        : "No date"}
+                    {po.isLate && (
+                      <Badge tone="negative" className="ml-2">
+                        Late
+                      </Badge>
+                    )}
                   </TableCell>
                 </TableRow>
               ))}

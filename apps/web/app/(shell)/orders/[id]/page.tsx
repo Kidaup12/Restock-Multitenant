@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -15,7 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getPoDetail } from "@/lib/data/orders";
+import { getPoDetail, type PoDetail } from "@/lib/data/orders";
 import { PoStatusBadge } from "../po-status-badge";
 import { PoActions } from "./po-actions";
 import { ReceiveForm } from "./receive-form";
@@ -26,6 +27,42 @@ export const metadata: Metadata = {
 
 const day = (date: Date) =>
   date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+
+/**
+ * What happened to the supplier's email, in words that claim only what the
+ * ledger knows. "Delivered" is not one of them: the mail provider accepting a
+ * message is not proof anyone read it, so a successful send says the email left
+ * us and stops there. A failure says the opposite plainly — the supplier has
+ * not seen this order — because the shop's next move depends on knowing that.
+ */
+function emailNote(email: PoDetail["email"]): { text: string; bad: boolean } {
+  if (!email) {
+    return {
+      text: "No email record for this order — it may have been sent before we started keeping them.",
+      bad: false,
+    };
+  }
+  const retries =
+    email.earlierAttempts > 0
+      ? ` After ${email.earlierAttempts} earlier attempt${email.earlierAttempts === 1 ? "" : "s"}.`
+      : "";
+  if (email.status === "sent") {
+    return {
+      text: `Email went out to ${email.to} on ${day(email.at)} — we can't tell whether it has been opened.${retries}`,
+      bad: false,
+    };
+  }
+  if (email.status === "skipped") {
+    return {
+      text: `Email to ${email.to} did not go out — email sending is switched off for this workspace. The supplier has not been told.${retries}`,
+      bad: true,
+    };
+  }
+  return {
+    text: `Email to ${email.to} did not go out on ${day(email.at)} — the supplier has not seen this order. Send it again or phone them.${retries}`,
+    bad: true,
+  };
+}
 
 export default async function PoDetailPage({
   params,
@@ -55,7 +92,13 @@ export default async function PoDetailPage({
 
   const receivable = po.status === "sent" || po.status === "partially_received";
 
-  const timeline = [
+  const timeline: {
+    label: string;
+    at: Date | null;
+    extra: string | null;
+    late?: boolean;
+    note?: { text: string; bad: boolean } | null;
+  }[] = [
     { label: "Created", at: po.createdAt, extra: po.createdByName ? `by ${po.createdByName}` : null },
     {
       label: "Sent",
@@ -64,10 +107,22 @@ export default async function PoDetailPage({
       // committed money to a supplier, and Created already names its actor.
       extra: [
         po.sentByName ? `by ${po.sentByName}` : null,
-        po.expectedAt ? `expected ${day(po.expectedAt)}` : null,
+        // No ETA means the supplier has no lead time on file — say so rather
+        // than leave a silence that reads as a delivery on track.
+        po.expectedAt
+          ? `expected ${day(po.expectedAt)}`
+          : po.sentAt
+            ? "no delivery date promised"
+            : null,
       ]
         .filter(Boolean)
         .join(" · "),
+      late: po.isLate,
+      // "Sent" has meant "we marked it sent" — this says what became of the
+      // email itself, which is the question the shop actually asks. Shown for a
+      // draft too when an attempt was logged: a failed send hands the order
+      // back to draft, so that is exactly where the bad news has to appear.
+      note: po.sentAt || po.email ? emailNote(po.email) : null,
     },
     po.cancelledAt
       ? { label: "Cancelled", at: po.cancelledAt, extra: null }
@@ -110,6 +165,20 @@ export default async function PoDetailPage({
                 {step.at ? day(step.at) : "—"}
               </p>
               {step.extra && <p className="text-xs text-ink-muted">{step.extra}</p>}
+              {step.note && (
+                <p
+                  className={`mt-1 max-w-xs text-xs ${
+                    step.note.bad ? "text-negative" : "text-ink-muted"
+                  }`}
+                >
+                  {step.note.text}
+                </p>
+              )}
+              {step.late && (
+                <Badge tone="negative" className="mt-1">
+                  Late
+                </Badge>
+              )}
             </div>
           ))}
           <div className="ml-auto text-right">
