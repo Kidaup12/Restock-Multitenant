@@ -1137,3 +1137,35 @@ model AuditEvent {
   @@index([tenantId, createdAt])
   @@index([tenantId, entity, entityId])
 }
+
+// Delivery ledger for outbound mail — one row per attempt through either send
+// seam (apps/web/lib/email.ts, apps/worker/src/email.ts). It answers the
+// question the purchase-order flow could not: did that email actually leave,
+// to whom, when, and if not, why. Without it a PO reads "sent" on the strength
+// of a function that returned.
+//
+// The body is deliberately absent. A purchase-order email carries supplier unit
+// costs, and this product is money-blind — the envelope is enough to trace a
+// send, the contents would be a second, unredacted copy of the costs.
+//
+// tenantId is nullable: password resets and sign-in codes are sent before any
+// workspace is resolved. RLS is fail-closed on that null — `NULL = <anything>`
+// is NULL, never true, so a tenant-less row is invisible to every tenant client
+// and un-insertable by the tenant role. Writes therefore go through the service
+// client, the same rule AuditEvent follows, and for the same reason: a ledger
+// the tenant role could write is not a ledger. Like AuditEvent it carries no
+// foreign key — the trail has to outlive the workspace it describes.
+model EmailLog {
+  id         String   @id @default(cuid())
+  tenantId   String?
+  to         String
+  subject    String
+  kind       String? // purchase_order | invite | sign_in_code | reconnect_alert | …
+  status     String // sent | skipped | failed
+  providerId String? // provider's message id, for chasing a delivery with them
+  error      String? // why a skipped/failed send did not go out
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([status, createdAt])
+}

@@ -230,6 +230,13 @@ export const builders: Record<string, Builder> = {
     entityId: `entity-${key}`,
     action: "created",
   }),
+  EmailLog: (tenantId, key) => ({
+    tenantId,
+    to: `${key}@isolation.test`,
+    subject: `subject-${key}`,
+    kind: "purchase_order",
+    status: "sent",
+  }),
 
   // Integrations (Shopify)
   ShopifyConnection: (tenantId, key) => ({
