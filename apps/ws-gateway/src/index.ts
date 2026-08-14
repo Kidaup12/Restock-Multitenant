@@ -63,7 +63,8 @@ async function main(): Promise<void> {
         () => process.exit(0),
         (err) => {
           console.error("ws-gateway: shutdown error", err);
-          process.exit(1);
+          captureError(err, { origin: "shutdown" });
+          void flushObservability(2000).finally(() => process.exit(1));
         }
       );
   };
@@ -72,6 +73,9 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
+  // Startup failures (Redis unreachable, port taken) never reach the process
+  // handlers above — report before exiting, if tracking got far enough to init.
   console.error("ws-gateway: fatal", err);
-  process.exit(1);
+  captureError(err, { origin: "startup" });
+  void flushObservability(2000).finally(() => process.exit(1));
 });

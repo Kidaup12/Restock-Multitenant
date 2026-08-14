@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
+import { captureError } from "@wezesha/observability";
 import { TENANT_CHANNEL_PATTERN, decodeEnvelope, tenantIdFromChannel } from "@wezesha/realtime";
-import type { AuthorizeSocket } from "./auth";
+import type { AuthorizeSocket, SocketPrincipal } from "./auth";
 
 /**
  * The slice of a Redis subscriber connection the gateway needs. ioredis
@@ -69,20 +70,47 @@ function workspaceFrom(req: IncomingMessage): string | null {
   return url.searchParams.get("workspace") || null;
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+/**
+ * A connection either gets in or doesn't — but *why* it didn't matters to
+ * reporting. "denied" is the authorizer answering no (bad token, expired
+ * session, a workspace the user doesn't hold): ordinary traffic, and the bulk
+ * of it. "failed" and "timeout" are the authorizer not answering at all —
+ * the session store is down or wedged — which is an incident even though the
+ * client sees the same 4401.
+ */
+type AuthorizeOutcome =
+  | { status: "ok"; principal: SocketPrincipal }
+  | { status: "denied" }
+  | { status: "failed"; err: unknown }
+  | { status: "timeout" };
+
+function runAuthorize(
+  attempt: Promise<SocketPrincipal | null>,
+  ms: number
+): Promise<AuthorizeOutcome> {
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(null), ms);
-    promise.then(
-      (value) => {
+    const timer = setTimeout(() => resolve({ status: "timeout" }), ms);
+    attempt.then(
+      (principal) => {
         clearTimeout(timer);
-        resolve(value);
+        resolve(principal ? { status: "ok", principal } : { status: "denied" });
       },
-      () => {
+      (err) => {
         clearTimeout(timer);
-        resolve(null);
+        resolve({ status: "failed", err });
       }
     );
   });
+}
+
+/**
+ * A tenant id asked for by an unauthenticated connection is client-controlled
+ * text, so it is only worth tagging when it is shaped like one of our ids —
+ * otherwise a client could pollute the tracker's tag cardinality at will.
+ * Nothing else from the request (token, cookies, payloads) ever reaches a tag.
+ */
+function tagSafeTenantId(value: string | null): string | null {
+  return value && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : null;
 }
 
 /**
@@ -127,29 +155,71 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> {
   subscriber.on("pmessage", (_pattern, channel, message) => {
     const channelTenant = tenantIdFromChannel(channel);
     if (!channelTenant) return;
-    const envelope = decodeEnvelope(message);
-    if (!envelope || envelope.data.tenantId !== channelTenant) return;
-    const bound = byTenant.get(channelTenant);
-    if (!bound) return;
-    for (const ws of bound) {
-      if (ws.readyState === WebSocket.OPEN) ws.send(message);
+    // This runs inside the Redis client's emit: an escaping throw would take
+    // the process, and every other tenant's socket, with it. One report per
+    // message, never one per socket — a wedged fan-out shouldn't flood.
+    let failure: unknown;
+    try {
+      const envelope = decodeEnvelope(message);
+      if (!envelope || envelope.data.tenantId !== channelTenant) return;
+      const bound = byTenant.get(channelTenant);
+      if (!bound) return;
+      for (const ws of bound) {
+        try {
+          if (ws.readyState === WebSocket.OPEN) ws.send(message);
+        } catch (err) {
+          failure ??= err; // keep delivering to the rest of the tenant's sockets
+        }
+      }
+    } catch (err) {
+      failure ??= err;
+    }
+    if (failure !== undefined) {
+      captureError(failure, { origin: "fanout", tenantId: channelTenant });
     }
   });
   await subscriber.psubscribe(TENANT_CHANNEL_PATTERN);
 
+  wss.on("error", (err) => {
+    captureError(err, { origin: "server" });
+  });
+
   wss.on("connection", (ws, req) => {
+    const requestedTenantId = workspaceFrom(req);
+    // Attach before the first await: an unhandled 'error' event on a socket
+    // throws out of the emitter and kills the process. Until the socket is
+    // bound, the only tenant to attribute it to is the one it asked for.
+    ws.on("error", (err) => {
+      captureError(err, {
+        origin: "socket",
+        tenantId: sockets.get(ws)?.tenantId ?? tagSafeTenantId(requestedTenantId),
+      });
+    });
+
     void (async () => {
-      // withTimeout also absorbs authorizer failures → treated as unauthorized.
-      const principal = await withTimeout(
-        authorize(tokenFrom(req), workspaceFrom(req)),
+      const outcome = await runAuthorize(
+        authorize(tokenFrom(req), requestedTenantId),
         authorizeTimeoutMs
       );
-      if (!principal) {
+      if (outcome.status !== "ok") {
+        // A "no" is routine and stays silent; an authorizer that broke or
+        // hung is reported, tagged with the workspace that couldn't connect.
+        if (outcome.status === "failed") {
+          captureError(outcome.err, {
+            origin: "authorize",
+            tenantId: tagSafeTenantId(requestedTenantId),
+          });
+        } else if (outcome.status === "timeout") {
+          captureError(new Error(`authorize did not answer within ${authorizeTimeoutMs}ms`), {
+            origin: "authorize-timeout",
+            tenantId: tagSafeTenantId(requestedTenantId),
+          });
+        }
         ws.close(4401, "unauthorized");
         return;
       }
 
-      const { tenantId } = principal;
+      const { tenantId } = outcome.principal;
       let bound = byTenant.get(tenantId);
       if (!bound) byTenant.set(tenantId, (bound = new Set()));
       bound.add(ws);
@@ -165,17 +235,32 @@ export async function startGateway(options: GatewayOptions): Promise<Gateway> {
         set?.delete(ws);
         if (set?.size === 0) byTenant.delete(tenantId);
       });
-    })();
+    })().catch((err) => {
+      // Nothing above should throw, but an unhandled rejection here reaches
+      // the process handler and exits — report it with the socket's tenant
+      // and drop just this connection instead.
+      captureError(err, {
+        origin: "connection",
+        tenantId: sockets.get(ws)?.tenantId ?? tagSafeTenantId(requestedTenantId),
+      });
+      ws.close(1011, "internal error");
+    });
   });
 
   const heartbeat = setInterval(() => {
     for (const [ws, state] of sockets) {
-      if (!state.isAlive) {
-        ws.terminate(); // close event cleans up the maps
-        continue;
+      try {
+        if (!state.isAlive) {
+          ws.terminate(); // close event cleans up the maps
+          continue;
+        }
+        state.isAlive = false;
+        ws.ping();
+      } catch (err) {
+        // A timer callback throws straight into the process handler; one bad
+        // socket must not end the sweep for the others.
+        captureError(err, { origin: "heartbeat", tenantId: state.tenantId });
       }
-      state.isAlive = false;
-      ws.ping();
     }
   }, heartbeatIntervalMs);
 
