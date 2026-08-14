@@ -1,5 +1,5 @@
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
-import { computeSupplierScore } from "@/lib/po/supplier-stats";
+import { computeSupplierScore, type OnTimeStatus } from "@/lib/po/supplier-stats";
 import {
   leadTimeDrift,
   learnedLeadMedianDays,
@@ -38,6 +38,8 @@ export type SupplierRow = {
   /** Completed deliveries scored (deliveredPos). */
   deliveriesTracked: number;
   onTimePct: number | null;
+  /** Why onTimePct is null — the row says so rather than leaving a gap. */
+  onTimeStatus: OnTimeStatus;
   fillRatePct: number | null;
   shortShipPct: number | null;
   assignedProductCount: number;
@@ -120,6 +122,7 @@ export async function getSuppliers(tenantId: string): Promise<SupplierRow[]> {
       learnedLeadDays,
       deliveriesTracked: score.deliveredPos,
       onTimePct: score.onTimePct,
+      onTimeStatus: score.onTimeStatus,
       fillRatePct: score.fillRatePct,
       shortShipPct: shortShipRatePct(supplierPos),
       assignedProductCount: countBySupplier.get(s.id) ?? 0,
