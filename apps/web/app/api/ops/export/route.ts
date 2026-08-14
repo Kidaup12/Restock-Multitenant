@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { activeMembership, getSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { exportTenantStream } from "@/lib/offboarding/export";
+import { withCapture } from "@/lib/observability/wrap";
 
 /**
  * Download the active workspace as one JSON archive. OWNER-only (role AND the
@@ -10,8 +11,11 @@ import { exportTenantStream } from "@/lib/offboarding/export";
  * app. The tenant comes from the membership, never the request. Streaming a
  * completed export also writes the "exported" AuditEvent the delete flow's
  * export-first safeguard checks for.
+ *
+ * Capture covers the guards and the stream's construction; a fault raised once
+ * the archive is already streaming happens after the return and is not caught.
  */
-export async function GET(): Promise<Response> {
+export const GET = withCapture(async () => {
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -37,4 +41,4 @@ export async function GET(): Promise<Response> {
       "cache-control": "no-store",
     },
   });
-}
+}, { route: "/api/ops/export" });

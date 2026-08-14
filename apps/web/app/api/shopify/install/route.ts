@@ -4,13 +4,14 @@ import { STATE_COOKIE, STATE_COOKIE_PATH } from "@/lib/shopify/cookies";
 import { credentialsForTenant } from "@/lib/shopify/credentials";
 import { shopifyAppUrl } from "@/lib/shopify/env";
 import { canManageConnections, tenantActor } from "@/lib/shopify/membership";
+import { withCapture } from "@/lib/observability/wrap";
 
 /**
  * Kicks off the per-store OAuth install: validates the shop domain, plants the
  * state nonce (bound to the shop) in an httpOnly cookie, and redirects the
  * browser to the store's authorize page. The callback route completes the pair.
  */
-export async function GET(req: NextRequest): Promise<NextResponse> {
+export const GET = withCapture(async (req: NextRequest) => {
   const actor = await tenantActor();
   if (!actor) return NextResponse.redirect(new URL("/login", req.nextUrl.origin));
   if (!canManageConnections(actor)) {
@@ -50,4 +51,4 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     path: STATE_COOKIE_PATH,
   });
   return res;
-}
+});

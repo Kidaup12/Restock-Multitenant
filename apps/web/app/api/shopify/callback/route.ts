@@ -11,12 +11,15 @@ import { STATE_COOKIE, STATE_COOKIE_PATH } from "@/lib/shopify/cookies";
 import { credentialsForTenant } from "@/lib/shopify/credentials";
 import { canManageConnections, tenantActor } from "@/lib/shopify/membership";
 import { enqueueShopifySync } from "@/lib/shopify/queue";
+import { withCapture } from "@/lib/observability/wrap";
 
 /**
  * OAuth callback: state + HMAC verification, code→offline-token exchange,
  * encrypted upsert of the ACTIVE tenant's connection, initial sync enqueue.
  * Browser-facing, so failures land back on the connections page with an error
- * code rather than a bare status page.
+ * code rather than a bare status page. What escapes that (the re-raised upsert
+ * failure below) is captured and answered 500 — the route tag is the path, so
+ * neither the code nor the hmac in the query string travels with it.
  */
 
 function done(origin: string, param: "connected" | "error", value: string): NextResponse {
@@ -31,7 +34,7 @@ function timingSafeEq(a: string, b: string): boolean {
   return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
 }
 
-export async function GET(req: NextRequest): Promise<NextResponse> {
+export const GET = withCapture(async (req: NextRequest) => {
   const origin = req.nextUrl.origin;
   const actor = await tenantActor();
   if (!actor) return NextResponse.redirect(new URL("/login", origin));
@@ -111,4 +114,4 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   return done(origin, "connected", "1");
-}
+});
