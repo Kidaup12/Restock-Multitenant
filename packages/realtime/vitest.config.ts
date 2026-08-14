@@ -4,6 +4,5 @@ export default defineConfig({
   test: {
     environment: "node",
     globalSetup: ["tests/require-infra.ts"],
-    passWithNoTests: true,
   },
 });
