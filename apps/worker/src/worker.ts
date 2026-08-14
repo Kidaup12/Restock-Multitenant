@@ -14,6 +14,27 @@ import { createShopifySyncProcessor, handleSyncFailure } from "./shopify-sync";
  * through the per-source failure hooks.
  */
 
+/** How long a held job stays locked without a renewal before the stalled sweep
+ *  may hand it to another worker. The lock renews on a timer, so what matters
+ *  is the worst renewal delay, not the ~3min run length — and this process
+ *  shares its event loop with seven cron workers. BullMQ's 30s default lets a
+ *  moment of contention re-deliver a running sync, giving one tenant two
+ *  concurrent writers. */
+export const SYNC_LOCK_DURATION_MS = 120_000;
+
+/** How often the sweep looks for expired locks. BullMQ's default, pinned so a
+ *  library change can't silently widen it: four checks fit inside one lock
+ *  window, so a crashed worker is noticed promptly and a healthy one is never
+ *  swept by a scan that ran at the wrong moment. */
+export const SYNC_STALLED_INTERVAL_MS = 30_000;
+
+/** How many times a job may be recovered from stalled before it is failed.
+ *  BullMQ's default, kept deliberately: one recovery covers the real case (a
+ *  redeploy killed the process mid-sync), and a job that stalls repeatedly is
+ *  a job that keeps duplicating tenant writes — failing it routes the operator
+ *  a Notification through the failure hooks instead. */
+export const SYNC_MAX_STALLED_COUNT = 1;
+
 export interface SyncWorkerOptions {
   /** BullMQ worker connection — must have maxRetriesPerRequest: null. */
   connection: Redis;
@@ -38,6 +59,9 @@ export function createSyncWorker(options: SyncWorkerOptions): Worker<SyncJobData
     },
     {
       connection: options.connection,
+      lockDuration: SYNC_LOCK_DURATION_MS,
+      stalledInterval: SYNC_STALLED_INTERVAL_MS,
+      maxStalledCount: SYNC_MAX_STALLED_COUNT,
       settings: {
         backoffStrategy: (attemptsMade: number, _type, err) => syncBackoffDelay(attemptsMade, err),
       },
