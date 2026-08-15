@@ -26,6 +26,7 @@ function fleetStub(overrides: Partial<FleetRow>): FleetRow {
     productCount: 0,
     connection: { state: "none", shopDomain: null },
     lastSync: { products: null, inventory: null, orders: null },
+    lastData: { products: null, inventory: null, orders: null },
     stalenessMs: null,
     recentFailures: 0,
     lastError: null,
@@ -135,11 +136,25 @@ describe.skipIf(!runnable)("fleet + audit queries (local db)", () => {
         scopes: "read_products",
       },
     });
-    // products fresh (1h), orders stale (30h), inventory never synced.
+    // The shape production is actually in: the sync ran an hour ago on both
+    // resources, and neither has brought anything back in over a day. Orders
+    // has never delivered at all. Cursors say healthy, arrivals say otherwise.
     await db.prismaService.ingestCursor.createMany({
       data: [
-        { tenantId: tenantAId, source: "shopify", resource: "products", cursor: new Date(now - HOUR) },
-        { tenantId: tenantAId, source: "shopify", resource: "orders", cursor: new Date(now - 30 * HOUR) },
+        {
+          tenantId: tenantAId,
+          source: "shopify",
+          resource: "products",
+          cursor: new Date(now - HOUR),
+          dataAt: new Date(now - 30 * HOUR),
+        },
+        {
+          tenantId: tenantAId,
+          source: "shopify",
+          resource: "orders",
+          cursor: new Date(now - HOUR),
+          dataAt: null,
+        },
       ],
     });
     await db.prismaService.product.create({
@@ -163,7 +178,7 @@ describe.skipIf(!runnable)("fleet + audit queries (local db)", () => {
     await db.prismaService.$disconnect();
   });
 
-  it("shapes a connected tenant's row: counts, cursor ages, worst staleness", async () => {
+  it("shapes a connected tenant's row: counts, cursor ages, staleness on arrivals", async () => {
     const rows = await fleet.getFleet(now);
     const rowA = rows.find((r) => r.tenantId === tenantAId);
     expect(rowA).toBeTruthy();
@@ -177,12 +192,32 @@ describe.skipIf(!runnable)("fleet + audit queries (local db)", () => {
       lastForecastRunAt: null,
     });
     expect(rowA!.lastSync.products?.getTime()).toBe(now - HOUR);
-    expect(rowA!.lastSync.orders?.getTime()).toBe(now - 30 * HOUR);
+    expect(rowA!.lastSync.orders?.getTime()).toBe(now - HOUR);
     expect(rowA!.lastSync.inventory).toBeNull();
-    // inventory has never synced → worst staleness is Infinity.
+
+    // The whole point of the split. Every cursor here is an hour old, so the
+    // column used to read "healthy" — while the last thing this store actually
+    // sent was thirty hours ago. Staleness is measured on arrivals now.
+    expect(rowA!.lastData.products?.getTime()).toBe(now - 30 * HOUR);
+    expect(rowA!.lastData.orders).toBeNull();
+    expect(rowA!.stalenessMs).toBe(30 * HOUR);
+    expect(rowA!.stalenessMs!).toBeGreaterThan(STALE_AFTER_MS);
+  });
+
+  it("a connected tenant that has never received anything is maximally stale", async () => {
+    // Distinct from "no connection": there is a store, it is answering, and it
+    // has handed over nothing. Infinity sorts it above every merely old row.
+    await db.prismaService.ingestCursor.updateMany({
+      where: { tenantId: tenantAId },
+      data: { dataAt: null },
+    });
+    const rowA = (await fleet.getFleet(now)).find((r) => r.tenantId === tenantAId);
     expect(rowA!.stalenessMs).toBe(Infinity);
-    // The stale flag line: orders at 30h is past the 24h threshold.
-    expect(now - rowA!.lastSync.orders!.getTime()).toBeGreaterThan(STALE_AFTER_MS);
+
+    await db.prismaService.ingestCursor.updateMany({
+      where: { tenantId: tenantAId, resource: "products" },
+      data: { dataAt: new Date(now - 30 * HOUR) },
+    });
   });
 
   it("shapes a bare tenant's row: no connection, nothing to be stale", async () => {

@@ -32,11 +32,16 @@ export type FleetRow = {
   memberCount: number;
   productCount: number;
   connection: { state: ConnectionState; shopDomain: string | null };
-  /** Cursor timestamp per resource; null = never synced. */
+  /** Cursor timestamp per resource — when a phase last RAN; null = never
+   *  synced. Advances on every run, empty or not, so it answers "is the sync
+   *  still ticking" and nothing more. */
   lastSync: Record<SyncResource, Date | null>;
-  /** Worst (oldest) resource age for a connected tenant, in ms; null when the
-   *  tenant has no live connection (nothing to be stale). Infinity = connected
-   *  but a resource has never synced. */
+  /** When each resource last ARRIVED with something; null = never delivered.
+   *  This is the one that can tell a connected store apart from a live one. */
+  lastData: Record<SyncResource, Date | null>;
+  /** How long since ANYTHING arrived for a connected tenant, in ms; null when
+   *  the tenant has no live connection (nothing to be stale). Infinity =
+   *  connected but nothing has ever arrived. */
   stalenessMs: number | null;
   openNotifications: number;
   lastForecastRunAt: Date | null;
@@ -77,19 +82,31 @@ export function isConnected(state: ConnectionState): boolean {
   return state === "live" || state === "paused";
 }
 
-function worstStaleness(
+/**
+ * How long since this tenant received anything at all.
+ *
+ * Measured on arrivals, not on cursors. Cursors advance after every run whether
+ * or not a row came back, so this column read "minutes old" for two workspaces
+ * whose newest sale was three and twenty-four days ago — the exact condition
+ * the screen exists to show.
+ *
+ * NEWEST arrival across the three resources rather than the oldest: the
+ * question is whether anything is still coming in. Taking the oldest would put
+ * every shop with a settled catalogue permanently in the red, which is the
+ * quickest way to make an operator stop reading the column.
+ */
+function dataStaleness(
   state: ConnectionState,
-  lastSync: Record<SyncResource, Date | null>,
+  lastData: Record<SyncResource, Date | null>,
   now: number
 ): number | null {
   if (!isConnected(state)) return null;
-  let worst = 0;
+  let freshest: number | null = null;
   for (const resource of SYNC_RESOURCES) {
-    const at = lastSync[resource];
-    const age = at ? now - at.getTime() : Infinity;
-    if (age > worst) worst = age;
+    const at = lastData[resource];
+    if (at && (freshest === null || at.getTime() > freshest)) freshest = at.getTime();
   }
-  return worst;
+  return freshest === null ? Infinity : now - freshest;
 }
 
 /** Every customer workspace with its sync health, one row each. */
@@ -110,7 +127,7 @@ export async function getFleet(now: number = Date.now()): Promise<FleetRow[]> {
       },
     }),
     prismaService.ingestCursor.findMany({
-      select: { tenantId: true, resource: true, cursor: true },
+      select: { tenantId: true, resource: true, cursor: true, dataAt: true },
     }),
     prismaService.notification.groupBy({
       by: ["tenantId"],
@@ -134,10 +151,11 @@ export async function getFleet(now: number = Date.now()): Promise<FleetRow[]> {
     }),
   ]);
 
-  const cursorsByTenant = new Map<string, Map<string, Date>>();
+  type CursorRow = { cursor: Date; dataAt: Date | null };
+  const cursorsByTenant = new Map<string, Map<string, CursorRow>>();
   for (const c of cursors) {
-    const forTenant = cursorsByTenant.get(c.tenantId) ?? new Map<string, Date>();
-    forTenant.set(c.resource, c.cursor);
+    const forTenant = cursorsByTenant.get(c.tenantId) ?? new Map<string, CursorRow>();
+    forTenant.set(c.resource, { cursor: c.cursor, dataAt: c.dataAt });
     cursorsByTenant.set(c.tenantId, forTenant);
   }
   const unreadByTenant = new Map(unread.map((n) => [n.tenantId, n._count._all]));
@@ -169,7 +187,10 @@ export async function getFleet(now: number = Date.now()): Promise<FleetRow[]> {
           : "live";
     const tenantCursors = cursorsByTenant.get(t.id);
     const lastSync = Object.fromEntries(
-      SYNC_RESOURCES.map((r) => [r, tenantCursors?.get(r) ?? null])
+      SYNC_RESOURCES.map((r) => [r, tenantCursors?.get(r)?.cursor ?? null])
+    ) as Record<SyncResource, Date | null>;
+    const lastData = Object.fromEntries(
+      SYNC_RESOURCES.map((r) => [r, tenantCursors?.get(r)?.dataAt ?? null])
     ) as Record<SyncResource, Date | null>;
 
     return {
@@ -181,7 +202,8 @@ export async function getFleet(now: number = Date.now()): Promise<FleetRow[]> {
       productCount: t._count.products,
       connection: { state, shopDomain: t.shopifyConnection?.shopDomain ?? null },
       lastSync,
-      stalenessMs: worstStaleness(state, lastSync, now),
+      lastData,
+      stalenessMs: dataStaleness(state, lastData, now),
       openNotifications: unreadByTenant.get(t.id) ?? 0,
       lastForecastRunAt: runByTenant.get(t.id) ?? null,
       recentFailures: failuresByTenant.get(t.id)?.count ?? 0,

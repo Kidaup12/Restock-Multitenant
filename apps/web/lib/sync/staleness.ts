@@ -6,10 +6,18 @@
  * store had stopped sending while the shop itself was shown nothing, and kept
  * buying against whatever the last successful sync left behind.
  *
- * It measures the SYNC, not the trading. The cursor advances only after a phase
- * completes, so a quiet shop that is still syncing is not stale — which is the
- * distinction that makes this safe to put in front of a customer. A shop with no
- * sales for a day would otherwise be told its data was broken.
+ * It measures ARRIVAL, not the run. It used to key on the cursor, on the
+ * reasoning that a cursor advances only after a phase completes — but a phase
+ * completes just as happily on an empty answer, so the cursor was stamped every
+ * fifteen minutes forever and this threshold could never be crossed by the case
+ * it exists for: a connected store that has gone silent. Four of five live
+ * workspaces sat in that state, each reporting a timestamp from minutes ago.
+ *
+ * Arrival is `IngestCursor.dataAt`, moved only when a phase actually brought
+ * something back. A shop that trades quietly still resets it through catalogue
+ * edits and stock movement, so this stays a signal about the pipe rather than
+ * about the till — but a genuinely dead day now does reach the shop, which is
+ * the trade the old design avoided by never firing at all.
  */
 
 export const STALE_AFTER_MS = 24 * 60 * 60 * 1000;

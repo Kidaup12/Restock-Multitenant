@@ -115,11 +115,30 @@ async function getCursor(tenantId: string, resource: string): Promise<Date | nul
   return row?.cursor ?? null;
 }
 
-async function setCursor(tenantId: string, resource: string, value: Date): Promise<void> {
+/**
+ * Advance the read position, and — only when the phase actually ingested
+ * something — the freshness stamp beside it.
+ *
+ * The cursor moves on every run by necessity: it is the start of the next delta
+ * window, and holding it back on a quiet run would re-fetch a year of orders on
+ * the next one. That is exactly why it cannot also answer "are this shop's
+ * figures still moving": stamped every fifteen minutes regardless of what came
+ * back, it reported a store that had sent nothing for weeks as minutes fresh,
+ * and the shop's own staleness banner could never fire.
+ */
+async function setCursor(
+  tenantId: string,
+  resource: string,
+  value: Date,
+  dataArrived: boolean
+): Promise<void> {
+  const freshness = dataArrived ? { dataAt: value } : {};
   await prismaService.ingestCursor.upsert({
     where: { tenantId_source_resource: { tenantId, source: "shopify", resource } },
-    create: { tenantId, source: "shopify", resource, cursor: value },
-    update: { cursor: value },
+    // A first run that ingested nothing leaves dataAt null, which is the honest
+    // record: connected, and has never delivered anything.
+    create: { tenantId, source: "shopify", resource, cursor: value, ...freshness },
+    update: { cursor: value, ...freshness },
   });
 }
 
@@ -340,15 +359,39 @@ async function syncProducts(
  *
  * A location with no owner-confirmed role gets a name-guessed role stamped as
  * "assumed"; a "confirmed" role is never overwritten by the sync.
+ *
+ * `changed` counts levels whose numbers actually MOVED. This phase has no delta
+ * — it re-reads every level every fifteen minutes — so "the store answered" says
+ * nothing about whether the shop's data is still alive; a store that stopped
+ * trading months ago answers just as fully as one selling all day. Only a
+ * changed level is evidence of movement, which is what the freshness stamp is
+ * allowed to be set from.
  */
 async function syncLocationsAndInventory(
   tenantId: string,
   locations: ShopifyLocationNode[],
   productIdByVariantCore: Map<string, string>,
   onProgress?: ProgressFn
-): Promise<{ locations: number; levels: number }> {
+): Promise<{ locations: number; levels: number; changed: number }> {
   let levels = 0;
+  let changed = 0;
   let processed = 0;
+
+  // One read of what we already hold, keyed the same way the upsert is. The
+  // upsert cannot report whether it changed anything after the fact, and the
+  // alternative — a findUnique per level — would add a query per SKU per branch
+  // to a phase that already runs every fifteen minutes.
+  const priorLevels = new Map<string, { onHand: number; available: number | null; incoming: number }>();
+  for (const level of await prismaService.inventoryLevel.findMany({
+    where: { tenantId },
+    select: { locationId: true, productId: true, onHand: true, available: true, incoming: true },
+  })) {
+    priorLevels.set(`${level.locationId}|${level.productId}`, {
+      onHand: level.onHand,
+      available: level.available,
+      incoming: level.incoming,
+    });
+  }
   const sellsByProduct = new Map<string, number>();
   const enrouteByProduct = new Map<string, number>();
   const incomingByProduct = new Map<string, number>();
@@ -396,6 +439,17 @@ async function syncLocationsAndInventory(
         create: { tenantId, locationId: row.id, productId, onHand, available, incoming },
         update: { onHand, available, incoming },
       });
+      // A level we have never seen is news by definition; one we have seen is
+      // news only if a number moved.
+      const prior = priorLevels.get(`${row.id}|${productId}`);
+      if (
+        !prior ||
+        prior.onHand !== onHand ||
+        prior.available !== available ||
+        prior.incoming !== incoming
+      ) {
+        changed++;
+      }
       seenProducts.add(productId);
       // Sellable stock is what can actually be sold: on-hand minus whatever is
       // already committed to unfulfilled orders. Counting on-hand here read a
@@ -435,7 +489,7 @@ async function syncLocationsAndInventory(
       },
     });
   }
-  return { locations: locations.length, levels };
+  return { locations: locations.length, levels, changed };
 }
 
 /** Idempotent day-set sales writer: delete exactly the touched (product, day)
@@ -686,7 +740,10 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
         fullSync: productsSince === null,
         onProgress: (done, total) => run.tick(done, total),
       });
-      await setCursor(tenantId, "products", runStart);
+      // The pull is a real delta (`updated_at:>=`), so a write means the store
+      // genuinely changed something within the window — not a re-send of the
+      // whole catalogue.
+      await setCursor(tenantId, "products", runStart, products.written > 0);
       await run.phaseEnd("products", products);
       await notifyCatalogueChanges(tenantId, products, options.publisher);
 
@@ -699,7 +756,8 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
         productIdByVariantCore,
         (done, total) => run.tick(done, total)
       );
-      await setCursor(tenantId, "inventory", runStart);
+      // Stock that moved, not stock that was re-read — see the phase docblock.
+      await setCursor(tenantId, "inventory", runStart, inventory.changed > 0);
       await run.phaseEnd("inventory", inventory);
 
       // ── Orders → SalesHistory day sets ──────────────────────────────────────
@@ -721,7 +779,9 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
         productIdByVariantCore,
         (done, total) => run.tick(done, total)
       );
-      await setCursor(tenantId, "orders", runStart);
+      // Day-sets written. Zero means the window held no orders at all — the
+      // shape of every run against a store that has quietly stopped selling.
+      await setCursor(tenantId, "orders", runStart, salesDays > 0);
       await run.phaseEnd("orders", { salesDays });
 
       await run.ok();

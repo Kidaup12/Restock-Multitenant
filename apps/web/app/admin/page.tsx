@@ -184,9 +184,14 @@ export default async function AdminFleetPage({
                   <TableCell numeric>{row.memberCount}</TableCell>
                   <TableCell numeric>{row.productCount}</TableCell>
                   <TableCell>{connectionBadge[row.connection.state]}</TableCell>
+                  {/* Last ARRIVAL, not last run. The cursor is stamped every
+                      15 minutes whether or not anything came back, so showing it
+                      here put "2 minutes ago" in green beside a store that has
+                      sent nothing for a month — and disagreed with the sort,
+                      which ranks on arrival. */}
                   {SYNC_RESOURCES.map((r) => (
                     <TableCell key={r} className="text-xs">
-                      <SyncCell row={row} at={row.lastSync[r]} />
+                      <SyncCell row={row} at={row.lastData[r]} />
                     </TableCell>
                   ))}
                   <TableCell className="text-xs">
