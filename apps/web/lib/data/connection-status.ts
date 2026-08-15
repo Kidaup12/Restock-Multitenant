@@ -21,12 +21,20 @@ export type ConnectionStatus = {
   /** Null when no store was ever connected. */
   shopDomain: string | null;
   /**
-   * When a sync phase last COMPLETED, across resources — the newest ingest
-   * cursor. A connection can be perfectly "live" and still be sending nothing,
-   * which is the case the shop was never told about. Null = never synced.
+   * When data last ARRIVED, across resources. Null = the store has never
+   * delivered anything.
    *
-   * The cursor rather than the run: it only advances after a phase succeeds, so
-   * a store that fails every 15 minutes cannot look fresh.
+   * Deliberately not the cursor. The cursor advances after every run whether or
+   * not a row came back, so it answered "did a sync happen" — and every sync
+   * happens, every fifteen minutes, for ever. Two production workspaces sat at
+   * "synced two minutes ago" with newest sales three and twenty-four days old,
+   * and this banner could not fire for either. `IngestCursor.dataAt` moves only
+   * when a phase ingested something.
+   *
+   * Newest across resources, not oldest: the question is whether ANYTHING is
+   * still arriving. A catalogue nobody has edited in a month is not a broken
+   * connection, and telling a healthy shop its figures are frozen teaches it to
+   * ignore the bar.
    */
   lastSyncedAt: Date | null;
 };
@@ -39,10 +47,12 @@ export async function getConnectionStatus(tenantId: string): Promise<ConnectionS
     db.shopifyConnection.findFirst({
       select: { shopDomain: true, uninstalledAt: true, syncPausedAt: true },
     }),
+    // Rows that have never delivered are excluded rather than sorted, so one
+    // silent resource cannot be picked as "the newest" ahead of a live one.
     db.ingestCursor.findFirst({
-      where: { source: "shopify" },
-      orderBy: { cursor: "desc" },
-      select: { cursor: true },
+      where: { source: "shopify", dataAt: { not: null } },
+      orderBy: { dataAt: "desc" },
+      select: { dataAt: true },
     }),
   ]);
 
@@ -55,6 +65,6 @@ export async function getConnectionStatus(tenantId: string): Promise<ConnectionS
   return {
     state,
     shopDomain: connection.shopDomain,
-    lastSyncedAt: freshest?.cursor ?? null,
+    lastSyncedAt: freshest?.dataAt ?? null,
   };
 }

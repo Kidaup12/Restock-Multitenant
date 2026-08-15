@@ -1006,12 +1006,31 @@ model ShopifyAppCredential {
 // Per-resource sync high-water mark. The worker re-pulls from cursor minus an
 // overlap window, so a crashed run resumes per resource instead of restarting
 // the whole sync.
+// Two different questions used to share one column, and the second one lost.
+//
+//   `cursor` — where have we READ UP TO. It must advance after every run,
+//   empty or not, or the next delta window re-fetches from the beginning.
+//
+//   `dataAt` — when did anything actually ARRIVE. It must NOT advance on a run
+//   that ingested nothing, because it is the only measure of whether a shop's
+//   figures are still moving.
+//
+// Stamping `cursor` on every run made both answers "a few minutes ago", so a
+// connected store that returns nothing for ever read as perfectly healthy and
+// the shop's staleness banner was structurally unable to fire. SyncRun cannot
+// stand in for this: it is pruned after 14 days, and a store silent longer than
+// that is precisely the case worth catching.
 model IngestCursor {
   id        String   @id @default(cuid())
   tenantId  String
   source    String // "shopify"
   resource  String // "products" | "inventory" | "orders"
   cursor    DateTime
+  // Null = this resource has never delivered anything. Existing rows were
+  // backfilled from `cursor` at deploy: the last moment we had any reason to
+  // believe the data was current, so the clock starts from the deploy rather
+  // than flagging every workspace at once.
+  dataAt    DateTime?
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
