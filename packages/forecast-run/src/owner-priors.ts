@@ -62,12 +62,40 @@ export function validateOwnerPriorInput(input: CreateOwnerPriorInput): string | 
   return null;
 }
 
+/**
+ * A prior names products by id — the scope value on a product-scoped prior, and
+ * the "sell like" proxy — and both ids arrive from the request body. OwnerPrior
+ * has no foreign key on either, and RLS has nothing to filter on a create, so
+ * the guard is a scoped READ: under RLS this can only see the caller's own
+ * catalogue, and a foreign id resolves to nothing.
+ */
+async function namesOnlyOwnProducts(
+  tenantId: string,
+  input: CreateOwnerPriorInput
+): Promise<boolean> {
+  const named = new Set(
+    [
+      input.scope === "product" ? input.scopeValue.trim() : null,
+      input.proxyProductId ?? null,
+    ].filter((id): id is string => !!id)
+  );
+  if (named.size === 0) return true;
+  const owned = await prismaForTenant(tenantId).product.findMany({
+    where: { id: { in: [...named] } },
+    select: { id: true },
+  });
+  return owned.length === named.size;
+}
+
 export async function createOwnerPrior(
   tenantId: string,
   input: CreateOwnerPriorInput
 ): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const error = validateOwnerPriorInput(input);
   if (error) return { ok: false, error };
+  if (!(await namesOnlyOwnProducts(tenantId, input))) {
+    return { ok: false, error: "that product is not in this workspace" };
+  }
   const created = await prismaForTenant(tenantId).ownerPrior.create({
     data: {
       tenantId,

@@ -219,8 +219,11 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       expect(row.moq).toBe(p.product.supplier?.moq ?? 1);
       const leadDays = p.product.leadTimeDays ?? p.product.supplier?.leadTimeAvgDays ?? ASSUMED_LEAD_DAYS;
       expect(row.leadDays).toBe(leadDays);
-      // Run/day derives from the persisted forecast, never a re-derivation.
-      expect(row.runRatePerDay).toBeCloseTo(Math.round((p.finalForecast30d / 30) * 10) / 10, 5);
+      // Run/day is the run's OWN rate — layer 1, before the promo lift and the
+      // cap — read back from the prediction, never re-derived. The sized
+      // forecast (finalForecast30d) answers a different question and belongs to
+      // the quantity, not to the pace.
+      expect(row.runRatePerDay).toBeCloseTo(Math.round((p.layer1Forecast30d / 30) * 10) / 10, 5);
       expect(row.orderByDate.getTime()).toBe(
         buyList!.runDate.getTime() + row.daysLeftToOrder * 86_400_000
       );
@@ -957,9 +960,14 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
       });
       expect(foreign).toEqual([]);
 
-      // A write under the probe's scope for the same product is a separate row,
-      // never touching the victim's.
-      await upsertPlanOverride(probe.id, { productId: target.productId, qty: 1 });
+      // A write under the probe's scope naming the victim's product is refused
+      // outright. RLS could never have caught this one — on a create there is no
+      // row for it to filter, and ProductPlanOverride carries no foreign key on
+      // productId — so the writer resolves the product on the tenant client
+      // first. Aiming only at the READ above let the WRITE through.
+      await expect(
+        upsertPlanOverride(probe.id, { productId: target.productId, qty: 1 })
+      ).rejects.toThrow();
       const victim = await prismaForTenant(seeded.tenantId).productPlanOverride.findMany({
         where: { productId: target.productId },
       });

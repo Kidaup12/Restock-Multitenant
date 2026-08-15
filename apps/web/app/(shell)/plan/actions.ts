@@ -16,6 +16,7 @@ import {
   redactBuyList,
   removePlanOverride,
   splitByBudget,
+  UnknownProductError,
   upsertPlanOverride,
   type BudgetSplit,
   type BuyList,
@@ -190,12 +191,19 @@ export async function setPlanOverride(input: {
   if (!Number.isFinite(qty) || qty < 1) return err("Enter a whole quantity of 1 or more.");
   if (qty > MAX_OVERRIDE_QTY) return err("That quantity is too large.");
 
-  await upsertPlanOverride(membership.tenantId, {
-    productId,
-    qty,
-    createdByUserId: session.user.id,
-    createdByName: membership.displayName ?? null,
-  });
+  try {
+    await upsertPlanOverride(membership.tenantId, {
+      productId,
+      qty,
+      createdByUserId: session.user.id,
+      createdByName: membership.displayName ?? null,
+    });
+  } catch (e) {
+    // The product isn't this workspace's — a stale tab or a crafted call, not
+    // something the owner can act on. Refuse in their words, don't 500.
+    if (e instanceof UnknownProductError) return err("That product isn't in this workspace.");
+    throw e;
+  }
   revalidatePath("/plan");
   return { ok: true, data: { productId, qty } };
 }
