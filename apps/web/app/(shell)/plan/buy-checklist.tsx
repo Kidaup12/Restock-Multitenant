@@ -183,6 +183,45 @@ function TrustNotes({ row }: { row: Pick<BuyListRow, "confidence" | "coldStart" 
   );
 }
 
+/**
+ * The "why this number" panel. Arithmetic first — that is the part no heading
+ * can give — then the run's own words. Shared by the tier rows and the held-back
+ * ones so a product's explanation has one wording wherever it appears.
+ */
+function WhyPanel({ row }: { row: BuyListRow }) {
+  return (
+    <div className="rounded-md bg-surface-2/60 px-4 py-3 text-sm">
+      <p className="font-mono text-xs text-ink">{row.explain?.summary ?? row.qtySummary}</p>
+      {row.explain && SIZING_RULE_COPY[row.explain.method] && (
+        <p className="mt-2 text-ink-secondary">{SIZING_RULE_COPY[row.explain.method]}</p>
+      )}
+      <p className="mt-2 text-ink-secondary">{row.reasoning}</p>
+      <TrustNotes row={row} />
+      {row.plannable !== "ok" && <p className="mt-2 text-warning">{PLANNABLE_NOTES[row.plannable]}</p>}
+    </div>
+  );
+}
+
+/**
+ * A group heading speaks for the whole group; when a row's own honesty words
+ * undercut it, the row has to say so where the heading is read, not inside a
+ * panel nobody opened. Only "You already have enough" makes a claim strong
+ * enough to need this: a product whose forecast is borrowed or shaky is covered
+ * against a guess, and the shelf-plus-incoming numbers below say against what.
+ */
+function coveredCaveat(row: ExcludedRow): string | null {
+  if (row.reason !== "covered") return null;
+  if (row.coldStart === "borrowed") {
+    return `Enough for now — though that's measured against an estimate borrowed from ${
+      row.borrowedFromTitle ?? "a similar product"
+    }, not this product's own sales.`;
+  }
+  if (row.coldStart === "too_new" || row.confidence === "guessing") {
+    return "Enough for now — though there's little sales history behind that estimate, so keep an eye on it.";
+  }
+  return null;
+}
+
 // Cover-days what-if control: step a uniform days-of-cover horizon and re-size
 // the whole list to it. A weekly step keeps the choices meaningful; the server
 // floors each line at its own lead time, so this is the range the owner explores.
@@ -386,36 +425,57 @@ export function ExcludedSection({
                   </tr>
                 </thead>
                 <tbody>
-                  {groupRows.map((row) => (
-                    <tr key={row.predictionId} className="border-b border-edge">
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium text-ink">{row.title}</span>
-                          {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
-                          <TrustChips row={row} />
-                        </div>
-                        <div className="mt-0.5 font-mono text-xs text-ink-muted">{row.sku}</div>
-                        {reason === "unplannable" && PLANNABLE_NOTES[row.plannable] && (
-                          <p className="mt-1 text-xs text-warning">{PLANNABLE_NOTES[row.plannable]}</p>
+                  {groupRows.map((row) => {
+                    const caveat = coveredCaveat(row);
+                    return (
+                      <tr key={row.predictionId} className="border-b border-edge">
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium text-ink">{row.title}</span>
+                            {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
+                            <TrustChips row={row} />
+                          </div>
+                          <div className="mt-0.5 font-mono text-xs text-ink-muted">{row.sku}</div>
+                          {reason === "unplannable" && PLANNABLE_NOTES[row.plannable] && (
+                            <p className="mt-1 text-xs text-warning">{PLANNABLE_NOTES[row.plannable]}</p>
+                          )}
+                          {caveat && (
+                            <p className="mt-1 max-w-prose text-xs text-ink-secondary">{caveat}</p>
+                          )}
+                          {/* Closed by default: the heading answers the common case,
+                              and a page of open prose is as unreadable as silence.
+                              Native disclosure, so it needs no state on a read-only
+                              section and still opens without JavaScript. */}
+                          <details className="mt-1.5">
+                            <summary
+                              aria-label={`Show the numbers for ${row.title}`}
+                              className="cursor-pointer list-none text-xs font-medium text-accent-ink hover:underline"
+                            >
+                              Show the numbers
+                            </summary>
+                            <div className="mt-2 max-w-prose">
+                              <WhyPanel row={row} />
+                            </div>
+                          </details>
+                        </td>
+                        <td className={cn(TD, "hidden md:table-cell")}>{row.supplierName ?? "—"}</td>
+                        <td className={TD_NUM}>{row.onHandUnits}</td>
+                        <td className={TD_NUM}>
+                          {row.onHandUnits <= 0 || row.daysUntilStockout == null
+                            ? "—"
+                            : `${row.daysUntilStockout}d`}
+                        </td>
+                        {showsQty && (
+                          <>
+                            <td className={cn(TD_NUM, "hidden md:table-cell")}>{row.recommendedQty}</td>
+                            <td className={TD_NUM}>
+                              <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
+                            </td>
+                          </>
                         )}
-                      </td>
-                      <td className={cn(TD, "hidden md:table-cell")}>{row.supplierName ?? "—"}</td>
-                      <td className={TD_NUM}>{row.onHandUnits}</td>
-                      <td className={TD_NUM}>
-                        {row.onHandUnits <= 0 || row.daysUntilStockout == null
-                          ? "—"
-                          : `${row.daysUntilStockout}d`}
-                      </td>
-                      {showsQty && (
-                        <>
-                          <td className={cn(TD_NUM, "hidden md:table-cell")}>{row.recommendedQty}</td>
-                          <td className={TD_NUM}>
-                            <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  ))}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -796,23 +856,7 @@ export function BuyChecklist({
                         {isOpen && (
                           <tr className="border-b border-edge">
                             <td colSpan={13} className="px-4 pt-0 pb-4">
-                              <div className="rounded-md bg-surface-2/60 px-4 py-3 text-sm">
-                                <p className="font-mono text-xs text-ink">
-                                  {row.explain?.summary ?? row.qtySummary}
-                                </p>
-                                {row.explain && SIZING_RULE_COPY[row.explain.method] && (
-                                  <p className="mt-2 text-ink-secondary">
-                                    {SIZING_RULE_COPY[row.explain.method]}
-                                  </p>
-                                )}
-                                <p className="mt-2 text-ink-secondary">{row.reasoning}</p>
-                                <TrustNotes row={row} />
-                                {row.plannable !== "ok" && (
-                                  <p className="mt-2 text-warning">
-                                    {PLANNABLE_NOTES[row.plannable]}
-                                  </p>
-                                )}
-                              </div>
+                              <WhyPanel row={row} />
                             </td>
                           </tr>
                         )}
