@@ -141,10 +141,20 @@ describe("rls coverage census", () => {
     const client = new Client({ connectionString: process.env.DIRECT_URL });
     await client.connect();
     try {
+      // relforcerowsecurity as well as relrowsecurity, which is why this reads
+      // pg_class rather than pg_tables: the census keys the FORCE sweep on a
+      // tenantId column too, so Tenant was skipped there for the same reason it
+      // was skipped here, and only the ENABLE half was ever asserted.
       const { rows: sec } = await client.query(
-        `SELECT rowsecurity FROM pg_tables WHERE schemaname = 'public' AND tablename = 'Tenant'`
+        `SELECT c.relrowsecurity, c.relforcerowsecurity
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public' AND c.relname = 'Tenant'`
       );
-      expect(sec[0]?.rowsecurity, "Tenant: ROW LEVEL SECURITY must be enabled").toBe(true);
+      expect(sec[0]?.relrowsecurity, "Tenant: ROW LEVEL SECURITY must be enabled").toBe(true);
+      expect(
+        sec[0]?.relforcerowsecurity,
+        "Tenant: ROW LEVEL SECURITY must be FORCEd — an owner is exempt from merely-enabled RLS, which is what a restore produces"
+      ).toBe(true);
 
       const { rows: pol } = await client.query(
         `SELECT qual, with_check FROM pg_policies
