@@ -43,8 +43,11 @@ const URGENCY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, 
 const OPEN_ORDER_STATUSES = ["pending", "ordered"];
 
 /** A "slow mover" the plan holds back: it has plenty of cover (urgency "low")
- *  AND sells below this daily pace, so restocking now just ties up cash. */
-const SLOW_MOVER_MAX_RUN_RATE = 1; // < 1 unit/day
+ *  AND the run sized less than this a day for it, so restocking now just ties up
+ *  cash. Read against the SIZED daily demand, not the run rate — the two part
+ *  company under a promo lift or the runaway cap, and this is the number the
+ *  order would have been built from. */
+const SLOW_MOVER_MAX_DAILY_DEMAND = 1; // < 1 unit/day
 
 /** Horizon (days) for the "what deferring costs you" revenue-at-risk figure. */
 const RISK_HORIZON_DAYS = 30;
@@ -93,7 +96,12 @@ export type BuyListRow = {
    *  Lets the UI show "you set N" and offer a revert; keyed on productId so it
    *  survives the nightly re-plan that wipes and recreates predictions. */
   overriddenQty: number | null;
-  /** Forecast daily run rate — persisted finalForecast30d / 30 (the one engine, not re-derived). */
+  /** How fast the product sells: the run's own rate, read back as persisted
+   *  layer1Forecast30d / 30 — the engine's recency-weighted, stockout-corrected
+   *  rate before the promo lift and the runaway cap, which is the same quantity
+   *  Stock shows as "Sells/day". NOT finalForecast30d / 30: that is the SIZED
+   *  30-day demand the order is built from, a different question, and printing
+   *  it here had Plan and Stock 15-35% apart on the same product. */
   runRatePerDay: number;
   /** Supplier minimum order quantity (units); 1 when none is set. */
   moq: number;
@@ -279,14 +287,21 @@ function tierFor(urgency: string, daysLeftToOrder: number): BuyTier {
 }
 
 /** Why this row is held off the active list, or null to keep it active. Order
- *  matters — already-ordered outranks a data problem, which outranks slow. */
+ *  matters — already-ordered outranks a data problem, which outranks slow.
+ *
+ *  `plannedDailyDemand` is the SIZED demand (finalForecast30d / 30), passed in
+ *  rather than read off the row: the row's own rate is the run rate now, and the
+ *  two differ wherever a promo lift or the runaway cap applied. Which products
+ *  the plan holds back is unchanged by that — this gate reads the same number it
+ *  always has. */
 function excludedReasonFor(
-  row: { plannable: PlannableReason; urgency: string; runRatePerDay: number },
+  row: { plannable: PlannableReason; urgency: string },
+  plannedDailyDemand: number,
   hasOpenOrder: boolean
 ): ExcludedReason | null {
   if (hasOpenOrder) return "already-ordered";
   if (row.plannable !== "ok") return "unplannable";
-  if (row.urgency === "low" && row.runRatePerDay < SLOW_MOVER_MAX_RUN_RATE) return "slow-mover";
+  if (row.urgency === "low" && plannedDailyDemand < SLOW_MOVER_MAX_DAILY_DEMAND) return "slow-mover";
   return null;
 }
 
@@ -345,6 +360,9 @@ export async function getBuyList(
       urgency: true,
       recommendedQty: true,
       finalForecast30d: true,
+      // The run's own rate, promo/cap aside — layer1Forecast30d / 30 is exactly
+      // the number the run itself sized safety stock, cover and urgency on.
+      layer1Forecast30d: true,
       safetyStock: true,
       reasoning: true,
       regime: true,
@@ -550,7 +568,7 @@ export async function getBuyList(
         recommendedQty: qty,
         orderQty,
         overriddenQty: override,
-        runRatePerDay: r1(p.finalForecast30d / 30),
+        runRatePerDay: r1(p.layer1Forecast30d / 30),
         moq: product.supplier?.moq ?? 1,
         abc: product.abcCategory,
         category: product.customCategory,
@@ -573,7 +591,9 @@ export async function getBuyList(
       };
   };
 
-  const built = kept.map(buildRow);
+  // Each row travels with the sized daily demand its prediction carried — the
+  // slow-mover gate reads that, not the row's run rate.
+  const built = kept.map((p) => ({ row: buildRow(p), plannedDailyDemand: p.finalForecast30d / 30 }));
 
   // Split the sized rows: hold already-ordered / unplannable / slow-mover
   // products OFF the active list (surfaced under `excluded`, never silently
@@ -582,8 +602,8 @@ export async function getBuyList(
   // what-if horizon never changes what's excluded.
   const activeRows: FullBuyListRow[] = [];
   const excludedRows: (FullBuyListRow & { reason: ExcludedReason })[] = [];
-  for (const row of built) {
-    const reason = excludedReasonFor(row, openOrderProductIds.has(row.productId));
+  for (const { row, plannedDailyDemand } of built) {
+    const reason = excludedReasonFor(row, plannedDailyDemand, openOrderProductIds.has(row.productId));
     if (reason) excludedRows.push({ ...row, reason });
     else activeRows.push(row);
   }
@@ -870,12 +890,27 @@ export type PlanOverrideInput = {
   createdByName?: string | null;
 };
 
+/** The productId named by an override doesn't belong to the caller's workspace
+ *  (or doesn't exist). Callers turn this into a refusal the owner can read. */
+export class UnknownProductError extends Error {
+  constructor(productId: string) {
+    super(`product ${productId} is not in this workspace`);
+    this.name = "UnknownProductError";
+  }
+}
+
 /**
  * Set (or replace) this tenant's owner override of the recommended order
  * quantity for a product. Upsert on the (tenantId, productId) unique — one
- * standing override per product, updated in place. RLS-scoped end to end: the
- * tenant client can only reach its own rows, and the WITH CHECK policy rejects
- * any write that names a foreign tenant.
+ * standing override per product, updated in place.
+ *
+ * The productId arrives from the browser, and RLS cannot vet it: the policy
+ * filters ROWS, so it rejects an UPDATE of someone else's override but has
+ * nothing to filter on a CREATE, where no row exists yet. Nor does the database
+ * — ProductPlanOverride carries no foreign key on productId, and none carrying a
+ * tenant is expressible without a (tenantId, id) key on Product. So the guard is
+ * a scoped READ of the product first: under RLS that read can only see this
+ * workspace's catalogue, and a foreign id resolves to nothing.
  */
 export async function upsertPlanOverride(
   tenantId: string,
@@ -883,6 +918,11 @@ export async function upsertPlanOverride(
 ): Promise<void> {
   const qty = Math.round(input.qty);
   const db = prismaForTenant(tenantId);
+  const owned = await db.product.findFirst({
+    where: { id: input.productId },
+    select: { id: true },
+  });
+  if (!owned) throw new UnknownProductError(input.productId);
   await db.productPlanOverride.upsert({
     where: { tenantId_productId: { tenantId, productId: input.productId } },
     create: {
