@@ -1,4 +1,4 @@
-import { prismaForTenant } from "@wezesha/db";
+import { Prisma, prismaForTenant } from "@wezesha/db";
 import { buildPoDocument, isPoLate, type PoDocumentData } from "@/lib/po/po-model";
 import { computeSupplierScore, type SupplierScore } from "@/lib/po/supplier-stats";
 
@@ -17,6 +17,111 @@ import { computeSupplierScore, type SupplierScore } from "@/lib/po/supplier-stat
  * supplier email is a separate, send-authorised path (lib/po/send-po.ts) that
  * always carries costs.
  */
+
+// ── The screen's state, as the URL ───────────────────────────────────────────
+
+/**
+ * Orders is two lists on one screen, so it carries TWO page numbers.
+ *
+ * A single `page` would mean turning to older purchase orders also scrolls the
+ * order queue away — two unrelated lists moving because the reader touched one
+ * of them. They get a param each, and every link writes both, so paging one
+ * leaves the other exactly where it was.
+ *
+ * Only the purchase orders are searchable. The queue is this week's buying,
+ * grouped by supplier and read whole; the purchase-order list is the one that
+ * keeps growing, and "find that order" is a question only it is ever asked.
+ *
+ * A hand-edited or stale value falls back to the default rather than throwing.
+ */
+
+/** Both page params are 1-based in the URL (people read pages from 1), 0-based
+ *  inside. */
+const PO_PAGE_PARAM = "page";
+const QUEUE_PAGE_PARAM = "queue";
+const SEARCH_PARAM = "q";
+
+/** Long enough for anything a shop types, short enough that a pasted essay
+ *  cannot turn one request into a scan for fifty terms. */
+const SEARCH_MAX = 120;
+
+export type OrdersQuery = {
+  /** Free text over the purchase orders, already trimmed. Empty means no filter. */
+  search: string;
+  /** 0-based page of the purchase-order list. */
+  poPage: number;
+  /** 0-based page of the order queue. */
+  queuePage: number;
+};
+
+export const DEFAULT_ORDERS_QUERY: OrdersQuery = { search: "", poPage: 0, queuePage: 0 };
+
+/** What Next hands a page: a value may be absent, single, or repeated. */
+export type RawSearchParams = Record<string, string | string[] | undefined>;
+
+function one(params: RawSearchParams, key: string): string | undefined {
+  const v = params[key];
+  return Array.isArray(v) ? v[0] : v;
+}
+
+function pageOf(params: RawSearchParams, key: string): number {
+  const n = Number(one(params, key) ?? "1");
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) - 1 : 0;
+}
+
+export function parseOrdersQuery(params: RawSearchParams): OrdersQuery {
+  return {
+    search: (one(params, SEARCH_PARAM) ?? "").trim().slice(0, SEARCH_MAX),
+    poPage: pageOf(params, PO_PAGE_PARAM),
+    queuePage: pageOf(params, QUEUE_PAGE_PARAM),
+  };
+}
+
+/** The query as a querystring, defaults omitted so an untouched screen has a
+ *  clean `/orders` URL and every param present means the reader chose it. */
+export function ordersQueryToSearch(q: OrdersQuery): string {
+  const out = new URLSearchParams();
+  if (q.search) out.set(SEARCH_PARAM, q.search);
+  if (q.poPage > 0) out.set(PO_PAGE_PARAM, String(q.poPage + 1));
+  if (q.queuePage > 0) out.set(QUEUE_PAGE_PARAM, String(q.queuePage + 1));
+  const s = out.toString();
+  return s ? `?${s}` : "";
+}
+
+/** The query as hidden form fields, minus the text and the list's own page. A
+ *  GET form submits only its own inputs, so without these a search would send
+ *  the reader back to the first page of the QUEUE too — a list they weren't
+ *  searching. Built from the same serializer the links use, so the two can't
+ *  drift. */
+export function ordersQueryFields(q: OrdersQuery): { name: string; value: string }[] {
+  const search = ordersQueryToSearch({ ...q, search: "", poPage: 0 });
+  return [...new URLSearchParams(search.replace(/^\?/, ""))].map(([name, value]) => ({
+    name,
+    value,
+  }));
+}
+
+/** A changed query. Searching narrows WHICH orders match, so it starts the
+ *  purchase-order list again at page 1 — a reader sitting on page 3 would
+ *  otherwise land past the end of a one-page result. Paging passes its own page
+ *  and keeps it, and neither list disturbs the other. */
+export function withOrdersQuery(q: OrdersQuery, patch: Partial<OrdersQuery>): OrdersQuery {
+  const next = { ...q, ...patch };
+  if (patch.search !== undefined && patch.poPage === undefined) next.poPage = 0;
+  return next;
+}
+
+/** Clamp to a real page. What survives a reader coming back to a bookmarked
+ *  page 4 of a list that has since been narrowed, or delivered and archived. */
+function pageBounds(
+  total: number,
+  page: number,
+  size: number
+): { pageCount: number; current: number; start: number } {
+  const pageCount = Math.max(1, Math.ceil(total / size));
+  const current = Math.min(Math.max(0, page), pageCount - 1);
+  return { pageCount, current, start: current * size };
+}
 
 // ── Supplier scorecards ──────────────────────────────────────────────────────
 
@@ -166,6 +271,48 @@ export async function getOrderQueue(
   }));
 }
 
+/** Supplier cards on one page of the queue. A card is a table with its own
+ *  scorecard and Create PO button, not a row, so five of them is already a long
+ *  screen. */
+export const QUEUE_PAGE_SIZE = 5;
+
+export type OrderQueuePage = {
+  groups: OrderQueueGroup[];
+  /** Suppliers with something queued — what the pager counts against. */
+  total: number;
+  page: number;
+  pageCount: number;
+  /** 1-based position of the first card on the page; 0 when there are none. */
+  from: number;
+};
+
+/**
+ * One page of the queue, counted whole cards.
+ *
+ * The page boundary falls BETWEEN suppliers, never inside one. A card is the
+ * unit the reader works with — they tick its lines, read its running total and
+ * turn it into a single purchase order — so half a supplier on one page and half
+ * on the next would be an order that quietly leaves stock behind.
+ *
+ * Sliced rather than paged in SQL because the groups only exist after the queued
+ * rows are resolved to products and gathered by supplier: the number of cards is
+ * not something the database can count without doing all of that first.
+ */
+export async function getOrderQueuePage(
+  tenantId: string,
+  { canViewCosts, page }: { canViewCosts: boolean; page: number }
+): Promise<OrderQueuePage> {
+  const groups = await getOrderQueue(tenantId, { canViewCosts });
+  const { pageCount, current, start } = pageBounds(groups.length, page, QUEUE_PAGE_SIZE);
+  return {
+    groups: groups.slice(start, start + QUEUE_PAGE_SIZE),
+    total: groups.length,
+    page: current,
+    pageCount,
+    from: groups.length === 0 ? 0 : start + 1,
+  };
+}
+
 // ── Purchase order list + detail ─────────────────────────────────────────────
 
 export type PoListRow = {
@@ -186,29 +333,26 @@ export type PoListRow = {
   isLate: boolean;
 };
 
-export async function getPurchaseOrders(
-  tenantId: string,
-  { canViewCosts }: { canViewCosts: boolean }
-): Promise<PoListRow[]> {
-  const db = prismaForTenant(tenantId);
-  const pos = await db.purchaseOrder.findMany({
-    where: { deletedAt: null },
-    orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      poNumber: true,
-      status: true,
-      subtotalKes: true,
-      createdAt: true,
-      sentAt: true,
-      expectedAt: true,
-      receivedAt: true,
-      supplier: { select: { name: true } },
-      lines: { select: { quantity: true, receivedQty: true } },
-    },
-  });
-  const now = new Date();
-  return pos.map((po) => ({
+const PO_LIST_SELECT = {
+  id: true,
+  poNumber: true,
+  status: true,
+  subtotalKes: true,
+  createdAt: true,
+  sentAt: true,
+  expectedAt: true,
+  receivedAt: true,
+  supplier: { select: { name: true } },
+  lines: { select: { quantity: true, receivedQty: true } },
+} satisfies Prisma.PurchaseOrderSelect;
+
+type PoListSelected = Prisma.PurchaseOrderGetPayload<{ select: typeof PO_LIST_SELECT }>;
+
+/** The row as the database has it. Redaction stays in the getter below, in
+ *  plain sight: the cost-surface scan reads exported bodies, so a getter that
+ *  hands its masking to a helper drops off the manifest that guards it. */
+function toPoListRow(po: PoListSelected, now: Date): PoListRow {
+  return {
     id: po.id,
     poNumber: po.poNumber,
     status: po.status,
@@ -216,13 +360,104 @@ export async function getPurchaseOrders(
     lineCount: po.lines.length,
     totalUnits: po.lines.reduce((s, l) => s + l.quantity, 0),
     receivedUnits: po.lines.reduce((s, l) => s + l.receivedQty, 0),
-    subtotalKes: canViewCosts ? po.subtotalKes : null,
+    subtotalKes: po.subtotalKes,
     createdAt: po.createdAt,
     sentAt: po.sentAt,
     expectedAt: po.expectedAt,
     receivedAt: po.receivedAt,
     isLate: isPoLate(po, now),
-  }));
+  };
+}
+
+/** Newest first. Id breaks a timestamp tie: without it two orders created in the
+ *  same millisecond can swap places between requests, which on a page boundary
+ *  shows one of them twice and hides the other. */
+const PO_LIST_ORDER = [
+  { createdAt: "desc" },
+  { id: "desc" },
+] satisfies Prisma.PurchaseOrderOrderByWithRelationInput[];
+
+/** Purchase orders on one page. The list is read once a week rather than
+ *  scanned, so a page is a month or two of ordering: enough to see the recent
+ *  run in one go, few enough that the page stops growing with the years. */
+export const PO_PAGE_SIZE = 20;
+
+/**
+ * What a search term is matched against: the order's number, its supplier, and
+ * the products on it — the three things someone hunting an order remembers. The
+ * number is the exact handle (unique per workspace), the supplier is what they
+ * say out loud, and the product is what they were after when they recalled
+ * neither.
+ *
+ * Costs stay out of it: a search that matched a figure would let a money-blind
+ * member confirm one by watching the match count move.
+ *
+ * Terms are ANDed: "haria lotion" means both, in any order.
+ */
+function poSearchFilter(search: string): Prisma.PurchaseOrderWhereInput[] {
+  return search
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((term) => {
+      const contains = { contains: term, mode: "insensitive" as const };
+      return {
+        OR: [
+          { poNumber: contains },
+          { supplier: { name: contains } },
+          { lines: { some: { OR: [{ title: contains }, { sku: contains }] } } },
+        ],
+      };
+    });
+}
+
+/** The one place the rows and the count agree on what the reader asked for. */
+function poListWhere(search: string): Prisma.PurchaseOrderWhereInput {
+  const filters = poSearchFilter(search);
+  return { deletedAt: null, ...(filters.length ? { AND: filters } : {}) };
+}
+
+/** How many live orders the reader's search matches — the whole list, not the
+ *  page. What the pager counts against, so "showing 1–20 of 26" is honest. */
+export async function countPurchaseOrders(
+  tenantId: string,
+  { search = "" }: { search?: string } = {}
+): Promise<number> {
+  const db = prismaForTenant(tenantId);
+  return db.purchaseOrder.count({ where: poListWhere(search) });
+}
+
+/** Clamp to a real page. What survives a reader coming back to a bookmarked
+ *  page 4 of a list that has since been narrowed by a search. */
+export function poListPageBounds(
+  total: number,
+  page: number
+): { pageCount: number; current: number; start: number } {
+  return pageBounds(total, page, PO_PAGE_SIZE);
+}
+
+export async function getPurchaseOrders(
+  tenantId: string,
+  { canViewCosts, search = "", page }: {
+    canViewCosts: boolean;
+    search?: string;
+    /** 0-based. Omitted returns the whole list. */
+    page?: number;
+  }
+): Promise<PoListRow[]> {
+  const db = prismaForTenant(tenantId);
+  const pos = await db.purchaseOrder.findMany({
+    where: poListWhere(search),
+    orderBy: PO_LIST_ORDER,
+    ...(page === undefined
+      ? {}
+      : { skip: Math.max(0, page) * PO_PAGE_SIZE, take: PO_PAGE_SIZE }),
+    select: PO_LIST_SELECT,
+  });
+  const now = new Date();
+  return pos.map((po) => {
+    const row = toPoListRow(po, now);
+    return canViewCosts ? row : { ...row, subtotalKes: null };
+  });
 }
 
 export type PoDetailLine = {
