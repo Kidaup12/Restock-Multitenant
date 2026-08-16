@@ -91,7 +91,7 @@ export default async function StockPage({
         }
       >
         {view === "locations" ? (
-          <LocationView tenantId={tenantId} canViewCosts={canViewCosts} />
+          <LocationView tenantId={tenantId} canViewCosts={canViewCosts} params={params} />
         ) : (
           <CatalogueTable
             tenantId={tenantId}

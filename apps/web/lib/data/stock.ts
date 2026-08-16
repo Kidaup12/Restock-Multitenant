@@ -18,11 +18,16 @@ import { getCatalogueMetrics } from "@/lib/metrics";
 import { buildFacetItems, type FacetItem, type FacetSourceRow } from "@/lib/facets";
 import {
   buildAggregates,
+  catalogueQueryFields,
+  catalogueQueryToSearch,
+  DEFAULT_QUERY,
   pageBounds,
+  parseCatalogueQuery,
   selectRows,
   PAGE_SIZE,
   type CatalogueAggregates,
   type CatalogueQuery,
+  type RawSearchParams,
 } from "@/lib/catalogue";
 import {
   coverVerdict,
@@ -556,4 +561,135 @@ export async function getStockByLocation(
       }),
     };
   });
+}
+
+/** The By-location screen's state. It rides the same `q` and `page` params the
+ *  catalogue tab uses: only one of the two tabs is on screen at a time, and the
+ *  tab link carries neither, so nobody arrives on page 4 of a list they have not
+ *  seen yet. */
+export type LocationsQuery = { search: string; page: number };
+
+export function parseLocationsQuery(params: RawSearchParams): LocationsQuery {
+  const q = parseCatalogueQuery(params);
+  return { search: q.search, page: q.page };
+}
+
+const asCatalogueQuery = (q: LocationsQuery): CatalogueQuery => ({
+  ...DEFAULT_QUERY,
+  search: q.search,
+  page: q.page,
+});
+
+/** This view's URL. Built through the catalogue's serializer so the two tabs
+ *  cannot spell the same params differently. */
+export function locationsQueryToSearch(q: LocationsQuery): string {
+  return catalogueQueryToSearch(asCatalogueQuery(q), { view: "locations" });
+}
+
+/** The hidden fields the search box carries — `view` alone, minus `q` and
+ *  `page`. Without the tab a search would answer with the by-product catalogue;
+ *  without dropping the page it would land on page 7 of a three-line answer. */
+export function locationsQueryFields(q: LocationsQuery): { name: string; value: string }[] {
+  return catalogueQueryFields(asCatalogueQuery(q), { view: "locations" });
+}
+
+/** Product name and SKU: the only two things the per-location table prints as
+ *  text — every other column is a number. Terms are ANDed and matched as
+ *  substrings, like the catalogue's box, so a run-together SKU (`LP-250ML`) is
+ *  still found by typing `250`. */
+export function matchesLocationLine(line: LocationLine, search: string): boolean {
+  const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const text = `${line.title} ${line.sku}`.toLowerCase();
+  return terms.every((t) => text.includes(t));
+}
+
+/** One location as this page shows it: the location's own totals, and the slice
+ *  of its lines that falls inside the page window. */
+export type LocationPageStock = LocationStock & {
+  /** Lines here that match the search — `skuCount` still counts them all. */
+  matchedLines: number;
+  /** 1-based position of the first line shown, within that match. */
+  from: number;
+};
+
+export type LocationsScreen = {
+  locations: LocationPageStock[];
+  pageCount: number;
+  /** Clamped page actually returned — the requested one may be past the end. */
+  page: number;
+  /** 1-based first and last line on screen, for "showing 51–100 of 211". */
+  from: number;
+  to: number;
+  /** Lines matching the search across every location — what the pager counts. */
+  matched: number;
+  /** Lines across every location, before the search. */
+  total: number;
+  /** Whether the shop has any location at all, which is a different empty state
+   *  from "no line matches this text". */
+  empty: boolean;
+};
+
+/**
+ * One page of the By-location screen.
+ *
+ * The screen is a list of locations, each with its own lines, and the lines are
+ * where the weight is: one shop floor can hold 131 of a tenant's 211. So the
+ * page window walks the LINES in location order and each location renders the
+ * part of the window that falls inside it — a location's lines can straddle a
+ * break and its card then appears on both pages, under its own heading.
+ *
+ * Paging the locations instead would leave that 131-line table whole, which is
+ * the thing that needed bounding; a page per location would need a page param
+ * per location in the URL. The card's own totals (SKUs, units, value) stay
+ * location-wide either way — they describe the location, never the page.
+ */
+export async function getLocationsScreen(
+  tenantId: string,
+  { canViewCosts, query }: { canViewCosts: boolean; query: LocationsQuery }
+): Promise<LocationsScreen> {
+  const locations = await getStockByLocation(tenantId, { canViewCosts });
+  const searched = locations.map((location) => ({
+    location,
+    lines: query.search
+      ? location.lines.filter((line) => matchesLocationLine(line, query.search))
+      : location.lines,
+  }));
+
+  const total = locations.reduce((sum, l) => sum + l.lines.length, 0);
+  const matched = searched.reduce((sum, s) => sum + s.lines.length, 0);
+  const { pageCount, current, start } = pageBounds(matched, query.page);
+  const end = start + PAGE_SIZE;
+
+  const page: LocationPageStock[] = [];
+  let cursor = 0;
+  for (const { location, lines } of searched) {
+    const first = Math.max(start, cursor);
+    const last = Math.min(end, cursor + lines.length);
+    if (last > first) {
+      page.push({
+        ...location,
+        lines: lines.slice(first - cursor, last - cursor),
+        matchedLines: lines.length,
+        from: first - cursor + 1,
+      });
+    } else if (lines.length === 0 && !query.search && cursor >= start && cursor < end) {
+      // A location holding nothing takes up no room in the window, so it is
+      // pinned to the page its position falls on — "this branch is empty" is
+      // worth reading once, and it used to be on screen every time.
+      page.push({ ...location, lines: [], matchedLines: 0, from: 1 });
+    }
+    cursor += lines.length;
+  }
+
+  return {
+    locations: page,
+    pageCount,
+    page: current,
+    from: matched === 0 ? 0 : start + 1,
+    to: Math.min(end, matched),
+    matched,
+    total,
+    empty: locations.length === 0,
+  };
 }
