@@ -132,6 +132,164 @@ export async function getSuppliers(tenantId: string): Promise<SupplierRow[]> {
   });
 }
 
+// ── The suppliers list: search, sort, page ───────────────────────────────────
+
+/**
+ * Suppliers on one page. The list grows by one every time a brand changes
+ * hands, and these rows run two and three lines tall — 25 is about a screenful,
+ * and the pager says how much is left rather than leaving the reader to guess.
+ */
+export const SUPPLIERS_PAGE_SIZE = 25;
+
+export const SUPPLIER_SORT_KEYS = [
+  "name",
+  "group",
+  "leadTyped",
+  "learned",
+  "moq",
+  "products",
+  "onTime",
+] as const;
+export type SupplierSortKey = (typeof SUPPLIER_SORT_KEYS)[number];
+
+/** Everything the screen filters and sorts by. Each one changes WHICH suppliers
+ *  match, so each one also sends the reader back to page 1. */
+export type SupplierQuery = {
+  /** Free text, already trimmed. Empty means no filter. */
+  search: string;
+  sortKey: SupplierSortKey;
+  desc: boolean;
+  page: number;
+};
+
+export const DEFAULT_SUPPLIER_QUERY: SupplierQuery = {
+  search: "",
+  sortKey: "name",
+  desc: false,
+  page: 0,
+};
+
+/**
+ * The text a search term is matched against: everything printed on the row,
+ * plus the email — which is how two entries for the same trading name are told
+ * apart, and what an owner usually has in front of them when they go looking.
+ *
+ * Deliberately NOT the products a supplier carries: that is a per-supplier list
+ * behind the Products count, and folding it in here would make one keystroke
+ * read the whole catalogue. Nothing in here is a cost; this screen carries none.
+ */
+function supplierHaystack(row: SupplierRow): string {
+  return [row.name, row.group, row.country, row.currency, row.email]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+/** Whitespace-separated terms, ANDed, matched as substrings — the same rule the
+ *  catalogue search follows, so one box never behaves unlike the other. */
+export function matchesSupplierSearch(row: SupplierRow, search: string): boolean {
+  const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return true;
+  const text = supplierHaystack(row);
+  return terms.every((t) => text.includes(t));
+}
+
+function sortValue(row: SupplierRow, key: SupplierSortKey): string | number | null {
+  switch (key) {
+    case "name":
+      return row.name.toLowerCase();
+    case "group":
+      return row.group?.toLowerCase() ?? null;
+    case "leadTyped":
+      return row.leadTimeTypedDays;
+    case "learned":
+      return row.learnedLeadDays;
+    case "moq":
+      return row.moq;
+    case "products":
+      return row.assignedProductCount;
+    case "onTime":
+      return row.onTimePct;
+  }
+}
+
+/**
+ * Search, then sort. Nulls sort last whichever way the column points: "not set"
+ * is not a small number, and floating the blanks to the top of a descending view
+ * buries the rows that actually have something to say. The id breaks the
+ * remaining ties, because two suppliers with the same name must not swap places
+ * between one page and the next — that is how a paged list loses a row.
+ */
+export function selectSuppliers(rows: SupplierRow[], q: SupplierQuery): SupplierRow[] {
+  const matched = q.search ? rows.filter((r) => matchesSupplierSearch(r, q.search)) : rows;
+  return [...matched].sort((a, b) => {
+    const av = sortValue(a, q.sortKey);
+    const bv = sortValue(b, q.sortKey);
+    if (av == null && bv == null) return a.id.localeCompare(b.id);
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const c =
+      typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+    if (c === 0) return a.id.localeCompare(b.id);
+    return q.desc ? -c : c;
+  });
+}
+
+function one(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+}
+
+/** Reads the screen's state off the URL, surviving whatever a hand-edited
+ *  address bar contains rather than throwing at the reader. */
+export function parseSupplierQuery(
+  params: Record<string, string | string[] | undefined>,
+): SupplierQuery {
+  const sort = one(params.sort);
+  const page = Number.parseInt(one(params.page), 10);
+  return {
+    search: one(params.q).trim().slice(0, 120),
+    sortKey: (SUPPLIER_SORT_KEYS as readonly string[]).includes(sort)
+      ? (sort as SupplierSortKey)
+      : DEFAULT_SUPPLIER_QUERY.sortKey,
+    desc: one(params.dir) === "desc",
+    page: Number.isFinite(page) && page > 0 ? page : 0,
+  };
+}
+
+export type SuppliersScreen = {
+  /** One page of suppliers, in the order the sort asked for. */
+  rows: SupplierRow[];
+  /** Suppliers the shop has, whatever is in the search box — the card's count,
+   *  and what decides whether the empty state belongs here at all. */
+  total: number;
+  /** Suppliers the text matched: what the pager counts against. */
+  matched: number;
+  page: number;
+  pageCount: number;
+  /** 1-based index of the first row on the page ("showing 26–28 of 28"). */
+  from: number;
+};
+
+/** The suppliers screen: the whole list counted, one page of it sent. */
+export async function getSuppliersScreen(
+  tenantId: string,
+  query: SupplierQuery,
+): Promise<SuppliersScreen> {
+  const all = await getSuppliers(tenantId);
+  const matched = selectSuppliers(all, query);
+  const pageCount = Math.max(1, Math.ceil(matched.length / SUPPLIERS_PAGE_SIZE));
+  const page = Math.min(Math.max(0, query.page), pageCount - 1);
+  const start = page * SUPPLIERS_PAGE_SIZE;
+  return {
+    rows: matched.slice(start, start + SUPPLIERS_PAGE_SIZE),
+    total: all.length,
+    matched: matched.length,
+    page,
+    pageCount,
+    from: start + 1,
+  };
+}
+
 export type UnassignedBrand = {
   vendor: string;
   productCount: number;

@@ -20,6 +20,7 @@ import {
   COVER_DAY_CHOICES,
   DEFAULT_COVER_DAYS,
   getTransferLocations,
+  parseSavedPlansQuery,
 } from "@/lib/data/transfers";
 import { ProposalView } from "./proposal-view";
 import { SavedPlans } from "./saved-plans";
@@ -156,7 +157,7 @@ async function TransfersContent({
 export default async function TransfersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; cover?: string }>;
+  searchParams: Promise<{ from?: string; cover?: string; q?: string; page?: string }>;
 }) {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
@@ -177,6 +178,11 @@ export default async function TransfersPage({
   const canViewCosts = hasPermission(membership, "view_costs");
   const canPlan = hasPermission(membership, "approve_orders");
   const coverDays = clampCoverDays(params.cover ? Number(params.cover) : DEFAULT_COVER_DAYS);
+  // The proposal's own state, kept whole across a plan search or page turn.
+  const carry = [
+    ...(params.from ? [{ name: "from", value: params.from }] : []),
+    { name: "cover", value: String(coverDays) },
+  ];
 
   return (
     <div className="space-y-6">
@@ -196,7 +202,13 @@ export default async function TransfersPage({
       </Suspense>
 
       <Suspense fallback={<SkeletonCard lines={3} />}>
-        <SavedPlans tenantId={membership.tenantId} canViewCosts={canViewCosts} canPlan={canPlan} />
+        <SavedPlans
+          tenantId={membership.tenantId}
+          canViewCosts={canViewCosts}
+          canPlan={canPlan}
+          carry={carry}
+          query={parseSavedPlansQuery(params)}
+        />
       </Suspense>
     </div>
   );

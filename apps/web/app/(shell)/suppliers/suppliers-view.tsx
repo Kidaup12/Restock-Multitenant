@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
+import { Pager } from "@/components/ui/pager";
+import { TableSearch } from "@/components/ui/table-search";
 import {
   Table,
   TableBody,
@@ -17,7 +18,14 @@ import {
 } from "@/components/ui/table";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import { SPEED_BAND_LABEL, type SpeedBand } from "@/lib/suppliers/lead-time";
-import type { AssignableProduct, SupplierOption, SupplierRow, UnassignedBrand } from "@/lib/data/suppliers";
+import type {
+  AssignableProduct,
+  SupplierOption,
+  SupplierQuery,
+  SupplierRow,
+  SupplierSortKey,
+  UnassignedBrand,
+} from "@/lib/data/suppliers";
 import {
   deleteSupplierAction,
   adoptLearnedLeadAction,
@@ -27,7 +35,33 @@ import { BulkAssignBar } from "./bulk-assign-bar";
 import { SupplierForm } from "./supplier-form";
 import { SupplierImport } from "./supplier-import";
 
-type SortKey = "name" | "group" | "leadTyped" | "learned" | "moq" | "products" | "onTime";
+/**
+ * The list's state is the address bar: the server searches, sorts and pages,
+ * and every control here is a link that asks it again. That keeps a filtered
+ * list linkable, survives the revalidate after an edit, and stops the table
+ * from sorting one page of rows while claiming to have ordered the whole list.
+ *
+ * The URL vocabulary is read back by `parseSupplierQuery` in lib/data/suppliers;
+ * the round-trip is held by a test, because the two halves live apart — a data
+ * module cannot be imported for its values by a client component without
+ * dragging the database client into the browser bundle.
+ */
+export function supplierQueryToSearch(q: SupplierQuery): string {
+  const params = new URLSearchParams();
+  if (q.search) params.set("q", q.search);
+  if (q.sortKey !== "name") params.set("sort", q.sortKey);
+  if (q.desc) params.set("dir", "desc");
+  if (q.page > 0) params.set("page", String(q.page));
+  const search = params.toString();
+  return search ? `?${search}` : "";
+}
+
+/** Every control except the pager changes WHICH suppliers match, so every one
+ *  of them sends the reader back to the first page. */
+export function withSupplierQuery(q: SupplierQuery, patch: Partial<SupplierQuery>): SupplierQuery {
+  const next = { ...q, ...patch };
+  return patch.page === undefined ? { ...next, page: 0 } : next;
+}
 
 const SPEED_TONE: Record<SpeedBand, "positive" | "accent" | "neutral"> = {
   local: "positive",
@@ -58,66 +92,73 @@ function SortHead({
   label,
   columnKey,
   numeric,
-  active,
-  dir,
-  onToggle,
+  query,
+  hrefFor,
 }: {
   label: string;
-  columnKey: SortKey;
+  columnKey: SupplierSortKey;
   numeric: boolean;
-  active: boolean;
-  dir: "asc" | "desc";
-  onToggle: (key: SortKey) => void;
+  query: SupplierQuery;
+  hrefFor: (patch: Partial<SupplierQuery>) => string;
 }) {
+  const active = query.sortKey === columnKey;
   return (
     <TableHead numeric={numeric}>
-      <button
-        type="button"
-        onClick={() => onToggle(columnKey)}
+      <Link
+        href={hrefFor({ sortKey: columnKey, desc: active ? !query.desc : false })}
+        scroll={false}
         className="inline-flex items-center gap-1 uppercase tracking-wider outline-accent hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         {label}
-        {active && <span aria-hidden>{dir === "asc" ? "▲" : "▼"}</span>}
-      </button>
+        {active && <span aria-hidden>{query.desc ? "▼" : "▲"}</span>}
+      </Link>
     </TableHead>
   );
 }
 
-function sortValue(row: SupplierRow, key: SortKey): string | number | null {
-  switch (key) {
-    case "name":
-      return row.name.toLowerCase();
-    case "group":
-      return row.group?.toLowerCase() ?? null;
-    case "leadTyped":
-      return row.leadTimeTypedDays;
-    case "learned":
-      return row.learnedLeadDays;
-    case "moq":
-      return row.moq;
-    case "products":
-      return row.assignedProductCount;
-    case "onTime":
-      return row.onTimePct;
-  }
-}
+/** What the server answered with, beside the page of rows itself. Optional as a
+ *  group: a caller that hands over the whole list gets it rendered whole. */
+export type SupplierPaging = {
+  /** Suppliers the shop has, whatever is in the search box. */
+  total: number;
+  /** Suppliers the text matched — what the pager counts against. */
+  matched: number;
+  page: number;
+  pageCount: number;
+  from: number;
+  query: SupplierQuery;
+  /** The full matched list, fetched at click time. The export is the list the
+   *  reader filtered to, not the twenty-five rows they are looking at. */
+  exportRows: () => Promise<SupplierRow[]>;
+};
+
+const WHOLE_LIST: SupplierQuery = { search: "", sortKey: "name", desc: false, page: 0 };
 
 export function SuppliersView({
   rows,
+  paging,
   unassignedBrands,
   supplierOptions,
   assignableProducts,
   canManage,
 }: {
+  /** One page of suppliers, already searched and sorted by the server. */
   rows: SupplierRow[];
+  paging?: SupplierPaging;
   unassignedBrands: UnassignedBrand[];
   supplierOptions: SupplierOption[];
   assignableProducts: AssignableProduct[];
   canManage: boolean;
 }) {
-  const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const {
+    total = rows.length,
+    matched = rows.length,
+    page = 0,
+    pageCount = 1,
+    from = 1,
+    query = WHOLE_LIST,
+    exportRows,
+  } = paging ?? {};
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<SupplierRow | "new" | null>(null);
@@ -125,25 +166,8 @@ export function SuppliersView({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const visible = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = q
-      ? rows.filter((r) =>
-          [r.name, r.group, r.country, r.currency]
-            .filter(Boolean)
-            .some((v) => v!.toLowerCase().includes(q)),
-        )
-      : rows;
-    return [...filtered].sort((a, b) => {
-      const av = sortValue(a, sortKey);
-      const bv = sortValue(b, sortKey);
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1; // nulls always last
-      if (bv == null) return -1;
-      const c = typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number);
-      return sortDir === "asc" ? c : -c;
-    });
-  }, [rows, query, sortKey, sortDir]);
+  const hrefFor = (patch: Partial<SupplierQuery>) =>
+    `/suppliers${supplierQueryToSearch(withSupplierQuery(query, patch))}`;
 
   function handleResult(result: SupplierActionResult) {
     if (result.ok) {
@@ -152,15 +176,6 @@ export function SuppliersView({
     } else {
       setNotice(null);
       setError(result.error);
-    }
-  }
-
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(key);
-      setSortDir("asc");
     }
   }
 
@@ -178,15 +193,8 @@ export function SuppliersView({
     run(row.id, () => deleteSupplierAction({ supplierId: row.id }));
   }
 
-  const sortHead = (label: string, k: SortKey, numeric = false) => (
-    <SortHead
-      label={label}
-      columnKey={k}
-      numeric={numeric}
-      active={sortKey === k}
-      dir={sortDir}
-      onToggle={toggleSort}
-    />
+  const sortHead = (label: string, k: SupplierSortKey, numeric = false) => (
+    <SortHead label={label} columnKey={k} numeric={numeric} query={query} hrefFor={hrefFor} />
   );
 
   return (
@@ -221,18 +229,15 @@ export function SuppliersView({
       <Card>
         <CardHeader
           title="Suppliers"
-          subtitle={`${rows.length} ${rows.length === 1 ? "supplier" : "suppliers"}`}
+          subtitle={`${total} ${total === 1 ? "supplier" : "suppliers"}`}
           action={
             <div className="flex flex-wrap items-center gap-2">
-              <Input
-                type="search"
-                value={query}
-                placeholder="Search suppliers…"
-                onChange={(e) => setQuery(e.target.value)}
-                className="h-8 w-44 text-sm"
-                aria-label="Search suppliers"
+              <ExportBar
+                loadRows={exportRows ?? (async () => rows)}
+                count={matched}
+                columns={exportColumns}
+                filename="suppliers"
               />
-              <ExportBar rows={visible} columns={exportColumns} filename="suppliers" />
               {canManage && !importing && (
                 <Button size="sm" variant="ghost" onClick={() => setImporting(true)}>
                   Import CSV
@@ -246,8 +251,21 @@ export function SuppliersView({
             </div>
           }
         />
+        {total > 0 && (
+          /* The form posts `q` itself and carries no page, so a new search
+             always lands on the first page of its own results. */
+          <TableSearch
+            action="/suppliers"
+            value={query.search}
+            hidden={sortFields(query)}
+            placeholder="Search by name, group, country or email…"
+            matched={query.search ? matched : null}
+            clearHref={hrefFor({ search: "" })}
+            label="Search suppliers"
+          />
+        )}
         <CardContent className="p-0 py-2">
-          {rows.length === 0 ? (
+          {total === 0 ? (
             <EmptyState
               title="No suppliers yet"
               description="Import your supplier list as a CSV, or add one by hand, then assign products by brand."
@@ -283,7 +301,7 @@ export function SuppliersView({
                 <TableHead>Actions</TableHead>
               </TableHeader>
               <TableBody>
-                {visible.map((row) => (
+                {rows.map((row) => (
                   <TableRow key={row.id}>
                     <TableCell className="font-medium text-ink">
                       <span className="inline-flex flex-wrap items-center gap-2">
@@ -399,10 +417,36 @@ export function SuppliersView({
               </TableBody>
             </Table>
           )}
+          {total > 0 && matched === 0 && (
+            <p className="px-4 py-6 text-sm text-ink-muted">
+              No supplier matches that. Clear the search to see all {total}.
+            </p>
+          )}
         </CardContent>
+        {pageCount > 1 && (
+          <Pager
+            page={page}
+            pageCount={pageCount}
+            from={from}
+            to={from + rows.length - 1}
+            total={matched}
+            pageHref={(next) => hrefFor({ page: next })}
+            label="Supplier pages"
+          />
+        )}
       </Card>
     </div>
   );
+}
+
+/** The sort the reader chose, as hidden fields on the search form. A GET form
+ *  submits only its own inputs, so without these, searching would quietly put
+ *  the list back in name order. Page is deliberately absent. */
+function sortFields(query: SupplierQuery): { name: string; value: string }[] {
+  return [
+    ...(query.sortKey !== "name" ? [{ name: "sort", value: query.sortKey }] : []),
+    ...(query.desc ? [{ name: "dir", value: "desc" }] : []),
+  ];
 }
 
 function driftTitle(row: SupplierRow): string {
