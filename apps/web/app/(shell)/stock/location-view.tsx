@@ -15,8 +15,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Pager } from "@/components/ui/pager";
+import { TableSearch } from "@/components/ui/table-search";
 import { coverTone } from "@/lib/locations/roles";
-import { getStockByLocation } from "@/lib/data/stock";
+import type { RawSearchParams } from "@/lib/catalogue";
+import {
+  getLocationsScreen,
+  locationsQueryFields,
+  locationsQueryToSearch,
+  parseLocationsQuery,
+  type LocationsQuery,
+} from "@/lib/data/stock";
 
 const roleLabels: Record<LocationRole, string> = {
   sells: "Sells",
@@ -51,18 +60,31 @@ function CoverCell({ daysCover, oversold }: { daysCover: number | null; oversold
   );
 }
 
+/**
+ * Stock by location. A shop with three branches carries a couple of hundred
+ * lines between them, most of them at one counter, so the table is searched and
+ * paged: the window walks the lines in location order, and a location whose
+ * lines cross a page break keeps its own card on both pages. What never moves
+ * with the page or the search is any of the figures — the card's totals are the
+ * location's, and the two shop-wide columns are the shop's.
+ */
 export async function LocationView({
   tenantId,
   canViewCosts = true,
+  params = {},
 }: {
   tenantId: string;
   canViewCosts?: boolean;
+  /** The page's search params: the text and page live in the URL, so a searched
+   *  branch is linkable and the back button walks the reader's own steps. */
+  params?: RawSearchParams;
 }) {
+  const query = parseLocationsQuery(params);
   // canViewCosts flows into the query: per-line and per-location values come
   // back null for a money-blind member, so the figures never reach the payload.
-  const locations = await getStockByLocation(tenantId, { canViewCosts });
+  const screen = await getLocationsScreen(tenantId, { canViewCosts, query });
 
-  if (locations.length === 0) {
+  if (screen.empty) {
     return (
       <EmptyState
         icon={<BoxIcon />}
@@ -72,9 +94,32 @@ export async function LocationView({
     );
   }
 
+  const hrefFor = (patch: Partial<LocationsQuery>) =>
+    `/stock${locationsQueryToSearch({ ...query, ...patch })}`;
+
   return (
     <div className="space-y-6">
-      {locations.map((location) => (
+      <Card className="pb-3">
+        <TableSearch
+          action="/stock"
+          value={query.search}
+          hidden={locationsQueryFields(query)}
+          placeholder="Search by product or SKU"
+          matched={query.search ? screen.matched : null}
+          clearHref={hrefFor({ search: "", page: 0 })}
+          label="Search stock by location"
+        />
+      </Card>
+
+      {screen.locations.length === 0 && (
+        <EmptyState
+          icon={<BoxIcon />}
+          title="No product matches"
+          description="Nothing at any location matches that. Clear the search to see them all."
+        />
+      )}
+
+      {screen.locations.map((location) => (
         <Card key={location.locationId}>
           <CardHeader
             title={location.name}
@@ -93,6 +138,23 @@ export async function LocationView({
               </div>
             }
           />
+          {/* Which of this location's lines are on screen. The header above
+              counts everything the location holds, so without this a table
+              narrowed by a search or cut by a page break would read as if the
+              rest had gone missing. */}
+          {(location.matchedLines < location.skuCount ||
+            location.lines.length < location.matchedLines) && (
+            <p className="px-5 pt-2 text-sm text-ink-muted">
+              {[
+                location.matchedLines < location.skuCount &&
+                  `${location.matchedLines} of ${location.skuCount} lines match`,
+                location.lines.length < location.matchedLines &&
+                  `showing ${location.from}–${location.from + location.lines.length - 1}`,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
           <div className="mt-2 pb-2">
             {location.lines.length === 0 ? (
               <p className="px-5 pb-4 text-sm text-ink-muted">Nothing on hand here.</p>
@@ -149,6 +211,20 @@ export async function LocationView({
           </div>
         </Card>
       ))}
+
+      {screen.pageCount > 1 && (
+        <Card>
+          <Pager
+            page={screen.page}
+            pageCount={screen.pageCount}
+            from={screen.from}
+            to={screen.to}
+            total={screen.matched}
+            pageHref={(next) => hrefFor({ page: next })}
+            label="Stock by location pages"
+          />
+        </Card>
+      )}
     </div>
   );
 }
