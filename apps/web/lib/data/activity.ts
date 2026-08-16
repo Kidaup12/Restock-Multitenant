@@ -1,4 +1,4 @@
-import { prismaForTenant } from "@wezesha/db";
+import { Prisma, prismaForTenant } from "@wezesha/db";
 
 /**
  * The shop's own record of who did what — an append-only trail for accounting.
@@ -12,6 +12,10 @@ import { prismaForTenant } from "@wezesha/db";
  * client payload, and cost entries are dropped entirely for a money-blind
  * caller — the same treatment their notification feed already gets, and for the
  * same reason: the entry's presence is itself a statement about cost.
+ *
+ * The trail is read one page at a time. It only ever grows, and a reader who
+ * gets the newest page with no count cannot tell a complete log from a
+ * truncated one.
  */
 
 /** Entity+action pairs that describe a money change. */
@@ -78,19 +82,86 @@ function summarise(
   return `${verb.charAt(0).toUpperCase()}${verb.slice(1)} ${noun}`;
 }
 
+/**
+ * Entries per page. The same 50 the catalogue uses, so the two long tables in
+ * the app page identically — and each entry here is one line of text rather
+ * than a row of computed figures, so a page of them is about two screens of
+ * scrolling and costs almost nothing to send.
+ */
+export const ACTIVITY_PAGE_SIZE = 50;
+
+/**
+ * What a search term is matched against: the actor, and the plain words the row
+ * prints. Someone looking for "who cancelled that order" types either the
+ * person's role or the word on the entry, not the `cancelled` token or the
+ * `PurchaseOrder` class — so a term matches the display noun and verb as well
+ * as the raw column.
+ *
+ * `meta` is deliberately not searched. It holds the cost figures a money-blind
+ * member must never learn, and a search over it hands them a way to confirm one
+ * by watching the match count move.
+ *
+ * Terms are ANDed: "cancelled order" means both, in any order.
+ */
+function keysMatching(map: Record<string, string>, term: string): string[] {
+  return Object.entries(map)
+    .filter(([, phrase]) => phrase.toLowerCase().includes(term))
+    .map(([key]) => key);
+}
+
+function searchFilter(search: string): Prisma.AuditEventWhereInput[] {
+  const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
+  return terms.map((term) => {
+    const entities = keysMatching(ENTITY_NOUN, term);
+    const actions = keysMatching(ACTION_VERB, term);
+    return {
+      OR: [
+        { actorName: { contains: term, mode: "insensitive" as const } },
+        { entity: { contains: term, mode: "insensitive" as const } },
+        { action: { contains: term, mode: "insensitive" as const } },
+        ...(entities.length ? [{ entity: { in: entities } }] : []),
+        ...(actions.length ? [{ action: { in: actions } }] : []),
+      ],
+    };
+  });
+}
+
+/** The one place the rows and the count agree on what the reader asked for. */
+function activityWhere(canViewCosts: boolean, search: string): Prisma.AuditEventWhereInput {
+  const and: Prisma.AuditEventWhereInput[] = [...searchFilter(search)];
+  if (!canViewCosts) and.push({ action: { notIn: [...COST_ACTIONS] } });
+  return and.length ? { AND: and } : {};
+}
+
+/** How many entries the reader's search matches — the whole trail, not the page.
+ *  What the pager counts against, so "showing 1–50 of 123" is honest. */
+export async function countActivity(
+  tenantId: string,
+  { canViewCosts, search = "" }: { canViewCosts: boolean; search?: string }
+): Promise<number> {
+  const db = prismaForTenant(tenantId);
+  return db.auditEvent.count({ where: activityWhere(canViewCosts, search) });
+}
+
 export async function getActivity(
   tenantId: string,
-  { canViewCosts, currency, limit = 100 }: {
+  { canViewCosts, currency, search = "", page = 0 }: {
     canViewCosts: boolean;
     currency: string;
-    limit?: number;
+    search?: string;
+    /** 0-based. */
+    page?: number;
   }
 ): Promise<ActivityEntry[]> {
   const db = prismaForTenant(tenantId);
   const rows = await db.auditEvent.findMany({
-    where: canViewCosts ? {} : { action: { notIn: [...COST_ACTIONS] } },
-    orderBy: { createdAt: "desc" },
-    take: limit,
+    where: activityWhere(canViewCosts, search),
+    // Id breaks a timestamp tie. Without it two entries written in the same
+    // millisecond can swap places between requests, which on a page boundary
+    // shows one of them twice and hides the other.
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: Math.max(0, page) * ACTIVITY_PAGE_SIZE,
+    take: ACTIVITY_PAGE_SIZE,
     select: { id: true, entity: true, action: true, actorName: true, meta: true, createdAt: true },
   });
 
