@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
+import { Pager } from "@/components/ui/pager";
 import { formatNumber } from "@/lib/money";
 import { formatEta } from "@/lib/dates";
 import { useCurrency } from "@/components/currency-provider";
@@ -367,75 +368,6 @@ function SortBar({
         {query.desc ? "Desc ↓" : "Asc ↑"}
       </Link>
     </div>
-  );
-}
-
-/** Table pager. Says how much of the matched list is on screen — a shop with
- *  400+ products must never be left guessing whether the rest is missing or
- *  merely further down — and the numbered links are the way to a far page
- *  without clicking Next eight times. */
-function Pager({
-  page,
-  pageCount,
-  from,
-  to,
-  total,
-  pageHref,
-}: {
-  page: number;
-  pageCount: number;
-  from: number;
-  to: number;
-  total: number;
-  pageHref: (page: number) => string;
-}) {
-  const step = "rounded-md border border-edge bg-surface px-2 py-1 text-ink hover:bg-surface-2";
-  const muted = "rounded-md border border-edge px-2 py-1 text-ink-faint opacity-50";
-  // A window around the current page: a 1000-SKU catalogue is 20 pages, and
-  // twenty numbers in a row is a wall rather than a control.
-  const span = 2;
-  const first = Math.max(0, Math.min(page - span, pageCount - (span * 2 + 1)));
-  const last = Math.min(pageCount - 1, Math.max(page + span, span * 2));
-
-  return (
-    <nav
-      aria-label="Catalogue pages"
-      className="flex flex-wrap items-center justify-between gap-2 border-t border-edge px-4 py-3 text-sm text-ink-muted"
-    >
-      <span>
-        Showing {from}–{to} of {total}
-      </span>
-      <span className="flex flex-wrap items-center gap-1">
-        {page === 0 ? (
-          <span className={muted}>← Previous</span>
-        ) : (
-          <Link href={pageHref(page - 1)} scroll={false} className={step}>
-            ← Previous
-          </Link>
-        )}
-        {first > 0 && <span className="px-1">…</span>}
-        {Array.from({ length: last - first + 1 }, (_, i) => first + i).map((n) => (
-          <Link
-            key={n}
-            href={pageHref(n)}
-            scroll={false}
-            aria-label={`Page ${n + 1} of ${pageCount}`}
-            aria-current={n === page ? "page" : undefined}
-            className={cn(step, n === page && "border-edge-strong bg-accent-soft text-accent-ink")}
-          >
-            {n + 1}
-          </Link>
-        ))}
-        {last < pageCount - 1 && <span className="px-1">…</span>}
-        {page >= pageCount - 1 ? (
-          <span className={muted}>Next →</span>
-        ) : (
-          <Link href={pageHref(page + 1)} scroll={false} className={step}>
-            Next →
-          </Link>
-        )}
-      </span>
-    </nav>
   );
 }
 
