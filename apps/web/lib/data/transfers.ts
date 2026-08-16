@@ -552,21 +552,25 @@ async function costByProduct(
   return new Map(products.map((p) => [p.id, p.costKes]));
 }
 
-export async function listDistributionPlans(
-  tenantId: string,
-  { canViewCosts, limit = 20 }: { canViewCosts: boolean; limit?: number }
-): Promise<SavedPlanSummary[]> {
-  const db = prismaForTenant(tenantId);
-  const plans = await db.distributionPlan.findMany({
-    where: { deletedAt: null },
-    orderBy: { createdAt: "desc" },
-    take: limit,
-    include: {
-      fromLocation: { select: { name: true } },
-      lines: { select: { productId: true, qty: true } },
-    },
-  });
+/** The stored plan as the summary needs it — structural, so both the plain list
+ *  and the paged screen can hand their rows to the same mapping. */
+type PlanRecord = {
+  id: string;
+  name: string | null;
+  status: string;
+  coverDays: number;
+  windowDays: number;
+  createdAt: Date;
+  createdByName: string | null;
+  fromLocation: { name: string };
+  lines: { productId: string; qty: number }[];
+};
 
+async function summarisePlans(
+  tenantId: string,
+  plans: PlanRecord[],
+  canViewCosts: boolean
+): Promise<SavedPlanSummary[]> {
   const costs = await costByProduct(
     tenantId,
     [...new Set(plans.flatMap((p) => p.lines.map((l) => l.productId)))]
@@ -587,6 +591,136 @@ export async function listDistributionPlans(
       ? plan.lines.reduce((sum, l) => sum + l.qty * (costs.get(l.productId) ?? 0), 0)
       : null,
   }));
+}
+
+/** The latest plans, newest first, capped at `limit`. The screen itself uses
+ *  the paged form below. */
+export async function listDistributionPlans(
+  tenantId: string,
+  { canViewCosts, limit = 20 }: { canViewCosts: boolean; limit?: number }
+): Promise<SavedPlanSummary[]> {
+  const plans = await prismaForTenant(tenantId).distributionPlan.findMany({
+    where: { deletedAt: null },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: limit,
+    include: {
+      fromLocation: { select: { name: true } },
+      lines: { select: { productId: true, qty: true } },
+    },
+  });
+  return summarisePlans(tenantId, plans, canViewCosts);
+}
+
+// ── The saved-plans list: search and page ────────────────────────────────────
+
+/** Saved plans on one page. Twenty was already the ceiling on this list — the
+ *  twenty-first plan simply never appeared — so the number stays and the pager
+ *  makes the rest reachable. */
+export const SAVED_PLANS_PAGE_SIZE = 20;
+
+export type SavedPlansQuery = {
+  /** Free text, already trimmed. Empty means no filter. */
+  search: string;
+  page: number;
+};
+
+export const DEFAULT_SAVED_PLANS_QUERY: SavedPlansQuery = { search: "", page: 0 };
+
+function onePlanParam(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+}
+
+export function parseSavedPlansQuery(
+  params: Record<string, string | string[] | undefined>
+): SavedPlansQuery {
+  const page = Number.parseInt(onePlanParam(params.page), 10);
+  return {
+    search: onePlanParam(params.q).trim().slice(0, 120),
+    page: Number.isFinite(page) && page > 0 ? page : 0,
+  };
+}
+
+/**
+ * The plans list as a query string. `carry` is whatever else the transfers
+ * screen holds — the source branch and the cover target belong to the proposal
+ * above these rows, and searching or turning a page must not throw them away.
+ */
+export function savedPlansSearch(
+  carry: { name: string; value: string }[],
+  q: SavedPlansQuery
+): string {
+  const params = new URLSearchParams(carry.map((c) => [c.name, c.value]));
+  if (q.search) params.set("q", q.search);
+  if (q.page > 0) params.set("page", String(q.page));
+  const search = params.toString();
+  return search ? `?${search}` : "";
+}
+
+export type SavedPlansScreen = {
+  /** One page of plans, newest first. */
+  plans: SavedPlanSummary[];
+  /** Plans saved, whatever is in the search box. Zero keeps the card away. */
+  total: number;
+  /** Plans the text matched: what the pager counts against. */
+  matched: number;
+  page: number;
+  pageCount: number;
+  /** 1-based index of the first row on the page ("showing 21–23 of 23"). */
+  from: number;
+};
+
+/**
+ * The saved-plans card: every plan counted, one page of them sent. The text
+ * matches the two things written on the row — what the plan was called and the
+ * branch it moves from. Neither is a cost, and the value column stays gated on
+ * `canViewCosts` exactly as it was.
+ */
+export async function listDistributionPlansScreen(
+  tenantId: string,
+  { canViewCosts, query }: { canViewCosts: boolean; query: SavedPlansQuery }
+): Promise<SavedPlansScreen> {
+  const db = prismaForTenant(tenantId);
+  const term = query.search;
+  const where = {
+    deletedAt: null,
+    ...(term
+      ? {
+          OR: [
+            { name: { contains: term, mode: "insensitive" as const } },
+            { fromLocation: { is: { name: { contains: term, mode: "insensitive" as const } } } },
+          ],
+        }
+      : {}),
+  };
+
+  const matched = await db.distributionPlan.count({ where });
+  const total = term ? await db.distributionPlan.count({ where: { deletedAt: null } }) : matched;
+
+  const pageCount = Math.max(1, Math.ceil(matched / SAVED_PLANS_PAGE_SIZE));
+  const page = Math.min(Math.max(0, query.page), pageCount - 1);
+  const start = page * SAVED_PLANS_PAGE_SIZE;
+
+  // The id breaks a createdAt tie: two plans saved in the same millisecond must
+  // not swap places between one page and the next, or the offset loses a row.
+  const plans = await db.distributionPlan.findMany({
+    where,
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: start,
+    take: SAVED_PLANS_PAGE_SIZE,
+    include: {
+      fromLocation: { select: { name: true } },
+      lines: { select: { productId: true, qty: true } },
+    },
+  });
+
+  return {
+    plans: await summarisePlans(tenantId, plans, canViewCosts),
+    total,
+    matched,
+    page,
+    pageCount,
+    from: start + 1,
+  };
 }
 
 export async function getDistributionPlan(
