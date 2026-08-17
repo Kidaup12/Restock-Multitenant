@@ -278,6 +278,18 @@ body {
   }
 }
 
+/* A scroll container that keeps its scrollbar to itself. Used by the rail, which
+   has to scroll on a short screen but should not show a track down the side of
+   the navigation. The content still scrolls by wheel, trackpad and keyboard. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* The mobile nav drawer sliding in from the left. Short and ease-out: a menu
    that takes its time reads as a page load. */
 @keyframes rail-in {

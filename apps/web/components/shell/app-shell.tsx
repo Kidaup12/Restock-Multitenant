@@ -229,7 +229,7 @@ function RailContent({
         <Brand />
       </div>
 
-      <nav className="flex-1 space-y-5 overflow-y-auto px-2.5 py-4">
+      <nav className="no-scrollbar flex-1 space-y-5 overflow-y-auto px-2.5 py-4">
         {lead.length > 0 && (
           <div className="space-y-0.5">
             {lead.map((item) => (
@@ -251,7 +251,7 @@ function RailContent({
         ))}
       </nav>
 
-      <div className="shrink-0 space-y-2 border-t border-edge px-3 py-3">
+      <div className="shrink-0 space-y-1.5 border-t border-edge px-3 py-2">
         {workspaces.length > 0 ? (
           <WorkspaceSwitcher workspaces={workspaces} activeId={workspace?.id ?? null} />
         ) : (
@@ -262,14 +262,14 @@ function RailContent({
             or ask for an invite
           </p>
         )}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           <ProfileMenu
             name={user.name}
             email={user.email}
             roleLabel={workspace ? workspace.roleLabel : "No workspace"}
             isPlatformAdmin={isPlatformAdmin}
           />
-          <div className="ml-auto flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-0.5">
             {/* Desktop only: on mobile this lives in the top bar, where it can be
                 seen without opening the drawer. */}
             <span className="hidden lg:inline-flex">
