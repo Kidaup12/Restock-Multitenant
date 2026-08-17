@@ -23,8 +23,17 @@ const variants = {
   danger: "bg-negative text-on-accent hover:brightness-95",
 };
 
+/**
+ * Two sizes where the reference has one.
+ *
+ * Their button is a single 40px control, but three quarters of ours are `sm` and
+ * most of those sit inside table rows and control strips where a 40px button
+ * would push the row height out and break the density the tables depend on. So
+ * `sm` stays, built from the same parts — same radius, same press, padding and
+ * type scaled down a step — rather than being a different kind of button.
+ */
 const sizes = {
-  sm: "h-8 px-3 text-xs",
+  sm: "min-h-8 px-3 py-1.5 text-xs",
   md: "min-h-10 px-4 py-2.5 text-sm",
 };
 

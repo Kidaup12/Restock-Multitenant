@@ -1,16 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { Role } from "@wezesha/db";
-import { cn } from "@/lib/cn";
 import type { PermissionSource } from "@/lib/auth/permissions";
-import { ChevronsLeftIcon, DotsIcon } from "@/components/icons";
-import {
-  navFor,
-  TAB_BAR_HREFS,
-  TAB_BAR_LABEL,
-} from "@/components/shell/nav-config";
+import { MenuIcon } from "@/components/icons";
+import { navSectionsFor } from "@/components/shell/nav-config";
 import { NavItem } from "@/components/shell/nav-item";
 import { ConnectionBanner, type Staleness } from "@/components/shell/connection-banner";
 import type { ConnectionState } from "@/lib/admin/fleet";
@@ -25,22 +21,6 @@ import { TourProvider } from "@/components/tour/tour-provider";
 import { CurrencyProvider } from "@/components/currency-provider";
 import { RealtimeConnectionProvider } from "@/components/realtime-connection";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-
-/* Desktop rail = every destination this caller can use; mobile tab bar = the
- * promoted few plus a "More" entry for the overflow. Both derive from the shared
- * nav config so a new destination surfaces everywhere at once. */
-function navsFor(membership: PermissionSource | null) {
-  const sidebarNav = navFor(membership);
-  return {
-    sidebarNav,
-    tabNav: [
-      ...sidebarNav
-        .filter((d) => TAB_BAR_HREFS.includes(d.href))
-        .map((d) => ({ ...d, label: TAB_BAR_LABEL[d.href] ?? d.label })),
-      { href: "/more", label: "More", icon: <DotsIcon />, tourKey: "nav-more" },
-    ],
-  };
-}
 
 export type ShellUser = {
   name: string;
@@ -62,6 +42,10 @@ export type ShellWorkspace = {
    *  when it cannot, rather than walking a new owner onto a locked screen. */
   canOpenInsights: boolean;
 } | null;
+
+/** The rail's fixed width (232px), and the offset the content column carries to
+ *  clear it. One number, so the two can never disagree. */
+const RAIL_W = "14.5rem" as const;
 
 export function AppShell({
   user,
@@ -87,9 +71,43 @@ export function AppShell({
   connection: { state: ConnectionState; canFix: boolean; stale: Staleness | null } | null;
   children: React.ReactNode;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const { sidebarNav, tabNav } = navsFor(
-    workspace ? { role: workspace.role, permissions: workspace.permissions ?? null } : null,
+  const pathname = usePathname();
+  const permissionSource: PermissionSource | null = workspace
+    ? { role: workspace.role, permissions: workspace.permissions ?? null }
+    : null;
+
+  /*
+   * The drawer remembers which page it was opened over, and is open only while
+   * that is still the page. Navigating therefore closes it on the very render
+   * that shows the new route — a menu left standing over the page you just asked
+   * for reads as a failed tap.
+   *
+   * Derived rather than an effect that resets it: an effect would close the
+   * drawer one render late, after a frame of the new page behind the old menu.
+   */
+  const [openedOver, setOpenedOver] = useState<string | null>(null);
+  const open = openedOver !== null && openedOver === pathname;
+  const setOpen = (next: boolean) => setOpenedOver(next ? pathname : null);
+
+  // The page behind it does not scroll while it is open.
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
+  const rail = (
+    <RailContent
+      user={user}
+      workspace={workspace}
+      workspaces={workspaces}
+      permissionSource={permissionSource}
+      unreadNotifications={unreadNotifications}
+      isPlatformAdmin={isPlatformAdmin}
+    />
   );
 
   return (
@@ -101,140 +119,169 @@ export function AppShell({
       autoStart={tourAutoStart}
       canOpenInsights={workspace?.canOpenInsights ?? true}
     >
-      <div className="flex min-h-dvh">
-        {/* Desktop sidebar rail */}
-        <aside
-          className={cn(
-            "sticky top-0 hidden h-dvh flex-col border-r border-edge bg-sidebar transition-[width] duration-200 md:flex",
-            collapsed ? "w-[68px]" : "w-60",
-          )}
+      {/* Mobile bar: the only chrome above the content below lg. The bell sits
+          here rather than inside the drawer so an unread count is visible
+          without opening anything. */}
+      <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-edge bg-surface/95 px-4 backdrop-blur lg:hidden">
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Open navigation"
+          aria-expanded={open}
+          data-tour="nav-menu"
+          className="-ml-1 grid size-9 place-items-center rounded-md text-ink-secondary transition-colors hover:bg-surface-2 hover:text-ink"
         >
-          <div className={cn("flex h-16 items-center gap-2.5 px-4", collapsed && "justify-center px-0")}>
-            <div className="grid size-8 shrink-0 place-items-center rounded-md bg-accent font-display text-sm font-bold text-on-accent">
-              W
-            </div>
-            {!collapsed && (
-              <div className="leading-tight">
-                <div className="font-display text-sm font-bold text-ink">Wezesha</div>
-                <div className="text-[10px] tracking-wider text-ink-muted uppercase">
-                  Restock OS
-                </div>
-              </div>
-            )}
-          </div>
-          <nav className="flex-1 space-y-1 px-3 py-4">
-            {sidebarNav.map((item) => (
-              <NavItem key={item.href} {...item} collapsed={collapsed} />
-            ))}
-          </nav>
-          <div className="space-y-1 border-t border-edge px-3 py-3">
-            {workspaces.length > 0 && (
-              <WorkspaceSwitcher
-                workspaces={workspaces}
-                activeId={workspace?.id ?? null}
-                collapsed={collapsed}
-              />
-            )}
-            <button
-              type="button"
-              onClick={() => setCollapsed((c) => !c)}
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className={cn(
-                "flex h-9 w-full items-center gap-3 rounded-md px-3 text-sm font-medium text-ink-muted transition-colors",
-                "outline-accent hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2",
-                collapsed && "justify-center px-0",
-              )}
-            >
-              <ChevronsLeftIcon
-                className={cn("size-4.5 shrink-0 transition-transform", collapsed && "rotate-180")}
-              />
-              {!collapsed && <span>Collapse</span>}
-            </button>
-          </div>
-        </aside>
-
-        {/* Main column */}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 flex h-16 items-center justify-between gap-3 border-b border-edge bg-page/85 px-4 backdrop-blur md:px-8">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <div className="grid size-8 shrink-0 place-items-center rounded-md bg-accent font-display text-sm font-bold text-on-accent md:hidden">
-                W
-              </div>
-              {/* Mobile: the workspace block is the switcher (the sidebar is
-                  hidden there). Desktop keeps the static label. */}
-              {workspaces.length > 0 && (
-                <div className="min-w-0 md:hidden">
-                  <WorkspaceSwitcher
-                    workspaces={workspaces}
-                    activeId={workspace?.id ?? null}
-                    layout="header"
-                  />
-                </div>
-              )}
-              <div
-                className={cn(
-                  "min-w-0 leading-tight",
-                  workspaces.length > 0 && "hidden md:block",
-                )}
-              >
-                <div className="truncate text-sm font-semibold text-ink">
-                  {workspace ? workspace.name : "No workspace"}
-                </div>
-                <div className="truncate text-xs text-ink-muted">
-                  {workspace ? (
-                    workspace.roleLabel
-                  ) : (
-                    <>
-                      <Link
-                        href="/workspaces/new"
-                        className="font-medium text-accent-ink hover:underline"
-                      >
-                        Create one
-                      </Link>{" "}
-                      or ask for an invite
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <ThemeToggle data-tour="theme-toggle" />
-              <NotificationBell
-                initialUnread={unreadNotifications}
-                workspaceId={workspace?.id ?? null}
-              />
-              <ProfileMenu
-                name={user.name}
-                email={user.email}
-                roleLabel={workspace ? workspace.roleLabel : "No workspace"}
-                isPlatformAdmin={isPlatformAdmin}
-              />
-            </div>
-          </header>
-
-          {connection && (
-            <ConnectionBanner
-              state={connection.state}
-              canFix={connection.canFix}
-              stale={connection.stale}
-            />
-          )}
-
-          <main className="flex-1 px-4 py-6 pb-24 md:px-8 md:py-8 md:pb-10">
-            <div className="mx-auto w-full max-w-6xl">{children}</div>
-          </main>
+          <MenuIcon className="size-4.5" />
+        </button>
+        <Brand />
+        <div className="ml-auto">
+          <NotificationBell
+            initialUnread={unreadNotifications}
+            workspaceId={workspace?.id ?? null}
+          />
         </div>
+      </header>
 
-        {/* Mobile bottom tab bar */}
-        <nav className="fixed inset-x-0 bottom-0 z-20 flex border-t border-edge bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
-          {tabNav.map((item) => (
-            <NavItem key={item.href} {...item} layout="tab" />
-          ))}
-        </nav>
+      {/* Mobile drawer — the same rail, slid over the page. */}
+      {open && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <button
+            type="button"
+            aria-label="Close navigation"
+            onClick={() => setOpen(false)}
+            className="absolute inset-0 bg-ink-strong/30"
+          />
+          <div className="absolute inset-y-0 left-0 flex w-[16.25rem] animate-[rail-in_180ms_cubic-bezier(0.22,1,0.36,1)] flex-col border-r border-edge bg-sidebar shadow-pop">
+            {rail}
+          </div>
+        </div>
+      )}
+
+      {/* Desktop rail — fixed, so the content column scrolls under it. */}
+      <aside
+        className="fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-edge bg-sidebar lg:flex"
+        style={{ width: RAIL_W }}
+      >
+        {rail}
+      </aside>
+
+      <div className="lg:pl-[14.5rem]">
+        {connection && (
+          <ConnectionBanner
+            state={connection.state}
+            canFix={connection.canFix}
+            stale={connection.stale}
+          />
+        )}
+        <main className="min-h-dvh px-5 py-7 sm:px-8">
+          <div className="mx-auto w-full max-w-7xl">{children}</div>
+        </main>
       </div>
     </TourProvider>
     </RouteLoadingProvider>
     </RealtimeConnectionProvider>
     </CurrencyProvider>
+  );
+}
+
+/** The wordmark. A gradient tile rather than a flat accent square — the one
+ *  place the brand spends the full accent ramp. */
+function Brand() {
+  return (
+    <Link href="/today" className="flex min-w-0 items-center gap-2.5">
+      <div className="size-7 shrink-0 rounded-md bg-gradient-to-br from-accent-500 to-accent-700" />
+      <div className="min-w-0 leading-tight">
+        <div className="truncate text-[15px] font-semibold tracking-tight text-ink">Wezesha</div>
+        <div className="text-[10px] tracking-[0.14em] text-ink-muted uppercase">Restock OS</div>
+      </div>
+    </Link>
+  );
+}
+
+/**
+ * Everything inside the rail, rendered identically on desktop and in the mobile
+ * drawer so the two can never drift apart.
+ *
+ * The four controls at the foot were a top header row until the shell moved to a
+ * rail-only layout. They are here because the reference build has no header to
+ * hang them on — not because they became less important.
+ */
+function RailContent({
+  user,
+  workspace,
+  workspaces,
+  permissionSource,
+  unreadNotifications,
+  isPlatformAdmin,
+}: {
+  user: ShellUser;
+  workspace: ShellWorkspace;
+  workspaces: WorkspaceOption[];
+  permissionSource: PermissionSource | null;
+  unreadNotifications: number;
+  isPlatformAdmin: boolean;
+}) {
+  const { lead, sections } = navSectionsFor(permissionSource);
+
+  return (
+    <>
+      <div className="flex h-16 shrink-0 items-center border-b border-edge px-4">
+        <Brand />
+      </div>
+
+      <nav className="flex-1 space-y-5 overflow-y-auto px-2.5 py-4">
+        {lead.length > 0 && (
+          <div className="space-y-0.5">
+            {lead.map((item) => (
+              <NavItem key={item.href} {...item} />
+            ))}
+          </div>
+        )}
+        {sections.map((section) => (
+          <div key={section.key}>
+            <div className="px-3 pb-1.5 text-[10px] font-semibold tracking-[0.14em] text-ink-faint uppercase">
+              {section.label}
+            </div>
+            <div className="space-y-0.5">
+              {section.items.map((item) => (
+                <NavItem key={item.href} {...item} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </nav>
+
+      <div className="shrink-0 space-y-2 border-t border-edge px-3 py-3">
+        {workspaces.length > 0 ? (
+          <WorkspaceSwitcher workspaces={workspaces} activeId={workspace?.id ?? null} />
+        ) : (
+          <p className="px-1 text-2xs text-ink-muted">
+            <Link href="/workspaces/new" className="font-medium text-accent-ink hover:underline">
+              Create a workspace
+            </Link>{" "}
+            or ask for an invite
+          </p>
+        )}
+        <div className="flex items-center gap-1">
+          <ProfileMenu
+            name={user.name}
+            email={user.email}
+            roleLabel={workspace ? workspace.roleLabel : "No workspace"}
+            isPlatformAdmin={isPlatformAdmin}
+          />
+          <div className="ml-auto flex items-center gap-1">
+            {/* Desktop only: on mobile this lives in the top bar, where it can be
+                seen without opening the drawer. */}
+            <span className="hidden lg:inline-flex">
+              <NotificationBell
+                initialUnread={unreadNotifications}
+                workspaceId={workspace?.id ?? null}
+              />
+            </span>
+            <ThemeToggle data-tour="theme-toggle" />
+          </div>
+        </div>
+      </div>
+    </>
   );
 }

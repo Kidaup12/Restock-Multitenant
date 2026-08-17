@@ -84,7 +84,6 @@ async function TransfersContent({
   if (locations.length < 2) {
     return (
       <EmptyState
-        icon={<LayersIcon />}
         title="Only one location"
         description="Transfers compare how fast each shop sells and move stock to even out cover. Add a second location — a shop or a warehouse — and the plan builds itself."
       />

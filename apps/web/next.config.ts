@@ -2,6 +2,11 @@ import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // The framework's dev badge sits in the bottom-left corner, which is where the
+  // rail's own account control lives — it covers a real button while reviewing
+  // the shell locally. Development-only chrome, so switching it off costs
+  // nothing and stops it being mistaken for ours.
+  devIndicators: false,
   // Loaded by Node at runtime instead of being bundled: the package resolves
   // the Prisma query engine relative to its own generated-client directory,
   // which bundling would break.

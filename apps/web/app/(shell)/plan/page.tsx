@@ -13,7 +13,7 @@ import { RunForecastButton } from "../today/run-forecast-button";
 import { PlanView } from "./plan-view";
 
 export const metadata: Metadata = {
-  title: "Plan",
+  title: "Restock Planner",
 };
 
 /** The buy list streams behind its own skeleton; the header paints immediately. */
@@ -80,7 +80,7 @@ export default async function PlanPage() {
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Plan" description="Weekly replenishment planning" />
+        <PageHeader title="Restock Planner" description="Weekly replenishment planning" />
         <EmptyState
           title="No workspace yet"
           description="Ask an admin to invite you to a workspace to plan its restocking."
@@ -94,7 +94,7 @@ export default async function PlanPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Plan" description="Weekly replenishment planning" />
+      <PageHeader title="Restock Planner" description="Weekly replenishment planning" />
       <Suspense
         fallback={
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

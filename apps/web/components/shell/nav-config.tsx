@@ -16,12 +16,34 @@ import {
   type PermissionSource,
 } from "@/lib/auth/permissions";
 
+/**
+ * The rail's four groups, in order. Eleven flat entries is a list to be read
+ * rather than scanned; grouped, the reader finds the one they want by deciding
+ * which *kind* of thing it is first.
+ *
+ * The grouping follows the job, not the schema: BUY is the replenishment cycle
+ * (decide, order, receive), STOCK is where things are right now, CATALOGUE is
+ * reference data you set up and revisit occasionally, ACCOUNT is everything you
+ * read or configure rather than act on.
+ */
+export const NAV_SECTIONS = [
+  { key: "buy", label: "Buy" },
+  { key: "stock", label: "Stock" },
+  { key: "catalogue", label: "Catalogue" },
+  { key: "account", label: "Account" },
+] as const;
+
+export type NavSectionKey = (typeof NAV_SECTIONS)[number]["key"];
+
 export type NavDestination = {
   href: string;
   label: string;
   icon: React.ReactNode;
   /* data-tour key so the interactive tour can spotlight this entry. */
   tourKey: string;
+  /* Which rail group this sits under. Omitted for the one destination that
+   * leads the rail on its own — the morning briefing needs no heading. */
+  section?: NavSectionKey;
   /* Permission the page needs before it shows anything useful. Set it only
    * where the destination is a dead end without it — a screen that merely masks
    * money or hides an edit button is still worth reaching. */
@@ -29,32 +51,55 @@ export type NavDestination = {
 };
 
 /**
- * The single source of truth for the shell's primary destinations, in nav
- * order. Every surface derives from this list — through navFor, so the same
- * entries are dropped everywhere — and no entry is reachable on one surface
- * and orphaned on another:
- *  - the desktop sidebar shows all the caller is allowed;
- *  - the mobile tab bar promotes TAB_BAR_HREFS;
- *  - the mobile "More" page carries the rest.
+ * The single source of truth for the shell's primary destinations, in nav order.
+ * Both surfaces derive from this list — through navFor, so the same entries are
+ * dropped everywhere — and no entry is reachable on one and orphaned on the
+ * other: the desktop rail and the mobile drawer render the same groups from the
+ * same call, so there is no overflow list to keep in step.
  */
 export const NAV_DESTINATIONS: NavDestination[] = [
-  { href: "/today", label: "Today", icon: <HomeIcon />, tourKey: "nav-today" },
-  { href: "/plan", label: "Plan", icon: <CalendarIcon />, tourKey: "nav-plan" },
-  { href: "/orders", label: "Orders", icon: <ClipboardIcon />, tourKey: "nav-orders" },
-  { href: "/stock", label: "Stock", icon: <BoxIcon />, tourKey: "nav-stock" },
-  { href: "/transfers", label: "Transfers", icon: <LayersIcon />, tourKey: "nav-transfers" },
+  // Leads the rail alone: the morning briefing is where the day starts, and a
+  // heading above a single entry is noise.
+  { href: "/today", label: "Dashboard", icon: <HomeIcon />, tourKey: "nav-today" },
+
+  { href: "/plan", label: "Restock Planner", icon: <CalendarIcon />, tourKey: "nav-plan", section: "buy" },
+  { href: "/orders", label: "Orders", icon: <ClipboardIcon />, tourKey: "nav-orders", section: "buy" },
+
+  { href: "/stock", label: "Stock", icon: <BoxIcon />, tourKey: "nav-stock", section: "stock" },
+  {
+    href: "/transfers",
+    label: "Transfers",
+    icon: <LayersIcon />,
+    tourKey: "nav-transfers",
+    section: "stock",
+  },
+
+  {
+    href: "/suppliers",
+    label: "Suppliers",
+    icon: <InboxIcon />,
+    tourKey: "nav-suppliers",
+    section: "catalogue",
+  },
   {
     href: "/costs",
     label: "Costs",
     icon: <BanknoteIcon />,
     tourKey: "nav-costs",
+    section: "catalogue",
     permission: "view_costs",
   },
-  { href: "/suppliers", label: "Suppliers", icon: <InboxIcon />, tourKey: "nav-suppliers" },
-  { href: "/sales", label: "Sales data", icon: <ChartIcon />, tourKey: "nav-sales" },
-  { href: "/insights", label: "Insights", icon: <BulbIcon />, tourKey: "nav-insights" },
-  { href: "/activity", label: "Activity log", icon: <ClipboardIcon />, tourKey: "nav-activity" },
-  { href: "/settings", label: "Settings", icon: <GearIcon />, tourKey: "nav-settings" },
+
+  { href: "/sales", label: "Sales data", icon: <ChartIcon />, tourKey: "nav-sales", section: "account" },
+  { href: "/insights", label: "Reports", icon: <BulbIcon />, tourKey: "nav-insights", section: "account" },
+  {
+    href: "/activity",
+    label: "Activity log",
+    icon: <ClipboardIcon />,
+    tourKey: "nav-activity",
+    section: "account",
+  },
+  { href: "/settings", label: "Settings", icon: <GearIcon />, tourKey: "nav-settings", section: "account" },
 ];
 
 /**
@@ -72,11 +117,25 @@ export function navFor(membership: PermissionSource | null): NavDestination[] {
   );
 }
 
-/* Destinations promoted to the mobile bottom tab bar, in tab order. Everything
- * else falls to the "More" overflow. */
-export const TAB_BAR_HREFS: readonly string[] = ["/today", "/plan", "/stock", "/sales"];
-
-/* Shorter labels for the tab bar where the sidebar label doesn't fit. */
-export const TAB_BAR_LABEL: Record<string, string> = {
-  "/sales": "Sales",
-};
+/**
+ * The caller's destinations grouped for the rail: the unsectioned lead entry,
+ * then each section in order with the entries it still has.
+ *
+ * A section whose every entry was filtered out returns no group at all, so a
+ * member without cost access never sees a "Catalogue" heading with one item
+ * under it, and never an empty heading.
+ */
+export function navSectionsFor(membership: PermissionSource | null): {
+  lead: NavDestination[];
+  sections: { key: NavSectionKey; label: string; items: NavDestination[] }[];
+} {
+  const allowed = navFor(membership);
+  return {
+    lead: allowed.filter((d) => !d.section),
+    sections: NAV_SECTIONS.map((s) => ({
+      key: s.key,
+      label: s.label,
+      items: allowed.filter((d) => d.section === s.key),
+    })).filter((s) => s.items.length > 0),
+  };
+}

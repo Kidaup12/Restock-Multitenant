@@ -309,6 +309,14 @@ export function UsersIcon(props: IconProps) {
   );
 }
 
+export function MenuIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 6.5h16M4 12h16M4 17.5h16" />
+    </Icon>
+  );
+}
+
 export function XIcon(props: IconProps) {
   return (
     <Icon {...props}>

@@ -2,9 +2,9 @@ import type { Role } from "@wezesha/db";
 
 /**
  * Tour step definitions for the shell. `target` lists data-tour keys in
- * preference order — the engine highlights the first visible match (a sidebar
- * item on desktop, its tab-bar twin on mobile) and drops the step when none
- * is visible. Screens extend the tour by adding data-tour attributes to their
+ * preference order — the engine highlights the first visible match — a
+ * rail item on desktop, or the drawer button that holds it on mobile — and drops
+ * the step when none is visible. Screens extend the tour by adding data-tour attributes to their
  * own elements and steps here.
  */
 export type TourStep = {
@@ -68,7 +68,7 @@ const today = step(
   "today",
   ["nav-today"],
   "Start your day here",
-  "Today is the daily brief: what needs restocking, what's arriving, and what to act on first.",
+  "The dashboard is your daily brief: what needs restocking, what's arriving, and what to act on first.",
 );
 
 // ── Screen-level steps ───────────────────────────────────────────────────────
@@ -129,13 +129,13 @@ const salesOverview = step(
 const plan = step(
   "plan",
   ["nav-plan"],
-  "Plan ahead",
-  "Plan builds the buy list — forecast demand, then decide what to order and when.",
+  "Plan your restock",
+  "The Restock Planner builds the buy list — forecast demand, then decide what to order and when.",
 );
 
 const orders = step(
   "orders",
-  ["nav-orders", "nav-more"],
+  ["nav-orders", "nav-menu"],
   "Track orders",
   "Purchase orders live here, from draft to received.",
 );
@@ -163,14 +163,14 @@ const salesCosts = step(
 
 const insights = step(
   "insights",
-  ["nav-insights", "nav-more"],
-  "Insights",
+  ["nav-insights", "nav-menu"],
+  "Reports",
   "Which shelves are empty, how much cash is asleep in stock, and whether the forecast has been right.",
 );
 
 const settings = step(
   "settings",
-  ["nav-settings", "nav-more"],
+  ["nav-settings", "nav-menu"],
   "Run your workspace",
   "Settings is where you invite teammates, set roles, and manage the workspace.",
 );

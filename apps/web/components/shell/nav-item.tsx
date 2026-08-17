@@ -9,9 +9,6 @@ export type NavItemProps = {
   href: string;
   label: string;
   icon: React.ReactNode;
-  /* rail = sidebar entry, tab = bottom tab bar entry */
-  layout?: "rail" | "tab";
-  collapsed?: boolean;
   /* data-tour key so the interactive tour can spotlight this entry. */
   tourKey?: string;
 };
@@ -38,52 +35,34 @@ function NavPending({ active, className }: { active: boolean; className?: string
   );
 }
 
-export function NavItem({
-  href,
-  label,
-  icon,
-  layout = "rail",
-  collapsed = false,
-  tourKey,
-}: NavItemProps) {
+/**
+ * One rail entry.
+ *
+ * The active entry is a tinted band with ink text and an accent-tinted icon —
+ * not a solid accent fill. A filled row shouts as loudly as a primary button,
+ * and with eleven of them the rail was the noisiest thing on screen; the tint
+ * marks where you are without competing with the page.
+ */
+export function NavItem({ href, label, icon, tourKey }: NavItemProps) {
   const pathname = usePathname();
   const active = pathname === href || pathname.startsWith(`${href}/`);
-
-  if (layout === "tab") {
-    return (
-      <Link
-        href={href}
-        aria-current={active ? "page" : undefined}
-        data-tour={tourKey}
-        className={cn(
-          "relative flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[11px] font-medium transition-colors [&_svg]:size-5",
-          active ? "text-accent-ink" : "text-ink-muted hover:text-ink",
-        )}
-      >
-        {icon}
-        <span>{label}</span>
-        <NavPending active={active} className="absolute right-2 top-1.5" />
-      </Link>
-    );
-  }
 
   return (
     <Link
       href={href}
       aria-current={active ? "page" : undefined}
-      title={collapsed ? label : undefined}
       data-tour={tourKey}
       className={cn(
-        "relative flex h-10 items-center gap-3 rounded-md px-3 text-sm font-medium transition-colors [&_svg]:size-5 [&_svg]:shrink-0",
-        collapsed && "justify-center px-0",
+        "relative flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors [&_svg]:size-4.5 [&_svg]:shrink-0",
+        "outline-none focus-visible:ring-2 focus-visible:ring-accent-300",
         active
-          ? "bg-accent text-on-accent shadow-glow"
-          : "text-ink-secondary hover:bg-surface-2 hover:text-ink",
+          ? "bg-surface-2 font-medium text-ink"
+          : "text-ink-secondary hover:bg-surface-2/60 hover:text-ink",
       )}
     >
-      {icon}
-      {!collapsed && <span className="truncate">{label}</span>}
-      <NavPending active={active} className={collapsed ? "absolute right-1 top-1" : "ml-auto"} />
+      <span className={cn("shrink-0", active ? "text-accent-ink" : "text-ink-muted")}>{icon}</span>
+      <span className="truncate">{label}</span>
+      <NavPending active={active} className="ml-auto" />
     </Link>
   );
 }
