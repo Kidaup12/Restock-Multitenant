@@ -105,6 +105,12 @@ export type BuyListRow = {
   runRatePerDay: number;
   /** Supplier minimum order quantity (units); 1 when none is set. */
   moq: number;
+  /** True when a cover horizon was asked for and this line's own lead time was
+   *  longer, so the quantity covers the wait for its delivery rather than the
+   *  horizon requested. Without it the number silently exceeds what was asked
+   *  for and reads like a miscalculation. False whenever no cover lens is
+   *  applied, and for a line the owner has overridden. */
+  leadFloored: boolean;
   /** What will actually be ordered: recommendedQty raised to the supplier's
    *  minimum. The two differ whenever a supplier won't ship a small line, and
    *  every money figure uses THIS one — the plan used to price the pre-floor
@@ -525,6 +531,11 @@ export async function getBuyList(
       // what-if. With neither lens active, `whatIf` is false, `resizedQty` is
       // null and `qty === override ?? p.qty`, byte-identical to today.
       const override = overrideByProduct.get(p.productId) ?? null;
+      // The horizon the re-size actually used. A measured lead longer than the
+      // requested cover raises it, because a line has to cover the wait for its
+      // own delivery — asking for 7 days from a 30-day supplier still buys 30.
+      const sizeDays =
+        coverDays != null ? Math.max(coverDays, measuredLeadDays ?? 0) : null;
       // One object, fed to BOTH the re-size and its explanation, so the breakdown
       // can never describe a different horizon from the one that set the number.
       const resizeInput =
@@ -534,12 +545,13 @@ export async function getBuyList(
               safetyStock: p.safetyStock,
               currentStock: product.currentStock,
               onOrder: inboundUnits,
-              coverDays:
-                coverDays != null
-                  ? Math.max(coverDays, measuredLeadDays ?? 0)
-                  : coverDaysFor(product, product.supplier),
+              coverDays: sizeDays ?? coverDaysFor(product, product.supplier),
             }
           : null;
+      // Read off the same `sizeDays` the quantity was built from, so the badge
+      // can never claim a flooring the number didn't get.
+      const leadFloored =
+        resizeInput != null && coverDays != null && sizeDays != null && sizeDays > coverDays;
       const resizedQty = resizeInput ? recommendedQty(resizeInput) : null;
       const qty = override ?? resizedQty ?? p.qty;
       // The supplier's floor is part of what this line costs, not a surprise
@@ -570,6 +582,7 @@ export async function getBuyList(
         overriddenQty: override,
         runRatePerDay: r1(p.layer1Forecast30d / 30),
         moq: product.supplier?.moq ?? 1,
+        leadFloored,
         abc: product.abcCategory,
         category: product.customCategory,
         unitCostKes: product.costKes,

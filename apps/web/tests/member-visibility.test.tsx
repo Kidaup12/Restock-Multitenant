@@ -912,6 +912,7 @@ describe("plan buy-list redaction (pure)", () => {
     overriddenQty: null,
     runRatePerDay: 1.5,
     moq: 1,
+    leadFloored: false,
     abc: "A",
     category: null,
     unitCostKes: 100,

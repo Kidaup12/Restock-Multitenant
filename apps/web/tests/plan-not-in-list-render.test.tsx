@@ -31,6 +31,7 @@ const row = (reason: ExcludedReason, over: Partial<ExcludedRow> = {}): ExcludedR
   overriddenQty: null,
   runRatePerDay: 0.3,
   moq: 1,
+  leadFloored: false,
   abc: "C",
   category: null,
   unitCostKes: 100,

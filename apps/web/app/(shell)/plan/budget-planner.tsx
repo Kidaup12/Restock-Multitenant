@@ -20,6 +20,14 @@ import {
 import type { BudgetSplit, BuyListRow } from "@/lib/data/plan";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import { planBudget } from "./actions";
+import {
+  COVER_MAX,
+  COVER_MIN,
+  COVER_STEP,
+  DEFAULT_BUDGET_COVER_DAYS,
+  clampCoverDays,
+} from "./cover";
+import { LeadFlooredNote } from "./lead-floored-note";
 
 /**
  * Mode 2 — the budget allocator. Enter the cash available; the engine funds
@@ -44,16 +52,28 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  function plan(budgetKes: number) {
+  // The cover target starts on: "spend this much" is only half a question
+  // without "to last how long". Unticking it returns to the plan's own horizon,
+  // which is what this screen allocated against before the target existed.
+  const [coverDays, setCoverDays] = useState<number | null>(DEFAULT_BUDGET_COVER_DAYS);
+
+  function plan(budgetKes: number, cover: number | null) {
     setError(null);
     startTransition(async () => {
-      const result = await planBudget({ budgetKes });
+      const result = await planBudget({ budgetKes, coverDays: cover });
       if (!result.ok) {
         setError(result.error);
         return;
       }
       setSplit(result.data);
     });
+  }
+
+  /** Change the horizon. Re-plans straight away once there is a split on screen,
+   *  so the effect of the change is visible where it lands. */
+  function applyCover(cover: number | null) {
+    setCoverDays(cover);
+    if (split) plan(Number(budget) || 0, cover);
   }
 
   const exportColumns: ExportColumn<BuyListRow & { status: string }>[] = [
@@ -113,7 +133,7 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
             className="flex flex-wrap items-center gap-2"
             onSubmit={(e) => {
               e.preventDefault();
-              plan(Number(budget) || 0);
+              plan(Number(budget) || 0, coverDays);
             }}
           >
             <label htmlFor="budget-kes" className="text-sm text-ink-muted">
@@ -141,6 +161,49 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
               Plan my restock
             </Button>
           </form>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-edge bg-surface-2/40 px-4 py-3">
+            <label className="flex items-center gap-2 text-sm font-medium text-ink">
+              <input
+                type="checkbox"
+                checked={coverDays != null}
+                onChange={(e) => applyCover(e.target.checked ? DEFAULT_BUDGET_COVER_DAYS : null)}
+                className="size-4 rounded border-edge accent-accent"
+              />
+              Stock to a cover target
+            </label>
+            {coverDays != null && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => applyCover(clampCoverDays(coverDays - COVER_STEP))}
+                  disabled={pending || coverDays <= COVER_MIN}
+                  aria-label="Fewer days of cover"
+                  className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
+                >
+                  −
+                </button>
+                <span className="w-20 text-center font-mono text-sm tabular-nums text-ink">
+                  {coverDays} days
+                </span>
+                <button
+                  type="button"
+                  onClick={() => applyCover(clampCoverDays(coverDays + COVER_STEP))}
+                  disabled={pending || coverDays >= COVER_MAX}
+                  aria-label="More days of cover"
+                  className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
+                >
+                  +
+                </button>
+              </div>
+            )}
+            <p className="max-w-prose text-xs text-ink-muted">
+              {coverDays == null
+                ? "Off: the budget is spread over the plan's own horizon, the quantities the nightly run recommends."
+                : `Every line is sized to ${coverDays} days of cover first — never below an item's lead time — and the budget is then spread over that list. Answers "spend this cash, but stock to this long".`}
+            </p>
+          </div>
+
           {error && <p className="text-sm text-negative">{error}</p>}
         </CardContent>
       </Card>
@@ -292,7 +355,10 @@ export function BudgetTable({
                   dayLabel(row.orderByDate)
                 )}
               </TableCell>
-              <TableCell numeric>{row.recommendedQty}</TableCell>
+              <TableCell numeric>
+                {row.recommendedQty}
+                {row.leadFloored && <LeadFlooredNote leadDays={row.leadDays} />}
+              </TableCell>
               <TableCell numeric className="hidden lg:table-cell">
                 {/* Revenue is a sales figure — visible to every role as a plain
                     amount whose unit lives in the header. */}

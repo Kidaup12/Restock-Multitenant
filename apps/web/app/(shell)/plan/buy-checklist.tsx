@@ -21,6 +21,14 @@ import type {
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import { moqPreview, type MoqPreview } from "@/lib/plan/moq-preview";
 import {
+  COVER_MAX,
+  COVER_MIN,
+  COVER_STEP,
+  DEFAULT_COVER_DAYS,
+  clampCoverDays,
+} from "./cover";
+import { LeadFlooredNote } from "./lead-floored-note";
+import {
   addToOrder,
   clearPlanOverride,
   planCoverHorizon,
@@ -225,10 +233,7 @@ function coveredCaveat(row: ExcludedRow): string | null {
 // Cover-days what-if control: step a uniform days-of-cover horizon and re-size
 // the whole list to it. A weekly step keeps the choices meaningful; the server
 // floors each line at its own lead time, so this is the range the owner explores.
-const DEFAULT_WHATIF_COVER = 30;
-const COVER_MIN = 7;
-const COVER_MAX = 120;
-const COVER_STEP = 7;
+// The range itself lives in ./cover — the budget allocator offers the same one.
 
 // Sales-push what-if control: step a uniform demand uplift (whole percent) and
 // re-size the whole list to the lifted demand — planning for a promotion or
@@ -510,7 +515,7 @@ export function BuyChecklist({
   // — the on-screen steppers always reflect the applied view. "Reset to plan"
   // clears both.
   const [whatIf, setWhatIf] = useState<BuyList | null>(null);
-  const [coverDays, setCoverDays] = useState(DEFAULT_WHATIF_COVER);
+  const [coverDays, setCoverDays] = useState(DEFAULT_COVER_DAYS);
   const [upliftPct, setUpliftPct] = useState(DEFAULT_WHATIF_UPLIFT);
   const [resizeError, setResizeError] = useState<string | null>(null);
   const [resizing, startResize] = useTransition();
@@ -519,7 +524,7 @@ export function BuyChecklist({
   const rows = view.rows;
 
   function applyCover(days: number) {
-    const clamped = Math.max(COVER_MIN, Math.min(COVER_MAX, days));
+    const clamped = clampCoverDays(days);
     setCoverDays(clamped);
     setUpliftPct(DEFAULT_WHATIF_UPLIFT); // cover lens takes over from any sales push
     startResize(async () => {
@@ -536,7 +541,7 @@ export function BuyChecklist({
   function applyUplift(pct: number) {
     const clamped = Math.max(UPLIFT_MIN, Math.min(UPLIFT_MAX, pct));
     setUpliftPct(clamped);
-    setCoverDays(DEFAULT_WHATIF_COVER); // sales-push lens takes over from any cover
+    setCoverDays(DEFAULT_COVER_DAYS); // sales-push lens takes over from any cover
     // Stepping back to no push is the same as showing the plan.
     if (clamped <= 0) {
       resetToPlan();
@@ -556,7 +561,7 @@ export function BuyChecklist({
   function resetToPlan() {
     setWhatIf(null);
     setResizeError(null);
-    setCoverDays(DEFAULT_WHATIF_COVER);
+    setCoverDays(DEFAULT_COVER_DAYS);
     setUpliftPct(DEFAULT_WHATIF_UPLIFT);
   }
   // Line totals are null for money-blind members; the total masks with them.
@@ -829,6 +834,7 @@ export function BuyChecklist({
                             <div className="flex flex-col items-end gap-0.5">
                               <QtyCell row={row} canOverride={canOverride} />
                               <MoqNote preview={moqPreview(row)} />
+                              {row.leadFloored && <LeadFlooredNote leadDays={row.leadDays} />}
                             </div>
                           </td>
                           <td className={cn(TD_NUM, "hidden lg:table-cell")}>

@@ -22,6 +22,9 @@ import {
   type BuyList,
   type CreateOrdersResult,
 } from "@/lib/data/plan";
+// Sanity cap on the cover-days horizon — a year of cover is already well past
+// any real ordering decision. Shared with the steppers that offer it.
+import { MAX_COVER_DAYS } from "./cover";
 
 /**
  * Plan-screen actions. Each re-resolves the caller's session and active
@@ -39,10 +42,6 @@ const MAX_LINES = 500;
 
 /** Sanity cap on a single override quantity — a real order never approaches it. */
 const MAX_OVERRIDE_QTY = 1_000_000;
-
-/** Sanity cap on the cover-days what-if — a year of cover is already well past
- *  any real ordering decision. */
-const MAX_COVER_DAYS = 365;
 
 /** Sanity cap on the sales-push what-if (whole percent). 500% is 6x demand —
  *  well past any real promotion, and the guard against a runaway order size. */
@@ -68,8 +67,21 @@ export async function addToOrder(input: {
   return { ok: true, data: result };
 }
 
+/**
+ * Allocate a cash budget across the buy list, optionally against a days-of-cover
+ * target.
+ *
+ * `coverDays` is optional here: absent means the plan's own horizon, and the
+ * split is then exactly what it was before the target existed. When it is set,
+ * the list is re-sized on the one engine first (`getBuyList`'s `coverDays` path,
+ * the same path the checklist's lens uses) and the budget is spread over that
+ * re-sized list — which is what "spend this cash, but stock to this horizon"
+ * means. Note the screen itself opens with a target already set, so the common
+ * call carries one; absent is the unticked case, not the default view.
+ */
 export async function planBudget(input: {
   budgetKes: number;
+  coverDays?: number | null;
 }): Promise<PlanActionResult<BudgetSplit>> {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
@@ -94,9 +106,19 @@ export async function planBudget(input: {
   const budget = Number(input.budgetKes);
   if (!Number.isFinite(budget) || budget < 0) return err(`Enter a budget in ${membership.tenant.currency}.`);
 
+  // Absent, null and NaN all mean "no cover target" — the plan's own horizon.
+  let coverDays: number | undefined;
+  if (input.coverDays != null) {
+    coverDays = Math.round(Number(input.coverDays));
+    if (!Number.isFinite(coverDays) || coverDays < 1) {
+      return err("Pick a cover of at least one day.");
+    }
+    if (coverDays > MAX_COVER_DAYS) return err("That cover horizon is too long.");
+  }
+
   // The allocator needs real costs, so the fetch is unredacted; what leaves
   // the server is redacted to the caller's own cost visibility.
-  const buyList = await getBuyList(membership.tenantId, { canViewCosts: true });
+  const buyList = await getBuyList(membership.tenantId, { canViewCosts: true, coverDays });
   if (!buyList) return err("Run a forecast first — there's nothing to plan yet.");
 
   const split = splitByBudget(buyList.rows, budget);

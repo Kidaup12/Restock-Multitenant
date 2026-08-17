@@ -32,6 +32,7 @@ function mkRow(partial: Partial<BuyListRow>): BuyListRow {
     overriddenQty: null,
     runRatePerDay: 1,
     moq: 1,
+    leadFloored: false,
     abc: null,
     category: null,
     unitCostKes: 100,
