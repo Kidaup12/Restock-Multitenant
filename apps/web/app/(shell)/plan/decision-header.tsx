@@ -71,6 +71,7 @@ export function PlanDecisionHeader({
       <StatTile
         label="Order today"
         value={String(summary.orderTodayCount)}
+        valueTone={urgent ? "negative" : "positive"}
         delta={{
           label: urgent ? "can't wait — order now" : "nothing overdue",
           tone: urgent ? "negative" : "positive",
@@ -84,6 +85,7 @@ export function PlanDecisionHeader({
       <StatTile
         label="Revenue at risk"
         value={<CostValue amount={summary.atRiskKes} canViewCosts={canViewCosts} compact />}
+        valueTone={canViewCosts && (summary.atRiskKes ?? 0) > 0 ? "negative" : "default"}
         delta={{ label: "sales at stake in 30 days if you wait", tone: "negative" }}
       />
       <StatTile
