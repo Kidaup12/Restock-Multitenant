@@ -6,8 +6,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
  * that can go wrong with it, and they go through the server action rather than
  * the data layer on purpose.
  *
- * 1. Unticked must mean unticked. Turning the target off must give the split this
- *    screen produced before the target existed.
+ * 1. Off must mean off. The control is opt-in, and a reader who never touches it
+ *    must get the split this screen has always produced. A leaked default would
+ *    silently move every quantity on the screen.
  * 2. On must actually reach the engine. The re-size happens inside `getBuyList`,
  *    so an action that accepts `coverDays` and forgets to pass it down
  *    type-checks, runs, and returns a perfectly plausible split that ignored the
@@ -46,11 +47,23 @@ import {
   COVER_MIN,
   COVER_STEP,
   DEFAULT_BUDGET_COVER_DAYS,
+  DEFAULT_COVER_DAYS,
 } from "../app/(shell)/plan/cover";
 
 /** Big enough to fund the whole list, so the comparison is about sizing rather
  *  than about which lines the cash happened to reach. */
 const BUDGET_KES = 100_000_000;
+
+/**
+ * One product stripped back to how a fresh Shopify import arrives: no supplier,
+ * no lead-time override. Its lead time is therefore a GUESS (the shared assumed
+ * value), not a measurement — and the engine deliberately refuses to floor a
+ * re-size on a guess, because that would inflate a real order off a number
+ * nobody supplied. It is the only row that can tell a flag read off the measured
+ * lead from one read off the displayed lead, since for every other product the
+ * two are the same number.
+ */
+const UNSUPPLIED_SKU = "ARI-MJ-90";
 
 let seeded: SeedResult;
 let originalPlan: string | null = null;
@@ -68,6 +81,10 @@ describe.skipIf(!runnable)("budget allocator with a cover target (seeded local d
   beforeAll(async () => {
     delete process.env.REDIS_URL;
     seeded = await seedDev();
+    await prismaService.product.updateMany({
+      where: { tenantId: seeded.tenantId, sku: UNSUPPLIED_SKU },
+      data: { supplierId: null, leadTimeDays: null },
+    });
     await runForecast(seeded.tenantId);
 
     // The budget allocator is a Growth feature; the seed ships Starter.
@@ -135,7 +152,7 @@ describe.skipIf(!runnable)("budget allocator with a cover target (seeded local d
 
   it("the horizon the control switches on is honoured, not just the extremes", async () => {
     const plain = await fundedAt(null);
-    const dflt = await fundedAt(DEFAULT_BUDGET_COVER_DAYS);
+    const dflt = await fundedAt(DEFAULT_COVER_DAYS);
     const stretched = await fundedAt(COVER_MAX);
 
     // The default sits between the plan's own horizon and the longest offered,
@@ -165,6 +182,67 @@ describe.skipIf(!runnable)("budget allocator with a cover target (seeded local d
 
     const opened = await fundedAt(DEFAULT_BUDGET_COVER_DAYS);
     expect(opened.size).toBeGreaterThan(0);
+  });
+
+  it("a line whose lead outlasts the horizon says so", async () => {
+    // The shortest horizon the stepper offers, against suppliers who take longer.
+    // The engine floors those lines at their own lead, so the quantity exceeds
+    // what was asked for — and the row must admit that rather than look wrong.
+    const short = await planBudget({ budgetKes: BUDGET_KES, coverDays: COVER_MIN });
+    expect(short.ok).toBe(true);
+    if (!short.ok) return;
+
+    const rows = [...short.data.funded, ...short.data.deferred];
+    // The stripped product's lead is a guess, so it is excluded here and gets its
+    // own test below.
+    const measuredLongLead = rows.filter(
+      (r) => r.leadDays > COVER_MIN && r.sku !== UNSUPPLIED_SKU
+    );
+    expect(
+      measuredLongLead.length,
+      "the seed needs a supplier slower than the shortest cover"
+    ).toBeGreaterThan(0);
+    for (const row of measuredLongLead) {
+      expect(row.leadFloored, `${row.sku} was floored at its lead but does not say so`).toBe(true);
+    }
+    for (const row of rows.filter((r) => r.leadDays <= COVER_MIN)) {
+      expect(row.leadFloored, `${row.sku} claims a flooring it never got`).toBe(false);
+    }
+  });
+
+  it("a GUESSED lead never claims a flooring it did not cause", async () => {
+    // The distinguishing case. This product displays the assumed 30-day lead, so a
+    // flag inferred from the lead ON SCREEN would mark it floored under a 7-day
+    // cover. The engine floored nothing — it refuses to size on a guess — so the
+    // row must stay silent. Reading the flag off the displayed lead instead of the
+    // measured one passes every other assertion in this file and fails only here.
+    const short = await planBudget({ budgetKes: BUDGET_KES, coverDays: COVER_MIN });
+    expect(short.ok).toBe(true);
+    if (!short.ok) return;
+
+    const row = [...short.data.funded, ...short.data.deferred].find(
+      (r) => r.sku === UNSUPPLIED_SKU
+    );
+    expect(row, `${UNSUPPLIED_SKU} must be sized by the run`).toBeDefined();
+    expect(
+      row!.leadDays,
+      "the stripped product should fall back to the assumed lead, which is longer than the shortest cover"
+    ).toBeGreaterThan(COVER_MIN);
+    expect(
+      row!.leadFloored,
+      `${UNSUPPLIED_SKU} has no measured lead, so nothing floored its quantity — it must not say otherwise`
+    ).toBe(false);
+  });
+
+  it("no cover target means nothing claims a flooring", async () => {
+    // With no horizon asked for there is no horizon to exceed, so the badge must
+    // be silent everywhere — including for the slowest supplier on the list.
+    const plain = await planBudget({ budgetKes: BUDGET_KES, coverDays: null });
+    expect(plain.ok).toBe(true);
+    if (!plain.ok) return;
+    const rows = [...plain.data.funded, ...plain.data.deferred];
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.some((r) => r.leadFloored)).toBe(false);
   });
 
   it("a nonsense horizon is refused rather than clamped silently", async () => {

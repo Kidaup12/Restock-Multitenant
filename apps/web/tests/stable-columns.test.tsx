@@ -207,6 +207,7 @@ const buyRow = (over: Partial<BuyListRow> = {}): BuyListRow => ({
   overriddenQty: null,
   runRatePerDay: 0.6,
   moq: 1,
+  leadFloored: false,
   orderQty: 24,
   abc: "A",
   category: null,

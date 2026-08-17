@@ -27,6 +27,7 @@ import {
   DEFAULT_COVER_DAYS,
   clampCoverDays,
 } from "./cover";
+import { LeadFlooredNote } from "./lead-floored-note";
 import {
   addToOrder,
   clearPlanOverride,
@@ -833,6 +834,7 @@ export function BuyChecklist({
                             <div className="flex flex-col items-end gap-0.5">
                               <QtyCell row={row} canOverride={canOverride} />
                               <MoqNote preview={moqPreview(row)} />
+                              {row.leadFloored && <LeadFlooredNote leadDays={row.leadDays} />}
                             </div>
                           </td>
                           <td className={cn(TD_NUM, "hidden lg:table-cell")}>

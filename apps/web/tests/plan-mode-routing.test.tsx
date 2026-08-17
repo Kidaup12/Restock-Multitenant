@@ -43,6 +43,7 @@ const row: BuyListRow = {
   overriddenQty: null,
   runRatePerDay: 0.8,
   moq: 1,
+  leadFloored: false,
   abc: "A",
   category: null,
   unitCostKes: 100,

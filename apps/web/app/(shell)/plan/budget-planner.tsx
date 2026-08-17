@@ -27,6 +27,7 @@ import {
   DEFAULT_BUDGET_COVER_DAYS,
   clampCoverDays,
 } from "./cover";
+import { LeadFlooredNote } from "./lead-floored-note";
 
 /**
  * Mode 2 — the budget allocator. Enter the cash available; the engine funds
@@ -354,7 +355,10 @@ export function BudgetTable({
                   dayLabel(row.orderByDate)
                 )}
               </TableCell>
-              <TableCell numeric>{row.recommendedQty}</TableCell>
+              <TableCell numeric>
+                {row.recommendedQty}
+                {row.leadFloored && <LeadFlooredNote leadDays={row.leadDays} />}
+              </TableCell>
               <TableCell numeric className="hidden lg:table-cell">
                 {/* Revenue is a sales figure — visible to every role as a plain
                     amount whose unit lives in the header. */}
