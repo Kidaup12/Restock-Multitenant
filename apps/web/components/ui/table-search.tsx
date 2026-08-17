@@ -13,6 +13,12 @@ import Link from "next/link";
  * `hidden` carries whatever else is in the query — a GET form submits only its
  * own inputs, so without it searching would quietly drop the reader's filters,
  * sort and tab. Every caller must pass its current query through it.
+ *
+ * The submit button hides while the box is empty (`peer` on the input, so no
+ * client JS is needed to know that). An empty search offers nothing to do: with
+ * no text it re-fetches the unfiltered list, which is what `Clear` is for. The
+ * Enter key deliberately still submits, because emptying the box and pressing it
+ * is how a reader clears a search they can see.
  */
 export function TableSearch({
   action,
@@ -49,11 +55,11 @@ export function TableSearch({
         defaultValue={value}
         placeholder={placeholder}
         aria-label={label}
-        className="h-9 min-w-64 flex-1 rounded-md border border-edge bg-surface px-3 text-sm text-ink placeholder:text-ink-faint"
+        className="peer h-9 min-w-64 flex-1 rounded-md border border-edge bg-surface px-3 text-sm text-ink placeholder:text-ink-faint"
       />
       <button
         type="submit"
-        className="h-9 rounded-md border border-edge bg-surface px-3 text-sm font-medium text-ink hover:bg-surface-2"
+        className="h-9 rounded-md border border-edge bg-surface px-3 text-sm font-medium text-ink hover:bg-surface-2 peer-placeholder-shown:hidden"
       >
         Search
       </button>

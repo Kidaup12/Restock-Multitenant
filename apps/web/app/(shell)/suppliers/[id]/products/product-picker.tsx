@@ -94,10 +94,15 @@ export function ProductPicker({
           name="q"
           defaultValue={search}
           placeholder="Search by product, SKU or brand"
-          className="w-72 rounded-md border border-edge bg-surface px-3 py-2 text-sm text-ink"
+          className="peer w-72 rounded-md border border-edge bg-surface px-3 py-2 text-sm text-ink"
           aria-label="Search products"
         />
-        <Button size="sm" variant="ghost" type="submit">
+        <Button
+          size="sm"
+          variant="ghost"
+          type="submit"
+          className="peer-placeholder-shown:hidden"
+        >
           Search
         </Button>
         {search && (
