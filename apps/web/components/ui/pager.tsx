@@ -33,8 +33,9 @@ export function Pager({
    *  the wrong thing. */
   unit?: string;
 }) {
-  const step = "rounded-md border border-edge bg-surface px-2 py-1 text-ink hover:bg-surface-2";
-  const muted = "rounded-md border border-edge px-2 py-1 text-ink-faint opacity-50";
+  const step =
+    "rounded-sm border border-edge px-2 py-1 text-ink-muted transition-colors hover:text-ink hover:bg-surface-2";
+  const muted = "rounded-sm border border-edge px-2 py-1 text-ink-muted opacity-40";
   // A window around the current page: a 1000-SKU catalogue is 20 pages, and
   // twenty numbers in a row is a wall rather than a control.
   const span = 2;
@@ -44,7 +45,7 @@ export function Pager({
   return (
     <nav
       aria-label={label}
-      className="flex flex-wrap items-center justify-between gap-2 border-t border-edge px-4 py-3 text-sm text-ink-muted"
+      className="flex flex-wrap items-center justify-between gap-2 border-t border-edge px-5 py-3 text-2xs text-ink-muted"
     >
       <span>
         Showing {from}–{to} of {total}
@@ -66,7 +67,7 @@ export function Pager({
             scroll={false}
             aria-label={`Page ${n + 1} of ${pageCount}`}
             aria-current={n === page ? "page" : undefined}
-            className={cn(step, n === page && "border-edge-strong bg-accent-soft text-accent-ink")}
+            className={cn(step, n === page && "border-accent-200 bg-accent-soft font-medium text-accent-ink")}
           >
             {n + 1}
           </Link>

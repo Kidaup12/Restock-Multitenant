@@ -20,14 +20,14 @@ export function Field({
   return (
     <div className={cn("space-y-1.5", className)}>
       <div className="flex items-baseline justify-between gap-2">
-        <label htmlFor={htmlFor} className="text-sm font-medium text-ink">
+        <label htmlFor={htmlFor} className="text-2xs font-medium tracking-wider text-ink-muted uppercase">
           {label}
         </label>
         {hint}
       </div>
       {children}
       {error && (
-        <p role="alert" className="text-xs text-negative">
+        <p role="alert" className="text-2xs text-negative">
           {error}
         </p>
       )}

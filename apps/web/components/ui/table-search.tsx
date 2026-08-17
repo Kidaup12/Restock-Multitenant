@@ -45,7 +45,7 @@ export function TableSearch({
   label?: string;
 }) {
   return (
-    <form method="get" action={action} className="flex flex-wrap items-center gap-2 px-4 pt-3">
+    <form method="get" action={action} className="flex flex-wrap items-center gap-2 px-5 pt-3">
       {hidden.map((f) => (
         <input key={`${f.name}:${f.value}`} type="hidden" name={f.name} value={f.value} />
       ))}
@@ -55,11 +55,11 @@ export function TableSearch({
         defaultValue={value}
         placeholder={placeholder}
         aria-label={label}
-        className="peer h-9 min-w-64 flex-1 rounded-md border border-edge bg-surface px-3 text-sm text-ink placeholder:text-ink-faint"
+        className="peer min-h-9 min-w-64 flex-1 rounded-md border border-edge bg-surface px-3.5 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent-500 focus:ring-4 focus:ring-accent-100"
       />
       <button
         type="submit"
-        className="h-9 rounded-md border border-edge bg-surface px-3 text-sm font-medium text-ink hover:bg-surface-2 peer-placeholder-shown:hidden"
+        className="min-h-9 rounded-md border border-edge bg-surface px-3 text-2xs font-medium text-ink transition-colors hover:bg-surface-2 peer-placeholder-shown:hidden"
       >
         Search
       </button>
@@ -67,12 +67,12 @@ export function TableSearch({
         <>
           <Link
             href={clearHref}
-            className="h-9 rounded-md px-2 py-1.5 text-sm text-ink-muted hover:text-ink"
+            className="min-h-9 rounded-md px-2 py-1.5 text-2xs text-ink-muted transition-colors hover:text-ink"
           >
             Clear
           </Link>
           {matched != null && (
-            <span className="text-sm text-ink-muted">
+            <span className="text-2xs text-ink-muted">
               {matched === 0 ? "No matches" : `${matched} match${matched === 1 ? "" : "es"}`}
             </span>
           )}

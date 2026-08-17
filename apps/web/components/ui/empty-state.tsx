@@ -17,14 +17,14 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-lg border border-dashed border-edge-strong bg-surface px-6 py-16 text-center",
+        "flex flex-col items-center justify-center rounded-lg border border-edge bg-surface px-6 py-14 text-center shadow-card",
         className,
       )}
     >
       <div className="grid size-12 place-items-center rounded-md bg-surface-2 text-ink-muted [&_svg]:size-6">
         {icon ?? <InboxIcon />}
       </div>
-      <h2 className="mt-4 font-display text-base font-semibold text-ink">
+      <h2 className="mt-4 text-base font-semibold tracking-tight text-ink">
         {title}
       </h2>
       {description && (
