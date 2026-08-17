@@ -243,25 +243,31 @@ body {
   color: var(--on-accent);
 }
 
-/* Skeleton shimmer — defined once, consumed by every skeleton variant. */
+/*
+ * Skeleton shimmer — defined once, consumed by every skeleton variant.
+ *
+ * A highlight travelling across the block rather than the whole block breathing:
+ * a pulse reads as "this element is disabled", a sweep reads as "this is on its
+ * way". The sweep rides an ::after so the base colour stays a flat fill.
+ */
 .skeleton {
+  position: relative;
+  overflow: hidden;
   background-color: var(--shimmer-base);
-  background-image: linear-gradient(
-    100deg,
-    transparent 35%,
-    var(--shimmer-sweep) 50%,
-    transparent 65%
-  );
-  background-size: 250% 100%;
-  animation: shimmer 1.6s linear infinite;
 }
 
-@keyframes shimmer {
-  from {
-    background-position: 200% 0;
-  }
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--shimmer-sweep), transparent);
+  animation: skeleton-sweep 1.4s infinite;
+}
+
+@keyframes skeleton-sweep {
   to {
-    background-position: -50% 0;
+    transform: translateX(100%);
   }
 }
 
@@ -291,8 +297,12 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    animation: none;
+    background: none;
+  }
+
   .skeleton {
-    background-image: none;
     animation: skeleton-pulse 2.4s ease-in-out infinite;
   }
 
