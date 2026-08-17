@@ -23,6 +23,7 @@ import {
 import type { FacetSelection } from "@/lib/facets";
 import { formatMovePct, VERDICT_LABELS, VERDICT_TONES } from "@/lib/cost";
 import {
+  catalogueQueryFields,
   catalogueQueryToSearch,
   withQuery,
   type CatalogueQuery,
@@ -30,8 +31,8 @@ import {
   type SortKey,
 } from "@/lib/catalogue";
 import type { CatalogueRow, CatalogueScreen, CategoryUsage } from "@/lib/data/stock";
+import { TableSearch } from "@/components/ui/table-search";
 import { BulkLeadTimeBar } from "./bulk-lead-time-bar";
-import { CatalogueSearch } from "./catalogue-search";
 import { FacetFilterBar } from "./facet-filter-bar";
 import { CatalogueExportBar } from "./catalogue-export";
 import { HealthStrip } from "./health-strip";
@@ -186,9 +187,14 @@ export function CatalogueView({
           }
         />
 
-        <CatalogueSearch
-          query={query}
+        <TableSearch
+          action="/stock"
+          value={query.search}
+          hidden={catalogueQueryFields(query)}
+          placeholder="Search by product, SKU, variant, brand or category"
+          label="Search the catalogue"
           matched={aggregates.matchedCount}
+          unit="product"
           clearHref={hrefFor({ search: "" })}
         />
 
