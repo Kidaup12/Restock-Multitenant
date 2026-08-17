@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import {
   PLAN_FEATURE_LABEL,
   PLAN_ORDER,
@@ -59,18 +60,18 @@ export function PlanControl({ tenantId, plan }: { tenantId: string; plan: string
         <label htmlFor="plan" className="text-ink-muted">
           Tier
         </label>
-        <select
+        <Select
+          size="sm"
           id="plan"
           value={choice}
           onChange={(e) => setChoice(e.target.value as PlanTier)}
-          className="rounded-md border border-edge bg-surface px-2 py-1 text-ink"
         >
           {PLAN_ORDER.map((tier) => (
             <option key={tier} value={tier}>
               {PLAN_TIER_LABEL[tier]}
             </option>
           ))}
-        </select>
+        </Select>
         <Button size="sm" onClick={save} loading={pending} disabled={choice === current}>
           {choice === current ? "Current tier" : "Change tier"}
         </Button>
