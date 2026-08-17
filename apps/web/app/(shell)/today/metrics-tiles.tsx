@@ -1,9 +1,4 @@
-import {
-  AlertIcon,
-  ArchiveIcon,
-  BanknoteIcon,
-  LayersIcon,
-} from "@/components/icons";
+
 import { CostValue } from "@/components/ui/cost-value";
 import { formatNumber } from "@/lib/money";
 import { StatTile, type StatDelta } from "@/components/ui/stat-tile";
@@ -40,13 +35,11 @@ export async function MetricsTiles({
         label="Revenue, 30 days"
         value={<CostValue amount={m.revenue30dKes} compact />}
         delta={revenueDelta(m.revenue30dKes, m.revenuePrev30dKes)}
-        icon={<BanknoteIcon />}
       />
       <StatTile
         label="Tracked products"
         value={formatNumber(m.trackedProducts)}
         delta={{ label: "Active in catalogue", tone: "neutral" }}
-        icon={<LayersIcon />}
       />
       <StatTile
         label="Stockouts"
@@ -56,7 +49,6 @@ export async function MetricsTiles({
             ? { label: "Zero on hand right now", tone: "negative", direction: "up" }
             : { label: "Everything in stock", tone: "positive" }
         }
-        icon={<AlertIcon />}
       />
       <StatTile
         label="Dead stock"
@@ -65,7 +57,6 @@ export async function MetricsTiles({
           label: `${m.deadStock.skus} SKUs, ${m.deadStock.windowDays}+ days idle`,
           tone: "neutral",
         }}
-        icon={<ArchiveIcon />}
       />
     </div>
   );

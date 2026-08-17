@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getInsightsOverview } from "@/lib/data/insights";
-import { AlertIcon, BoxIcon, CheckIcon, TrendDownIcon } from "@/components/icons";
+
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
@@ -34,7 +34,6 @@ export async function ShelfHealth({
   if (stockouts.trackedProducts === 0) {
     return (
       <EmptyState
-        icon={<BoxIcon />}
         title="No products tracked yet"
         description="Connect your shop or import a catalogue and this fills in overnight."
       />
@@ -53,13 +52,11 @@ export async function ShelfHealth({
             label: `${formatNumber(stockouts.skus)} of ${formatNumber(stockouts.trackedProducts)} products`,
             tone: stockouts.skus > 0 ? "negative" : "positive",
           }}
-          icon={<AlertIcon />}
         />
         <StatTile
           label="Sales going missing"
           value={<CostValue amount={missedPerDay} compact />}
           delta={{ label: "a day, while the shelf is empty", tone: "negative" }}
-          icon={<TrendDownIcon />}
         />
         <StatTile
           label="Cash not moving"
@@ -89,7 +86,6 @@ export async function ShelfHealth({
         <CardContent>
           {shelfRows.length === 0 ? (
             <EmptyState
-              icon={<CheckIcon />}
               title="Nothing is out of stock"
               description="Every tracked product has something on the shelf. This is the number to keep at zero."
             />
@@ -139,7 +135,6 @@ export async function ShelfHealth({
         <CardContent>
           {cashRows.length === 0 ? (
             <EmptyState
-              icon={<CheckIcon />}
               title="No cash asleep"
               description={`Nothing has sat unsold for ${deadStock.windowDays} days, and nothing is carrying more than ${overview.overstockCoverDays} days of cover.`}
             />

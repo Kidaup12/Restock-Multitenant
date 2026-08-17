@@ -281,6 +281,19 @@ body {
   }
 }
 
+/* The mobile nav drawer sliding in from the left. Short and ease-out: a menu
+   that takes its time reads as a page load. */
+@keyframes rail-in {
+  from {
+    transform: translateX(-12%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
 /* Progress bar with no known total — a sweep, because a bar pinned at zero
    reads as stuck rather than working. */
 .progress-indeterminate {

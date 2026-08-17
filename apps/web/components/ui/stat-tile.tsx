@@ -13,36 +13,51 @@ export type StatDelta = {
   direction?: "up" | "down";
 };
 
+/**
+ * The figure itself carries the verdict.
+ *
+ * Three stockouts is bad news and no stockouts is good news, and the tile can say
+ * so in the number rather than making the reader parse a sub-line to find out.
+ * Default is plain ink: most figures are neither.
+ */
+const valueTones = {
+  default: "text-ink",
+  positive: "text-positive",
+  warning: "text-warning",
+  negative: "text-negative",
+  critical: "text-critical",
+};
+
 export function StatTile({
   label,
   value,
+  valueTone = "default",
   delta,
-  icon,
   className,
 }: {
   label: string;
   /* String, or an element like <CostValue> when the figure is gated. */
   value: React.ReactNode;
+  valueTone?: keyof typeof valueTones;
   delta?: StatDelta;
-  icon?: React.ReactNode;
   className?: string;
 }) {
   return (
     <div
       className={cn(
-        "relative rounded-lg border border-edge bg-surface p-4 shadow-card sm:p-5",
+        "rounded-lg border border-edge bg-surface p-4 shadow-card sm:p-5",
         className,
       )}
     >
-      {icon && (
-        <div className="absolute top-4 right-4 grid size-9 place-items-center rounded-md bg-accent-soft text-accent-ink [&_svg]:size-4.5">
-          {icon}
-        </div>
-      )}
       <div className="text-2xs tracking-wider text-ink-muted uppercase">
         {label}
       </div>
-      <div className="mt-1.5 font-mono text-3xl font-semibold tracking-tight text-ink">
+      <div
+        className={cn(
+          "mt-1.5 font-mono text-3xl font-semibold tracking-tight",
+          valueTones[valueTone],
+        )}
+      >
         {value}
       </div>
       {delta && (

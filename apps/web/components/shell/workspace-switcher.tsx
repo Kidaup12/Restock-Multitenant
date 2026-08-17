@@ -20,25 +20,17 @@ export type WorkspaceOption = {
 export type WorkspaceSwitcherProps = {
   workspaces: WorkspaceOption[];
   activeId: string | null;
-  /* rail = sidebar bottom (menu drops up), header = mobile top bar (drops down). */
-  layout?: "rail" | "header";
-  collapsed?: boolean;
 };
 
 function WorkspaceInitial({ name }: { name: string }) {
   return (
-    <span className="grid size-7 shrink-0 place-items-center rounded-md bg-accent-soft font-display text-xs font-bold text-accent-ink">
+    <span className="grid size-7 shrink-0 place-items-center rounded-md bg-accent-soft text-xs font-bold text-accent-ink">
       {name.charAt(0).toUpperCase()}
     </span>
   );
 }
 
-export function WorkspaceSwitcher({
-  workspaces,
-  activeId,
-  layout = "rail",
-  collapsed = false,
-}: WorkspaceSwitcherProps) {
+export function WorkspaceSwitcher({ workspaces, activeId }: WorkspaceSwitcherProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -115,25 +107,15 @@ export function WorkspaceSwitcher({
         aria-expanded={open}
         className={cn(
           "flex w-full items-center gap-2.5 rounded-md text-left transition-colors",
-          "outline-accent hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2",
-          layout === "rail" && (collapsed ? "justify-center px-0 py-1.5" : "px-2 py-1.5"),
-          layout === "header" && "min-w-0 py-1 pr-1.5",
+          "outline-accent px-2 py-1.5 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2",
         )}
       >
         <WorkspaceInitial name={active.name} />
-        {!(layout === "rail" && collapsed) && (
-          <>
-            <span className="min-w-0 flex-1 leading-tight">
-              <span className="block truncate text-sm font-semibold text-ink">
-                {active.name}
-              </span>
-              <span className="block truncate text-xs text-ink-muted">
-                {active.roleLabel}
-              </span>
-            </span>
-            <ChevronsUpDownIcon className="size-4 shrink-0 text-ink-faint" />
-          </>
-        )}
+        <span className="min-w-0 flex-1 leading-tight">
+          <span className="block truncate text-sm font-semibold text-ink">{active.name}</span>
+          <span className="block truncate text-2xs text-ink-muted">{active.roleLabel}</span>
+        </span>
+        <ChevronsUpDownIcon className="size-4 shrink-0 text-ink-faint" />
       </button>
 
       {open && (
@@ -143,8 +125,7 @@ export function WorkspaceSwitcher({
           aria-label="Workspaces"
           onKeyDown={onMenuKeyDown}
           className={cn(
-            "absolute left-0 z-30 w-60 rounded-lg border border-edge bg-surface p-1.5 shadow-pop",
-            layout === "rail" ? "bottom-full mb-2" : "top-full mt-2",
+            "absolute bottom-full left-0 z-30 mb-2 w-60 rounded-lg border border-edge bg-surface p-1.5 shadow-pop",
           )}
         >
           <div className="px-3 pt-2 pb-1 text-[10px] font-medium tracking-wider text-ink-muted uppercase">

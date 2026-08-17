@@ -6,7 +6,7 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { getTenantPlan } from "@/lib/capabilities";
 import { PLAN_TIER_LABEL, planAllows, planFeatureTier } from "@/lib/capabilities/plan-features";
 import { cn } from "@/lib/cn";
-import { BulbIcon } from "@/components/icons";
+
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -17,7 +17,7 @@ import { ShelfHealth } from "./shelf-health";
 import { StockoutTrend } from "./stockout-trend";
 
 export const metadata: Metadata = {
-  title: "Insights",
+  title: "Reports",
 };
 
 const DESCRIPTION = "Where your money is stuck, and whether the forecast is earning its keep";
@@ -52,7 +52,6 @@ function InsightsLocked() {
     <Card>
       <CardContent>
         <EmptyState
-          icon={<BulbIcon />}
           title="Insights is on a higher plan"
           description="See where your shelves are empty, how much cash is sitting in stock that isn't moving, and whether the forecast has been telling you the truth."
           action={
@@ -78,7 +77,7 @@ export default async function InsightsPage({
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Insights" description={DESCRIPTION} />
+        <PageHeader title="Reports" description={DESCRIPTION} />
         <EmptyState
           title="No workspace yet"
           description="Create your shop's workspace to start, or ask an admin to invite you to theirs."
@@ -94,7 +93,7 @@ export default async function InsightsPage({
   if (!planAllows(plan, "insights")) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Insights" description={DESCRIPTION} />
+        <PageHeader title="Reports" description={DESCRIPTION} />
         <InsightsLocked />
       </div>
     );
@@ -102,7 +101,7 @@ export default async function InsightsPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Insights" description={DESCRIPTION} />
+      <PageHeader title="Reports" description={DESCRIPTION} />
       <ViewTabs view={view} />
 
       {view === "now" ? (

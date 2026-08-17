@@ -1,4 +1,4 @@
-import { BoxIcon, LayersIcon } from "@/components/icons";
+
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
@@ -66,7 +66,6 @@ export async function ProposalView({
   if (!proposal) {
     return (
       <EmptyState
-        icon={<LayersIcon />}
         title="Nowhere to send stock"
         description="This location has no selling branch to distribute to. Confirm your location roles in Settings — a warehouse holds stock, a branch sells it."
       />
@@ -76,7 +75,6 @@ export async function ProposalView({
   if (proposal.lines.length === 0) {
     return (
       <EmptyState
-        icon={<BoxIcon />}
         title="Nothing to move"
         description={`Every branch already has ${proposal.coverDays} days of cover on what ${proposal.fromLocationName} holds, or the branches that are short sell nothing yet.`}
       />
@@ -93,7 +91,6 @@ export async function ProposalView({
           label="Units to move"
           value={formatNumber(proposal.totalUnits)}
           delta={{ label: `out of ${proposal.fromLocationName}`, tone: "neutral" }}
-          icon={<LayersIcon />}
         />
         <StatTile
           label="Products"
