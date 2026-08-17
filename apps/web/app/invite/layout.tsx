@@ -14,11 +14,11 @@ export default function InviteLayout({
       <div className="w-full max-w-100">
         <div className="mb-8 flex justify-center">
           <div className="flex items-center gap-2.5">
-            <div className="grid size-8 shrink-0 place-items-center rounded-md bg-accent font-display text-sm font-bold text-on-accent">
+            <div className="grid size-8 shrink-0 place-items-center rounded-md bg-accent text-sm font-bold text-on-accent">
               W
             </div>
             <div className="leading-tight">
-              <div className="font-display text-sm font-bold text-ink">
+              <div className="text-sm font-bold text-ink">
                 Wezesha
               </div>
               <div className="text-[10px] tracking-wider text-ink-muted uppercase">

@@ -28,7 +28,7 @@ function InviteCard({
   return (
     <Card>
       <CardContent className="p-6 md:p-8">
-        <h1 className="font-display text-xl font-bold text-ink-strong">
+        <h1 className="text-xl font-bold text-ink-strong">
           {title}
         </h1>
         {children}

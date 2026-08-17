@@ -191,11 +191,8 @@
   --color-track: var(--track);
   --color-shimmer: var(--shimmer-base);
 
-  /* Two faces, not three. The reference uses Inter + JetBrains Mono only, so the
-     display face is retired — `font-display` now resolves to the body face so the
-     files still carrying the class degrade to it instead of to nothing while they
-     are cleaned up. */
-  --font-display: var(--font-inter);
+  /* Two faces, matching the reference: Inter and JetBrains Mono. The third
+     display face is gone, along with the `font-display` class that used it. */
   --font-sans: var(--font-inter);
   --font-mono: var(--font-jbmono);
 

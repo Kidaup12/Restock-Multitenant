@@ -31,7 +31,7 @@ export default async function AdminLayout({
             scrolled sideways and the sticky bar detached from the content. */}
         <div className="mx-auto flex min-h-14 max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0 sm:px-6">
           <Link href="/admin" className="flex items-baseline gap-2">
-            <span className="font-display text-sm font-bold tracking-tight text-ink-strong">
+            <span className="text-sm font-bold tracking-tight text-ink-strong">
               Wezesha
             </span>
             <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-accent-ink uppercase">

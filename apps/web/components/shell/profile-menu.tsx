@@ -115,7 +115,7 @@ export function ProfileMenu({
         aria-expanded={open}
         data-tour="profile-menu"
         className={cn(
-          "grid size-9 place-items-center rounded-full bg-accent font-display text-sm font-bold text-on-accent transition-shadow",
+          "grid size-9 place-items-center rounded-full bg-accent text-sm font-bold text-on-accent transition-shadow",
           "outline-accent hover:shadow-glow focus-visible:outline-2 focus-visible:outline-offset-2",
         )}
       >

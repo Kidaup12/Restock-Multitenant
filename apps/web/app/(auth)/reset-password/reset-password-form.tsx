@@ -52,7 +52,7 @@ export function ResetPasswordForm() {
     return (
       <Card>
         <CardContent className="p-6 text-center md:p-8">
-          <h1 className="font-display text-xl font-bold text-ink-strong">
+          <h1 className="text-xl font-bold text-ink-strong">
             This link isn&apos;t valid
           </h1>
           <p className="mt-2 text-sm text-ink-muted">
@@ -79,7 +79,7 @@ export function ResetPasswordForm() {
           <div className="mx-auto grid size-12 place-items-center rounded-md bg-positive-soft text-positive">
             <CheckIcon className="size-6" />
           </div>
-          <h1 className="mt-4 font-display text-xl font-bold text-ink-strong">
+          <h1 className="mt-4 text-xl font-bold text-ink-strong">
             Password updated
           </h1>
           <p className="mt-2 text-sm text-ink-muted">
@@ -101,7 +101,7 @@ export function ResetPasswordForm() {
   return (
     <Card>
       <CardContent className="p-6 md:p-8">
-        <h1 className="font-display text-xl font-bold text-ink-strong">
+        <h1 className="text-xl font-bold text-ink-strong">
           Choose a new password
         </h1>
         <p className="mt-1 text-sm text-ink-muted">

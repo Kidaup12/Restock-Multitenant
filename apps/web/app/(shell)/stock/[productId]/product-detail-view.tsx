@@ -92,7 +92,7 @@ export function ProductDetailView({
             {detail.prediction ? (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-display text-2xl text-ink">
+                  <span className="text-2xl text-ink">
                     {detail.prediction.recommendedQty}
                   </span>
                   <span className="text-sm text-ink-muted">units suggested</span>

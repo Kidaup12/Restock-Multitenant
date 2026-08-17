@@ -397,7 +397,7 @@ export function ExcludedSection({
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="font-display text-base font-semibold text-ink">
+        <h2 className="text-base font-semibold text-ink">
           Not on the buy list · {excluded.length}
         </h2>
         <p className="mt-0.5 text-sm text-ink-muted">
