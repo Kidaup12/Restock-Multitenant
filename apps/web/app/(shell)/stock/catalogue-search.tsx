@@ -43,11 +43,11 @@ export function CatalogueSearch({
         defaultValue={query.search}
         placeholder="Search by product, SKU, variant, brand or category"
         aria-label="Search the catalogue"
-        className="w-full rounded-md border border-edge bg-surface px-3 py-2 text-sm text-ink sm:w-96"
+        className="peer w-full rounded-md border border-edge bg-surface px-3 py-2 text-sm text-ink sm:w-96"
       />
       <button
         type="submit"
-        className="rounded-md border border-edge bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-surface-2"
+        className="rounded-md border border-edge bg-surface px-3 py-2 text-sm font-medium text-ink hover:bg-surface-2 peer-placeholder-shown:hidden"
       >
         Search
       </button>
