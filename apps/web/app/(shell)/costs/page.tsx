@@ -7,7 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatTile } from "@/components/ui/stat-tile";
 import { CostValue } from "@/components/ui/cost-value";
-import { SkeletonTableRows } from "@/components/ui/skeleton";
+import { SkeletonCard, SkeletonStatTile } from "@/components/ui/skeleton";
 import { getCostCoverage, getCostMovedAlerts, type CostCoverage } from "@/lib/data/costs";
 import type { CostSource } from "@/lib/cost";
 import { CostImport } from "./cost-import";
@@ -148,9 +148,17 @@ export default async function CostsPage() {
       <PageHeader title="Costs" description="Cost coverage, upload/paste and cost-moved alerts" />
       <Suspense
         fallback={
-          <Card className="p-5">
-            <SkeletonTableRows rows={6} />
-          </Card>
+          // Three tiles then two cards — the shape the screen actually loads
+          // into. It used to promise a six-row table this page has never had.
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <SkeletonStatTile />
+              <SkeletonStatTile />
+              <SkeletonStatTile />
+            </div>
+            <SkeletonCard lines={3} />
+            <SkeletonCard lines={4} />
+          </div>
         }
       >
         <CostsBoard tenantId={membership.tenantId} canViewCosts={canViewCosts} canManage={canManage} />

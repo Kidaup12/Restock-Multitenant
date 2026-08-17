@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import {
+  Skeleton,
   SkeletonChart,
   SkeletonStatTile,
   SkeletonTableRows,
@@ -67,7 +68,9 @@ export default async function TodayPage() {
       <Suspense
         fallback={
           <Card className="px-5 py-4">
-            <div className="h-6 w-full animate-pulse rounded bg-surface-2" />
+            {/* The shared skeleton, not a bare pulse: this sat beside four
+                shimmering tiles and read as a different kind of loading. */}
+            <Skeleton className="h-6 w-full" />
           </Card>
         }
       >
