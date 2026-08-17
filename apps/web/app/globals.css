@@ -14,93 +14,135 @@
   --bg: #fafafa;
   --sidebar: #ffffff;
   --surface: #ffffff;
-  --surface-2: #f2f2f5;
+  --surface-2: #f3f2f8;
 
   /* lines */
-  --edge: #e7e7ec;
-  --edge-strong: #d7d8e0;
+  --edge: #e7e6ee;
+  --edge-strong: #d8d6e4;
 
-  /* text */
-  --ink-strong: #0f1222;
-  --ink: #1c2030;
-  --ink-secondary: #4c5165;
-  --ink-muted: #686d83;
-  --ink-faint: #9599ad;
+  /* text — neutral zinc, warmer and darker than the navy greys it replaces */
+  --ink-strong: #0b0b10;
+  --ink: #17171c;
+  --ink-secondary: #3f3f46;
+  --ink-muted: #71717a;
+  --ink-faint: #a1a1aa;
 
-  /* accent — violet, the single brand accent */
-  --accent: #6d5ce6;
-  --accent-strong: #5b4bd6;
-  --accent-soft: #edeafc;
-  --accent-ink: #5b4bd6;
+  /*
+   * Accent — dusty rose, as a nine-step ramp rather than the four flat violets
+   * it replaces. The ramp is used AS a ramp: 500 for a focus border, 100 for a
+   * focus ring and an info chip, 600/700 for fills, 500→700 for the brand
+   * gradient. The semantic aliases below sit on top so existing components keep
+   * working unchanged.
+   */
+  --accent-50: #fdf2f6;
+  --accent-100: #fce7ee;
+  --accent-200: #f9cfde;
+  --accent-300: #f2a8c2;
+  --accent-400: #e87aa0;
+  --accent-500: #db5586;
+  --accent-600: #c83f72;
+  --accent-700: #a62f5c;
+  --accent-800: #7d2244;
+
+  --accent: var(--accent-600);
+  --accent-strong: var(--accent-700);
+  --accent-soft: var(--accent-100);
+  --accent-ink: var(--accent-700);
   --on-accent: #ffffff;
 
-  /* status */
-  --positive: #166534;
-  --positive-soft: #dcf3e6;
-  --warning: #92400e;
-  --warning-soft: #fdf1d8;
+  /* status — four levels: the fourth ("critical") is a severity above negative,
+     used where a shop is already losing money rather than merely at risk. */
+  --positive: #15803d;
+  --positive-soft: #e8f2ec;
+  --warning: #b45309;
+  --warning-soft: #f8eee6;
   --negative: #b91c1c;
-  --negative-soft: #fbeaea;
+  --negative-soft: #f8e8e8;
+  --critical: #7f1d1d;
+  --critical-soft: #f2e8e8;
 
   /* charts */
-  --track: #e9e6fa;
+  --track: #f3e8ee;
 
-  /* elevation */
-  --card-shadow: 0 1px 2px rgb(23 20 60 / 0.04), 0 2px 8px rgb(23 20 60 / 0.04);
-  --pop-shadow: 0 4px 16px rgb(23 20 60 / 0.1);
+  /* elevation — the lifted shadow is accent-tinted, not neutral */
+  --card-shadow: 0 1px 2px rgb(17 17 30 / 0.04), 0 1px 3px rgb(17 17 30 / 0.05);
+  --pop-shadow: 0 10px 28px rgb(200 63 114 / 0.2);
   --glow: 0 0 #0000;
 
   /* skeleton shimmer */
-  --shimmer-base: #ececf1;
-  --shimmer-sweep: rgb(28 32 48 / 0.05);
+  --shimmer-base: #f3f2f8;
+  --shimmer-sweep: rgb(255 255 255 / 0.7);
 }
 
+/*
+ * Dark theme. The reference build is light-only by design decision, so none of
+ * this is ported — it is authored to sit under the same rose accent. The light
+ * greys are neutral zinc, so the dark surfaces are neutral too rather than the
+ * navy they replace, or the accent reads cold against them.
+ *
+ * The ramp itself does not change hue in the dark: a ramp is a ramp. What changes
+ * is which STEP each semantic alias points at, because a 600 fill that reads as
+ * confident on white reads as muddy on near-black.
+ */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  /* surfaces — dark desaturated navy, never pure black; sidebar a step darker than the page */
-  --bg: #0c0e17;
-  --sidebar: #0a0b12;
-  --surface: #12141f;
-  --surface-2: #1a1d2b;
+  /* surfaces — neutral near-black, never pure; sidebar a step darker than the page */
+  --bg: #0d0d11;
+  --sidebar: #0a0a0e;
+  --surface: #14141a;
+  --surface-2: #1c1c24;
 
   /* lines — faint white */
   --edge: rgb(255 255 255 / 0.08);
   --edge-strong: rgb(255 255 255 / 0.14);
 
-  /* text — near-white headings, lavender-grey body, dim labels; numbers bright white */
+  /* text — near-white headings, zinc body, dim labels */
   --ink-strong: #ffffff;
-  --ink: #eceef6;
-  --ink-secondary: #a0a3b8;
-  --ink-muted: #8285a0;
-  --ink-faint: #5c5f78;
+  --ink: #ececef;
+  --ink-secondary: #a1a1aa;
+  --ink-muted: #8b8b95;
+  --ink-faint: #5f5f6b;
 
-  /* accent — same violet as light; brighter step reserved for accent-colored text */
-  --accent: #6d5ce6;
-  --accent-strong: #7e6ef0;
-  --accent-soft: rgb(109 92 230 / 0.16);
-  --accent-ink: #a89dff;
+  /* accent — the same nine steps; the aliases move up for contrast on dark */
+  --accent-50: #fdf2f6;
+  --accent-100: #fce7ee;
+  --accent-200: #f9cfde;
+  --accent-300: #f2a8c2;
+  --accent-400: #e87aa0;
+  --accent-500: #db5586;
+  --accent-600: #c83f72;
+  --accent-700: #a62f5c;
+  --accent-800: #7d2244;
+
+  --accent: var(--accent-500);
+  --accent-strong: var(--accent-400);
+  --accent-soft: rgb(219 85 134 / 0.16);
+  --accent-ink: var(--accent-300);
   --on-accent: #ffffff;
 
-  /* status — kept muted */
-  --positive: #45c88b;
-  --positive-soft: rgb(69 200 139 / 0.14);
+  /* status — kept muted; critical is the one that gets brighter, not darker,
+     because on a dark surface "worse" cannot mean "closer to the background" */
+  --positive: #4ec986;
+  --positive-soft: rgb(78 201 134 / 0.14);
   --warning: #d9a13e;
   --warning-soft: rgb(217 161 62 / 0.15);
   --negative: #e06c75;
   --negative-soft: rgb(224 108 117 / 0.14);
+  --critical: #ef5f6b;
+  --critical-soft: rgb(239 95 107 / 0.18);
 
   /* charts */
-  --track: #23263a;
+  --track: #26202a;
 
   /* elevation — subtle glow on active elements */
   --card-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
   --pop-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
-  --glow: 0 0 18px rgb(109 92 230 / 0.35);
+  --glow: 0 0 18px rgb(200 63 114 / 0.35);
 
   /* skeleton shimmer */
-  --shimmer-base: #1a1d2b;
-  --shimmer-sweep: rgb(255 255 255 / 0.05);
+  --shimmer-base: #1c1c24;
+  --shimmer-sweep: rgb(255 255 255 / 0.06);
 }
 
 @theme inline {
@@ -118,11 +160,24 @@
   --color-ink-muted: var(--ink-muted);
   --color-ink-faint: var(--ink-faint);
 
+  /* Semantic aliases — what components have always used. */
   --color-accent: var(--accent);
   --color-accent-strong: var(--accent-strong);
   --color-accent-soft: var(--accent-soft);
   --color-accent-ink: var(--accent-ink);
   --color-on-accent: var(--on-accent);
+
+  /* The ramp itself, for the places that need a specific step: a focus border at
+     500, a focus ring at 100, the brand gradient 500→700. */
+  --color-accent-50: var(--accent-50);
+  --color-accent-100: var(--accent-100);
+  --color-accent-200: var(--accent-200);
+  --color-accent-300: var(--accent-300);
+  --color-accent-400: var(--accent-400);
+  --color-accent-500: var(--accent-500);
+  --color-accent-600: var(--accent-600);
+  --color-accent-700: var(--accent-700);
+  --color-accent-800: var(--accent-800);
 
   --color-positive: var(--positive);
   --color-positive-soft: var(--positive-soft);
@@ -130,11 +185,17 @@
   --color-warning-soft: var(--warning-soft);
   --color-negative: var(--negative);
   --color-negative-soft: var(--negative-soft);
+  --color-critical: var(--critical);
+  --color-critical-soft: var(--critical-soft);
 
   --color-track: var(--track);
   --color-shimmer: var(--shimmer-base);
 
-  --font-display: var(--font-pjs);
+  /* Two faces, not three. The reference uses Inter + JetBrains Mono only, so the
+     display face is retired — `font-display` now resolves to the body face so the
+     files still carrying the class degrade to it instead of to nothing while they
+     are cleaned up. */
+  --font-display: var(--font-inter);
   --font-sans: var(--font-inter);
   --font-mono: var(--font-jbmono);
 
@@ -145,14 +206,36 @@
 
 @theme {
   --spacing: 0.25rem;
+
+  /*
+   * Radius. `md` and `lg` already sit where the reference's `xl` and `2xl` do
+   * (0.75rem / 1rem), so a card and a button need no change at all. `xs` is new:
+   * the reference's chips are a tight 0.375rem, and on a 20px-tall badge our
+   * smallest existing step reads as a pill.
+   */
+  --radius-xs: 0.375rem;
   --radius-sm: 0.5rem;
   --radius-md: 0.75rem;
   --radius-lg: 1rem;
+
+  /* One step below `xs` text, carrying the whole label and meta layer: table
+     headers, chips, eyebrows, the small print beside a number. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
 }
 
 body {
   background: var(--bg);
   color: var(--ink);
+  /* Inter's stylistic sets, and the slight negative tracking the reference uses
+     throughout — most of what makes its text feel tighter than ours. */
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  letter-spacing: -0.005em;
+}
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 ::selection {
