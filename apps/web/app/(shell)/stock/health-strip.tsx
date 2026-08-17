@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { cn } from "@/lib/cn";
+import { SegmentedNav } from "@/components/ui/segmented-nav";
 
 /**
  * Catalogue health strip (spec §2): a row of clickable chips above the table —
@@ -24,12 +25,35 @@ export type HealthChip = {
   tone: HealthChipTone;
 };
 
+const OFF = "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink";
+
+/** A selected filter is a tinted fill with a hairline of its own colour — the
+ *  same treatment the status chips use, so a filter and the thing it filters for
+ *  read as the same idea. */
 const toneStyles: Record<HealthChipTone, { on: string; off: string }> = {
-  neutral: { on: "border-edge-strong bg-surface-2 text-ink", off: "border-edge bg-surface text-ink-muted hover:text-ink" },
-  warning: { on: "border-warning bg-warning-soft text-warning", off: "border-edge bg-surface text-ink-muted hover:text-ink" },
-  negative: { on: "border-negative bg-negative-soft text-negative", off: "border-edge bg-surface text-ink-muted hover:text-ink" },
-  accent: { on: "border-edge-strong bg-accent-soft text-accent-ink", off: "border-edge bg-surface text-ink-muted hover:text-ink" },
+  neutral: { on: "border-edge-strong bg-surface-2 text-ink", off: OFF },
+  warning: { on: "border-warning/30 bg-warning/10 text-warning", off: OFF },
+  negative: { on: "border-negative/30 bg-negative/10 text-negative", off: OFF },
+  accent: { on: "border-accent-200 bg-accent-soft text-accent-ink", off: OFF },
 };
+
+/** Shared shape for every chip in the strip. */
+const CHIP =
+  "inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors";
+
+/** The count that rides inside a chip. */
+function ChipCount({ value, on }: { value: number; on: boolean }) {
+  return (
+    <span
+      className={cn(
+        "rounded-xs px-1.5 font-mono tabular-nums",
+        on ? "bg-surface/50" : "bg-surface-2 text-ink-faint",
+      )}
+    >
+      {value}
+    </span>
+  );
+}
 
 export function HealthStrip({
   total,
@@ -58,40 +82,22 @@ export function HealthStrip({
   const live = chips.filter((c) => c.count > 0);
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-edge px-4 py-3">
-      <div role="group" aria-label="Catalogue scope" className="flex flex-wrap items-center gap-2">
-        {scopes.map((s) => {
-          const on = scope === s.key;
-          return (
-            <Link
-              key={s.key}
-              href={scopeHref(s.key)}
-              scroll={false}
-              aria-current={on ? "true" : undefined}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium transition-colors",
-                on
-                  ? "border-edge-strong bg-accent-soft text-accent-ink"
-                  : "border-edge bg-surface text-ink-muted hover:text-ink",
-              )}
-            >
-              {s.label}
-              <span className={cn("rounded-full px-1.5 text-xs", on ? "bg-surface/60" : "bg-surface-2 text-ink-faint")}>
-                {s.count}
-              </span>
-            </Link>
-          );
-        })}
-      </div>
+    <div className="flex flex-wrap items-center gap-2 border-b border-edge px-5 py-3">
+      <SegmentedNav
+        label="Catalogue scope"
+        items={scopes.map((s) => ({
+          href: scopeHref(s.key),
+          label: s.label,
+          count: s.count,
+          active: scope === s.key,
+        }))}
+      />
       <span aria-hidden className="mx-1 h-5 w-px bg-edge" />
 
       <Link
         href={clearHref}
         scroll={false}
-        className={cn(
-          "rounded-md border px-2.5 py-1 text-sm font-medium transition-colors",
-          active == null ? "border-edge-strong bg-surface-2 text-ink" : "border-edge bg-surface text-ink-muted hover:text-ink",
-        )}
+        className={cn(CHIP, active == null ? toneStyles.neutral.on : OFF)}
       >
         {shown === total ? `${total} products` : `${shown} of ${total}`}
       </Link>
@@ -105,15 +111,10 @@ export function HealthStrip({
             href={chipHref(chip.key)}
             scroll={false}
             aria-current={on ? "true" : undefined}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium transition-colors",
-              on ? style.on : style.off,
-            )}
+            className={cn(CHIP, on ? style.on : style.off)}
           >
             {chip.label}
-            <span className={cn("rounded-full px-1.5 text-xs", on ? "bg-surface/60" : "bg-surface-2 text-ink-faint")}>
-              {chip.count}
-            </span>
+            <ChipCount value={chip.count} on={on} />
           </Link>
         );
       })}
