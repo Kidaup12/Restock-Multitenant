@@ -2,9 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { TrashIcon } from "@/components/icons";
-import { cn } from "@/lib/cn";
 import type { DeclaredClosure, DeclaredPromo, SignalsCatalogue } from "@/lib/data/signals";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
@@ -62,11 +62,6 @@ const STATUS_BADGE: Record<DeclaredPromo["status"], { tone: "neutral" | "accent"
   past: { tone: "positive", label: "Finished" },
 };
 
-const selectClass = cn(
-  "h-10 w-full rounded-md border border-edge bg-surface px-2 text-sm text-ink transition-colors",
-  "outline-accent focus-visible:outline-2 focus-visible:outline-offset-2",
-  "disabled:pointer-events-none disabled:opacity-60"
-);
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
@@ -306,19 +301,18 @@ function PromoForm({
       />
       <CardContent className="space-y-4">
         <Field label="What kind" htmlFor="promo-type">
-          <select
+          <Select
             id="promo-type"
             value={promoType}
             disabled={!canManage || pending}
             onChange={(e) => setPromoType(e.target.value)}
-            className={selectClass}
           >
             {PROMO_TYPE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -343,7 +337,7 @@ function PromoForm({
         </div>
 
         <Field label="What it covered" htmlFor="promo-scope">
-          <select
+          <Select
             id="promo-scope"
             value={scope}
             disabled={!canManage || pending}
@@ -351,24 +345,22 @@ function PromoForm({
               setScope(e.target.value);
               setScopeValue("");
             }}
-            className={selectClass}
           >
             {SCOPE_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         {scope !== "all" && (
           <Field label="Which one" htmlFor="promo-scope-value">
-            <select
+            <Select
               id="promo-scope-value"
               value={scopeValue}
               disabled={!canManage || pending}
               onChange={(e) => setScopeValue(e.target.value)}
-              className={selectClass}
             >
               <option value="">Pick one…</option>
               {scopeChoices.map((choice) => (
@@ -376,7 +368,7 @@ function PromoForm({
                   {choice.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
         )}
 
@@ -451,19 +443,18 @@ function ClosureForm({
       />
       <CardContent className="space-y-4">
         <Field label="Which location" htmlFor="closure-location">
-          <select
+          <Select
             id="closure-location"
             value={locationId}
             disabled={!canManage || pending || locations.length === 0}
             onChange={(e) => setLocationId(e.target.value)}
-            className={selectClass}
           >
             {locations.map((location) => (
               <option key={location.id} value={location.id}>
                 {location.name}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -488,19 +479,18 @@ function ClosureForm({
         </div>
 
         <Field label="Why" htmlFor="closure-reason">
-          <select
+          <Select
             id="closure-reason"
             value={reason}
             disabled={!canManage || pending}
             onChange={(e) => setReason(e.target.value)}
-            className={selectClass}
           >
             {CLOSURE_REASON_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
-          </select>
+          </Select>
         </Field>
 
         <Field

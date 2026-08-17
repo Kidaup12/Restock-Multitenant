@@ -48,6 +48,7 @@ export async function ShelfHealth({
         <StatTile
           label="Empty right now"
           value={`${stockouts.ratePct}%`}
+          valueTone={stockouts.skus > 0 ? "negative" : "positive"}
           delta={{
             label: `${formatNumber(stockouts.skus)} of ${formatNumber(stockouts.trackedProducts)} products`,
             tone: stockouts.skus > 0 ? "negative" : "positive",
@@ -56,11 +57,13 @@ export async function ShelfHealth({
         <StatTile
           label="Sales going missing"
           value={<CostValue amount={missedPerDay} compact />}
+          valueTone={(missedPerDay ?? 0) > 0 ? "negative" : "default"}
           delta={{ label: "a day, while the shelf is empty", tone: "negative" }}
         />
         <StatTile
           label="Cash not moving"
           value={<CostValue amount={cashTotalKes} canViewCosts={canViewCosts} compact />}
+          valueTone={canViewCosts && deadStock.skus > 0 ? "warning" : "default"}
           delta={{
             label: `${formatNumber(deadStock.skus)} products, ${deadStock.windowDays}+ days unsold`,
             tone: deadStock.skus > 0 ? "negative" : "positive",

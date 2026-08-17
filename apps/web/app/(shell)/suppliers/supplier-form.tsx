@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -16,11 +16,6 @@ import {
 
 const CURRENCIES = ["KES", "USD", "CNY", "AED"] as const;
 
-const selectClass = cn(
-  "h-10 w-full rounded-md border border-edge bg-surface px-3 text-sm text-ink transition-colors",
-  "outline-accent focus-visible:outline-2 focus-visible:outline-offset-2",
-  "disabled:pointer-events-none disabled:opacity-60",
-);
 
 /** Add-by-hand / edit form for a supplier. Gated by canManage upstream. */
 export function SupplierForm({
@@ -125,9 +120,8 @@ export function SupplierForm({
             />
           </Field>
           <Field label="Currency" htmlFor="sf-currency">
-            <select
+            <Select
               id="sf-currency"
-              className={selectClass}
               value={currency}
               onChange={(e) => setCurrency(e.target.value)}
             >
@@ -136,7 +130,7 @@ export function SupplierForm({
                   {c}
                 </option>
               ))}
-            </select>
+            </Select>
           </Field>
           <Field label="Lead time (days, optional)" htmlFor="sf-lead">
             <Input

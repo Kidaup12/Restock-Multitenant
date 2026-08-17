@@ -45,7 +45,7 @@ function ModeCard({
       <div className="grid size-9 place-items-center rounded-md bg-accent-soft text-accent-ink [&_svg]:size-4.5">
         {icon}
       </div>
-      <h2 className="mt-3 font-display text-base font-semibold text-ink">{title}</h2>
+      <h2 className="mt-3 text-base font-semibold text-ink">{title}</h2>
       <p className="mt-1 text-sm text-ink-muted">{description}</p>
     </button>
   );
@@ -72,7 +72,7 @@ function LockedModeCard({
       <div className="grid size-9 place-items-center rounded-md bg-surface-2 text-ink-muted [&_svg]:size-4.5">
         {icon}
       </div>
-      <h2 className="mt-3 font-display text-base font-semibold text-ink">{title}</h2>
+      <h2 className="mt-3 text-base font-semibold text-ink">{title}</h2>
       <p className="mt-1 text-sm text-ink-muted">{description}</p>
       <p className="mt-3 text-sm font-medium text-accent-ink">{upsell}</p>
     </div>

@@ -3,11 +3,11 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 function BrandMark() {
   return (
     <div className="flex items-center gap-2.5">
-      <div className="grid size-8 shrink-0 place-items-center rounded-md bg-accent font-display text-sm font-bold text-on-accent">
+      <div className="grid size-8 shrink-0 place-items-center rounded-md bg-accent text-sm font-bold text-on-accent">
         W
       </div>
       <div className="leading-tight">
-        <div className="font-display text-sm font-bold text-ink">Wezesha</div>
+        <div className="text-sm font-bold text-ink">Wezesha</div>
         <div className="text-[10px] tracking-wider text-ink-muted uppercase">
           Restock OS
         </div>
@@ -42,7 +42,7 @@ export default function AuthLayout({
           <BrandMark />
         </div>
         <div className="relative max-w-md">
-          <h2 className="font-display text-4xl font-bold tracking-tight text-ink-strong">
+          <h2 className="text-4xl font-bold tracking-tight text-ink-strong">
             Know what to restock before it runs out.
           </h2>
           <p className="mt-4 text-base text-ink-muted">

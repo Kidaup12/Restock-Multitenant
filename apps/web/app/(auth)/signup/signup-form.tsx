@@ -56,7 +56,7 @@ export function SignupForm({
     <div>
       <Card>
         <CardContent className="p-6 md:p-8">
-          <h1 className="font-display text-xl font-bold text-ink-strong">
+          <h1 className="text-xl font-bold text-ink-strong">
             Create your account
           </h1>
           <p className="mt-1 text-sm text-ink-muted">

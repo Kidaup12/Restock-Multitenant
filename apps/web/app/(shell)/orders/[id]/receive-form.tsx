@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -122,7 +123,6 @@ export function ReceiveForm({
                       value={qtys[line.id] ?? ""}
                       onChange={(e) => setQty(line.id, e.target.value, remaining)}
                       aria-label={`Units received for ${line.title}`}
-                      className="h-8 w-24 rounded-md border border-edge bg-surface px-2 text-right text-sm text-ink outline-accent focus-visible:outline-2"
                     />
                   )}
                 </TableCell>
@@ -137,11 +137,11 @@ export function ReceiveForm({
           <label htmlFor="receive-location" className="text-sm text-ink-muted">
             Receive into
           </label>
-          <select
+          <Select
+            size="sm"
             id="receive-location"
             value={locationId}
             onChange={(e) => setLocationId(e.target.value)}
-            className="h-8 rounded-md border border-edge bg-surface px-2 text-sm text-ink"
           >
             {locations.map((l) => (
               <option key={l.id} value={l.id}>
@@ -149,7 +149,7 @@ export function ReceiveForm({
                 {l.isPrimary ? " (primary)" : ""}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="ghost" onClick={fillRemaining}>

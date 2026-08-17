@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -49,12 +50,6 @@ const roleLabels: Record<Role, string> = {
   ADMIN: "Admin",
   MEMBER: "Member",
 };
-
-const selectClass = cn(
-  "h-8 rounded-md border border-edge bg-surface px-2 text-sm text-ink transition-colors",
-  "outline-accent focus-visible:outline-2 focus-visible:outline-offset-2",
-  "disabled:pointer-events-none disabled:opacity-60",
-);
 
 export function TeamView({
   rows,
@@ -125,18 +120,18 @@ export function TeamView({
                 />
               </Field>
               <Field label="Role" htmlFor="invite-role">
-                <select
+                <Select
                   id="invite-role"
                   value={role}
                   onChange={(e) => setRole(e.target.value as Role)}
-                  className={cn(selectClass, "h-10 w-full px-3 sm:w-32")}
+                  className="sm:w-32"
                 >
                   {inviteRoles.map((option) => (
                     <option key={option} value={option}>
                       {roleLabels[option]}
                     </option>
                   ))}
-                </select>
+                </Select>
               </Field>
               <Button type="submit" loading={pending}>
                 Send invite
@@ -186,7 +181,7 @@ export function TeamView({
                   <TableCell>{member.email}</TableCell>
                   <TableCell>
                     {member.roleOptions.length > 0 ? (
-                      <select
+                      <Select
                         aria-label={`Role for ${member.name}`}
                         value={member.role}
                         disabled={pending}
@@ -198,7 +193,7 @@ export function TeamView({
                             }),
                           )
                         }
-                        className={selectClass}
+                        size="sm"
                       >
                         <option value={member.role}>
                           {roleLabels[member.role]}
@@ -208,7 +203,7 @@ export function TeamView({
                             {roleLabels[option]}
                           </option>
                         ))}
-                      </select>
+                      </Select>
                     ) : (
                       <Badge tone={member.role === "OWNER" ? "accent" : "neutral"}>
                         {roleLabels[member.role]}

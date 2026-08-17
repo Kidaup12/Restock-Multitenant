@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -72,10 +73,10 @@ export default async function AdminAuditPage({
       >
         <label className="text-xs font-medium text-ink-muted">
           Workspace
-          <select
+          <Select
             name="tenant"
             defaultValue={tenantId ?? ""}
-            className="mt-1 block h-9 rounded-md border border-edge bg-surface px-2 text-sm text-ink"
+            className="mt-1"
           >
             <option value="">All workspaces</option>
             {tenants.map((t) => (
@@ -83,14 +84,14 @@ export default async function AdminAuditPage({
                 {t.name}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="text-xs font-medium text-ink-muted">
           Action
-          <select
+          <Select
             name="action"
             defaultValue={action ?? ""}
-            className="mt-1 block h-9 rounded-md border border-edge bg-surface px-2 text-sm text-ink"
+            className="mt-1"
           >
             <option value="">All actions</option>
             {actions.map((a) => (
@@ -98,7 +99,7 @@ export default async function AdminAuditPage({
                 {a}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <Button type="submit" variant="ghost" size="sm">
           Filter

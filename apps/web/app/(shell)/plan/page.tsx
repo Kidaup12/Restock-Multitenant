@@ -97,7 +97,9 @@ export default async function PlanPage() {
       <PageHeader title="Restock Planner" description="Weekly replenishment planning" />
       <Suspense
         fallback={
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          // Three mode cards, on the same grid the real chooser uses.
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <SkeletonCard lines={2} />
             <SkeletonCard lines={2} />
             <SkeletonCard lines={2} />
           </div>

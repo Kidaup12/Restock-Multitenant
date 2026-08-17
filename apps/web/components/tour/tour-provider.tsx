@@ -278,7 +278,7 @@ export function TourProvider({
               <div className="text-xs font-medium text-ink-faint">
                 {index + 1} of {total}
               </div>
-              <h2 className="mt-1 font-display text-base font-semibold text-ink">
+              <h2 className="mt-1 text-base font-semibold text-ink">
                 {step.title}
               </h2>
               <p className="mt-1 text-sm text-ink-muted">{step.body}</p>

@@ -38,7 +38,7 @@ export function ForgotPasswordForm() {
           <div className="mx-auto grid size-12 place-items-center rounded-md bg-accent-soft text-accent-ink">
             <MailIcon className="size-6" />
           </div>
-          <h1 className="mt-4 font-display text-xl font-bold text-ink-strong">
+          <h1 className="mt-4 text-xl font-bold text-ink-strong">
             Check your inbox
           </h1>
           {/* Same response whether or not the account exists — no enumeration. */}
@@ -63,7 +63,7 @@ export function ForgotPasswordForm() {
     <div>
       <Card>
         <CardContent className="p-6 md:p-8">
-          <h1 className="font-display text-xl font-bold text-ink-strong">
+          <h1 className="text-xl font-bold text-ink-strong">
             Forgot your password?
           </h1>
           <p className="mt-1 text-sm text-ink-muted">

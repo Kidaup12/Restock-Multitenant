@@ -1,11 +1,10 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
-import { cn } from "@/lib/cn";
 import { LayersIcon } from "@/components/icons";
 import { EmptyState } from "@/components/ui/empty-state";
+import { SegmentedNav } from "@/components/ui/segmented-nav";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
 import { SkeletonCard, SkeletonStatTile, SkeletonTableRows } from "@/components/ui/skeleton";
@@ -32,20 +31,6 @@ export const metadata: Metadata = {
 /** Source and cover-horizon pills are plain links: the whole screen is a server
  *  render of a searchParams state, so a picked source survives a refresh and can
  *  be shared with whoever is doing the picking. */
-function Pill({ href, label, active }: { href: string; label: string; active: boolean }) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-        active ? "bg-accent-soft text-accent-ink" : "text-ink-muted hover:bg-surface-2 hover:text-ink"
-      )}
-    >
-      {label}
-    </Link>
-  );
-}
-
 /** Growth-tier lock: shown, not hidden, so the owner can see what they'd get. */
 function LockedTransfers() {
   const tier = PLAN_TIER_LABEL[planFeatureTier("transfers")];
@@ -54,7 +39,7 @@ function LockedTransfers() {
       <div className="grid size-9 place-items-center rounded-md bg-surface-2 text-ink-muted [&_svg]:size-4.5">
         <LayersIcon />
       </div>
-      <h2 className="mt-3 font-display text-base font-semibold text-ink">Move stock between branches</h2>
+      <h2 className="mt-3 text-base font-semibold text-ink">Move stock between branches</h2>
       <p className="mt-1 text-sm text-ink-muted">
         Build a plan that says exactly what to move from the warehouse to each shop, sized so every
         shop ends up with the same days of cover at its own selling rate.
@@ -99,29 +84,25 @@ async function TransfersContent({
       <Card className="flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-4">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium tracking-wider text-ink-muted uppercase">Move from</span>
-          <div className="flex flex-wrap items-center gap-1 rounded-lg border border-edge bg-surface p-1">
-            {locations.map((location) => (
-              <Pill
-                key={location.locationId}
-                href={query({ from: location.locationId })}
-                label={location.name}
-                active={location.locationId === source.locationId}
-              />
-            ))}
-          </div>
+          <SegmentedNav
+            label="Move stock from"
+            items={locations.map((location) => ({
+              href: query({ from: location.locationId }),
+              label: location.name,
+              active: location.locationId === source.locationId,
+            }))}
+          />
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium tracking-wider text-ink-muted uppercase">Cover target</span>
-          <div className="flex items-center gap-1 rounded-lg border border-edge bg-surface p-1">
-            {COVER_DAY_CHOICES.map((days) => (
-              <Pill
-                key={days}
-                href={query({ cover: days })}
-                label={`${days}d`}
-                active={days === coverDays}
-              />
-            ))}
-          </div>
+          <SegmentedNav
+            label="Cover target"
+            items={COVER_DAY_CHOICES.map((days) => ({
+              href: query({ cover: days }),
+              label: `${days}d`,
+              active: days === coverDays,
+            }))}
+          />
         </div>
       </Card>
 

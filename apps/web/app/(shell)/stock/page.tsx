@@ -1,10 +1,9 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
-import { cn } from "@/lib/cn";
 import { EmptyState } from "@/components/ui/empty-state";
+import { SegmentedNav } from "@/components/ui/segmented-nav";
 import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonTableRows } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
@@ -17,27 +16,15 @@ export const metadata: Metadata = {
 };
 
 function ViewTabs({ view }: { view: "products" | "locations" }) {
-  const tab = (href: string, label: string, active: boolean) => (
-    <Link
-      href={href}
-      className={cn(
-        "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-        active
-          ? "bg-accent-soft text-accent-ink"
-          : "text-ink-muted hover:bg-surface-2 hover:text-ink"
-      )}
-    >
-      {label}
-    </Link>
-  );
   return (
-    <div
-      className="flex items-center gap-1 rounded-lg border border-edge bg-surface p-1"
+    <SegmentedNav
+      label="Stock views"
       data-tour="stock-tabs"
-    >
-      {tab("/stock", "By product", view === "products")}
-      {tab("/stock?view=locations", "By location", view === "locations")}
-    </div>
+      items={[
+        { href: "/stock", label: "By product", active: view === "products" },
+        { href: "/stock?view=locations", label: "By location", active: view === "locations" },
+      ]}
+    />
   );
 }
 

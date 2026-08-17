@@ -7,8 +7,8 @@ import {
   roleOfType,
   typeOfRole,
 } from "@wezesha/db/roles";
-import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { formatNumber } from "@/lib/money";
@@ -48,11 +48,6 @@ const ROLE_OPTIONS: { type: LocationType; label: string }[] = [
   { type: "virtual", label: "Ignore — doesn't count" },
 ];
 
-const selectClass = cn(
-  "h-8 rounded-md border border-edge bg-surface px-2 text-sm text-ink transition-colors",
-  "outline-accent focus-visible:outline-2 focus-visible:outline-offset-2",
-  "disabled:pointer-events-none disabled:opacity-60",
-);
 
 /**
  * Till → branch mapping. A till whose sales aren't pointed at a branch counts
@@ -109,7 +104,8 @@ export function TillsView({
                   </span>
                 </TableCell>
                 <TableCell>
-                  <select
+                  <Select
+                    size="sm"
                     aria-label={`Branch for ${till.warehouse}`}
                     value={till.locationId ?? ""}
                     disabled={!canManage || pending}
@@ -123,7 +119,6 @@ export function TillsView({
                             }),
                       )
                     }
-                    className={selectClass}
                   >
                     <option value="">Not mapped — sales count for no branch</option>
                     {locations.map((location) => (
@@ -131,7 +126,7 @@ export function TillsView({
                         {location.name}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </TableCell>
                 <TableCell numeric>{formatNumber(till.salesCount)}</TableCell>
               </TableRow>
@@ -221,7 +216,8 @@ export function LocationsView({
                     </TableCell>
                     <TableCell>
                       <div className="space-y-1">
-                        <select
+                        <Select
+                          size="sm"
                           aria-label={`Role for ${row.name}`}
                           value={selectedType}
                           disabled={!canManage || pending}
@@ -230,14 +226,13 @@ export function LocationsView({
                               setLocationRole({ locationId: row.id, locationType: e.target.value }),
                             )
                           }
-                          className={selectClass}
                         >
                           {ROLE_OPTIONS.map((option) => (
                             <option key={option.type} value={option.type}>
                               {option.label}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                         <p className="max-w-xs text-xs text-ink-muted">
                           {LOCATION_ROLE_DESCRIPTIONS[role]}
                         </p>

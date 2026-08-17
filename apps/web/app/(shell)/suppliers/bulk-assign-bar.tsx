@@ -1,18 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import type { SupplierOption, UnassignedBrand } from "@/lib/data/suppliers";
 import { bulkAssignByBrandAction, type SupplierActionResult } from "./actions";
 
-const selectClass = cn(
-  "h-8 rounded-md border border-edge bg-surface px-2 text-sm text-ink transition-colors",
-  "outline-accent focus-visible:outline-2 focus-visible:outline-offset-2",
-  "disabled:pointer-events-none disabled:opacity-60",
-);
 
 /**
  * "Assign by brand" — the missing piece. Unassigned products grouped by Shopify
@@ -86,9 +81,9 @@ export function BulkAssignBar({
               <label className="sr-only" htmlFor={`assign-${brand.vendor}`}>
                 Supplier for {brand.vendor}
               </label>
-              <select
+              <Select
+                size="sm"
                 id={`assign-${brand.vendor}`}
-                className={selectClass}
                 disabled={!canManage || pending}
                 value={picked[brand.vendor] ?? ""}
                 onChange={(e) =>
@@ -101,7 +96,7 @@ export function BulkAssignBar({
                     {option.name}
                   </option>
                 ))}
-              </select>
+              </Select>
               <Button
                 size="sm"
                 disabled={!canManage || !picked[brand.vendor]}

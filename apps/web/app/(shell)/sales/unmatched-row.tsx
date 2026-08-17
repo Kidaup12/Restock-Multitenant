@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { formatMoney, formatNumber } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
@@ -64,10 +65,11 @@ export function UnmatchedRow({
       {canFix ? (
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1.5">
-            <select
+            <Select
+              size="sm"
+              className="max-w-52"
               value={productId}
               onChange={(e) => setProductId(e.target.value)}
-              className="h-8 max-w-52 rounded-md border border-edge bg-surface px-2 text-xs text-ink outline-accent focus-visible:outline-2"
             >
               <option value="">Pick a product…</option>
               {products.map((p) => (
@@ -75,7 +77,7 @@ export function UnmatchedRow({
                   {p.title} ({p.sku})
                 </option>
               ))}
-            </select>
+            </Select>
             {row.suggestion && productId === row.suggestion.productId && (
               <Badge tone="accent">Suggested</Badge>
             )}

@@ -44,6 +44,7 @@ export async function MetricsTiles({
       <StatTile
         label="Stockouts"
         value={formatNumber(m.stockedOutProducts)}
+        valueTone={m.stockedOutProducts > 0 ? "negative" : "positive"}
         delta={
           m.stockedOutProducts > 0
             ? { label: "Zero on hand right now", tone: "negative", direction: "up" }
@@ -53,6 +54,7 @@ export async function MetricsTiles({
       <StatTile
         label="Dead stock"
         value={<CostValue amount={m.deadStock.costKes} canViewCosts={canViewCosts} compact />}
+        valueTone={canViewCosts && m.deadStock.skus > 0 ? "warning" : "default"}
         delta={{
           label: `${m.deadStock.skus} SKUs, ${m.deadStock.windowDays}+ days idle`,
           tone: "neutral",

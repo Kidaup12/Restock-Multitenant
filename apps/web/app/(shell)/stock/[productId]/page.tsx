@@ -59,7 +59,18 @@ export default async function ProductPage({
         title="Product"
         description="One product and everything about it"
       />
-      <Suspense fallback={<SkeletonCard lines={8} />}>
+      <Suspense
+        fallback={
+          // Four cards, matching the detail view. One tall block stood in for
+          // all of them and collapsed into four on load.
+          <div className="space-y-6">
+            <SkeletonCard lines={4} />
+            <SkeletonCard lines={3} />
+            <SkeletonCard lines={3} />
+            <SkeletonCard lines={2} />
+          </div>
+        }
+      >
         <ProductContent
           tenantId={membership.tenantId}
           productId={productId}

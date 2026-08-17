@@ -3,8 +3,8 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ORDER_METHODS, type OrderMethod } from "@wezesha/forecast";
-import { cn } from "@/lib/cn";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -50,11 +50,6 @@ const GROUPS = [
   },
 ];
 
-const selectClass = cn(
-  "h-10 w-full rounded-md border border-edge bg-surface px-3 text-sm text-ink transition-colors",
-  "outline-accent focus-visible:outline-2 focus-visible:outline-offset-2",
-  "disabled:pointer-events-none disabled:opacity-60",
-);
 
 export type WorkspaceFormValues = {
   name: string;
@@ -152,19 +147,18 @@ export function WorkspaceForm({
           </Field>
 
           <Field label="Time zone" htmlFor="workspace-timezone" error={errorFor("timezone")}>
-            <select
+            <Select
               id="workspace-timezone"
               value={values.timezone}
               disabled={!canManage || pending}
               onChange={(e) => set("timezone", e.target.value)}
-              className={selectClass}
             >
               {timezones.map((zone) => (
                 <option key={zone} value={zone}>
                   {zone}
                 </option>
               ))}
-            </select>
+            </Select>
             <p className="text-xs text-ink-muted">
               A till sale rung at 23:30 counts as that day, not the next one. Change
               this only if the shop trades somewhere else.
@@ -256,19 +250,18 @@ export function WorkspaceForm({
             const value = values[key];
             return (
               <Field key={group.key} label={group.label} htmlFor={`workspace-${key}`}>
-                <select
+                <Select
                   id={`workspace-${key}`}
                   value={value}
                   disabled={!canManage || pending}
                   onChange={(e) => set(key, e.target.value as OrderMethod)}
-                  className={selectClass}
                 >
                   {ORDER_METHODS.map((method) => (
                     <option key={method} value={method}>
                       {METHOD_LABEL[method]}
                     </option>
                   ))}
-                </select>
+                </Select>
                 <p className="text-xs text-ink-muted">
                   {group.hint} {METHOD_HINT[value]}
                 </p>
