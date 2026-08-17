@@ -37,9 +37,16 @@ export function CostValue({
   className?: string;
 }) {
   const currency = useCurrency();
+  const masked = !canViewCosts || amount == null;
   return (
-    <span className={cn("tabular-nums", className)}>
-      {canViewCosts && amount != null ? formatMoney(amount, currency, { compact }) : maskedMoney(currency)}
+    <span
+      className={cn("tabular-nums", masked && "text-ink-faint select-none", className)}
+      // A masked figure is withheld, not missing. The reference renders a bare
+      // dash for the same case, which tells a money-blind member the shop has no
+      // cost on file — a different and wrong statement. The glyphs stay, dimmed.
+      title={masked ? "You don't have access to cost figures" : undefined}
+    >
+      {masked ? maskedMoney(currency) : formatMoney(amount, currency, { compact })}
     </span>
   );
 }
