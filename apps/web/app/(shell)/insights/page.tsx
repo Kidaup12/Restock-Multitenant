@@ -1,14 +1,13 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getTenantPlan } from "@/lib/capabilities";
 import { PLAN_TIER_LABEL, planAllows, planFeatureTier } from "@/lib/capabilities/plan-features";
-import { cn } from "@/lib/cn";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { SegmentedNav } from "@/components/ui/segmented-nav";
 import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonCard, SkeletonStatTile, SkeletonTableRows } from "@/components/ui/skeleton";
 import { ForecastScorecard } from "./forecast-scorecard";
@@ -23,25 +22,15 @@ export const metadata: Metadata = {
 const DESCRIPTION = "Where your money is stuck, and whether the forecast is earning its keep";
 
 function ViewTabs({ view }: { view: "now" | "proof" }) {
-  const tab = (href: string, label: string, active: boolean) => (
-    <Link
-      href={href}
-      className={cn(
-        "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-        active ? "bg-accent-soft text-accent-ink" : "text-ink-muted hover:bg-surface-2 hover:text-ink"
-      )}
-    >
-      {label}
-    </Link>
-  );
   return (
-    <div
-      className="flex items-center gap-1 rounded-lg border border-edge bg-surface p-1"
+    <SegmentedNav
+      label="Report views"
       data-tour="insights-tabs"
-    >
-      {tab("/insights", "Where you stand", view === "now")}
-      {tab("/insights?view=proof", "Is it working?", view === "proof")}
-    </div>
+      items={[
+        { href: "/insights", label: "Where you stand", active: view === "now" },
+        { href: "/insights?view=proof", label: "Is it working?", active: view === "proof" },
+      ]}
+    />
   );
 }
 
@@ -113,6 +102,9 @@ export default async function InsightsPage({
                 <SkeletonStatTile />
                 <SkeletonStatTile />
               </div>
+              {/* Shelf health loads TWO tables — empty shelves, then dead
+                  stock. One stood in for both and the page jumped on load. */}
+              <SkeletonTableRows rows={6} />
               <SkeletonTableRows rows={6} />
             </div>
           }
