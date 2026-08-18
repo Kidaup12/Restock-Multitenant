@@ -27,7 +27,7 @@ export default async function PosSettingsPage() {
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Till sales" description="Send in-store sales to Wezesha" />
+        <PageHeader eyebrow="Settings" title="Till sales" description="Send in-store sales to Wezesha" />
         <EmptyState
           icon={<ChartIcon />}
           title="No workspace"

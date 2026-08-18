@@ -19,7 +19,7 @@ export default async function LocationsSettingsPage() {
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Locations" description="What each location does for your stock math" />
+        <PageHeader eyebrow="Settings" title="Locations" description="What each location does for your stock math" />
         <EmptyState
           icon={<LayersIcon />}
           title="No workspace"

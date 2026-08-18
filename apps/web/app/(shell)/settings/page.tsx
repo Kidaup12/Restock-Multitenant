@@ -179,7 +179,7 @@ export default async function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Settings" description="Workspace, team, and integrations" />
+      <PageHeader eyebrow="Account" title="Settings" description="Workspace, team, and integrations" />
       {membership && (
         <Suspense fallback={<SkeletonCard />}>
           <SettingsSections tenantId={membership.tenantId} />

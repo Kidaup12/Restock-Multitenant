@@ -29,7 +29,7 @@ export default async function OrdersPage({
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Orders" description="Purchase orders and deliveries" />
+        <PageHeader eyebrow="Buy" title="Orders" description="Purchase orders and deliveries" />
         <EmptyState
           title="No workspace yet"
           description="Ask an admin to invite you to a workspace to manage its purchase orders."
@@ -44,7 +44,7 @@ export default async function OrdersPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <PageHeader eyebrow="Buy"
         title="Orders"
         description="What to buy, and every purchase order from draft to delivered"
       />

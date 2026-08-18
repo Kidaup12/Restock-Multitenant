@@ -34,7 +34,7 @@ export default async function TeamPage() {
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Team" description="Who has access to this workspace" />
+        <PageHeader eyebrow="Settings" title="Team" description="Who has access to this workspace" />
         <EmptyState
           icon={<UsersIcon />}
           title="No workspace"
