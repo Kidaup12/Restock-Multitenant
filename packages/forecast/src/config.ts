@@ -4,7 +4,7 @@
  * fields onto defaults. Null/absent always means "code default".
  */
 import { SERVICE_Z_DEFAULTS } from "./baseline";
-import { DEFAULT_CAP_MULTIPLE } from "./layered";
+import { CHAMPION_DEFAULT, DEFAULT_CAP_MULTIPLE, type DemandMethod } from "./layered";
 
 // ── Per-ABC-class ordering method ────────────────────────────────────────────
 // Business-facing choice a merchant makes per class. Recommended defaults:
@@ -79,4 +79,31 @@ export function policyForClass(
 ): OrderPolicy {
   const cls = abc === "A" || abc === "B" || abc === "C" ? abc : "C";
   return methodToPolicy(methods[cls]);
+}
+
+/**
+ * The demand method each ABC class won in the last audition.
+ *
+ * Stored as loose JSON, so every value is checked on the way out: an unknown
+ * or missing method falls back to the run rate rather than throwing. A shop
+ * that has never been audited forecasts exactly as it did before.
+ */
+export function resolveChampions(
+  stored: unknown
+): Record<"A" | "B" | "C", DemandMethod> {
+  const raw = stored && typeof stored === "object" ? (stored as Record<string, unknown>) : {};
+  const pick = (cls: "A" | "B" | "C"): DemandMethod =>
+    raw[cls] === "run_rate" || raw[cls] === "recent_heavy"
+      ? (raw[cls] as DemandMethod)
+      : CHAMPION_DEFAULT;
+  return { A: pick("A"), B: pick("B"), C: pick("C") };
+}
+
+/** The method for a product's ABC class. Unclassified products take C's. */
+export function championForClass(
+  champions: Record<"A" | "B" | "C", DemandMethod>,
+  abc: string | null | undefined
+): DemandMethod {
+  const cls = abc === "A" || abc === "B" || abc === "C" ? abc : "C";
+  return champions[cls];
 }

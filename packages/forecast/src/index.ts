@@ -126,6 +126,8 @@ export {
   parseOrderMethod,
   resolveForecastKnobs,
   policyForClass,
+  resolveChampions,
+  championForClass,
   ORDER_METHODS,
   METHOD_DEFAULTS,
   type OrderMethod,
