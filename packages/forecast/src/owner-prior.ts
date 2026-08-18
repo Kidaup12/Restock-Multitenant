@@ -14,6 +14,17 @@
 
 export type PriorScope = "product" | "brand";
 
+/**
+ * The most a multiplier prior may scale the engine's own number.
+ *
+ * A multiplier is a relative nudge — "run this brand hotter for a while". A real
+ * campaign is 2–3×; past that it is almost always a slip (a `9` meant for `0.9`,
+ * or a stray digit), and because a prior bypasses the reality guardrail it would
+ * otherwise fund a buy list off a typo. An expectation in absolute units is a
+ * different thing — the owner naming a number they mean — and is left alone.
+ */
+export const OWNER_PRIOR_MAX_MULTIPLIER = 4;
+
 /** The shape the engine needs to reason about a prior. Storage carries more
  *  (author, note, id); only these fields drive the math. */
 export type OwnerPriorFacts = {
@@ -91,6 +102,6 @@ export function applyOwnerPrior(
 ): number {
   let v = base30d;
   if (p.expectedUnits != null) v = p.expectedUnits;
-  if (p.multiplier != null) v = v * p.multiplier;
+  if (p.multiplier != null) v = v * Math.min(p.multiplier, OWNER_PRIOR_MAX_MULTIPLIER);
   return Math.max(0, v);
 }
