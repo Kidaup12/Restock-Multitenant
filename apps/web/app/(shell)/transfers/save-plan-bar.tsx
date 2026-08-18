@@ -55,7 +55,8 @@ export function SavePlanBar({
         value={name}
         onChange={(e) => setName(e.target.value)}
         placeholder="Name this plan (optional)"
-        className="min-h-8 w-56 text-xs"
+        size="sm"
+        className="w-56"
       />
       <Button size="sm" loading={pending} onClick={save}>
         Save plan

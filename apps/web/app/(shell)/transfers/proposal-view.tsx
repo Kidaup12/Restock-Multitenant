@@ -115,18 +115,17 @@ export async function ProposalView({
           subtitle={`Sized to give every branch ${proposal.coverDays} days of cover at its own rate — ${basisCaption[basis]}.`}
           action={<Badge tone={proposal.hasAttributedDemand ? "positive" : "neutral"}>{basisLabel[basis]}</Badge>}
         />
-        <div className="px-5 pt-4">
-          <div className="flex flex-wrap gap-2">
-            {proposal.destinations.map((d) => (
-              <span
-                key={d.locationId}
-                className="rounded-md border border-edge bg-surface-2 px-3 py-1.5 text-sm text-ink-secondary"
-              >
-                <span className="font-medium text-ink">{d.name}</span> · {formatNumber(d.units)} units ·{" "}
-                {d.skus} SKUs · <CostValue amount={d.valueKes} canViewCosts={canViewCosts} compact />
-              </span>
-            ))}
-          </div>
+        {/* Where these lines are going, as a band across the top of the rows
+            rather than a chip floating above them — the reference leads every
+            grouped table this way, and it carries the same four facts. */}
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-y border-edge bg-surface-2 px-5 py-2 text-2xs tracking-wider text-ink-muted uppercase">
+          {proposal.destinations.map((d) => (
+            <span key={d.locationId}>
+              <span className="font-semibold text-ink-secondary">{d.name}</span> ·{" "}
+              {formatNumber(d.units)} units · {d.skus} SKUs ·{" "}
+              <CostValue amount={d.valueKes} canViewCosts={canViewCosts} compact />
+            </span>
+          ))}
         </div>
 
         {proposal.skipped.length > 0 && (
@@ -136,8 +135,8 @@ export async function ProposalView({
           </p>
         )}
 
-        <div className="mt-2 pb-2">
-          <Table>
+        <div className="pb-2">
+          <Table dense>
             <TableHeader>
               <TableHead>Product</TableHead>
               <TableHead>SKU</TableHead>
