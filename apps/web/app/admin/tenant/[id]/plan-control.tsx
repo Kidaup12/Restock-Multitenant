@@ -57,7 +57,7 @@ export function PlanControl({ tenantId, plan }: { tenantId: string; plan: string
   return (
     <div className="space-y-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <label htmlFor="plan" className="text-ink-muted">
+        <label htmlFor="plan" className="text-2xs font-medium tracking-wider text-ink-muted uppercase">
           Tier
         </label>
         <Select
