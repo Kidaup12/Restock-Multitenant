@@ -6,7 +6,7 @@ import { LayersIcon } from "@/components/icons";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SegmentedNav } from "@/components/ui/segmented-nav";
 import { PageHeader } from "@/components/ui/page-header";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { SkeletonCard, SkeletonStatTile, SkeletonTableRows } from "@/components/ui/skeleton";
 import {
   getTenantPlan,
@@ -35,17 +35,19 @@ export const metadata: Metadata = {
 function LockedTransfers() {
   const tier = PLAN_TIER_LABEL[planFeatureTier("transfers")];
   return (
-    <div aria-disabled="true" className="rounded-lg border border-edge bg-surface p-5 text-left opacity-75">
-      <div className="grid size-9 place-items-center rounded-md bg-surface-2 text-ink-muted [&_svg]:size-4.5">
-        <LayersIcon />
-      </div>
-      <h2 className="mt-3 text-base font-semibold text-ink">Move stock between branches</h2>
-      <p className="mt-1 text-sm text-ink-muted">
-        Build a plan that says exactly what to move from the warehouse to each shop, sized so every
-        shop ends up with the same days of cover at its own selling rate.
-      </p>
-      <p className="mt-3 text-sm font-medium text-accent-ink">Unlock on {tier}.</p>
-    </div>
+    <Card aria-disabled="true" className="text-left opacity-75">
+      <CardContent>
+        <div className="grid size-9 place-items-center rounded-md bg-surface-2 text-ink-muted [&_svg]:size-4.5">
+          <LayersIcon />
+        </div>
+        <h2 className="mt-3 text-base font-semibold text-ink">Move stock between branches</h2>
+        <p className="mt-1 text-sm text-ink-muted">
+          Build a plan that says exactly what to move from the warehouse to each shop, sized so every
+          shop ends up with the same days of cover at its own selling rate.
+        </p>
+        <p className="mt-3 text-sm font-medium text-accent-ink">Unlock on {tier}.</p>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -83,7 +85,7 @@ async function TransfersContent({
     <div className="space-y-6">
       <Card className="flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-4">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium tracking-wider text-ink-muted uppercase">Move from</span>
+          <span className="text-2xs font-medium tracking-wider text-ink-muted uppercase">Move from</span>
           <SegmentedNav
             label="Move stock from"
             items={locations.map((location) => ({
@@ -94,7 +96,7 @@ async function TransfersContent({
           />
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-medium tracking-wider text-ink-muted uppercase">Cover target</span>
+          <span className="text-2xs font-medium tracking-wider text-ink-muted uppercase">Cover target</span>
           <SegmentedNav
             label="Cover target"
             items={COVER_DAY_CHOICES.map((days) => ({
@@ -146,7 +148,11 @@ export default async function TransfersPage({
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Transfers" description="Move stock to the shops that will sell it" />
+        <PageHeader
+          eyebrow="Stock"
+          title="Transfers"
+          description="Even out cover between branches: move what one shop is sitting on to the shop that is selling it."
+        />
         <EmptyState
           title="No workspace yet"
           description="Ask an admin to invite you to a workspace to plan its transfers."
@@ -167,8 +173,9 @@ export default async function TransfersPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow="Stock"
         title="Transfers"
-        description="Move stock to the shops that will sell it"
+        description="Even out cover between branches: move what one shop is sitting on to the shop that is selling it."
       />
 
       <Suspense fallback={<SkeletonCard lines={3} />}>
