@@ -220,7 +220,7 @@ export function CatalogueView({
         <SortBar query={query} canViewCosts={canViewCosts} hrefFor={hrefFor} />
 
         <CardContent className="p-0 py-2">
-          <Table>
+          <Table dense>
             <TableHeader>
               {canManage && (
                 <TableHead>

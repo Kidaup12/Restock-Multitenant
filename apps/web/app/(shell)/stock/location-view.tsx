@@ -159,7 +159,7 @@ export async function LocationView({
             {location.lines.length === 0 ? (
               <p className="px-5 pb-4 text-sm text-ink-muted">Nothing on hand here.</p>
             ) : (
-              <Table>
+              <Table dense>
                 <TableHeader>
                   <TableHead>Product</TableHead>
                   <TableHead>SKU</TableHead>
