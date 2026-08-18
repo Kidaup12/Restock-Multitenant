@@ -132,7 +132,7 @@ export function AdminsCard({ admins }: { admins: PlatformAdminRow[] }) {
             value={email}
             placeholder="person@company.com"
             onChange={(e) => setEmail(e.target.value)}
-            className="h-9 w-64 text-sm"
+            className="min-h-9 w-64 text-sm"
             aria-label="Email to grant console access"
           />
           <Button size="sm" onClick={grant} loading={pending} disabled={!email.trim()}>
