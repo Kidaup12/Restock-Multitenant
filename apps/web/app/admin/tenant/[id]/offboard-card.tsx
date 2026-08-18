@@ -115,7 +115,7 @@ export function OffboardCard({
               value={confirmSlug}
               placeholder={slug}
               onChange={(e) => setConfirmSlug(e.target.value)}
-              className="h-9 w-56 font-mono text-sm"
+              className="min-h-9 w-56 font-mono text-sm"
               aria-label="Type the workspace slug to confirm deletion"
             />
             <Button

@@ -49,6 +49,10 @@ describe("a caller can override a control's height", () => {
   // The trap itself, asserted so the reason for `min-h-*` is on the record: a
   // plain height does NOT win, because it is a different utility group.
   it("a plain height does not override the minimum — this is why callers use min-h", () => {
+    // The one place the losing form is written on purpose. The lint rule that
+    // now bans it everywhere else is itself proved by this line: unwire the
+    // rule and `reportUnusedDisableDirectives` turns this disable into an error.
+    // eslint-disable-next-line control-class-override/no-losing-height -- asserting the trap
     const cls = classesOf(renderToStaticMarkup(<Button size="sm" className="h-6" />));
     expect(cls).toContain("h-6");
     expect(

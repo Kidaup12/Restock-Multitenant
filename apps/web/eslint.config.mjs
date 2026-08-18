@@ -5,6 +5,7 @@ import nextTs from "eslint-config-next/typescript";
 // and a lint rule has no business in the package's public surface.
 import tenantSafety from "../../packages/db/eslint-plugin-tenant-safety/index.mjs";
 import costVisibility from "./eslint-rules/cost-visibility.mjs";
+import controlClassOverride from "./eslint-rules/control-class-override.mjs";
 
 const eslintConfig = defineConfig([
   ...nextVitals,
@@ -34,6 +35,15 @@ const eslintConfig = defineConfig([
     files: ["**/*.{ts,tsx}"],
     plugins: { "cost-visibility": costVisibility },
     rules: { "cost-visibility/require-cost-gate": "error" },
+  },
+  {
+    // A control that sets a minimum height cannot be shortened by a plain
+    // `h-*` — both classes survive the merge and the minimum wins. The source
+    // still reads correctly, which is why this needs a rule and not a sweep:
+    // the last sweep left three call sites wrong on screens it never opened.
+    files: ["**/*.tsx"],
+    plugins: { "control-class-override": controlClassOverride },
+    rules: { "control-class-override/no-losing-height": "error" },
   },
   {
     // Four helpers that read cost columns and are not the surface the guarantee
