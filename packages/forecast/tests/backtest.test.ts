@@ -104,6 +104,8 @@ const acc = (method: DemandMethod, mae: number, sampleSize = 12): ClassAccuracy 
   mape: 0.1,
   sampleSize,
   leans: "even",
+  // No scale: these cases pin the margin arithmetic on the MAE fallback.
+  scaleFree: { mase: null, rmsse: null, pinball: null },
 });
 
 describe("auditChampion — run rate reigns until a real win", () => {
@@ -129,6 +131,42 @@ describe("auditChampion — run rate reigns until a real win", () => {
 
   it("defaults to run rate when there is no baseline at all", () => {
     expect(auditChampion({})).toBe("run_rate");
+  });
+
+  /** A scale exists, so the audit judges on RMSSE rather than the MAE fallback. */
+  const scaled = (method: DemandMethod, mae: number, rmsse: number) => ({
+    ...acc(method, mae),
+    scaleFree: { mase: null, rmsse, pinball: null },
+  });
+
+  it("judges on RMSSE when the histories could be scaled", () => {
+    // Challenger is far better on RMSSE and no better on MAE — it still wins.
+    expect(
+      auditChampion({
+        run_rate: scaled("run_rate", 10, 1.0),
+        recent_heavy: scaled("recent_heavy", 10, 0.5),
+      })
+    ).toBe("recent_heavy");
+  });
+
+  it("does not hand the class to a method that only wins on MAE", () => {
+    // The give-up shape: much lower absolute error, worse squared-scaled error
+    // because it misses every spike. Selecting on MAE would switch here.
+    expect(
+      auditChampion({
+        run_rate: scaled("run_rate", 10, 0.5),
+        recent_heavy: scaled("recent_heavy", 5, 0.9),
+      })
+    ).toBe("run_rate");
+  });
+
+  it("falls back to MAE when only one side could be scaled", () => {
+    expect(
+      auditChampion({
+        run_rate: scaled("run_rate", 10, 1.0),
+        recent_heavy: acc("recent_heavy", 8),
+      })
+    ).toBe("recent_heavy");
   });
 });
 

@@ -17,6 +17,7 @@
 import { runRateDaily } from "./layered";
 import type { SalesPoint } from "./baseline";
 import type { AbcCategory } from "./abc";
+import { scaleFreeAccuracy, type ScaleFreeAccuracy, type WindowError } from "./accuracy";
 
 /** Demand methods in the audition. Run rate is the champion; recent_heavy is a
  *  more reactive challenger (trailing-30-day mean, no long-tail anchor). Adding
@@ -55,6 +56,10 @@ export type ClassAccuracy = {
   /** Number of product-windows scored. */
   sampleSize: number;
   leans: Lean;
+  /** Scale-free accuracy, averaged over the products in this class so a busy
+   *  product cannot drown a quiet one. Null where no product could supply a
+   *  scale (every history in the class was flat). */
+  scaleFree: ScaleFreeAccuracy;
 };
 
 const DAY_MS = 86_400_000;
@@ -122,11 +127,51 @@ function lean(bias: number, happenedUnits: number, sampleSize: number): Lean {
   return "even";
 }
 
+/** The service quantile the pinball loss prices under-forecasting at — the same
+ *  level the order-up-to rules aim for. */
+const PINBALL_TAU = 0.95;
+
+/** A product's sales as one value per day, zeros included. The scales in
+ *  `accuracy` measure how much a series moves, so the quiet days have to be
+ *  present — a sparse list of sale days would look like a steady seller. */
+function densify(history: SalesPoint[]): number[] {
+  if (history.length === 0) return [];
+  let first = history[0]!.date.getTime();
+  let last = first;
+  for (const p of history) {
+    const t = p.date.getTime();
+    if (t < first) first = t;
+    if (t > last) last = t;
+  }
+  const days = Math.round((last - first) / DAY_MS) + 1;
+  const daily = new Array<number>(days).fill(0);
+  for (const p of history) {
+    daily[Math.round((p.date.getTime() - first) / DAY_MS)]! += p.quantity;
+  }
+  return daily;
+}
+
+/** Mean of the values that exist, or null when none do. */
+function meanOf(values: Array<number | null>): number | null {
+  const real = values.filter((v): v is number => v != null && Number.isFinite(v));
+  return real.length > 0 ? real.reduce((s, v) => s + v, 0) / real.length : null;
+}
+
+/** Pool per-product scale-free scores with equal weight per product. */
+function poolScaleFree(perProduct: ScaleFreeAccuracy[]): ScaleFreeAccuracy {
+  return {
+    mase: meanOf(perProduct.map((s) => s.mase)),
+    rmsse: meanOf(perProduct.map((s) => s.rmsse)),
+    pinball: meanOf(perProduct.map((s) => s.pinball)),
+  };
+}
+
 /** One class's accuracy for one method, from its per-window errors. */
 function aggregate(
   abcClass: AbcCategory | "ALL",
   method: DemandMethod,
-  windows: Array<{ said: number; happened: number }>
+  windows: Array<{ said: number; happened: number }>,
+  perProductScaleFree: ScaleFreeAccuracy[]
 ): ClassAccuracy {
   const sampleSize = windows.length;
   const saidUnits = windows.reduce((s, w) => s + w.said, 0);
@@ -151,6 +196,7 @@ function aggregate(
     mape,
     sampleSize,
     leans: lean(bias, happenedUnits, sampleSize),
+    scaleFree: poolScaleFree(perProductScaleFree),
   };
 }
 
@@ -172,6 +218,15 @@ export function walkForwardBacktest(
 ): BacktestResult {
   // class -> method -> windows
   const buckets = new Map<AbcCategory | "ALL", Map<DemandMethod, Array<{ said: number; happened: number }>>>();
+  // class -> method -> one scale-free score per product
+  const scaled = new Map<AbcCategory | "ALL", Map<DemandMethod, ScaleFreeAccuracy[]>>();
+  const pushScaled = (cls: AbcCategory | "ALL", method: DemandMethod, score: ScaleFreeAccuracy) => {
+    let byMethod = scaled.get(cls);
+    if (!byMethod) scaled.set(cls, (byMethod = new Map()));
+    let list = byMethod.get(method);
+    if (!list) byMethod.set(method, (list = []));
+    list.push(score);
+  };
   const push = (
     cls: AbcCategory | "ALL",
     method: DemandMethod,
@@ -187,6 +242,8 @@ export function walkForwardBacktest(
 
   for (const product of products) {
     const cls: AbcCategory = product.abcClass ?? "C";
+    const daily = densify(product.history);
+    const own = new Map<DemandMethod, WindowError[]>();
     for (const cutoff of cutoffs) {
       // Skip cutoffs whose horizon runs past the product's own history end.
       const end = new Date(cutoff.getTime() + horizonDays * DAY_MS);
@@ -197,14 +254,22 @@ export function walkForwardBacktest(
         const said = methodDailyRate(method, product.history, cutoff) * horizonDays;
         push(cls, method, said, happened);
         push("ALL", method, said, happened);
+        let mine = own.get(method);
+        if (!mine) own.set(method, (mine = []));
+        mine.push({ said, happened });
       }
+    }
+    for (const [method, windows] of own) {
+      const score = scaleFreeAccuracy(windows, daily, PINBALL_TAU);
+      pushScaled(cls, method, score);
+      pushScaled("ALL", method, score);
     }
   }
 
   const byClass: ClassAccuracy[] = [];
   for (const [cls, byMethod] of buckets) {
     for (const [method, windows] of byMethod) {
-      byClass.push(aggregate(cls, method, windows));
+      byClass.push(aggregate(cls, method, windows, scaled.get(cls)?.get(method) ?? []));
     }
   }
   return { horizonDays, byClass };
@@ -218,14 +283,32 @@ export function walkForwardBacktest(
 export function auditChampion(resultsByMethod: Partial<Record<DemandMethod, ClassAccuracy>>): DemandMethod {
   const baseline = resultsByMethod[CHAMPION_DEFAULT];
   if (!baseline || baseline.sampleSize === 0) return CHAMPION_DEFAULT;
+
+  // Judge on RMSSE where the histories could supply a scale. Mean absolute
+  // error is minimised by the median, which on a shop's intermittent long tail
+  // is zero — it would hand the class to whichever method stops forecasting.
+  // RMSSE answers to the mean, so missing the spikes is what costs a method.
+  // MAE remains the fallback for a class too flat to scale, where the two rank
+  // the same anyway.
+  // One basis for the whole audit — mixing an RMSSE against a MAE compares
+  // numbers in different units and picks a winner by accident.
+  const contenders = DEMAND_METHODS.map((m) => resultsByMethod[m]).filter(
+    (r): r is ClassAccuracy => r != null && r.sampleSize > 0
+  );
+  const onRmsse = contenders.every((r) => r.scaleFree.rmsse != null);
+  const scoreOf = (r: ClassAccuracy): number => (onRmsse ? r.scaleFree.rmsse! : r.mae);
+
   let champion: DemandMethod = CHAMPION_DEFAULT;
-  let bestMae = baseline.mae;
+  const incumbent = scoreOf(baseline);
+  let best = incumbent;
   for (const method of DEMAND_METHODS) {
     if (method === CHAMPION_DEFAULT) continue;
     const r = resultsByMethod[method];
-    if (r && r.sampleSize > 0 && r.mae < baseline.mae * (1 - CHALLENGER_WIN_MARGIN) && r.mae < bestMae) {
+    if (!r || r.sampleSize === 0) continue;
+    const challenger = scoreOf(r);
+    if (challenger < incumbent * (1 - CHALLENGER_WIN_MARGIN) && challenger < best) {
       champion = method;
-      bestMae = r.mae;
+      best = challenger;
     }
   }
   return champion;
