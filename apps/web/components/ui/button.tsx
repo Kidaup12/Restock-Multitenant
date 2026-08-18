@@ -2,22 +2,23 @@ import { cn } from "@/lib/cn";
 import { Spinner } from "@/components/ui/spinner";
 
 /**
- * Ink is the primary action, not the accent.
+ * The accent carries the primary action.
  *
- * The accent is spent deliberately — roughly a tenth of any screen — so the
- * ordinary "go" button is near-black and `accent` is reserved for the one action
- * a screen is actually about. Every existing `primary` therefore turns from a
- * coloured button into an ink one, which is the intended shift and not a
- * regression: a page with six violet buttons had no way to say which mattered.
+ * Measured off the reference rather than inferred: its create action renders at
+ * the accent, secondary actions are white with an edge, and ink is reserved for
+ * the active segment in a tab strip. An earlier reading had this backwards and
+ * made every primary near-black, which left the accent unused across the whole
+ * app — the screens went quiet in the one place the reference is loud.
  *
- * `danger` has no counterpart in the reference; it stays, because destructive
- * actions still have to look destructive.
+ * Screens hold to one primary each; the rest are `ghost`. `danger` has no
+ * counterpart there and stays, because destructive actions still have to look
+ * destructive.
  */
 const variants = {
-  // Sits at body ink and deepens on press, so the hover intensifies rather than
-  // fades. In dark that inverts to a near-white button brightening to white.
-  primary: "bg-ink text-surface hover:bg-ink-strong active:bg-ink-strong",
-  accent: "bg-accent text-on-accent hover:bg-accent-strong active:bg-accent-strong shadow-card",
+  // Accent at rest, deepening on press. The shadow is the reference's own —
+  // the same one-pixel lift the cards carry.
+  primary:
+    "bg-accent text-on-accent hover:bg-accent-strong active:bg-accent-strong shadow-card",
   ghost:
     "border border-edge bg-surface text-ink hover:bg-surface-2 active:bg-surface-2",
   danger: "bg-negative text-on-accent hover:brightness-95",

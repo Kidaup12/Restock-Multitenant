@@ -28,6 +28,7 @@ export function ExportBar<T>({
   filename,
   document: printable,
   className,
+  size = "sm",
 }: {
   /** The rows currently visible under the active filter. Omit when the screen
    *  only holds a page of them and passes `loadRows` instead. */
@@ -42,6 +43,9 @@ export function ExportBar<T>({
   columns: readonly ExportColumn<T>[];
   /** Base filename, no extension — the download is date-stamped. */
   filename: string;
+  /** Matches whatever the screen puts these buttons beside — table toolbars run
+   *  dense, a page's own action row runs full height. */
+  size?: "sm" | "md";
   /** When set, adds a "Save PDF" button printing these rows as a document. */
   document?: { title: string; subtitle?: string; footNote?: string };
   className?: string;
@@ -101,14 +105,14 @@ export function ExportBar<T>({
   const disabled = empty || busy;
   return (
     <div className={className ? `flex items-center gap-2 ${className}` : "flex items-center gap-2"}>
-      <Button variant="ghost" size="sm" disabled={disabled} onClick={downloadCsv}>
+      <Button variant="ghost" size={size} disabled={disabled} onClick={downloadCsv}>
         Export CSV
       </Button>
-      <Button variant="ghost" size="sm" disabled={disabled} onClick={copyTsv}>
+      <Button variant="ghost" size={size} disabled={disabled} onClick={copyTsv}>
         {copied ? "Copied" : "Copy"}
       </Button>
       {printable && (
-        <Button variant="ghost" size="sm" disabled={disabled} onClick={savePdf}>
+        <Button variant="ghost" size={size} disabled={disabled} onClick={savePdf}>
           Save PDF
         </Button>
       )}

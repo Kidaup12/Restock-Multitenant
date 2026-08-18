@@ -3,14 +3,26 @@ import { cn } from "@/lib/cn";
 /* On small screens the table scrolls inside its container instead of squashing columns. */
 export function Table({
   className,
+  dense = false,
   children,
 }: {
   className?: string;
+  /** Narrows the column gutters for a table with enough columns to overflow its
+   *  card on a laptop. Nine columns spend 360px on gutters alone, which is what
+   *  pushed the row actions off the side of the suppliers table — the room comes
+   *  back from the spacing rather than from dropping a column someone needs. */
+  dense?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div className="w-full overflow-x-auto">
-      <table className={cn("w-full min-w-[560px] text-sm", className)}>
+      <table
+        className={cn(
+          "w-full min-w-[560px] text-sm",
+          dense && "[&_td]:px-3 [&_th]:px-3",
+          className,
+        )}
+      >
         {children}
       </table>
     </div>

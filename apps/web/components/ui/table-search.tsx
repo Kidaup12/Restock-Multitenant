@@ -42,6 +42,7 @@ export function TableSearch({
   clearHref,
   label = "Search",
   unit,
+  total,
 }: {
   /** Route the form posts to, e.g. "/activity". */
   action: string;
@@ -60,6 +61,10 @@ export function TableSearch({
   /** What is being counted, when "matches" is vaguer than it needs to be —
    *  "3 products match" reads better than "3 matches" on a catalogue. */
   unit?: string;
+  /** Rows the shop has, ignoring the search box. Set it where the screen has no
+   *  other place saying how many there are, and the row count sits beside the
+   *  box as "8 of 40" whether or not anything has been typed. */
+  total?: number;
 }) {
   return (
     <form method="get" action={action} className="flex flex-wrap items-center gap-2 px-5 pt-3">
@@ -72,7 +77,7 @@ export function TableSearch({
         defaultValue={value}
         placeholder={placeholder}
         aria-label={label}
-        className="peer min-h-9 min-w-64 flex-1 rounded-md border border-edge bg-surface px-3.5 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent-500 focus:ring-4 focus:ring-accent-100"
+        className="peer min-h-10 w-full max-w-80 rounded-md border border-edge bg-surface px-3.5 py-2 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent-500 focus:ring-4 focus:ring-accent-100"
       />
       <button
         type="submit"
@@ -88,12 +93,17 @@ export function TableSearch({
           >
             Clear
           </Link>
-          {matched != null && (
+          {matched != null && total == null && (
             <span className="text-2xs text-ink-muted">
               {matchSentence(matched, unit)}
             </span>
           )}
         </>
+      )}
+      {total != null && (
+        <span className="ml-auto text-2xs text-ink-muted">
+          {matched ?? total} of {total}
+        </span>
       )}
     </form>
   );
