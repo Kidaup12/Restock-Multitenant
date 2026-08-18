@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -38,9 +39,28 @@ const sizes = {
   md: "min-h-10 px-4 py-2.5 text-sm",
 };
 
+type Variant = keyof typeof variants;
+type Size = keyof typeof sizes;
+
+/** The one place a button's look is assembled, so a link that has to look like
+ *  a button (a navigation action) draws from the same source and cannot drift. */
+export function buttonClasses(variant: Variant = "primary", size: Size = "md", className?: string) {
+  return cn(
+    "relative inline-flex items-center justify-center rounded-md font-medium",
+    // Every button feels the press: a short ease-out scale, transform only.
+    "transition-[transform,background-color,color,border-color] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
+    "active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100",
+    "outline-accent focus-visible:outline-2 focus-visible:outline-offset-2",
+    "disabled:pointer-events-none disabled:opacity-60",
+    variants[variant],
+    sizes[size],
+    className,
+  );
+}
+
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: keyof typeof variants;
-  size?: keyof typeof sizes;
+  variant?: Variant;
+  size?: Size;
   loading?: boolean;
 };
 
@@ -58,17 +78,7 @@ export function Button({
       type="button"
       disabled={disabled || loading}
       aria-busy={loading || undefined}
-      className={cn(
-        "relative inline-flex items-center justify-center rounded-md font-medium",
-        // Every button feels the press: a short ease-out scale, transform only.
-        "transition-[transform,background-color,color,border-color] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]",
-        "active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100",
-        "outline-accent focus-visible:outline-2 focus-visible:outline-offset-2",
-        "disabled:pointer-events-none disabled:opacity-60",
-        variants[variant],
-        sizes[size],
-        className,
-      )}
+      className={buttonClasses(variant, size, className)}
       {...rest}
     >
       {/* Label keeps its box while loading so the button width is preserved. */}
@@ -87,4 +97,15 @@ export function Button({
       )}
     </button>
   );
+}
+
+/** A navigation action that has to look like a button — an empty-state call to
+ *  action, a "back to X". Same look as `Button`, but it is a real link. */
+export function ButtonLink({
+  variant = "primary",
+  size = "md",
+  className,
+  ...rest
+}: React.ComponentProps<typeof Link> & { variant?: Variant; size?: Size }) {
+  return <Link className={buttonClasses(variant, size, className)} {...rest} />;
 }
