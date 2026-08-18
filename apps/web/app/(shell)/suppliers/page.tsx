@@ -63,8 +63,9 @@ export default async function SuppliersPage({
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow="Catalogue"
         title="Suppliers"
-        description="Lead times, learned deliveries, and who supplies what"
+        description="Lead times here drive safety stock and order timing for every product assigned to a supplier."
       />
       <Suspense
         key={supplierQueryKey(query)}

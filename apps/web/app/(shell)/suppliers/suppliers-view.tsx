@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pager } from "@/components/ui/pager";
 import { TableSearch } from "@/components/ui/table-search";
@@ -226,31 +226,28 @@ export function SuppliersView({
         />
       )}
 
-      <Card>
-        <CardHeader
-          title="Suppliers"
-          subtitle={`${total} ${total === 1 ? "supplier" : "suppliers"}`}
-          action={
-            <div className="flex flex-wrap items-center gap-2">
-              <ExportBar
-                loadRows={exportRows ?? (async () => rows)}
-                count={matched}
-                columns={exportColumns}
-                filename="suppliers"
-              />
-              {canManage && !importing && (
-                <Button size="sm" variant="ghost" onClick={() => setImporting(true)}>
-                  Import CSV
-                </Button>
-              )}
-              {canManage && editing !== "new" && (
-                <Button size="sm" onClick={() => setEditing("new")}>
-                  Add supplier
-                </Button>
-              )}
-            </div>
-          }
+      {/* Screen actions sit above the table rather than inside its card: the
+          page heading already names what this is, so a card header repeating it
+          only pushed the rows further down. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <ExportBar
+          loadRows={exportRows ?? (async () => rows)}
+          count={matched}
+          columns={exportColumns}
+          filename="suppliers"
+          size="md"
         />
+        {canManage && !importing && (
+          <Button variant="ghost" onClick={() => setImporting(true)}>
+            Import CSV
+          </Button>
+        )}
+        {canManage && editing !== "new" && (
+          <Button onClick={() => setEditing("new")}>Add supplier</Button>
+        )}
+      </div>
+
+      <Card>
         {total > 0 && (
           /* The form posts `q` itself and carries no page, so a new search
              always lands on the first page of its own results. */
@@ -260,6 +257,7 @@ export function SuppliersView({
             hidden={sortFields(query)}
             placeholder="Search by name, group, country or email…"
             matched={query.search ? matched : null}
+            total={total}
             clearHref={hrefFor({ search: "" })}
             label="Search suppliers"
           />
@@ -283,7 +281,7 @@ export function SuppliersView({
               }
             />
           ) : (
-            <Table>
+            <Table dense>
               <TableHeader>
                 {/* Lead time sits directly after the name on purpose: it is the
                     figure that decides when to reorder, and the one thing a shop
