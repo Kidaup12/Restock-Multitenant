@@ -27,6 +27,7 @@ import {
   DEFAULT_BUDGET_COVER_DAYS,
   clampCoverDays,
 } from "./cover";
+import { Stepper } from "@/components/ui/stepper";
 import { LeadFlooredNote } from "./lead-floored-note";
 
 /**
@@ -173,29 +174,17 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
               Stock to a cover target
             </label>
             {coverDays != null && (
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => applyCover(clampCoverDays(coverDays - COVER_STEP))}
-                  disabled={pending || coverDays <= COVER_MIN}
-                  aria-label="Fewer days of cover"
-                  className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
-                >
-                  −
-                </button>
-                <span className="w-20 text-center font-mono text-sm tabular-nums text-ink">
-                  {coverDays} days
-                </span>
-                <button
-                  type="button"
-                  onClick={() => applyCover(clampCoverDays(coverDays + COVER_STEP))}
-                  disabled={pending || coverDays >= COVER_MAX}
-                  aria-label="More days of cover"
-                  className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
-                >
-                  +
-                </button>
-              </div>
+              <Stepper
+                label="Days of cover"
+                value={`${coverDays} days`}
+                onDecrement={() => applyCover(clampCoverDays(coverDays - COVER_STEP))}
+                onIncrement={() => applyCover(clampCoverDays(coverDays + COVER_STEP))}
+                decrementLabel="Fewer days of cover"
+                incrementLabel="More days of cover"
+                canDecrement={coverDays > COVER_MIN}
+                canIncrement={coverDays < COVER_MAX}
+                busy={pending}
+              />
             )}
             <p className="max-w-prose text-xs text-ink-muted">
               {coverDays == null

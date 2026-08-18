@@ -4,7 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 /**
  * Every search box on a long table hides its submit button while the box is
- * empty. An empty search has nothing to do: with no text the server returns the
+ * empty. They are all the one shared component now — the catalogue had its own
+ * copy until it was folded in. An empty search has nothing to do: with no text the server returns the
  * unfiltered list, which is what `Clear` already is.
  *
  * The hiding is CSS — `peer` on the input, `peer-placeholder-shown:hidden` on
@@ -27,8 +28,6 @@ vi.mock("next/link", () => ({
 }));
 
 import { TableSearch } from "../components/ui/table-search";
-import { CatalogueSearch } from "../app/(shell)/stock/catalogue-search";
-import { DEFAULT_QUERY } from "../lib/catalogue";
 
 /** The submit button's markup, and the input's, in document order. */
 function parts(html: string) {
@@ -59,14 +58,6 @@ describe("a search box offers no submit button until something is typed", () => 
           placeholder="Search the log"
           clearHref="/activity"
         />
-      )
-    );
-  });
-
-  it("the catalogue's own search hides it", () => {
-    expectHidesWhileEmpty(
-      renderToStaticMarkup(
-        <CatalogueSearch query={DEFAULT_QUERY} matched={0} clearHref="/stock" />
       )
     );
   });

@@ -20,6 +20,19 @@ import Link from "next/link";
  * Enter key deliberately still submits, because emptying the box and pressing it
  * is how a reader clears a search they can see.
  */
+/** "3 products match" when the caller names what it counts, "3 matches" when it
+ *  doesn't. Subject and verb have to agree in both shapes. */
+function matchSentence(matched: number, unit?: string) {
+  if (unit) {
+    if (matched === 0) return `No ${unit}s`;
+    if (matched === 1) return `1 ${unit} matches`;
+    return `${matched} ${unit}s match`;
+  }
+  if (matched === 0) return "No matches";
+  if (matched === 1) return "1 match";
+  return `${matched} matches`;
+}
+
 export function TableSearch({
   action,
   value,
@@ -28,6 +41,7 @@ export function TableSearch({
   matched,
   clearHref,
   label = "Search",
+  unit,
 }: {
   /** Route the form posts to, e.g. "/activity". */
   action: string;
@@ -43,6 +57,9 @@ export function TableSearch({
    *  a button named `q` would post a second `q` alongside the input's own. */
   clearHref: string;
   label?: string;
+  /** What is being counted, when "matches" is vaguer than it needs to be —
+   *  "3 products match" reads better than "3 matches" on a catalogue. */
+  unit?: string;
 }) {
   return (
     <form method="get" action={action} className="flex flex-wrap items-center gap-2 px-5 pt-3">
@@ -73,7 +90,7 @@ export function TableSearch({
           </Link>
           {matched != null && (
             <span className="text-2xs text-ink-muted">
-              {matched === 0 ? "No matches" : `${matched} match${matched === 1 ? "" : "es"}`}
+              {matchSentence(matched, unit)}
             </span>
           )}
         </>

@@ -100,7 +100,7 @@ export function RowEditor({
                   placeholder="Type a cost"
                   value={costInput}
                   onChange={(e) => setCostInput(e.target.value)}
-                  className="h-9 max-w-40"
+                  className="min-h-9 max-w-40"
                 />
                 <Button
                   size="sm"
@@ -142,7 +142,7 @@ export function RowEditor({
                   placeholder="Type a price"
                   value={priceInput}
                   onChange={(e) => setPriceInput(e.target.value)}
-                  className="h-9 max-w-40"
+                  className="min-h-9 max-w-40"
                 />
                 <Button
                   size="sm"
@@ -175,7 +175,7 @@ export function RowEditor({
                 placeholder="Assign or + new category"
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
-                className="h-9"
+                className="min-h-9"
               />
               <datalist id="catalogue-categories">
                 {categories.map((c) => (

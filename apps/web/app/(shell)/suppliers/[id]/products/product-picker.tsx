@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { ActionBar } from "@/components/ui/action-bar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -208,7 +209,7 @@ export function ProductPicker({
       )}
 
       {toAssign.length > 0 && (
-        <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-surface px-4 py-3 shadow-pop">
+        <ActionBar>
           <span className="text-sm text-ink">
             {toAssign.length} to add
             {movingFromOther > 0 && (
@@ -221,7 +222,7 @@ export function ProductPicker({
           <Button size="sm" onClick={save} loading={pending} className="ml-auto">
             Assign to {supplierName}
           </Button>
-        </div>
+        </ActionBar>
       )}
     </div>
   );

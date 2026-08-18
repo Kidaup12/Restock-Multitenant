@@ -46,7 +46,7 @@ export function ManageCategories({ categories }: { categories: CategoryUsage[] }
             <Input
               defaultValue={c.name}
               onChange={(e) => setDrafts((d) => ({ ...d, [c.name]: e.target.value }))}
-              className="h-8 text-sm"
+              className="min-h-8 text-sm"
             />
             <span className="shrink-0 text-xs text-ink-faint">{c.count}</span>
             <Button

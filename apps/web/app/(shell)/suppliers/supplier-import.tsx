@@ -157,7 +157,7 @@ export function SupplierImport({ onClose }: { onClose: () => void }) {
 
             <div className="max-h-72 overflow-auto rounded-md border border-edge">
               <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-surface-2 text-xs text-ink-muted">
+                <thead className="sticky top-0 bg-surface-2 text-2xs tracking-wider text-ink-muted uppercase">
                   <tr>
                     <th className="px-3 py-2 text-left">Supplier</th>
                     <th className="px-3 py-2 text-right">Lead (d)</th>
@@ -174,7 +174,7 @@ export function SupplierImport({ onClose }: { onClose: () => void }) {
                       </td>
                       <td className="px-3 py-1.5 text-right font-mono">{r.data?.moq ?? "—"}</td>
                       <td className="px-3 py-1.5">
-                        <span className="text-xs text-ink-muted">
+                        <span className="text-2xs text-ink-muted">
                           {STATUS_LABEL[r.status] ?? r.status}
                           {r.note ? ` — ${r.note}` : ""}
                         </span>

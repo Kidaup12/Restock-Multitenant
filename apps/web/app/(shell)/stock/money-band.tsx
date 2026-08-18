@@ -39,19 +39,19 @@ function Tile({
         : "hover:border-edge-strong";
   const body = (
     <>
-      <div className="text-xs font-medium tracking-wider text-ink-muted uppercase">{label}</div>
+      <div className="text-2xs tracking-wider text-ink-muted uppercase">{label}</div>
       <div
         className={cn(
-          "mt-2 font-mono text-2xl font-semibold tracking-tight",
-          tone === "negative" ? "text-negative" : "text-ink-strong",
+          "mt-1.5 font-mono text-3xl font-semibold tracking-tight",
+          tone === "negative" ? "text-negative" : "text-ink",
         )}
       >
         {value}
       </div>
-      <div className="mt-1 text-xs text-ink-muted">{sub}</div>
+      <div className="mt-1 text-2xs text-ink-muted">{sub}</div>
     </>
   );
-  const shell = "flex-1 rounded-lg border bg-surface p-4 text-left shadow-card transition-colors";
+  const shell = "flex-1 rounded-lg border bg-surface p-4 text-left shadow-card transition-colors sm:p-5";
 
   if (!href) {
     return <div className={cn(shell, "border-edge")}>{body}</div>;

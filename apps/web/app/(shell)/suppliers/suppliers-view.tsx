@@ -345,7 +345,7 @@ export function SuppliersView({
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-6 px-2 text-xs"
+                              className="min-h-6 px-2"
                               loading={pending && busyId === row.id}
                               onClick={() =>
                                 run(row.id, () => adoptLearnedLeadAction({ supplierId: row.id }))
@@ -395,7 +395,7 @@ export function SuppliersView({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-7 px-2 text-xs"
+                            className="min-h-7 px-2"
                             onClick={() => setEditing(row)}
                           >
                             Edit
@@ -403,7 +403,7 @@ export function SuppliersView({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-7 px-2 text-xs"
+                            className="min-h-7 px-2"
                             loading={pending && busyId === row.id}
                             onClick={() => remove(row)}
                           >

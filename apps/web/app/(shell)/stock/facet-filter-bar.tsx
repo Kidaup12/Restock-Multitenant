@@ -56,20 +56,20 @@ export function FacetFilterBar({
           <details key={key} className="group relative">
             <summary
               className={cn(
-                "flex cursor-pointer list-none items-center gap-1.5 rounded-md border px-2.5 py-1 text-sm font-medium transition-colors",
+                "flex cursor-pointer list-none items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
                 chosen.length > 0
-                  ? "border-edge-strong bg-accent-soft text-accent-ink"
-                  : "border-edge bg-surface text-ink-muted hover:text-ink"
+                  ? "border-accent-200 bg-accent-soft text-accent-ink"
+                  : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink"
               )}
             >
               {FACET_LABELS[key]}
               {chosen.length > 0 && (
-                <span className="rounded-full bg-accent px-1.5 text-xs text-white">
+                <span className="rounded-xs bg-surface/50 px-1.5 font-mono tabular-nums">
                   {chosen.length}
                 </span>
               )}
             </summary>
-            <div className="absolute z-10 mt-1 flex max-h-72 min-w-44 max-w-64 flex-wrap gap-1 overflow-auto rounded-lg border border-edge bg-surface p-2 shadow-lg">
+            <div className="absolute z-10 mt-1 flex max-h-72 min-w-44 max-w-64 flex-wrap gap-1 overflow-auto rounded-md border border-edge bg-surface p-2 shadow-pop">
               {options[key].map((opt) => {
                 const on = chosen.includes(opt.value);
                 return (
@@ -79,9 +79,9 @@ export function FacetFilterBar({
                     scroll={false}
                     aria-current={on ? "true" : undefined}
                     className={cn(
-                      "rounded-full border px-2 py-0.5 text-xs transition-colors",
+                      "rounded-xs border px-2 py-0.5 text-2xs transition-colors",
                       on
-                        ? "border-edge-strong bg-accent-soft text-accent-ink"
+                        ? "border-accent-200 bg-accent-soft text-accent-ink"
                         : "border-edge bg-surface-2 text-ink-muted hover:text-ink"
                     )}
                   >
@@ -98,7 +98,7 @@ export function FacetFilterBar({
         <Link
           href={selectionHref({})}
           scroll={false}
-          className="rounded-md px-2 py-1 text-sm text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+          className="rounded-sm px-2 py-1 text-2xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
         >
           Clear ({activeCount})
         </Link>

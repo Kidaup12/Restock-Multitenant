@@ -9,6 +9,7 @@ import { CostValue } from "@/components/ui/cost-value";
 import { formatMoney, formatNumber } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
 import { cn } from "@/lib/cn";
+import { ActionBar } from "@/components/ui/action-bar";
 import type {
   BuyList,
   BuyListRow,
@@ -27,6 +28,7 @@ import {
   DEFAULT_COVER_DAYS,
   clampCoverDays,
 } from "./cover";
+import { Stepper } from "@/components/ui/stepper";
 import { LeadFlooredNote } from "./lead-floored-note";
 import {
   addToOrder,
@@ -106,22 +108,25 @@ const QTY_GROUPS = new Set<ExcludedReason>(["already-ordered", "unplannable", "s
 
 // The run's own honesty words, in shop language. The engine's tokens
 // ("fairly_sure", "min_max") must never reach a screen.
-export const CONFIDENCE_COPY: Record<PlanConfidence, { chip: string; tone: string; sentence: string }> = {
+export const CONFIDENCE_COPY: Record<
+  PlanConfidence,
+  { chip: string; tone: "positive" | "neutral" | "warning"; sentence: string }
+> = {
   sure: {
     chip: "Sure",
-    tone: "border-positive bg-positive-soft text-positive",
+    tone: "positive",
     sentence:
       "A steady seller with a long, clean sales record — this number is as good as we get.",
   },
   fairly_sure: {
     chip: "Fairly sure",
-    tone: "border-edge bg-surface-2 text-ink-muted",
+    tone: "neutral",
     sentence:
       "Enough sales history to be useful, but something is unsettled — a short record, uneven weeks, or a promotion running.",
   },
   guessing: {
     chip: "Guessing",
-    tone: "border-warning bg-warning-soft text-warning",
+    tone: "warning",
     sentence:
       "Not enough clean sales history to be confident. Treat this as a starting point and use your own judgement.",
   },
@@ -159,21 +164,8 @@ export function TrustChips({ row }: { row: Pick<BuyListRow, "confidence" | "cold
   if (!confidence && !cold) return null;
   return (
     <>
-      {confidence && (
-        <span
-          className={cn(
-            "rounded-full border px-2 py-0.5 text-xs font-medium",
-            confidence.tone
-          )}
-        >
-          {confidence.chip}
-        </span>
-      )}
-      {cold && (
-        <span className="rounded-full border border-edge bg-surface-2 px-2 py-0.5 text-xs font-medium text-ink-muted">
-          {cold.chip(row.borrowedFromTitle)}
-        </span>
-      )}
+      {confidence && <Badge tone={confidence.tone}>{confidence.chip}</Badge>}
+      {cold && <Badge tone="neutral">{cold.chip(row.borrowedFromTitle)}</Badge>}
     </>
   );
 }
@@ -245,10 +237,12 @@ const UPLIFT_STEP = 10;
 
 // Column class fragments — the table is a raw <table>, so headers/cells repeat
 // these; the `hidden … :table-cell` variants keep the wide detail off mobile.
-const TH = "px-4 py-3 text-left text-xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase";
-const TH_NUM = "px-4 py-3 text-right text-xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase";
-const TD = "px-4 py-3 whitespace-nowrap text-ink-secondary";
-const TD_NUM = "px-4 py-3 text-right font-mono tabular-nums whitespace-nowrap text-ink";
+// Kept in step with components/ui/table.tsx by hand: this table is raw because
+// its rows expand, and a reader should not be able to tell which one they are on.
+const TH = "px-5 py-3 text-left text-2xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase";
+const TH_NUM = "px-5 py-3 text-right text-2xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase";
+const TD = "px-5 py-3 whitespace-nowrap text-ink-secondary";
+const TD_NUM = "px-5 py-3 text-right font-mono tabular-nums whitespace-nowrap text-ink";
 
 const dayLabel = (date: Date) =>
   new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
@@ -416,7 +410,7 @@ export function ExcludedSection({
             <div className="mt-2 w-full overflow-x-auto pb-2">
               <table className={cn("w-full text-sm", showsQty ? "min-w-[560px]" : "min-w-[420px]")}>
                 <thead>
-                  <tr className="border-b border-edge">
+                  <tr className="border-b border-edge bg-surface-2">
                     <th scope="col" className={TH}>Product</th>
                     <th scope="col" className={cn(TH, "hidden md:table-cell")}>Supplier</th>
                     <th scope="col" className={TH_NUM}>In stock</th>
@@ -434,7 +428,7 @@ export function ExcludedSection({
                     const caveat = coveredCaveat(row);
                     return (
                       <tr key={row.predictionId} className="border-b border-edge">
-                        <td className="px-4 py-3">
+                        <td className="px-5 py-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium text-ink">{row.title}</span>
                             {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
@@ -654,63 +648,34 @@ export function BuyChecklist({
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-edge bg-surface-2/40 px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-ink">Size to cover</span>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => applyCover(coverDays - COVER_STEP)}
-              disabled={resizing || coverDays <= COVER_MIN}
-              aria-label="Fewer days of cover"
-              className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
-            >
-              −
-            </button>
-            <span className="w-20 text-center font-mono text-sm tabular-nums text-ink">
-              {coverDays} days
-            </span>
-            <button
-              type="button"
-              onClick={() => applyCover(coverDays + COVER_STEP)}
-              disabled={resizing || coverDays >= COVER_MAX}
-              aria-label="More days of cover"
-              className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
-            >
-              +
-            </button>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-ink">Size for a sales push</span>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => applyUplift(upliftPct - UPLIFT_STEP)}
-              disabled={resizing || upliftPct <= UPLIFT_MIN}
-              aria-label="Smaller sales push"
-              className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
-            >
-              −
-            </button>
-            <span className="w-16 text-center font-mono text-sm tabular-nums text-ink">
-              +{upliftPct}%
-            </span>
-            <button
-              type="button"
-              onClick={() => applyUplift(upliftPct + UPLIFT_STEP)}
-              disabled={resizing || upliftPct >= UPLIFT_MAX}
-              aria-label="Bigger sales push"
-              className="grid size-7 place-items-center rounded-md border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40"
-            >
-              +
-            </button>
-          </div>
-          {whatIf && (
-            <Badge tone="warning" className="font-sans">
-              what-if
-            </Badge>
-          )}
-        </div>
+        <Stepper
+          label="Size to cover"
+          value={`${coverDays} days`}
+          onDecrement={() => applyCover(coverDays - COVER_STEP)}
+          onIncrement={() => applyCover(coverDays + COVER_STEP)}
+          decrementLabel="Fewer days of cover"
+          incrementLabel="More days of cover"
+          canDecrement={coverDays > COVER_MIN}
+          canIncrement={coverDays < COVER_MAX}
+          busy={resizing}
+        />
+        <Stepper
+          label="Size for a sales push"
+          value={`+${upliftPct}%`}
+          valueClassName="w-16"
+          onDecrement={() => applyUplift(upliftPct - UPLIFT_STEP)}
+          onIncrement={() => applyUplift(upliftPct + UPLIFT_STEP)}
+          decrementLabel="Smaller sales push"
+          incrementLabel="Bigger sales push"
+          canDecrement={upliftPct > UPLIFT_MIN}
+          canIncrement={upliftPct < UPLIFT_MAX}
+          busy={resizing}
+        />
+        {whatIf && (
+          <Badge tone="warning" className="font-sans">
+            what-if
+          </Badge>
+        )}
         <p className="max-w-prose text-xs text-ink-muted">
           Two ways to explore, never below an item&apos;s lead time: size every line
           to {coverDays} days of cover, or size for a +{upliftPct}% sales push
@@ -742,8 +707,8 @@ export function BuyChecklist({
             <div className="mt-2 w-full overflow-x-auto pb-2">
               <table className="w-full min-w-[640px] text-sm">
                 <thead>
-                  <tr className="border-b border-edge">
-                    <th scope="col" className="w-10 px-4 py-3" aria-label="Tick to order" />
+                  <tr className="border-b border-edge bg-surface-2">
+                    <th scope="col" className="w-10 px-5 py-3" aria-label="Tick to order" />
                     <th scope="col" className={TH}>Product</th>
                     <th scope="col" className={cn(TH, "hidden md:table-cell")}>Supplier</th>
                     {/* Stock on its way, however it was set in motion — an
@@ -758,7 +723,7 @@ export function BuyChecklist({
                     <th scope="col" className={TH_NUM}>Qty</th>
                     <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>Rev · 30d ({currency})</th>
                     <th scope="col" className={TH_NUM}>Line total</th>
-                    <th scope="col" className="w-10 px-4 py-3" aria-label="Show reasoning" />
+                    <th scope="col" className="w-10 px-5 py-3" aria-label="Show reasoning" />
                   </tr>
                 </thead>
                 <tbody>
@@ -777,7 +742,7 @@ export function BuyChecklist({
                             isOpen && "border-b-0"
                           )}
                         >
-                          <td className="px-4 py-3">
+                          <td className="px-5 py-3">
                             <input
                               type="checkbox"
                               checked={isPicked}
@@ -789,7 +754,7 @@ export function BuyChecklist({
                               className="size-4 accent-accent"
                             />
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-5 py-3">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="font-medium text-ink">{row.title}</span>
                               {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
@@ -845,7 +810,7 @@ export function BuyChecklist({
                           <td className={TD_NUM}>
                             <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-5 py-3">
                             <button
                               type="button"
                               onClick={() => setExpanded((e) => toggleSet(e, row.predictionId))}
@@ -861,7 +826,7 @@ export function BuyChecklist({
                         </tr>
                         {isOpen && (
                           <tr className="border-b border-edge">
-                            <td colSpan={13} className="px-4 pt-0 pb-4">
+                            <td colSpan={13} className="px-5 pt-0 pb-4">
                               <WhyPanel row={row} />
                             </td>
                           </tr>
@@ -881,7 +846,7 @@ export function BuyChecklist({
       )}
 
       {(picked.size > 0 || notice) && (
-        <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-surface px-4 py-3 shadow-pop">
+        <ActionBar>
           {picked.size > 0 && (
             <span className="text-sm font-medium text-ink">
               {picked.size} ticked ·{" "}
@@ -901,7 +866,7 @@ export function BuyChecklist({
               Add {picked.size} to order
             </Button>
           )}
-        </div>
+        </ActionBar>
       )}
     </div>
   );
