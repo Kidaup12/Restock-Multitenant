@@ -64,6 +64,7 @@ export {
   priorMatchesProduct,
   selectPriorForProduct,
   applyOwnerPrior,
+  OWNER_PRIOR_MAX_MULTIPLIER,
   type PriorScope,
   type OwnerPriorFacts,
   type PriorProduct,

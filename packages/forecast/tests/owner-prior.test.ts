@@ -4,6 +4,7 @@ import {
   priorMatchesProduct,
   selectPriorForProduct,
   applyOwnerPrior,
+  OWNER_PRIOR_MAX_MULTIPLIER,
   type OwnerPriorFacts,
 } from "../src/owner-prior";
 
@@ -91,5 +92,23 @@ describe("applyOwnerPrior", () => {
 
   it("never returns a negative forecast", () => {
     expect(applyOwnerPrior(10, { expectedUnits: -5, multiplier: null })).toBe(0);
+  });
+
+  it("caps a multiplier so a fat-finger cannot run away with the buy list", () => {
+    // A prior bypasses the reality guardrail, so an un-capped 9x would fund a
+    // 90-unit order off a 10-unit seller. The cap holds it to the sane ceiling.
+    expect(applyOwnerPrior(10, { expectedUnits: null, multiplier: 9 })).toBe(
+      10 * OWNER_PRIOR_MAX_MULTIPLIER
+    );
+    expect(OWNER_PRIOR_MAX_MULTIPLIER).toBe(4);
+  });
+
+  it("leaves a genuine campaign multiplier alone", () => {
+    expect(applyOwnerPrior(10, { expectedUnits: null, multiplier: 3 })).toBe(30);
+  });
+
+  it("still honours an explicit expected level — the owner's own number", () => {
+    // expectedUnits is a figure the owner named on purpose; it is not clamped.
+    expect(applyOwnerPrior(10, { expectedUnits: 90, multiplier: null })).toBe(90);
   });
 });

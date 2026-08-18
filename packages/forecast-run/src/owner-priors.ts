@@ -1,5 +1,5 @@
 import { prismaForTenant } from "@wezesha/db";
-import { priorActive } from "@wezesha/forecast";
+import { priorActive, OWNER_PRIOR_MAX_MULTIPLIER } from "@wezesha/forecast";
 
 /**
  * Owner-prior write path — the "tell the forecast something" box (spec §6).
@@ -56,6 +56,9 @@ export function validateOwnerPriorInput(input: CreateOwnerPriorInput): string | 
   }
   if (input.expectedUnits != null && input.expectedUnits < 0) return "expected units cannot be negative";
   if (input.multiplier != null && input.multiplier <= 0) return "multiplier must be greater than zero";
+  if (input.multiplier != null && input.multiplier > OWNER_PRIOR_MAX_MULTIPLIER) {
+    return `multiplier cannot exceed ${OWNER_PRIOR_MAX_MULTIPLIER}x — for a bigger change, set an expected amount instead`;
+  }
   if (input.proxyProductId != null && input.scope !== "product") {
     return "a 'sell like' proxy only applies to a single product";
   }

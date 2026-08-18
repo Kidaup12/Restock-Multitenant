@@ -5,6 +5,7 @@ import {
   walkForwardBacktest,
   walkForwardCutoffs,
   championsByClass,
+  resolveChampions,
   type BacktestProduct,
   type BacktestResult,
   type DemandMethod,
@@ -19,7 +20,9 @@ import {
  *   - the champion audit — run rate reigns per class until a challenger beats it,
  *     recorded in TenantConfig.forecastChampions (the user never picks a model);
  *   - a degradation alert — a bell Notification (kind "accuracy_drop") when this
- *     run's error is materially worse than the previous one.
+ *     run's error is materially worse than the previous one;
+ *   - a method-change alert (kind "forecast_method_changed") when a class adopts
+ *     a new winning method, since that shifts its order quantities.
  *
  * Single-tenant path: everything goes through the RLS-enforced tenant client.
  */
@@ -33,6 +36,38 @@ export const DEFAULT_HORIZON_DAYS = 30;
 export const DEGRADATION_THRESHOLD = 0.25;
 /** One accuracy_drop notification per tenant per rolling window. */
 export const DROP_DEDUP_DAYS = 14;
+/** One method-change notification per tenant per rolling window. */
+export const METHOD_CHANGE_DEDUP_DAYS = 14;
+
+/** How each ABC class reads to a shop owner — the audit never names a method. */
+const CLASS_WORDS: Record<"A" | "B" | "C", string> = {
+  A: "your bestsellers",
+  B: "your steady sellers",
+  C: "your slower movers",
+};
+
+/** The classes whose winning method changed between two audits. */
+export function changedChampionClasses(
+  prev: Record<"A" | "B" | "C", DemandMethod>,
+  next: Record<"A" | "B" | "C", DemandMethod>
+): Array<"A" | "B" | "C"> {
+  return (["A", "B", "C"] as const).filter((c) => prev[c] !== next[c]);
+}
+
+/** Plain-language body for a method-change alert — order suggestions for the
+ *  named groups may shift, said without a model name in sight. */
+export function methodChangeBody(changed: Array<"A" | "B" | "C">): string {
+  const groups = changed.map((c) => CLASS_WORDS[c]);
+  const list =
+    groups.length === 1
+      ? groups[0]
+      : `${groups.slice(0, -1).join(", ")} and ${groups[groups.length - 1]}`;
+  return (
+    `This month's accuracy review tuned how we size ${list}. ` +
+    `Order suggestions for those products may look different from last month — ` +
+    `it reflects how they've actually been selling.`
+  );
+}
 
 export type BacktestRunOutcome = {
   /** Rows written (0 = not enough history for a single hold-out window). */
@@ -40,6 +75,8 @@ export type BacktestRunOutcome = {
   champions: Record<"A" | "B" | "C", DemandMethod> | null;
   /** True when this run wrote an accuracy_drop notification. */
   degraded: boolean;
+  /** True when a class changed its winning method and an owner alert was written. */
+  methodChanged: boolean;
   result: BacktestResult | null;
 };
 
@@ -98,7 +135,7 @@ export async function runBacktest(
   const allPoints: SalesPoint[] = sales.map((s) => ({ date: s.date, quantity: s.quantity }));
   const cutoffs = walkForwardCutoffs(allPoints, horizonDays);
   if (cutoffs.length === 0) {
-    return { rowsWritten: 0, champions: null, degraded: false, result: null };
+    return { rowsWritten: 0, champions: null, degraded: false, methodChanged: false, result: null };
   }
 
   const result = walkForwardBacktest(backtestProducts, cutoffs, horizonDays);
@@ -122,7 +159,7 @@ export async function runBacktest(
       leans: r.leans,
     }));
   if (rows.length === 0) {
-    return { rowsWritten: 0, champions: null, degraded: false, result };
+    return { rowsWritten: 0, champions: null, degraded: false, methodChanged: false, result };
   }
 
   // Degradation check against the previous run's whole-shop champion accuracy,
@@ -162,7 +199,16 @@ export async function runBacktest(
   }
 
   // Champion audit: record the per-class champion for tonight's runs onward.
+  // Read the old winners first — the upsert is about to overwrite them, and a
+  // change is what the owner needs told, since it moves order quantities.
+  const priorConfig = await db.tenantConfig.findUnique({
+    where: { tenantId },
+    select: { forecastChampions: true },
+  });
+  const prevChampions = resolveChampions(priorConfig?.forecastChampions);
   const champions = championsByClass(result);
+  const changed = changedChampionClasses(prevChampions, champions);
+
   await db.tenantConfig.upsert({
     where: { tenantId },
     create: {
@@ -172,7 +218,27 @@ export async function runBacktest(
     update: { forecastChampions: { ...champions, auditedAt: now.toISOString() } },
   });
 
-  return { rowsWritten: rows.length, champions, degraded, result };
+  let methodChanged = false;
+  if (changed.length > 0) {
+    const dedupSince = new Date(now.getTime() - METHOD_CHANGE_DEDUP_DAYS * DAY_MS);
+    const recent = await db.notification.findFirst({
+      where: { kind: "forecast_method_changed", createdAt: { gte: dedupSince } },
+      select: { id: true },
+    });
+    if (!recent) {
+      await db.notification.create({
+        data: {
+          tenantId,
+          kind: "forecast_method_changed",
+          title: "We tuned your order suggestions",
+          body: methodChangeBody(changed),
+        },
+      });
+      methodChanged = true;
+    }
+  }
+
+  return { rowsWritten: rows.length, champions, degraded, methodChanged, result };
 }
 
 /** Plain-language body for the degradation alert (units, not error %). */
