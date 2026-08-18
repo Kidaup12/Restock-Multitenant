@@ -88,23 +88,30 @@ export function TourProvider({
   const active = step !== null;
   const total = steps?.length ?? 0;
 
-  const start = useCallback(() => {
-    if (!role) return;
-    // Keep a step if the engine can navigate to its page (STEP_ROUTES) or its
-    // target is already on screen — so the walkthrough visits every page, not
-    // just the sidebar links visible from Today.
-    const chosen = tourStepsForRole(role, canOpenInsights).filter(
-      (s) => STEP_ROUTES[s.key] || findTarget(s)
-    );
-    if (chosen.length === 0) return;
-    // A replay from the profile menu starts at step one again, and that step is
-    // owed its navigation even though a previous run already spent it.
-    navigatedFor.current = null;
-    setIndex(0);
-    setRect(null);
-    setCardStyle(null);
-    setSteps(chosen);
-  }, [role, canOpenInsights]);
+  const start = useCallback(
+    (opts?: { keepCurrentPage?: boolean }) => {
+      if (!role) return;
+      // Keep a step if the engine can navigate to its page (STEP_ROUTES) or its
+      // target is already on screen — so the walkthrough visits every page, not
+      // just the sidebar links visible from Today.
+      const chosen = tourStepsForRole(role, canOpenInsights).filter(
+        (s) => STEP_ROUTES[s.key] || findTarget(s)
+      );
+      if (chosen.length === 0) return;
+      // A replay from the profile menu starts at step one again, and that step
+      // is owed its navigation even though a previous run already spent it.
+      // The first-visit run is not: someone who opened a link to Suppliers
+      // asked for Suppliers, and answering that with a jump to Today loses the
+      // page they wanted. Step one's target is a sidebar item, present on every
+      // page, so the walkthrough still works from wherever they landed.
+      navigatedFor.current = opts?.keepCurrentPage ? (chosen[0]?.key ?? null) : null;
+      setIndex(0);
+      setRect(null);
+      setCardStyle(null);
+      setSteps(chosen);
+    },
+    [role, canOpenInsights]
+  );
 
   const finish = useCallback(() => {
     setSteps(null);
@@ -118,7 +125,7 @@ export function TourProvider({
   useEffect(() => {
     if (!autoStart || autoStarted.current) return;
     autoStarted.current = true;
-    const timer = setTimeout(start, 600);
+    const timer = setTimeout(() => start({ keepCurrentPage: true }), 600);
     return () => clearTimeout(timer);
   }, [autoStart, start]);
 

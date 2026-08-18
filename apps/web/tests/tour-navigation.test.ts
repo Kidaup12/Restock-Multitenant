@@ -22,6 +22,17 @@ describe("routeForStep", () => {
     expect(routeForStep(stepOf("today"), "/suppliers", "today")).toBeNull();
   });
 
+  it("leaves a first-run visitor on the page they actually asked for", () => {
+    // Auto-start spends step one's navigation before the walkthrough begins, so
+    // someone who opened a link to Transfers stays on Transfers. Without this a
+    // first visit to any deep link bounced to Today a second after it loaded.
+    const first = tourStepsForRole("OWNER", true)[0]!;
+    expect(routeForStep(first, "/transfers", first.key)).toBeNull();
+    // A replay from the profile menu spends nothing, so it still walks to the
+    // first step's page.
+    expect(routeForStep(first, "/transfers", null)).toBe(STEP_ROUTES[first.key]);
+  });
+
   it("still navigates when the step changes, including going Back", () => {
     expect(routeForStep(stepOf("orders"), "/today", "today")).toBe("/orders");
     expect(routeForStep(stepOf("today"), "/orders", "orders")).toBe("/today");
