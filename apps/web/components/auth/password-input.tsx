@@ -3,12 +3,9 @@
 import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { EyeIcon, EyeOffIcon } from "@/components/icons";
-import { Input } from "@/components/ui/input";
+import { Input, type InputProps } from "@/components/ui/input";
 
-type PasswordInputProps = Omit<
-  React.InputHTMLAttributes<HTMLInputElement>,
-  "type"
->;
+type PasswordInputProps = Omit<InputProps, "type">;
 
 export function PasswordInput({ className, ...rest }: PasswordInputProps) {
   const [visible, setVisible] = useState(false);
