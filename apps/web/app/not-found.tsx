@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { ButtonLink } from "@/components/ui/button";
 
 /**
  * Root 404 — the last stop for anything outside the app shell, which is where
@@ -21,12 +21,9 @@ export default function NotFound() {
         <p className="mt-2 text-sm text-ink-muted">
           The link may be out of date, or you may not have access to it.
         </p>
-        <Link
-          href="/today"
-          className="mt-6 inline-flex h-10 items-center justify-center rounded-md bg-accent px-4 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong"
-        >
+        <ButtonLink href="/today" className="mt-6">
           Back to Today
-        </Link>
+        </ButtonLink>
       </div>
     </main>
   );

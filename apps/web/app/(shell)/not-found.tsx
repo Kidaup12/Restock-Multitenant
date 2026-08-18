@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { ButtonLink } from "@/components/ui/button";
 import { InboxIcon } from "@/components/icons";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -18,12 +18,9 @@ export default function ShellNotFound() {
         title="That page isn't here"
         description="The link may be out of date, or the item was removed from this workspace."
         action={
-          <Link
-            href="/today"
-            className="flex h-10 items-center justify-center rounded-md bg-accent px-4 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong"
-          >
+          <ButtonLink href="/today">
             Back to Today
-          </Link>
+          </ButtonLink>
         }
       />
     </div>

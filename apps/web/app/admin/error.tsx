@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { AlertIcon } from "@/components/icons";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 
@@ -35,12 +34,9 @@ export default function AdminError({
         action={
           <div className="flex items-center gap-2">
             <Button onClick={reset}>Try again</Button>
-            <Link
-              href="/admin"
-              className="flex h-10 items-center justify-center rounded-md border border-edge px-4 text-sm font-medium text-ink transition-colors hover:bg-surface-2"
-            >
+            <ButtonLink href="/admin" variant="ghost">
               Back to the fleet
-            </Link>
+            </ButtonLink>
           </div>
         }
       />
