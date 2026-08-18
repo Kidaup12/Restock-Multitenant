@@ -14,7 +14,7 @@
  * Pure: the caller loads each product's history + ABC class and the cutoffs.
  */
 
-import { runRateDaily } from "./layered";
+import { demandRateFor, CHAMPION_DEFAULT, type DemandMethod } from "./layered";
 import type { SalesPoint } from "./baseline";
 import type { AbcCategory } from "./abc";
 import { scaleFreeAccuracy, type ScaleFreeAccuracy, type WindowError } from "./accuracy";
@@ -22,9 +22,9 @@ import { scaleFreeAccuracy, type ScaleFreeAccuracy, type WindowError } from "./a
 /** Demand methods in the audition. Run rate is the champion; recent_heavy is a
  *  more reactive challenger (trailing-30-day mean, no long-tail anchor). Adding
  *  a method here is all it takes to enter it in every class audition. */
-export type DemandMethod = "run_rate" | "recent_heavy";
+export type { DemandMethod };
+export { CHAMPION_DEFAULT };
 export const DEMAND_METHODS: readonly DemandMethod[] = ["run_rate", "recent_heavy"] as const;
-export const CHAMPION_DEFAULT: DemandMethod = "run_rate";
 
 /** A challenger must beat run rate's MAE by at least this fraction to take a
  *  class — no style change without a real receipt (spec §6). */
@@ -64,20 +64,11 @@ export type ClassAccuracy = {
 
 const DAY_MS = 86_400_000;
 
-/** Trailing-`days` mean daily rate before `cutoff` — the reactive challenger. */
-function trailingMeanRate(history: SalesPoint[], cutoff: Date, days: number): number {
-  const since = new Date(cutoff.getTime() - days * DAY_MS);
-  const qty = history
-    .filter((p) => p.date >= since && p.date < cutoff)
-    .reduce((s, p) => s + p.quantity, 0);
-  return qty / days;
-}
-
-/** A method's forecast daily rate as of a cutoff, from history strictly before it. */
+/** A method's forecast daily rate as of a cutoff, from history strictly before
+ *  it. Runs the same dispatch the nightly forecast does, so a method that wins
+ *  a class here behaves the same way when the run adopts it. */
 export function methodDailyRate(method: DemandMethod, history: SalesPoint[], cutoff: Date): number {
-  const past = history.filter((p) => p.date < cutoff);
-  if (method === "recent_heavy") return trailingMeanRate(past, cutoff, 30);
-  return runRateDaily(past, cutoff);
+  return demandRateFor(method, history.filter((p) => p.date < cutoff), cutoff);
 }
 
 /** Actual units sold in [cutoff, cutoff + horizonDays). */

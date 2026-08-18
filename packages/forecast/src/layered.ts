@@ -103,6 +103,8 @@ export type ForecastInput = {
   /** Cold-start borrow / owner expectation that replaces the run rate. Absent ->
    *  forecast from the product's own sales as usual. */
   demandOverride?: DemandOverride | null;
+  /** Which demand method to run — the champion for this product's class. */
+  demandMethod?: DemandMethod;
 };
 
 /** No forecast may exceed this multiple of the product's best trailing month.
@@ -191,6 +193,48 @@ function rateOverWindow(
  * promo-spike ∪ shop-closure day-keys) are censored from every path — distinct
  * from stockoutDates, so they never flip the censored-vs-inference dispatch.
  */
+/** Demand methods the audition can choose between. `run_rate` is the recency-
+ *  weighted rate with the full censoring story; `recent_heavy` answers the same
+ *  question over a flat trailing month, for a shop whose demand turns quickly. */
+export type DemandMethod = "run_rate" | "recent_heavy";
+export const CHAMPION_DEFAULT: DemandMethod = "run_rate";
+
+/** Trailing days `recent_heavy` averages over. */
+const RECENT_HEAVY_WINDOW_DAYS = 30;
+
+/**
+ * The daily demand rate a method reports.
+ *
+ * Both methods run through the same censoring: a stockout day and a past promo
+ * spike are excluded either way. They differ only in how they weight recency,
+ * which is the thing the audition is meant to be comparing. A challenger that
+ * also quietly dropped stockout correction would win classes by under-counting
+ * the days a shelf was empty.
+ */
+export function demandRateFor(
+  method: DemandMethod,
+  history: SalesPoint[],
+  today: Date,
+  opts?: { stockoutDates?: Date[]; excludedDates?: Date[]; snapshotsSince?: Date }
+): number {
+  if (method === "recent_heavy") {
+    return rateOverWindow(
+      history,
+      today,
+      RECENT_HEAVY_WINDOW_DAYS,
+      opts?.stockoutDates,
+      opts?.excludedDates
+    );
+  }
+  return runRateDaily(
+    history,
+    today,
+    opts?.stockoutDates,
+    opts?.excludedDates,
+    opts?.snapshotsSince
+  );
+}
+
 export function runRateDaily(
   history: SalesPoint[],
   today: Date,
@@ -253,12 +297,15 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   const override = input.demandOverride ?? null;
 
   // ── Layer 1: recency-weighted run rate (or an external demand override) ────
-  const historyDailyRate = runRateDaily(
+  const historyDailyRate = demandRateFor(
+    input.demandMethod ?? CHAMPION_DEFAULT,
     input.history,
     today,
-    input.stockoutDates,
-    input.excludedDates,
-    input.snapshotsSince
+    {
+      stockoutDates: input.stockoutDates,
+      excludedDates: input.excludedDates,
+      snapshotsSince: input.snapshotsSince,
+    }
   );
   // The rate the inventory + sizing math runs on: the override when present
   // (cold-start borrow / owner expectation), else the history run rate.
