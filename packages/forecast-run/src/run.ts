@@ -14,7 +14,9 @@ import {
   forecastProduct,
   historySpanDays,
   anchorToday,
+  championForClass,
   policyForClass,
+  resolveChampions,
   resolveForecastKnobs,
   selectProxy,
   isEstablishedProxy,
@@ -256,6 +258,8 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
 
   // Cross-product steps the pure pipeline leaves to the caller.
   const knobs = resolveForecastKnobs(config);
+  // The method each class earned in the last audition; run rate until audited.
+  const champions = resolveChampions(config?.forecastChampions);
   // This is the ONE place a product's current ABC class is decided; the column
   // it writes is what every screen reads. `now` is passed explicitly rather than
   // left to default: a run replayed with a fixed clock must rank against the
@@ -332,6 +336,7 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
       snapshotsSince,
       excludedDates: excludedByProduct.get(product.id),
       policy: policyForClass(knobs.methods, abcCategory),
+      demandMethod: championForClass(champions, abcCategory),
       serviceZ: knobs.serviceZ,
       capMultiple: knobs.capMultiple,
       runDateKey,
@@ -433,6 +438,7 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
             snapshotsSince,
             excludedDates: excludedByProduct.get(product.id),
             policy: policyForClass(knobs.methods, abcCategory),
+            demandMethod: championForClass(champions, abcCategory),
             serviceZ: knobs.serviceZ,
             capMultiple: knobs.capMultiple,
             runDateKey,
