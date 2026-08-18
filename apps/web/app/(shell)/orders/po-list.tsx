@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ButtonLink } from "@/components/ui/button";
 import { ClipboardIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -93,17 +94,12 @@ export async function PoList({
               title="No purchase orders yet"
               description="Select queued products above and create your first purchase order — or start from the buy list."
               action={
-                <Link
-                  href="/plan"
-                  className="flex h-10 items-center justify-center rounded-md bg-accent px-4 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong"
-                >
-                  Go to the buy list
-                </Link>
+                <ButtonLink href="/plan">Go to the buy list</ButtonLink>
               }
             />
           </CardContent>
         ) : (
-          <Table>
+          <Table dense>
             <TableHeader>
               <TableHead>PO</TableHead>
               <TableHead>Supplier</TableHead>

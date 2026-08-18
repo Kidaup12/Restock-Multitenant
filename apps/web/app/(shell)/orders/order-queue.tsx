@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { ButtonLink } from "@/components/ui/button";
 import { ClipboardIcon } from "@/components/icons";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -37,12 +37,7 @@ export async function OrderQueue({
             title="Nothing queued to order"
             description="Products you queue from the plan — and urgent forecast picks — collect here, ready to turn into purchase orders."
             action={
-              <Link
-                href="/plan"
-                className="flex h-10 items-center justify-center rounded-md bg-accent px-4 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong"
-              >
-                Go to the buy list
-              </Link>
+              <ButtonLink href="/plan">Go to the buy list</ButtonLink>
             }
           />
         </CardContent>
