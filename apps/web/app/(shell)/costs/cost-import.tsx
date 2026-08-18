@@ -127,7 +127,7 @@ export function CostImport({ canManage }: { canManage: boolean }) {
 
             <div className="max-h-72 overflow-auto rounded-md border border-edge">
               <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-surface-2 text-xs text-ink-muted">
+                <thead className="sticky top-0 bg-surface-2 text-2xs tracking-wider text-ink-muted uppercase">
                   <tr>
                     <th className="px-3 py-2 text-left">Row</th>
                     <th className="px-3 py-2 text-left">Match</th>
@@ -142,7 +142,7 @@ export function CostImport({ canManage }: { canManage: boolean }) {
                       <td className="px-3 py-1.5 text-ink">{r.title ?? "—"}</td>
                       <td className="px-3 py-1.5 text-right font-mono">{r.costKes != null ? r.costKes.toLocaleString("en-KE") : "—"}</td>
                       <td className="px-3 py-1.5">
-                        <span className="text-xs text-ink-muted">
+                        <span className="text-2xs text-ink-muted">
                           {r.status === "matched" ? (r.pinned ? "matched · typed" : "matched") : r.status}
                           {r.note ? ` — ${r.note}` : ""}
                         </span>
