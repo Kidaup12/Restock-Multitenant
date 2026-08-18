@@ -27,7 +27,7 @@ export default async function SalesPage() {
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Sales data" description="Imports and sales history" />
+        <PageHeader eyebrow="Account" title="Sales data" description="Imports and sales history" />
         <EmptyState
           title="No workspace yet"
           description="Ask an admin to invite you to a workspace to see its sales."
@@ -42,7 +42,7 @@ export default async function SalesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Sales data" description="What sold, when, across every channel" />
+      <PageHeader eyebrow="Account" title="Sales data" description="What sold, when, across every channel" />
 
       {/* POS data-health surfaces (spec §3). Each hides itself when clean, so a
           healthy tenant sees only the metrics below. */}

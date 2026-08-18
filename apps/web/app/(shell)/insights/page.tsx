@@ -66,7 +66,7 @@ export default async function InsightsPage({
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Reports" description={DESCRIPTION} />
+        <PageHeader eyebrow="Account" title="Reports" description={DESCRIPTION} />
         <EmptyState
           title="No workspace yet"
           description="Create your shop's workspace to start, or ask an admin to invite you to theirs."
@@ -82,7 +82,7 @@ export default async function InsightsPage({
   if (!planAllows(plan, "insights")) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Reports" description={DESCRIPTION} />
+        <PageHeader eyebrow="Account" title="Reports" description={DESCRIPTION} />
         <InsightsLocked />
       </div>
     );
@@ -90,7 +90,7 @@ export default async function InsightsPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Reports" description={DESCRIPTION} />
+      <PageHeader eyebrow="Account" title="Reports" description={DESCRIPTION} />
       <ViewTabs view={view} />
 
       {view === "now" ? (

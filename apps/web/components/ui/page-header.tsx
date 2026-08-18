@@ -53,7 +53,9 @@ export function PageHeader({
   /** Ancestors then the current page, e.g. Orders / PO-0001. Omit on a
    *  top-level section — the sidebar already says where you are. */
   breadcrumbs?: Crumb[];
-  /** Small caps above the title, naming the section the page belongs to. */
+  /** Small caps above the title, naming the section the page belongs to.
+   *  Only on pages without a trail — a breadcrumb already opens with the
+   *  section, and carrying both prints it twice, one line apart. */
   eyebrow?: string;
   title: string;
   description?: string;

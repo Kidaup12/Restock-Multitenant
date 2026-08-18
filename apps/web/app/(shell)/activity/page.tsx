@@ -123,7 +123,7 @@ export default async function ActivityPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <PageHeader eyebrow="Account"
         title="Activity log"
         description="Who created, ordered, cancelled or received orders, and who changed a cost. Kept for accounting — entries can't be edited or removed."
       />

@@ -42,7 +42,7 @@ export default async function ProfilePage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
+      <PageHeader eyebrow="Account"
         title="Profile"
         description="Your account and workspace access"
       />

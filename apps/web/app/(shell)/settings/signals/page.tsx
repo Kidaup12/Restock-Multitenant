@@ -21,6 +21,7 @@ export default async function SignalsSettingsPage() {
     return (
       <div className="space-y-6">
         <PageHeader
+          eyebrow="Settings"
           title="Promotions & closures"
           description="Days that weren't normal trading"
         />

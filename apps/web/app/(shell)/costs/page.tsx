@@ -119,7 +119,7 @@ export default async function CostsPage() {
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Costs" description="Cost coverage and upload" />
+        <PageHeader eyebrow="Catalogue" title="Costs" description="Cost coverage and upload" />
         <EmptyState title="No workspace yet" description="Ask an admin to invite you to a workspace." />
       </div>
     );
@@ -134,7 +134,7 @@ export default async function CostsPage() {
   if (!canViewCosts) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Costs" description="Cost coverage and upload" />
+        <PageHeader eyebrow="Catalogue" title="Costs" description="Cost coverage and upload" />
         <EmptyState
           title="Not available on your account"
           description="Buying prices are hidden for your role. Ask an owner or admin if you need them."
@@ -145,7 +145,7 @@ export default async function CostsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Costs" description="Cost coverage, upload/paste and cost-moved alerts" />
+      <PageHeader eyebrow="Catalogue" title="Costs" description="Cost coverage, upload/paste and cost-moved alerts" />
       <Suspense
         fallback={
           // Three tiles then two cards — the shape the screen actually loads

@@ -76,7 +76,7 @@ export default async function PoDetailPage({
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Purchase order" />
+        <PageHeader eyebrow="Buy" title="Purchase order" />
         <EmptyState
           title="No workspace yet"
           description="Ask an admin to invite you to a workspace to manage its purchase orders."

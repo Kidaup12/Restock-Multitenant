@@ -38,7 +38,7 @@ export default async function WorkspaceSettingsPage() {
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Workspace" description="Your workspace's basic settings" />
+        <PageHeader eyebrow="Settings" title="Workspace" description="Your workspace's basic settings" />
         <EmptyState
           icon={<GearIcon />}
           title="No workspace"
