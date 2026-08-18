@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { ActionBar } from "@/components/ui/action-bar";
 import { Button } from "@/components/ui/button";
 import { setLeadTimeForProductsAction } from "./actions";
 import type { CatalogueQuery } from "@/lib/catalogue";
@@ -54,7 +55,7 @@ export function BulkLeadTimeBar({
   const valid = parsed != null && Number.isFinite(parsed) && parsed >= 0 && parsed <= 365;
 
   return (
-    <div className="sticky bottom-4 z-10 mx-4 flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-surface px-4 py-3 shadow-pop">
+    <ActionBar className="mx-4">
       <span className="text-sm font-medium text-ink">
         {count} {count === 1 ? "product" : "products"} selected
       </span>
@@ -108,6 +109,6 @@ export function BulkLeadTimeBar({
           {note.text}
         </span>
       )}
-    </div>
+    </ActionBar>
   );
 }

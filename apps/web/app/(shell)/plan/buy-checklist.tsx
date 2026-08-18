@@ -9,6 +9,7 @@ import { CostValue } from "@/components/ui/cost-value";
 import { formatMoney, formatNumber } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
 import { cn } from "@/lib/cn";
+import { ActionBar } from "@/components/ui/action-bar";
 import type {
   BuyList,
   BuyListRow,
@@ -845,7 +846,7 @@ export function BuyChecklist({
       )}
 
       {(picked.size > 0 || notice) && (
-        <div className="sticky bottom-4 z-10 flex flex-wrap items-center gap-3 rounded-lg border border-edge bg-surface px-4 py-3 shadow-pop">
+        <ActionBar>
           {picked.size > 0 && (
             <span className="text-sm font-medium text-ink">
               {picked.size} ticked ·{" "}
@@ -865,7 +866,7 @@ export function BuyChecklist({
               Add {picked.size} to order
             </Button>
           )}
-        </div>
+        </ActionBar>
       )}
     </div>
   );
