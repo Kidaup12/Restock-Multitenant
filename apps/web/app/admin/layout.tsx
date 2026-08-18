@@ -29,12 +29,12 @@ export default async function AdminLayout({
         {/* Wraps below ~440px. Five non-shrinking items in one nowrap row gave
             the console a hard minimum wider than a phone, so every /admin page
             scrolled sideways and the sticky bar detached from the content. */}
-        <div className="mx-auto flex min-h-14 max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0 sm:px-6">
+        <div className="mx-auto flex min-h-14 max-w-7xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2 sm:h-14 sm:flex-nowrap sm:py-0 sm:px-6">
           <Link href="/admin" className="flex items-baseline gap-2">
             <span className="text-sm font-bold tracking-tight text-ink-strong">
               Wezesha
             </span>
-            <span className="rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-accent-ink uppercase">
+            <span className="rounded bg-accent-soft px-1.5 py-0.5 text-2xs font-semibold tracking-wider text-accent-ink uppercase">
               Admin
             </span>
           </Link>
@@ -62,7 +62,7 @@ export default async function AdminLayout({
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">{children}</main>
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>
     </div>
   );
 }

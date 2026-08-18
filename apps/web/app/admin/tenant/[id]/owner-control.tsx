@@ -47,7 +47,7 @@ export function OwnerControl({ tenantId }: { tenantId: string }) {
   return (
     <div className="space-y-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <label htmlFor="owner-email" className="text-ink-muted">
+        <label htmlFor="owner-email" className="text-2xs font-medium tracking-wider text-ink-muted uppercase">
           Email
         </label>
         <Input
