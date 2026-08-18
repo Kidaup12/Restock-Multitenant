@@ -73,7 +73,11 @@ export function TableHead({
     <th
       scope="col"
       className={cn(
-        "px-5 py-3 text-left text-2xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase",
+        // `relative` so a visually-hidden label stays inside its own column.
+        // `sr-only` positions absolutely, and with no positioned ancestor it
+        // resolves against the page — a screen-reader-only "Actions" heading in
+        // a wide table pushed the whole admin page 88px sideways.
+        "relative px-5 py-3 text-left text-2xs font-medium tracking-wider whitespace-nowrap text-ink-muted uppercase",
         numeric && "text-right",
         className,
       )}
