@@ -13,6 +13,7 @@ import {
   anchorToday,
   layeredForecast,
   type ActivePromo,
+  type DemandMethod,
   type DemandOverride,
   type Signal,
 } from "./layered";
@@ -69,6 +70,8 @@ export type ProductForecastInput = {
   /** Cold-start borrow / owner expectation that replaces the run rate for this
    *  product. The forecast-run resolves it (cross-product proxy + prior table). */
   demandOverride?: DemandOverride | null;
+  /** The demand method this product's class won in the last audition. */
+  demandMethod?: DemandMethod;
 };
 
 /** The Prediction row fields the engine is responsible for. `signals` stays
@@ -121,6 +124,7 @@ export function forecastProduct(input: ProductForecastInput): PredictionFields {
     serviceZ: input.serviceZ,
     capMultiple: input.capMultiple,
     demandOverride: input.demandOverride ?? null,
+    demandMethod: input.demandMethod,
   });
 
   // The reality guardrail clamps engine output to recent actual sales. It must
