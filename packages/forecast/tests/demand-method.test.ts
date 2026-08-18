@@ -67,11 +67,10 @@ describe("the champion a class won reaches the forecast", () => {
     productType: null,
     vendor: null,
     currentStock: 50,
+    onOrder: 0,
     costKes: 100,
     priceKes: 400,
     leadTimeDays: null,
-    minStock: null,
-    maxStock: null,
   };
   const base = {
     productId: "p1",
