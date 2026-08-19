@@ -1,4 +1,5 @@
-import { prismaForTenantTx, prismaService, isSellable, sellableUnits } from "@wezesha/db";
+import { prismaForTenantTx, prismaService } from "@wezesha/db";
+import { recomputeSellableStock } from "@/lib/inventory/sellable-rollup";
 
 /**
  * Line-by-line receiving with partial quantities. One tenant transaction:
@@ -150,23 +151,7 @@ export async function receivePoLines(
     const touched = stockFollowsStore
       ? []
       : [...new Set(receipts.map((e) => lineById.get(e.lineId)!.productId))];
-    for (const productId of touched) {
-      const levels = await tx.inventoryLevel.findMany({
-        where: { productId },
-        select: {
-          available: true,
-          onHand: true,
-          location: { select: { locationType: true } },
-        },
-      });
-      const sellable = levels
-        .filter((l) => l.location && isSellable(l.location))
-        .reduce((sum, l) => sum + sellableUnits(l), 0);
-      await tx.product.update({
-        where: { id: productId },
-        data: { currentStock: sellable },
-      });
-    }
+    await recomputeSellableStock(tx, touched);
 
     // A queue row completes when its product's line is fully in.
     if (fullyReceivedProducts.length > 0) {

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { LOCATION_TYPES, prismaForTenant, prismaService, type LocationType } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
+import { recomputeSellableStock } from "@/lib/inventory/sellable-rollup";
 
 /**
  * Confirm (or change) a location's role. Only MANAGE_SETTINGS members may do
@@ -43,6 +44,18 @@ export async function setLocationRole(input: {
     where: { id: target.id },
     data: { locationType: input.locationType, roleStatus: "confirmed" },
   });
+
+  // The role decides whether this location's units are sellable, and
+  // Product.currentStock is a STORED rollup of exactly that — so the answer to
+  // this prompt does not reach a single screen until the rollup is rewritten.
+  // Without this the confirmation looked accepted and changed nothing: a shop
+  // correcting a warehouse guessed as a shopfront still saw the old buy list,
+  // and the only thing that eventually fixed it was an unrelated sync.
+  const affected = await db.inventoryLevel.findMany({
+    where: { locationId: target.id },
+    select: { productId: true },
+  });
+  await recomputeSellableStock(db, [...new Set(affected.map((l) => l.productId))]);
 
   await prismaService.auditEvent.create({
     data: {
