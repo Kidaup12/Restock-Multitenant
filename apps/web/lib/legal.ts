@@ -6,19 +6,21 @@
  * those documents that a lawyer or the business has to supply — everything else
  * is a description of what the code does.
  *
- * ⚠️ The four PLACEHOLDER values must be filled in before the app is submitted
- * to Shopify. A privacy policy naming no legal entity is not a privacy policy.
+ * These were placeholders until the operating business supplied them; a privacy
+ * policy naming no legal entity is not a privacy policy, and both documents were
+ * live with "PLACEHOLDER" in them. `effective` dates THIS text, not any other
+ * version of the terms — move it only when the wording here changes.
  */
 
 export const LEGAL = {
   /** Registered name of the entity that operates the service. */
-  entity: "PLACEHOLDER — registered company name",
+  entity: "SimplyDone Africa",
   /** Postal address of that entity. */
-  address: "PLACEHOLDER — registered address",
+  address: "Nairobi, Kenya",
   /** Where a merchant writes about their data. A monitored mailbox, not a person. */
-  privacyContact: "PLACEHOLDER — privacy@yourdomain",
+  privacyContact: "teamsimplydone@gmail.com",
   /** Governing law for the merchant terms. */
-  jurisdiction: "PLACEHOLDER — e.g. the Republic of Kenya",
+  jurisdiction: "Kenya",
 
   /** Product name as merchants see it. */
   product: "Wezesha Restock",
