@@ -769,6 +769,14 @@ export function BuyChecklist({
           canDecrement={coverDays > COVER_MIN}
           canIncrement={coverDays < COVER_MAX}
           busy={resizing}
+          edit={{
+            value: coverDays,
+            min: COVER_MIN,
+            max: COVER_MAX,
+            unit: "days",
+            ariaLabel: "Days of cover to size to",
+            onCommit: applyCover,
+          }}
         />
         <Stepper
           label="Size for a sales push"
@@ -781,6 +789,14 @@ export function BuyChecklist({
           canDecrement={upliftPct > UPLIFT_MIN}
           canIncrement={upliftPct < UPLIFT_MAX}
           busy={resizing}
+          edit={{
+            value: upliftPct,
+            min: UPLIFT_MIN,
+            max: UPLIFT_MAX,
+            unit: "%",
+            ariaLabel: "Sales push percentage",
+            onCommit: applyUplift,
+          }}
         />
         {whatIf && (
           <Badge tone="warning" className="font-sans">
