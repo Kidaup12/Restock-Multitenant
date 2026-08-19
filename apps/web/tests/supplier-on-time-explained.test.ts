@@ -98,6 +98,7 @@ function renderRows(rows: SupplierRow[]): string {
       unassignedBrands: [],
       supplierOptions: [],
       assignableProducts: [],
+      defaultCurrency: "KES",
       canManage: true,
     })
   );

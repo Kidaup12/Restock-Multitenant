@@ -141,6 +141,7 @@ export function SuppliersView({
   unassignedBrands,
   supplierOptions,
   assignableProducts,
+  defaultCurrency,
   canManage,
 }: {
   /** One page of suppliers, already searched and sorted by the server. */
@@ -149,6 +150,7 @@ export function SuppliersView({
   unassignedBrands: UnassignedBrand[];
   supplierOptions: SupplierOption[];
   assignableProducts: AssignableProduct[];
+  defaultCurrency: string;
   canManage: boolean;
 }) {
   const {
@@ -228,6 +230,7 @@ export function SuppliersView({
       {editing && canManage && (
         <SupplierForm
           assignableProducts={assignableProducts}
+          defaultCurrency={defaultCurrency}
           supplier={editing === "new" ? null : editing}
           onResult={handleResult}
           onClose={() => setEditing(null)}
