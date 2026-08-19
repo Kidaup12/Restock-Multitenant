@@ -28,21 +28,22 @@
   --ink-faint: #a1a1aa;
 
   /*
-   * Accent — dusty rose, as a nine-step ramp rather than the four flat violets
-   * it replaces. The ramp is used AS a ramp: 500 for a focus border, 100 for a
-   * focus ring and an info chip, 600/700 for fills, 500→700 for the brand
-   * gradient. The semantic aliases below sit on top so existing components keep
-   * working unchanged.
+   * Accent — the brand violet, as a nine-step ramp. 600 and 700 are the two the
+   * old flat theme carried; the rest of the ramp is built around them so the
+   * steps components already reference keep meaning what they meant. The ramp is
+   * used AS a ramp: 500 for a focus border, 100 for a focus ring and an info
+   * chip, 600/700 for fills, 500→700 for the brand gradient. The semantic
+   * aliases below sit on top so existing components keep working unchanged.
    */
-  --accent-50: #fdf2f6;
-  --accent-100: #fce7ee;
-  --accent-200: #f9cfde;
-  --accent-300: #f2a8c2;
-  --accent-400: #e87aa0;
-  --accent-500: #db5586;
-  --accent-600: #c83f72;
-  --accent-700: #a62f5c;
-  --accent-800: #7d2244;
+  --accent-50: #f6f4fe;
+  --accent-100: #edeafc;
+  --accent-200: #ded8f9;
+  --accent-300: #c5bbf4;
+  --accent-400: #a695ed;
+  --accent-500: #8974e9;
+  --accent-600: #6d5ce6;
+  --accent-700: #5b4bd6;
+  --accent-800: #4536a4;
 
   --accent: var(--accent-600);
   --accent-strong: var(--accent-700);
@@ -62,11 +63,11 @@
   --critical-soft: #f2e8e8;
 
   /* charts */
-  --track: #f3e8ee;
+  --track: #ece9f8;
 
   /* elevation — the lifted shadow is accent-tinted, not neutral */
   --card-shadow: 0 1px 2px rgb(17 17 30 / 0.04), 0 1px 3px rgb(17 17 30 / 0.05);
-  --pop-shadow: 0 10px 28px rgb(200 63 114 / 0.2);
+  --pop-shadow: 0 10px 28px rgb(109 92 230 / 0.2);
   --glow: 0 0 #0000;
 
   /* skeleton shimmer */
@@ -76,7 +77,7 @@
 
 /*
  * Dark theme. The reference build is light-only by design decision, so none of
- * this is ported — it is authored to sit under the same rose accent. The light
+ * this is ported — it is authored to sit under the same violet accent. The light
  * greys are neutral zinc, so the dark surfaces are neutral too rather than the
  * navy they replace, or the accent reads cold against them.
  *
@@ -105,19 +106,19 @@
   --ink-faint: #5f5f6b;
 
   /* accent — the same nine steps; the aliases move up for contrast on dark */
-  --accent-50: #fdf2f6;
-  --accent-100: #fce7ee;
-  --accent-200: #f9cfde;
-  --accent-300: #f2a8c2;
-  --accent-400: #e87aa0;
-  --accent-500: #db5586;
-  --accent-600: #c83f72;
-  --accent-700: #a62f5c;
-  --accent-800: #7d2244;
+  --accent-50: #f6f4fe;
+  --accent-100: #edeafc;
+  --accent-200: #ded8f9;
+  --accent-300: #c5bbf4;
+  --accent-400: #a695ed;
+  --accent-500: #8974e9;
+  --accent-600: #6d5ce6;
+  --accent-700: #5b4bd6;
+  --accent-800: #4536a4;
 
   --accent: var(--accent-500);
   --accent-strong: var(--accent-400);
-  --accent-soft: rgb(219 85 134 / 0.16);
+  --accent-soft: rgb(137 116 233 / 0.16);
   --accent-ink: var(--accent-300);
   --on-accent: #ffffff;
 
@@ -133,12 +134,12 @@
   --critical-soft: rgb(239 95 107 / 0.18);
 
   /* charts */
-  --track: #26202a;
+  --track: #22202e;
 
   /* elevation — subtle glow on active elements */
   --card-shadow: 0 1px 2px rgb(0 0 0 / 0.5);
   --pop-shadow: 0 8px 24px rgb(0 0 0 / 0.5);
-  --glow: 0 0 18px rgb(200 63 114 / 0.35);
+  --glow: 0 0 18px rgb(109 92 230 / 0.35);
 
   /* skeleton shimmer */
   --shimmer-base: #1c1c24;
