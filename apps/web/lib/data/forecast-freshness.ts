@@ -23,6 +23,10 @@ export type PlanFreshness = {
   text: string;
   /** The same fact where only a few words fit — a card subtitle, a header. */
   short: string;
+  /** How long ago, for the header pill: "just now", "4h ago", "3d ago". Decided
+   *  here with the rest of the verdict so a screen cannot print an age that
+   *  disagrees with the sentence beside it. */
+  relative: string;
 };
 
 /** Clock passed in, not read during render — react-hooks/purity bans Date.now()
@@ -47,15 +51,28 @@ function nightsAgo(runDate: Date | string, now: number): number {
   return Math.max(1, days);
 }
 
+/** Coarse and deliberately so: nobody acts differently on 4h against 5h, and a
+ *  minute-accurate reading invites re-reading it. */
+function relativeAge(ageMs: number): string {
+  const minutes = Math.floor(ageMs / (60 * 1000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 export function planFreshnessLabel(runDate: Date | string, now: number = Date.now()): PlanFreshness {
   const day = new Date(runDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  const relative = relativeAge(planAgeMs(runDate, now));
   if (!isPlanStale(runDate, now)) {
-    return { tone: "neutral", text: `Plan computed ${day}`, short: `run ${day}` };
+    return { tone: "neutral", text: `Plan computed ${day}`, short: `run ${day}`, relative };
   }
   const nights = nightsAgo(runDate, now);
   return {
     tone: "warning",
     text: `This plan was computed ${day} — ${nights} nights ago. The overnight run has not finished since, so these numbers are behind your stock.`,
     short: `${nights} nights out of date`,
+    relative,
   };
 }

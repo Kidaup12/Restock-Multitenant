@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { ChevronDownIcon } from "@/components/icons";
 import { cn } from "@/lib/cn";
 import type { BuyListRow } from "@/lib/data/plan";
@@ -288,47 +288,59 @@ export function ScopeBar({
       {/* Kept mounted while folded — an open dimension popover shouldn't be torn
           down (and rebuilt closed) every time the row is hidden. */}
       <div className={open ? "flex flex-wrap items-center gap-2" : "hidden"}>
-      {activeDims.map(({ key, label }) => {
+      {activeDims.map(({ key, label }, i) => {
         const chosen = selection[key] as string[];
+        const divider = i > 0 ? <span aria-hidden className="h-4 w-px bg-edge" /> : null;
+
+        // Supplier stays a popover: a shop can have dozens, and dozens of chips
+        // is a wall rather than a choice. The other three are short, fixed and
+        // read faster laid out flat than hidden one click down.
+        if (key === "supplier") {
+          return (
+            <Fragment key={key}>
+              {divider}
+              <details className="group relative">
+                <summary
+                  className={cn(
+                    "flex cursor-pointer list-none items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
+                    chosen.length > 0
+                      ? "border-accent-200 bg-accent-soft text-accent-ink"
+                      : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink"
+                  )}
+                >
+                  {chosen.length > 0 ? `${chosen.length} supplier${chosen.length === 1 ? "" : "s"}` : label}
+                  <ChevronDownIcon className="size-3.5" />
+                </summary>
+                <div className="absolute z-10 mt-1 flex max-h-72 min-w-44 max-w-64 flex-wrap gap-1 overflow-auto rounded-md border border-edge bg-surface p-2 shadow-pop">
+                  {facets[key].map((opt) => (
+                    <ScopeChip
+                      key={opt.value}
+                      label={opt.label}
+                      count={opt.count}
+                      on={chosen.includes(opt.value)}
+                      onClick={() => toggle(key, opt.value)}
+                    />
+                  ))}
+                </div>
+              </details>
+            </Fragment>
+          );
+        }
+
         return (
-          <details key={key} className="group relative">
-            <summary
-              className={cn(
-                "flex cursor-pointer list-none items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
-                chosen.length > 0
-                  ? "border-accent-200 bg-accent-soft text-accent-ink"
-                  : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink"
-              )}
-            >
-              {label}
-              {chosen.length > 0 && (
-                <span className="rounded-xs bg-surface/50 px-1.5 font-mono tabular-nums">
-                  {chosen.length}
-                </span>
-              )}
-            </summary>
-            <div className="absolute z-10 mt-1 flex max-h-72 min-w-44 max-w-64 flex-wrap gap-1 overflow-auto rounded-md border border-edge bg-surface p-2 shadow-pop">
-              {facets[key].map((opt) => {
-                const on = chosen.includes(opt.value);
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => toggle(key, opt.value)}
-                    className={cn(
-                      "rounded-xs border px-2 py-0.5 text-2xs transition-colors",
-                      on
-                        ? "border-accent-200 bg-accent-soft text-accent-ink"
-                        : "border-edge bg-surface-2 text-ink-muted hover:text-ink"
-                    )}
-                  >
-                    {opt.label}
-                    <span className="ml-1 text-ink-faint">{opt.count}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </details>
+          <Fragment key={key}>
+            {divider}
+            {facets[key].map((opt) => (
+              <ScopeChip
+                key={opt.value}
+                // A bare "A" beside category names says nothing on its own.
+                label={key === "abc" && opt.value !== NONE_VALUE ? `Class ${opt.label}` : opt.label}
+                count={opt.count}
+                on={chosen.includes(opt.value)}
+                onClick={() => toggle(key, opt.value)}
+              />
+            ))}
+          </Fragment>
         );
       })}
       {onSaveScope && activeCount > 0 && (
@@ -364,5 +376,36 @@ export function ScopeBar({
 
       </div>
     </div>
+  );
+}
+
+/** One filter value. Carries its count so a reader can see what narrowing costs
+ *  before they click it. */
+function ScopeChip({
+  label,
+  count,
+  on,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  on: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={on}
+      className={cn(
+        "rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
+        on
+          ? "border-accent-200 bg-accent-soft text-accent-ink"
+          : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink"
+      )}
+    >
+      {label}
+      <span className="ml-1.5 font-mono tabular-nums text-ink-faint">{count}</span>
+    </button>
   );
 }
