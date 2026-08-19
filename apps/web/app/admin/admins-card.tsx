@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,17 +59,24 @@ export function AdminsCard({ admins }: { admins: PlatformAdminRow[] }) {
     run("grant console access", () => grantPlatformAdminAction(form));
   }
 
-  function revoke(userId: string, who: string) {
-    if (!confirm(`Remove console access for ${who}? They keep any workspace membership.`)) return;
+  async function revoke(userId: string, who: string) {
+    const ok = await confirm({
+      title: `Remove console access for ${who}?`,
+      body: "They keep any workspace membership — this only takes away the operator console.",
+      confirmLabel: "Revoke access",
+    });
+    if (!ok) return;
     const form = new FormData();
     form.set("userId", userId);
     run(`revoke ${who}'s access`, () => revokePlatformAdminAction(form));
   }
 
   const live = admins.filter((a) => a.revokedAt === null);
+  const { confirm, dialog } = useConfirm();
 
   return (
     <Card>
+      {dialog}
       <CardHeader
         title="Console access"
         subtitle={`${live.length} ${live.length === 1 ? "person" : "people"} can open this console`}

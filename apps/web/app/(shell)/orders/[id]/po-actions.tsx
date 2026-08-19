@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Button } from "@/components/ui/button";
 import { cancelPoAction, sendPoAction } from "../actions";
 
@@ -17,6 +18,7 @@ export function PoActions({
 }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
   const [sending, startSending] = useTransition();
   const [cancelling, startCancelling] = useTransition();
 
@@ -30,8 +32,14 @@ export function PoActions({
     });
   };
 
-  const cancel = () => {
-    if (!window.confirm("Cancel this purchase order? Its items go back to the queue.")) return;
+  const cancel = async () => {
+    const ok = await confirm({
+      title: "Cancel this purchase order?",
+      body: "Its items go back to the queue, ready to be ordered again.",
+      confirmLabel: "Cancel order",
+      cancelLabel: "Keep it",
+    });
+    if (!ok) return;
     setError(null);
     setMessage(null);
     startCancelling(async () => {
@@ -42,6 +50,7 @@ export function PoActions({
 
   return (
     <div className="flex flex-col items-end gap-1">
+      {dialog}
       <div className="flex items-center gap-2">
         {status === "draft" && (
           <Button size="sm" onClick={send} loading={sending} disabled={!supplierEmail}>

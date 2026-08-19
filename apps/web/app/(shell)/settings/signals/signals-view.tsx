@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { TrashIcon } from "@/components/icons";
 import type { DeclaredClosure, DeclaredPromo, SignalsCatalogue } from "@/lib/data/signals";
 import { Badge } from "@/components/ui/badge";
@@ -80,6 +81,7 @@ export function SignalsView({
 }) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
   const [pending, startTransition] = useTransition();
 
   function run(action: () => Promise<SignalActionResult>, onDone?: () => void) {
@@ -98,6 +100,7 @@ export function SignalsView({
 
   return (
     <div className="space-y-6">
+      {dialog}
       {message && (
         <p className="rounded-md bg-positive-soft px-3 py-2 text-sm text-positive">{message}</p>
       )}
@@ -166,8 +169,13 @@ export function SignalsView({
                             size="sm"
                             disabled={pending}
                             aria-label={`Remove the promotion on ${promo.rangeLabel}`}
-                            onClick={() => {
-                              if (!window.confirm("Remove this promotion? Those days go back to counting as normal sales.")) return;
+                            onClick={async () => {
+                              const ok = await confirm({
+                                title: "Remove this promotion?",
+                                body: "Those days go back to counting as normal sales, so the run rate will move.",
+                                confirmLabel: "Remove promotion",
+                              });
+                              if (!ok) return;
                               run(() => removePromo({ promoId: promo.id }));
                             }}
                           >
@@ -229,8 +237,13 @@ export function SignalsView({
                           size="sm"
                           disabled={pending}
                           aria-label={`Remove the closed day on ${closure.dayLabel}`}
-                          onClick={() => {
-                            if (!window.confirm("Remove this closed day? It'll count as a trading day again.")) return;
+                          onClick={async () => {
+                            const ok = await confirm({
+                              title: "Remove this closed day?",
+                              body: "It will count as a trading day again, so a day with no sales will read as poor demand.",
+                              confirmLabel: "Remove closed day",
+                            });
+                            if (!ok) return;
                             run(() =>
                               removeClosureDay({
                                 locationId: closure.locationId,

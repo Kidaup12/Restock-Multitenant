@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ export function UnmatchedRow({
   const [productId, setProductId] = useState(row.suggestion?.productId ?? "");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
   const [matching, startMatch] = useTransition();
   const [ignoring, startIgnore] = useTransition();
 
@@ -40,8 +42,13 @@ export function UnmatchedRow({
     });
   };
 
-  const ignore = () => {
-    if (!window.confirm(`Ignore "${row.sku}" as "not a product"? It won't queue again.`)) return;
+  const ignore = async () => {
+    const ok = await confirm({
+      title: `Ignore "${row.sku}"?`,
+      body: "It will be treated as not a product, and will not queue again.",
+      confirmLabel: "Ignore it",
+    });
+    if (!ok) return;
     setError(null);
     setMessage(null);
     startIgnore(async () => {
@@ -53,6 +60,7 @@ export function UnmatchedRow({
 
   return (
     <li className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-edge px-5 py-3">
+      {dialog}
       <div className="min-w-0 flex-1">
         <p className="font-mono text-xs text-ink">{row.sku}</p>
         {row.productName && <p className="truncate text-xs text-ink-muted">{row.productName}</p>}
