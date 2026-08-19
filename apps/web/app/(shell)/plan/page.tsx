@@ -80,7 +80,7 @@ export default async function PlanPage() {
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Restock Planner" description="Weekly replenishment planning" />
+        <PageHeader eyebrow="Buy" title="This week's Buy List" />
         <EmptyState
           title="No workspace yet"
           description="Ask an admin to invite you to a workspace to plan its restocking."
@@ -94,7 +94,11 @@ export default async function PlanPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Restock Planner" description="Weekly replenishment planning" />
+      <PageHeader
+        eyebrow="Buy"
+        title="This week's Buy List"
+        description="Start from what the forecast recommends, plan against a budget, or look ahead at the ordering calendar."
+      />
       <Suspense
         fallback={
           // Three mode cards, on the same grid the real chooser uses.

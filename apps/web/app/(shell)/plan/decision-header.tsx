@@ -1,19 +1,22 @@
 "use client";
 
 import { CostValue } from "@/components/ui/cost-value";
-import { StatTile } from "@/components/ui/stat-tile";
-import type { BuyListRow } from "@/lib/data/plan";
+import type { BuyListRow, BuyTier } from "@/lib/data/plan";
 
 /**
- * Decision header for the buy checklist: the four numbers that answer "what do I
- * do about this list right now" — how many items can't wait, the cash it takes
- * to order the ones at real risk, the sales on the line if you defer, and how
- * much of the plan you're looking at. Every figure is summed from the rows the
- * checklist already has, so the header always reflects the scope on screen and
- * needs no extra data fetch. Cost sums stay money-blind: they're built from
- * fields the data layer already nulls for a member, so a null propagates through
- * the total and CostValue masks it.
+ * Decision header for the buy checklist: what has to be ordered today, and what
+ * the rest of the list can wait for. The headline is WHEN money must move, not
+ * one undifferentiated total — the three tiers already sort the list that way,
+ * so the header just totals them.
+ *
+ * Every figure is summed from the rows the checklist already has, so the header
+ * always reflects the scope on screen and needs no extra data fetch. Cost sums
+ * stay money-blind: they're built from fields the data layer already nulls for a
+ * member, so a null propagates through the total and CostValue masks it.
  */
+
+/** One tier's roll-up. Cash is null when any row in it has its cost hidden. */
+export type TierTotal = { count: number; cashKes: number | null };
 
 export type PlanDecisionSummary = {
   /** Rows tiered "order today" — critical, or already past their safe order day. */
@@ -26,6 +29,8 @@ export type PlanDecisionSummary = {
   atRiskKes: number | null;
   /** How many products the current (scoped) list covers. */
   productCount: number;
+  /** Count and cash per tier, so the header can say when each pile is due. */
+  tiers: Record<BuyTier, TierTotal>;
 };
 
 /** Sum that propagates the unknown: a single null makes the whole total null
@@ -40,7 +45,12 @@ function sumOrNull(values: (number | null)[]): number | null {
   return total;
 }
 
-/** Pure: the header's four figures from the buy-list rows in view. */
+function tierTotal(rows: BuyListRow[], tier: BuyTier): TierTotal {
+  const inTier = rows.filter((r) => r.tier === tier);
+  return { count: inTier.length, cashKes: sumOrNull(inTier.map((r) => r.lineTotalKes)) };
+}
+
+/** Pure: the header's figures from the buy-list rows in view. */
 export function planDecisionSummary(rows: BuyListRow[]): PlanDecisionSummary {
   return {
     orderTodayCount: rows.filter((r) => r.tier === "order_today").length,
@@ -49,6 +59,11 @@ export function planDecisionSummary(rows: BuyListRow[]): PlanDecisionSummary {
     ),
     atRiskKes: sumOrNull(rows.map((r) => r.atRiskKes)),
     productCount: rows.length,
+    tiers: {
+      order_today: tierTotal(rows, "order_today"),
+      this_week: tierTotal(rows, "this_week"),
+      can_wait: tierTotal(rows, "can_wait"),
+    },
   };
 }
 
@@ -64,35 +79,50 @@ export function PlanDecisionHeader({
   // state; a row of zeroes above it would only add noise.
   if (summary.productCount === 0) return null;
 
-  const urgent = summary.orderTodayCount > 0;
+  const { order_today: today, this_week: thisWeek, can_wait: canWait } = summary.tiers;
+  const urgent = today.count > 0;
 
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <StatTile
-        label="Order today"
-        value={String(summary.orderTodayCount)}
-        valueTone={urgent ? "negative" : "positive"}
-        delta={{
-          label: urgent ? "can't wait — order now" : "nothing overdue",
-          tone: urgent ? "negative" : "positive",
-        }}
-      />
-      <StatTile
-        label="Cash for criticals"
-        value={<CostValue amount={summary.criticalsCashKes} canViewCosts={canViewCosts} compact />}
-        delta={{ label: "to order every must-have now", tone: "neutral" }}
-      />
-      <StatTile
-        label="Revenue at risk"
-        value={<CostValue amount={summary.atRiskKes} canViewCosts={canViewCosts} compact />}
-        valueTone={canViewCosts && (summary.atRiskKes ?? 0) > 0 ? "negative" : "default"}
-        delta={{ label: "sales at stake in 30 days if you wait", tone: "negative" }}
-      />
-      <StatTile
-        label="Products to restock"
-        value={String(summary.productCount)}
-        delta={{ label: "on this list", tone: "neutral" }}
-      />
+    <div className="rounded-lg border border-edge bg-surface p-5 shadow-card">
+      <div className="text-2xs tracking-wider text-ink-muted uppercase">Order today</div>
+
+      <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        {/* The headline is the cash that has to move now. A money-blind member
+            gets the count instead — a masked figure makes a poor headline, and
+            the count is the part of the answer they are allowed to have. */}
+        <span
+          className={`font-mono text-3xl font-semibold tracking-tight ${
+            urgent ? "text-accent-ink" : "text-positive"
+          }`}
+        >
+          {!urgent ? (
+            "None"
+          ) : canViewCosts ? (
+            <CostValue amount={today.cashKes} canViewCosts={canViewCosts} compact />
+          ) : (
+            today.count
+          )}
+        </span>
+        <span className="text-sm text-ink-muted">
+          {urgent
+            ? `${today.count} ${today.count === 1 ? "item is" : "items are"} past the last safe day — order now or they run out before the delivery lands.`
+            : "Nothing is overdue. The rest of the list can be ordered on its own schedule."}
+        </span>
+      </div>
+
+      <div className="mt-2.5 text-sm text-ink-muted">
+        This week — <CostValue amount={thisWeek.cashKes} canViewCosts={canViewCosts} compact /> (
+        {thisWeek.count}) · Can wait —{" "}
+        <CostValue amount={canWait.cashKes} canViewCosts={canViewCosts} compact /> ({canWait.count})
+        <span className="ml-2 text-2xs">each line shows its order-by date</span>
+      </div>
+
+      <div className="mt-1 text-sm text-ink-muted">
+        Cash for criticals —{" "}
+        <CostValue amount={summary.criticalsCashKes} canViewCosts={canViewCosts} compact /> ·
+        Revenue at risk if you wait —{" "}
+        <CostValue amount={summary.atRiskKes} canViewCosts={canViewCosts} compact />
+      </div>
     </div>
   );
 }

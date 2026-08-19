@@ -62,6 +62,45 @@ const TIERS: { tier: BuyTier; title: string; subtitle: string }[] = [
   },
 ];
 
+/**
+ * How the rows are ordered inside each tier. "Plan order" is the order the run
+ * itself produced (bestsellers first) — the default, and the only one that
+ * needs no client work.
+ *
+ * `costly` is the one key that reads a cost field, so it is offered only to a
+ * caller who may see costs. Sorting a money-blind member's list by line total
+ * would hand back the cost ranking the data layer just spent a re-sort hiding.
+ */
+type SortKey = "plan" | "urgent" | "fastest" | "revenue" | "alpha" | "costly";
+
+const SORTS: { key: SortKey; label: string; needsCosts?: true }[] = [
+  { key: "plan", label: "Plan order (bestsellers first)" },
+  { key: "urgent", label: "Most urgent" },
+  { key: "fastest", label: "Fastest-selling" },
+  { key: "revenue", label: "Highest 30d revenue" },
+  { key: "costly", label: "Biggest line total", needsCosts: true },
+  { key: "alpha", label: "A → Z" },
+];
+
+/** Non-mutating; "plan" hands back the same array so the run's own order is
+ *  passed through untouched rather than re-derived. */
+function sortRows(rows: BuyListRow[], key: SortKey): BuyListRow[] {
+  if (key === "plan") return rows;
+  const copy = [...rows];
+  switch (key) {
+    case "urgent":
+      return copy.sort((a, b) => a.daysLeftToOrder - b.daysLeftToOrder);
+    case "fastest":
+      return copy.sort((a, b) => b.runRatePerDay - a.runRatePerDay);
+    case "revenue":
+      return copy.sort((a, b) => b.revenue30dKes - a.revenue30dKes);
+    case "costly":
+      return copy.sort((a, b) => (b.lineTotalKes ?? 0) - (a.lineTotalKes ?? 0));
+    case "alpha":
+      return copy.sort((a, b) => a.title.localeCompare(b.title));
+  }
+}
+
 const PLANNABLE_NOTES: Record<string, string> = {
   "missing-cost": "No unit cost on file — the line total can't be trusted.",
   "missing-price": "No selling price on file — margin can't be checked.",
@@ -509,6 +548,8 @@ export function BuyChecklist({
   // — the on-screen steppers always reflect the applied view. "Reset to plan"
   // clears both.
   const [whatIf, setWhatIf] = useState<BuyList | null>(null);
+  const [sort, setSort] = useState<SortKey>("plan");
+  const [urgentOnly, setUrgentOnly] = useState(false);
   const [coverDays, setCoverDays] = useState(DEFAULT_COVER_DAYS);
   const [upliftPct, setUpliftPct] = useState(DEFAULT_WHATIF_UPLIFT);
   const [resizeError, setResizeError] = useState<string | null>(null);
@@ -516,6 +557,18 @@ export function BuyChecklist({
 
   const view = whatIf ?? buyList;
   const rows = view.rows;
+
+  // What the tiers actually render: the urgency filter first, then the chosen
+  // order. Ticking is unaffected — a row ticked before the filter narrowed stays
+  // ticked and stays in the total.
+  const shownRows = useMemo(() => {
+    const kept = urgentOnly
+      ? rows.filter((r) => r.urgency === "critical" || r.urgency === "high")
+      : rows;
+    return sortRows(kept, sort);
+  }, [rows, urgentOnly, sort]);
+
+  const sortOptions = SORTS.filter((s) => !s.needsCosts || canViewCosts);
 
   function applyCover(days: number) {
     const clamped = clampCoverDays(days);
@@ -634,7 +687,7 @@ export function BuyChecklist({
           {view.excluded.length > 0 && <> · {view.excluded.length} held back</>}
         </p>
         <ExportBar
-          rows={rows}
+          rows={shownRows}
           columns={exportColumns}
           filename="buy-list"
           document={{
@@ -645,6 +698,60 @@ export function BuyChecklist({
               : undefined,
           }}
         />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="text-sm text-ink-muted">
+          <span className="font-medium text-ink">{picked.size}</span> of {shownRows.length} ticked ·{" "}
+          <CostValue amount={pickedTotalKes} canViewCosts={canViewCosts} />
+        </span>
+        <button
+          type="button"
+          onClick={() => setUrgentOnly((v) => !v)}
+          aria-pressed={urgentOnly}
+          title="Show only the lines that are critical or close to it"
+          className={cn(
+            "rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
+            urgentOnly
+              ? "border-accent-200 bg-accent-soft text-accent-ink"
+              : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink"
+          )}
+        >
+          Urgent only
+        </button>
+        <label className="flex items-center gap-1.5 text-2xs text-ink-muted">
+          Sort
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+            aria-label="Sort the buy list"
+            className="rounded-sm border border-edge bg-surface px-2 py-1.5 text-2xs text-ink transition-colors hover:bg-surface-2 focus:border-accent-500 focus:ring-4 focus:ring-accent-100 focus:outline-none"
+          >
+            {sortOptions.map((option) => (
+              <option key={option.key} value={option.key}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={shownRows.length === 0}
+            onClick={() => setPicked(new Set(shownRows.map((r) => r.predictionId)))}
+          >
+            Select all
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={picked.size === 0}
+            onClick={() => setPicked(new Set())}
+          >
+            Deselect
+          </Button>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-edge bg-surface-2/40 px-4 py-3">
@@ -699,7 +806,7 @@ export function BuyChecklist({
       </div>
 
       {TIERS.map(({ tier, title, subtitle }) => {
-        const tierRows = rows.filter((r) => r.tier === tier);
+        const tierRows = shownRows.filter((r) => r.tier === tier);
         if (tierRows.length === 0) return null;
         return (
           <Card key={tier}>
