@@ -36,7 +36,7 @@ const { TeamView } = await import("../app/(shell)/settings/team/team-view");
 const { SignalsView } = await import("../app/(shell)/settings/signals/signals-view");
 const { BuyChecklist } = await import("../app/(shell)/plan/buy-checklist");
 const { ProductDetailView } = await import(
-  "../app/(shell)/stock/[productId]/product-detail-view"
+  "../app/(shell)/products/[productId]/product-detail-view"
 );
 
 const headerCells = (html: string) => (html.match(/<th\b/g) ?? []).length;

@@ -1,93 +1,30 @@
-import { Suspense } from "react";
-import type { Metadata } from "next";
-import { activeMembership, requireSession } from "@/lib/auth";
-import { hasPermission } from "@/lib/auth/permissions";
-import { EmptyState } from "@/components/ui/empty-state";
-import { SegmentedNav } from "@/components/ui/segmented-nav";
-import { PageHeader } from "@/components/ui/page-header";
-import { SkeletonTableRows } from "@/components/ui/skeleton";
-import { Card } from "@/components/ui/card";
-import { catalogueQueryToSearch, parseCatalogueQuery, type RawSearchParams } from "@/lib/catalogue";
-import { CatalogueTable } from "./catalogue-table";
-import { LocationView } from "./location-view";
+import { permanentRedirect } from "next/navigation";
+import type { RawSearchParams } from "@/lib/catalogue";
 
-export const metadata: Metadata = {
-  title: "Stock",
-};
-
-function ViewTabs({ view }: { view: "products" | "locations" }) {
-  return (
-    <SegmentedNav
-      label="Stock views"
-      data-tour="stock-tabs"
-      items={[
-        { href: "/stock", label: "By product", active: view === "products" },
-        { href: "/stock?view=locations", label: "By location", active: view === "locations" },
-      ]}
-    />
-  );
-}
-
-export default async function StockPage({
+/**
+ * `/stock` was one screen with a tab; it is now Products and Inventory. The
+ * route stays as a forwarder because it shipped, and a bookmark or a link in
+ * somebody's notes should not answer 404. The by-location tab becomes Inventory;
+ * everything else was the catalogue.
+ *
+ * Filters ride along so a saved link to a filtered catalogue still lands on the
+ * rows it named.
+ */
+export default async function StockRedirect({
   searchParams,
 }: {
   searchParams: Promise<RawSearchParams>;
 }) {
-  const session = await requireSession();
-  const membership = await activeMembership(session.user.id);
   const params = await searchParams;
-  const view = params.view === "locations" ? "locations" : "products";
-  // Scope, filters, sort and page all live in the URL: the server decides which
-  // rows to send, so it has to read what the reader chose.
-  const query = parseCatalogueQuery(params);
+  if (params.view === "locations") permanentRedirect("/inventory");
 
-  if (!membership) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title="Stock" description="Every tracked product and its position" />
-        <EmptyState
-          title="No workspace yet"
-          description="Ask an admin to invite you to a workspace to see its stock."
-        />
-      </div>
-    );
+  const carried = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (key === "view") continue;
+    for (const v of Array.isArray(value) ? value : value == null ? [] : [value]) {
+      carried.append(key, v);
+    }
   }
-
-  const tenantId = membership.tenantId;
-  // Money-blind gate: MEMBERs (without view_costs) see no KES cost figures.
-  const canViewCosts = hasPermission(membership, "view_costs");
-  // Catalogue editing (cost pin, category, not-for-sale) needs settings access.
-  const canManage = hasPermission(membership, "manage_settings");
-
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Stock"
-        description="Every tracked product and its position"
-        actions={<ViewTabs view={view} />}
-      />
-      <Suspense
-        // Keyed on the whole query, not just the tab: the boundary has to
-        // remount for the new query's rows to render, and it shows the skeleton
-        // while they load.
-        key={`${view}${catalogueQueryToSearch(query)}`}
-        fallback={
-          <Card className="p-5">
-            <SkeletonTableRows rows={10} />
-          </Card>
-        }
-      >
-        {view === "locations" ? (
-          <LocationView tenantId={tenantId} canViewCosts={canViewCosts} params={params} />
-        ) : (
-          <CatalogueTable
-            tenantId={tenantId}
-            canViewCosts={canViewCosts}
-            canManage={canManage}
-            query={query}
-          />
-        )}
-      </Suspense>
-    </div>
-  );
+  const query = carried.toString();
+  permanentRedirect(query ? `/products?${query}` : "/products");
 }

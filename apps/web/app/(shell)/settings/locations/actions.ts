@@ -76,7 +76,8 @@ export async function setLocationRole(input: {
 
   // Roles drive the live stock queries, so refresh both surfaces.
   revalidatePath("/settings/locations");
-  revalidatePath("/stock");
+  revalidatePath("/products");
+  revalidatePath("/inventory");
   return { ok: true };
 }
 

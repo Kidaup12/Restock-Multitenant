@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { prismaService } from "@wezesha/db";
-import { LocationView } from "../app/(shell)/stock/location-view";
+import { LocationView } from "../app/(shell)/inventory/location-view";
 
 /**
  * Inbound stock, and a stable set of columns, on the per-location table.

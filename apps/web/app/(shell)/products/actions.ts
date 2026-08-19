@@ -56,7 +56,7 @@ function audit(
 }
 
 function revalidateCatalogue() {
-  revalidatePath("/stock");
+  revalidatePath("/products");
   revalidatePath("/costs");
   // Archiving a SKU, or fixing its cost, changes what the buy list contains —
   // leaving the plan cached would show it ordering something just retired.

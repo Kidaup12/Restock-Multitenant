@@ -149,7 +149,7 @@ export function CatalogueView({
    *  filtering down to eight rows while sitting on page 7 would otherwise show
    *  an empty table. */
   const hrefFor = (patch: Partial<CatalogueQuery>) =>
-    `/stock${catalogueQueryToSearch(withQuery(query, patch))}`;
+    `/products${catalogueQueryToSearch(withQuery(query, patch))}`;
 
   return (
     <div className="space-y-4">
@@ -188,7 +188,7 @@ export function CatalogueView({
         />
 
         <TableSearch
-          action="/stock"
+          action="/products"
           value={query.search}
           hidden={catalogueQueryFields(query)}
           placeholder="Search by product, SKU, variant, brand or category"
@@ -514,7 +514,7 @@ export function RowGroup({
                 of months, the supplier's lead time, and what the run decided. */}
             <div className="px-4 pb-4">
               <Link
-                href={`/stock/${row.productId}`}
+                href={`/products/${row.productId}`}
                 className="text-sm font-medium text-accent-ink hover:underline"
               >
                 See this product in full →

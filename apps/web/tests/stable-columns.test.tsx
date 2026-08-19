@@ -27,7 +27,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }),
 }));
 
-const { CatalogueView, RowGroup } = await import("../app/(shell)/stock/catalogue-view");
+const { CatalogueView, RowGroup } = await import("../app/(shell)/products/catalogue-view");
 const { BudgetTable } = await import("../app/(shell)/plan/budget-planner");
 
 const headerCells = (html: string) => html.match(/<th\b/g) ?? [];

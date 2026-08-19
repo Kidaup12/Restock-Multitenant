@@ -80,7 +80,7 @@ export function buildSetupSteps(input: SetupChecklistInput): SetupStep[] {
           ? `${input.productsTotal} ${plural(input.productsTotal, "product", "products")}`
           : "your catalogue arrives with the first sync",
       done: input.productsTotal > 0,
-      href: "/stock",
+      href: "/products",
       actionable: shop,
     },
     {

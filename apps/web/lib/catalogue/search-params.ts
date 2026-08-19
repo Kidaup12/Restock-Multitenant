@@ -87,12 +87,10 @@ export function parseCatalogueQuery(params: RawSearchParams): CatalogueQuery {
 
 /**
  * The query as a querystring, defaults omitted so an untouched catalogue has a
- * clean `/stock` URL and every param present means the reader chose it.
- * `view` is passed through because the Stock page's tab lives there too.
+ * clean `/products` URL and every param present means the reader chose it.
  */
-export function catalogueQueryToSearch(q: CatalogueQuery, extra?: { view?: string }): string {
+export function catalogueQueryToSearch(q: CatalogueQuery): string {
   const out = new URLSearchParams();
-  if (extra?.view) out.set("view", extra.view);
   if (q.scope !== DEFAULT_QUERY.scope) out.set(SCOPE_PARAM, q.scope);
   for (const key of FACET_KEYS) {
     for (const value of q.selection[key as FacetKey] ?? []) out.append(`${FACET_PREFIX}${key}`, value);
@@ -113,9 +111,8 @@ export function catalogueQueryToSearch(q: CatalogueQuery, extra?: { view?: strin
  *  typed. Built from the same serializer the links use, so the two can't drift. */
 export function catalogueQueryFields(
   q: CatalogueQuery,
-  extra?: { view?: string },
 ): { name: string; value: string }[] {
-  const search = catalogueQueryToSearch({ ...q, search: "", page: 0 }, extra);
+  const search = catalogueQueryToSearch({ ...q, search: "", page: 0 });
   return [...new URLSearchParams(search.replace(/^\?/, ""))].map(([name, value]) => ({ name, value }));
 }
 

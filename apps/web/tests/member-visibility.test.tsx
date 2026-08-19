@@ -46,11 +46,11 @@ vi.mock("next/navigation", () => ({
 
 import { MetricsTiles } from "../app/(shell)/today/metrics-tiles";
 import { ReorderTable } from "../app/(shell)/today/reorder-table";
-import { CatalogueTable } from "../app/(shell)/stock/catalogue-table";
-import { CatalogueView } from "../app/(shell)/stock/catalogue-view";
+import { CatalogueTable } from "../app/(shell)/products/catalogue-table";
+import { CatalogueView } from "../app/(shell)/products/catalogue-view";
 import { DEFAULT_QUERY } from "../lib/catalogue";
-import { LocationView } from "../app/(shell)/stock/location-view";
-import { catalogueExportColumns } from "../app/(shell)/stock/catalogue-export";
+import { LocationView } from "../app/(shell)/inventory/location-view";
+import { catalogueExportColumns } from "../app/(shell)/products/catalogue-export";
 import { ShelfHealth } from "../app/(shell)/insights/shelf-health";
 import { CostMovedList } from "../app/(shell)/costs/cost-moved-list";
 import { ProposalView } from "../app/(shell)/transfers/proposal-view";

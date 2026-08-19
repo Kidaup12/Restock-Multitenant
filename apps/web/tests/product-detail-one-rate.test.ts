@@ -5,7 +5,7 @@ import { prismaService } from "@wezesha/db";
 import { layeredForecast } from "@wezesha/forecast";
 import { getProductDetail } from "../lib/data/product-detail";
 import { getCatalogueMetrics } from "../lib/metrics/catalogue";
-import { ProductDetailView } from "../app/(shell)/stock/[productId]/product-detail-view";
+import { ProductDetailView } from "../app/(shell)/products/[productId]/product-detail-view";
 
 /**
  * One question, one number. The product page puts a LIVE "Sells/day" and "Days

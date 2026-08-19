@@ -62,13 +62,13 @@ describe("preflight (pure)", () => {
     expect(result.checks).toEqual([]);
   });
 
-  it("flags a negative stock count and sends the owner to Stock", () => {
+  it("flags a negative stock count and sends the owner to Products", () => {
     const [check, ...rest] = preflight([mkRow({ onHandUnits: -3 }), mkRow()]).checks;
     expect(rest).toEqual([]);
     // The count is the concrete part — "some products" is not actionable.
     expect(check.text).toContain("1 product has");
     expect(check.text).toContain("negative stock count");
-    expect(check.href).toBe("/stock");
+    expect(check.href).toBe("/products");
   });
 
   it("flags products with no supplier, because their order-by dates are guesses", () => {
@@ -92,7 +92,7 @@ describe("preflight (pure)", () => {
       mkRow({ supplierName: null }),
       mkRow({ doubleOrderWarn: true }),
     ]).checks;
-    expect(checks.map((c) => c.href)).toEqual(["/stock", "/suppliers", "/orders"]);
+    expect(checks.map((c) => c.href)).toEqual(["/products", "/suppliers", "/orders"]);
   });
 
   it("reads only fields a money-blind member can see", () => {

@@ -41,7 +41,7 @@ export function preflight(rows: BuyListRow[]): Preflight {
   if (negative.length > 0) {
     checks.push({
       text: `${negative.length} ${plural(negative.length, "product has", "products have")} a negative stock count, so ${plural(negative.length, "its", "their")} order quantity can't be trusted until the count is fixed.`,
-      href: "/stock",
+      href: "/products",
       action: "Fix counts",
     });
   }

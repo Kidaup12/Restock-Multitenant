@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }),
 }));
 
-const { RowEditor } = await import("../app/(shell)/stock/row-editor");
+const { RowEditor } = await import("../app/(shell)/products/row-editor");
 
 const row: CatalogueRow = {
   productId: "p1",
