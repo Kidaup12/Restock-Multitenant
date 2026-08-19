@@ -232,8 +232,8 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
                 {split.deferredCriticalCount} must-restock{" "}
                 {split.deferredCriticalCount === 1 ? "line doesn't" : "lines don't"} fit this budget
               </span>{" "}
-              — <CostValue amount={split.deferredCriticalKes} canViewCosts={canViewCosts} /> more
-              would cover them. They&apos;re held back below: raise the budget, or accept the
+              — <CostValue amount={split.deferredCriticalKes} canViewCosts={canViewCosts} />{" "}
+              more would cover them. They&apos;re held back below: raise the budget, or accept the
               stockout risk.
             </div>
           )}

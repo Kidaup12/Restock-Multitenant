@@ -1,5 +1,5 @@
 import { Card } from "@/components/ui/card";
-import { setupChecklistFor } from "@/lib/capabilities/setup-checklist";
+import { setupChecklistFor } from "@/lib/capabilities/setup-checklist-read";
 import { ConfirmLocations } from "./confirm-locations";
 import { FinishSetupCard } from "./finish-setup-card";
 

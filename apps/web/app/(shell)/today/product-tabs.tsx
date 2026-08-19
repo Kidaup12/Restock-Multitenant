@@ -302,7 +302,11 @@ export function ProductTabs({
                     ) : (
                       <>
                         <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
-                        <TableCell numeric>{row.runRate}</TableCell>
+                        <TableCell numeric>
+                          {/* Same presentation as the catalogue: two places, and a
+                              dash rather than 0.00 for something that is not moving. */}
+                          {row.runRate > 0 ? row.runRate.toFixed(2) : "—"}
+                        </TableCell>
                         <TableCell numeric>{cover(row)}</TableCell>
                         <TableCell numeric>
                           {row.onOrderUnits > 0 ? formatNumber(row.onOrderUnits) : "—"}

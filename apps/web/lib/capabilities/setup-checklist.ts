@@ -10,8 +10,6 @@
  * Pure: counts in, steps out. The reads live in `setupChecklistInput`.
  */
 
-import { getTenantPlan } from "./index";
-import { setupDepth, type SetupDepth } from "./setup-depth";
 
 export type SetupStepId =
   | "displayName"
@@ -130,37 +128,4 @@ export function setupProgress(steps: SetupStep[]): SetupProgress {
   const done = steps.filter((s) => s.done).length;
   const total = steps.length;
   return { done, total, percent: total === 0 ? 0 : Math.floor((done / total) * 100) };
-}
-
-/**
- * Gather the checklist for a tenant.
- *
- * Reads nothing of its own beyond the plan: `setupDepth` already runs the
- * RLS-scoped pass over connections, products, costs and suppliers, so this
- * composes its facts rather than asking the database the same questions twice.
- * The display name is the caller's own and arrives from the session.
- */
-export async function setupChecklistFor(
-  tenantId: string,
-  { displayName, canManageShop }: { displayName: string | null; canManageShop: boolean }
-): Promise<{ steps: SetupStep[]; depth: SetupDepth }> {
-  const [depth, plan] = await Promise.all([setupDepth(tenantId), getTenantPlan(tenantId)]);
-  const { facts } = depth;
-
-  // The depth goes back with the steps: the caller also needs its pending
-  // locations, and asking for it twice would run the whole read pass again.
-  const steps = buildSetupSteps({
-    displayName,
-    // The ladder's `shopify` signal also requires a synced catalogue; here the
-    // connection and the catalogue are two separate steps, so this reads the
-    // raw fact rather than the rung.
-    shopifyConnected: facts.shopifyConnected,
-    productsTotal: facts.activeProducts,
-    productsWithCost: facts.trustedCostProducts,
-    leadTimesSet: facts.suppliedProducts > 0,
-    planChosen: plan != null,
-    canManageShop,
-  });
-
-  return { steps, depth };
 }
