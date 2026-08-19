@@ -15,9 +15,12 @@ import { EXPORT_FRESHNESS_HOURS } from "./export";
  *   4. a final AuditEvent written BEFORE the cascade; AuditEvent carries no
  *      Tenant FK precisely so the ledger survives the tenant
  *
- * BacktestRun and SpotCheck also carry no FK (by design); they hold tenant
- * data, so this flow removes them explicitly. AuditEvent rows are KEPT — an
- * append-only accounting ledger outlives its subject.
+ * BacktestRun, SpotCheck and EmailLog carry no FK to Tenant and have no
+ * cascading parent, so the cascade cannot reach them; they hold tenant data and
+ * this flow removes them explicitly. EmailLog matters most of the three: it
+ * holds the recipient addresses the shop mailed, which is exactly what a
+ * customer expects a permanent delete to take with it. AuditEvent rows are
+ * KEPT — an append-only accounting ledger outlives its subject.
  */
 
 const HOUR_MS = 3_600_000;
@@ -117,6 +120,7 @@ export async function deleteTenant(request: DeleteTenantRequest): Promise<Delete
   // Non-FK tenant data first (the cascade can't reach it), then the cascade.
   await prismaService.backtestRun.deleteMany({ where: { tenantId } });
   await prismaService.spotCheck.deleteMany({ where: { tenantId } });
+  await prismaService.emailLog.deleteMany({ where: { tenantId } });
   await prismaService.tenant.delete({ where: { id: tenantId } });
 
   return { ok: true };
