@@ -411,19 +411,23 @@ function poSearchFilter(search: string): Prisma.PurchaseOrderWhereInput[] {
 }
 
 /** The one place the rows and the count agree on what the reader asked for. */
-function poListWhere(search: string): Prisma.PurchaseOrderWhereInput {
+function poListWhere(search: string, statuses?: readonly string[]): Prisma.PurchaseOrderWhereInput {
   const filters = poSearchFilter(search);
-  return { deletedAt: null, ...(filters.length ? { AND: filters } : {}) };
+  return {
+    deletedAt: null,
+    ...(statuses ? { status: { in: [...statuses] } } : {}),
+    ...(filters.length ? { AND: filters } : {}),
+  };
 }
 
 /** How many live orders the reader's search matches — the whole list, not the
  *  page. What the pager counts against, so "showing 1–20 of 26" is honest. */
 export async function countPurchaseOrders(
   tenantId: string,
-  { search = "" }: { search?: string } = {}
+  { search = "", statuses }: { search?: string; statuses?: readonly string[] } = {}
 ): Promise<number> {
   const db = prismaForTenant(tenantId);
-  return db.purchaseOrder.count({ where: poListWhere(search) });
+  return db.purchaseOrder.count({ where: poListWhere(search, statuses) });
 }
 
 /** Clamp to a real page. What survives a reader coming back to a bookmarked
@@ -437,17 +441,23 @@ export function poListPageBounds(
 
 export async function getPurchaseOrders(
   tenantId: string,
-  { canViewCosts, search = "", page }: {
+  { canViewCosts, search = "", page, statuses, orderBy }: {
     canViewCosts: boolean;
     search?: string;
     /** 0-based. Omitted returns the whole list. */
     page?: number;
+    /** Narrow to particular lifecycle states — Receiving asks for the two that
+     *  still have stock outstanding. Omitted means every live order. */
+    statuses?: readonly string[];
+    /** Receiving reads in arrival order, not creation order: the question there
+     *  is what lands next, and the newest order is rarely the answer. */
+    orderBy?: Prisma.PurchaseOrderOrderByWithRelationInput[];
   }
 ): Promise<PoListRow[]> {
   const db = prismaForTenant(tenantId);
   const pos = await db.purchaseOrder.findMany({
-    where: poListWhere(search),
-    orderBy: PO_LIST_ORDER,
+    where: poListWhere(search, statuses),
+    orderBy: orderBy ?? PO_LIST_ORDER,
     ...(page === undefined
       ? {}
       : { skip: Math.max(0, page) * PO_PAGE_SIZE, take: PO_PAGE_SIZE }),

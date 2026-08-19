@@ -21,6 +21,7 @@ export const config = {
     "/today/:path*",
     "/plan/:path*",
     "/orders/:path*",
+    "/receiving",
     "/stock/:path*",
     "/products/:path*",
     "/inventory/:path*",

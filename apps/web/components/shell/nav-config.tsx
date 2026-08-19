@@ -65,6 +65,7 @@ export const NAV_DESTINATIONS: NavDestination[] = [
 
   { href: "/plan", label: "Restock Planner", icon: <CalendarIcon />, tourKey: "nav-plan", section: "buy" },
   { href: "/orders", label: "Orders", icon: <ClipboardIcon />, tourKey: "nav-orders", section: "buy" },
+  { href: "/receiving", label: "Receiving", icon: <InboxIcon />, tourKey: "nav-receiving", section: "buy" },
 
   { href: "/inventory", label: "Inventory", icon: <ArchiveIcon />, tourKey: "nav-inventory", section: "stock" },
   {
