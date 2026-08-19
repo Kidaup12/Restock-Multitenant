@@ -54,4 +54,23 @@ describe("plan freshness", () => {
     expect(planFreshnessLabel(run, NOW).text).toContain("2 nights ago");
     expect(planFreshnessLabel(run, evening).text).toContain("2 nights ago");
   });
+
+  it("reads its age coarsely, and agrees with the sentence beside it", () => {
+    const run = new Date("2026-08-19T02:00:00Z");
+    const at = (ms: number) => planFreshnessLabel(run, run.getTime() + ms);
+    expect(at(30_000).relative).toBe("just now");
+    expect(at(45 * 60_000).relative).toBe("45m ago");
+    expect(at(5 * 3_600_000).relative).toBe("5h ago");
+    expect(at(3 * 24 * 3_600_000).relative).toBe("3d ago");
+    // Coarse on purpose — nobody acts differently on 4h against 5h, and a
+    // minute-accurate pill invites re-reading it.
+    expect(at(4 * 3_600_000 + 59 * 60_000).relative).toBe("4h ago");
+  });
+
+  it("carries the age on a stale plan too, not just a fresh one", () => {
+    const run = new Date("2026-08-14T02:00:00Z");
+    const verdict = planFreshnessLabel(run, new Date("2026-08-19T08:00:00Z").getTime());
+    expect(verdict.tone).toBe("warning");
+    expect(verdict.relative).toBe("5d ago");
+  });
 });
