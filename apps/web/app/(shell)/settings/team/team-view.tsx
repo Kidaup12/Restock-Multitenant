@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { Role } from "@wezesha/db";
 import { cn } from "@/lib/cn";
 import { TrashIcon, XIcon } from "@/components/icons";
@@ -68,6 +69,7 @@ export function TeamView({
   );
   const [sent, setSent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
   const [pending, startTransition] = useTransition();
 
   function run(action: () => Promise<TeamActionResult>) {
@@ -97,6 +99,7 @@ export function TeamView({
 
   return (
     <div className="space-y-6">
+      {dialog}
       {canManage && inviteRoles.length > 0 && (
         <Card>
           <CardHeader
@@ -217,14 +220,13 @@ export function TeamView({
                         type="button"
                         aria-label={`Remove ${member.name}`}
                         disabled={pending}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Remove ${member.name} from this workspace?`,
-                            )
-                          ) {
-                            run(() => removeMember({ membershipId: member.id }));
-                          }
+                        onClick={async () => {
+                          const ok = await confirm({
+                            title: `Remove ${member.name} from this workspace?`,
+                            body: "They lose access immediately. Anything they created stays.",
+                            confirmLabel: "Remove them",
+                          });
+                          if (ok) run(() => removeMember({ membershipId: member.id }));
                         }}
                         className={cn(
                           "grid size-8 place-items-center rounded-md text-ink-muted transition-colors",

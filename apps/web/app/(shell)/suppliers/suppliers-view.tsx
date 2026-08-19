@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,7 +71,7 @@ const SPEED_TONE: Record<SpeedBand, "positive" | "accent" | "neutral"> = {
 };
 
 const DELETE_WARNING =
-  "Remove this supplier? Its products fall back to category timing, lose PO grouping, and are re-flagged as unassigned. Delivery history and its scorecard are kept.";
+  "Its products fall back to category timing, lose PO grouping, and are re-flagged as unassigned. Delivery history and its scorecard are kept.";
 
 const exportColumns: ExportColumn<SupplierRow>[] = [
   { header: "Supplier", cell: (r) => r.name },
@@ -164,6 +165,7 @@ export function SuppliersView({
   const [editing, setEditing] = useState<SupplierRow | "new" | null>(null);
   const [importing, setImporting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
   const [pending, startTransition] = useTransition();
 
   const hrefFor = (patch: Partial<SupplierQuery>) =>
@@ -188,8 +190,13 @@ export function SuppliersView({
     });
   }
 
-  function remove(row: SupplierRow) {
-    if (!window.confirm(DELETE_WARNING)) return;
+  async function remove(row: SupplierRow) {
+    const ok = await confirm({
+      title: `Remove ${row.name}?`,
+      body: DELETE_WARNING,
+      confirmLabel: "Remove supplier",
+    });
+    if (!ok) return;
     run(row.id, () => deleteSupplierAction({ supplierId: row.id }));
   }
 
@@ -199,6 +206,7 @@ export function SuppliersView({
 
   return (
     <div className="space-y-6">
+      {dialog}
       {notice && (
         <p className="rounded-md bg-positive-soft px-3 py-2 text-sm text-positive">{notice}</p>
       )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -36,6 +37,7 @@ export function OffboardCard({
   const [confirmSlug, setConfirmSlug] = useState("");
   const [note, setNote] = useState<{ tone: "positive" | "negative"; text: string } | null>(null);
   const [stepUp, setStepUp] = useState<{ label: string; run: () => void } | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   function doExport() {
     setNote(null);
@@ -62,16 +64,15 @@ export function OffboardCard({
     });
   }
 
-  function doDelete() {
+  async function doDelete() {
     setNote(null);
     setStepUp(null);
-    if (
-      !confirm(
-        `Permanently delete ${name} and everything in it? This cascades across every table and cannot be undone.`
-      )
-    ) {
-      return;
-    }
+    const ok = await confirm({
+      title: `Permanently delete ${name}?`,
+      body: "This cascades across every table and cannot be undone — products, orders, history, everything in the workspace.",
+      confirmLabel: "Delete workspace",
+    });
+    if (!ok) return;
     startTransition(async () => {
       const form = new FormData();
       form.set("tenantId", tenantId);
@@ -89,6 +90,7 @@ export function OffboardCard({
 
   return (
     <Card>
+      {dialog}
       <CardHeader
         title="Offboarding"
         subtitle="Take the customer's data out, then remove the workspace"
