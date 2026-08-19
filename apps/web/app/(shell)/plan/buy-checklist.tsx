@@ -528,10 +528,14 @@ export function BuyChecklist({
   buyList,
   canViewCosts,
   canOverride,
+  initialUrgentOnly = false,
 }: {
   buyList: BuyList;
   canViewCosts: boolean;
   canOverride: boolean;
+  /** Start narrowed to the critical lines — set by a deep link that promised
+   *  them. Not sticky: clearing it is a click, and the URL is the record. */
+  initialUrgentOnly?: boolean;
 }) {
   const currency = useCurrency();
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -549,7 +553,7 @@ export function BuyChecklist({
   // clears both.
   const [whatIf, setWhatIf] = useState<BuyList | null>(null);
   const [sort, setSort] = useState<SortKey>("plan");
-  const [urgentOnly, setUrgentOnly] = useState(false);
+  const [urgentOnly, setUrgentOnly] = useState(initialUrgentOnly);
   const [coverDays, setCoverDays] = useState(DEFAULT_COVER_DAYS);
   const [upliftPct, setUpliftPct] = useState(DEFAULT_WHATIF_UPLIFT);
   const [resizeError, setResizeError] = useState<string | null>(null);
