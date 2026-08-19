@@ -128,7 +128,11 @@ export function ProfileMenu({
           role="menu"
           aria-label="Account"
           onKeyDown={onMenuKeyDown}
-          className="absolute right-0 z-30 mt-2 w-64 rounded-lg border border-edge bg-surface p-1.5 shadow-pop"
+          // Anchored to the bottom of the rail, so it opens UPWARD and from the left
+          // edge — the same pair the workspace switcher above it uses. Opening
+          // down and right-aligned put a 256px menu at x=-208, y=viewport
+          // bottom: on screen in the DOM, off screen for the reader.
+          className="absolute bottom-full left-0 z-30 mb-2 w-64 rounded-lg border border-edge bg-surface p-1.5 shadow-pop"
         >
           <div className="px-3 pt-2 pb-3">
             <div className="truncate text-sm font-semibold text-ink">
