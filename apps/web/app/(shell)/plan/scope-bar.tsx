@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { ChevronDownIcon } from "@/components/icons";
 import { cn } from "@/lib/cn";
 import type { BuyListRow } from "@/lib/data/plan";
 // The "no value" sentinel is shared with the catalogue facets so scoping to a
@@ -181,6 +182,10 @@ export function ScopeBar({
 }) {
   const facets = useMemo(() => deriveScopeFacets(rows), [rows]);
   const [name, setName] = useState("");
+  // The dimension chips start folded away, so the list is the first thing read
+  // rather than four choices about it. A scope that is already active opens the
+  // row on mount — otherwise the narrowing would be invisible.
+  const [open, setOpen] = useState(() => isScopeActive(selection));
   // Only dimensions with something to choose between earn a control.
   const activeDims = DIMENSIONS.filter(({ key }) => facets[key].length > 1);
   const activeCount =
@@ -204,7 +209,85 @@ export function ScopeBar({
   if (activeDims.length === 0) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className={cn(
+            "flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
+            activeCount > 0
+              ? "border-accent-200 bg-accent-soft text-accent-ink"
+              : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink"
+          )}
+        >
+          Filter
+          <span className="font-normal text-ink-faint">
+            {activeCount > 0
+              ? `· ${activeCount} on`
+              : `(${activeDims.map((d) => d.label).join(" · ")})`}
+          </span>
+          <ChevronDownIcon className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+        </button>
+
+        {savedScopes.length > 0 && (
+          <details className="group relative">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-sm border border-edge bg-surface px-2.5 py-1.5 text-2xs font-medium text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink">
+              Saved scopes
+              <span className="rounded-xs bg-surface-2 px-1.5 font-mono tabular-nums text-ink-faint">
+                {savedScopes.length}
+              </span>
+            </summary>
+            <div className="absolute z-10 mt-1 flex max-h-72 min-w-52 flex-col gap-0.5 overflow-auto rounded-md border border-edge bg-surface p-1.5 shadow-pop">
+              {savedScopes.map((scope) => (
+                <div key={scope.id} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChange(scope.selection);
+                      setOpen(true);
+                    }}
+                    className="min-w-0 flex-1 truncate rounded-md px-2 py-1 text-left text-sm text-ink-secondary transition-colors hover:bg-surface-2 hover:text-ink"
+                  >
+                    {scope.name}
+                  </button>
+                  {onDeleteScope && (
+                    <button
+                      type="button"
+                      onClick={() => onDeleteScope(scope.id)}
+                      aria-label={`Delete scope ${scope.name}`}
+                      className="rounded-md px-1.5 py-1 text-sm text-ink-faint transition-colors hover:text-negative"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+
+        {activeCount > 0 && (
+          <button
+            type="button"
+            onClick={() => onChange(EMPTY_SCOPE)}
+            className="rounded-sm px-2 py-1 text-2xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+          >
+            Clear ({activeCount})
+          </button>
+        )}
+
+        {activeCount > 0 && (
+          <span className="text-sm text-ink-muted">
+            Showing {showing} of {rows.length}
+          </span>
+        )}
+      </div>
+
+      {/* Kept mounted while folded — an open dimension popover shouldn't be torn
+          down (and rebuilt closed) every time the row is hidden. */}
+      <div className={open ? "flex flex-wrap items-center gap-2" : "hidden"}>
       {activeDims.map(({ key, label }) => {
         const chosen = selection[key] as string[];
         return (
@@ -248,50 +331,6 @@ export function ScopeBar({
           </details>
         );
       })}
-      {activeCount > 0 && (
-        <button
-          type="button"
-          onClick={() => onChange(EMPTY_SCOPE)}
-          className="rounded-sm px-2 py-1 text-2xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
-        >
-          Clear ({activeCount})
-        </button>
-      )}
-
-      {savedScopes.length > 0 && (
-        <details className="group relative">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-sm border border-edge bg-surface px-2.5 py-1.5 text-2xs font-medium text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink">
-            Saved scopes
-            <span className="rounded-xs bg-surface-2 px-1.5 font-mono tabular-nums text-ink-faint">
-              {savedScopes.length}
-            </span>
-          </summary>
-          <div className="absolute z-10 mt-1 flex max-h-72 min-w-52 flex-col gap-0.5 overflow-auto rounded-md border border-edge bg-surface p-1.5 shadow-pop">
-            {savedScopes.map((scope) => (
-              <div key={scope.id} className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => onChange(scope.selection)}
-                  className="min-w-0 flex-1 truncate rounded-md px-2 py-1 text-left text-sm text-ink-secondary transition-colors hover:bg-surface-2 hover:text-ink"
-                >
-                  {scope.name}
-                </button>
-                {onDeleteScope && (
-                  <button
-                    type="button"
-                    onClick={() => onDeleteScope(scope.id)}
-                    aria-label={`Delete scope ${scope.name}`}
-                    className="rounded-md px-1.5 py-1 text-sm text-ink-faint transition-colors hover:text-negative"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-
       {onSaveScope && activeCount > 0 && (
         <details className="group relative">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-sm border border-edge bg-surface px-2.5 py-1.5 text-2xs font-medium text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink">
@@ -323,11 +362,7 @@ export function ScopeBar({
         </details>
       )}
 
-      {activeCount > 0 && (
-        <span className="text-sm text-ink-muted">
-          Showing {showing} of {rows.length}
-        </span>
-      )}
+      </div>
     </div>
   );
 }

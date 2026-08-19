@@ -10,6 +10,7 @@ import { BudgetPlanner } from "./budget-planner";
 import { BuyChecklist } from "./buy-checklist";
 import { PlanDecisionHeader } from "./decision-header";
 import { PlanFreshness } from "./plan-freshness";
+import { PreflightStrip } from "./preflight-strip";
 import { deleteScope, listScopes, saveScope, type SavedScope } from "./scope-actions";
 import { EMPTY_SCOPE, filterBuyListRows, ScopeBar, type ScopeSelection } from "./scope-bar";
 import { SupplyCalendarMode } from "./supply-calendar";
@@ -237,6 +238,9 @@ export function PlanView({
       <div className="space-y-4">
         {backToOptions}
         {freshness}
+        {/* Scanned over the WHOLE plan, not the scoped rows: a data problem that
+            disappears when you narrow the list is one you order straight past. */}
+        <PreflightStrip rows={buyList.rows} />
         <PlanDecisionHeader rows={filteredRows} canViewCosts={canViewCosts} />
         <ScopeBar
           rows={buyList.rows}

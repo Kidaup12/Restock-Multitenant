@@ -113,13 +113,47 @@ describe("planDecisionSummary (pure)", () => {
     expect(planDecisionSummary(rows).criticalsCashKes).toBeNull();
   });
 
+  it("rolls each tier up to its own count and cash", () => {
+    const rows = [
+      mkRow({ tier: "order_today", lineTotalKes: 500 }),
+      mkRow({ tier: "order_today", lineTotalKes: 250 }),
+      mkRow({ tier: "this_week", lineTotalKes: 90 }),
+      mkRow({ tier: "can_wait", lineTotalKes: 40 }),
+    ];
+    // The headline card reads these three buckets, so each has to total only
+    // its own rows — a tier borrowing another's cash would misstate when the
+    // money has to move, which is the whole point of the tiering.
+    expect(planDecisionSummary(rows).tiers).toEqual({
+      order_today: { count: 2, cashKes: 750 },
+      this_week: { count: 1, cashKes: 90 },
+      can_wait: { count: 1, cashKes: 40 },
+    });
+  });
+
+  it("a hidden cost nulls only the tier it sits in", () => {
+    const rows = [
+      mkRow({ tier: "order_today", lineTotalKes: null }),
+      mkRow({ tier: "order_today", lineTotalKes: 400 }),
+      mkRow({ tier: "this_week", lineTotalKes: 90 }),
+    ];
+    const { tiers } = planDecisionSummary(rows);
+    // Same rule as the other totals: an unknown stays unknown rather than
+    // silently reporting the smaller sum of the rows that were visible.
+    expect(tiers.order_today.cashKes).toBeNull();
+    expect(tiers.order_today.count).toBe(2);
+    // ...and it does not spread to a tier whose costs are all present.
+    expect(tiers.this_week.cashKes).toBe(90);
+  });
+
   it("empty list: zero counts, zero criticals cash, zero at risk", () => {
     const summary = planDecisionSummary([]);
+    const noTier = { count: 0, cashKes: 0 };
     expect(summary).toEqual({
       orderTodayCount: 0,
       criticalsCashKes: 0,
       atRiskKes: 0,
       productCount: 0,
+      tiers: { order_today: noTier, this_week: noTier, can_wait: noTier },
     });
   });
 });
