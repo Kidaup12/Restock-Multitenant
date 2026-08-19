@@ -67,6 +67,17 @@ describe.skipIf(!runnable)("tenant export + delete (local db, fixture tenants)",
     await prismaService.backtestRun.create({
       data: { tenantId: tenantB, mae: 1, bias: 0, sampleSize: 5 },
     });
+    // Rows in tables the cascade cannot reach: no FK to Tenant, no cascading
+    // parent. EmailLog holds recipient addresses, so it is the one that matters.
+    await prismaService.emailLog.create({
+      data: {
+        tenantId: tenantB,
+        to: "supplier@offboard-test.invalid",
+        subject: "Purchase order for Offboard B",
+        kind: "purchase_order",
+        status: "sent",
+      },
+    });
   });
 
   afterAll(async () => {
@@ -178,5 +189,25 @@ describe.skipIf(!runnable)("tenant export + delete (local db, fixture tenants)",
 
     // The other workspace is untouched.
     expect(await prismaService.product.count({ where: { tenantId: tenantA } })).toBe(2);
+  });
+
+  /**
+   * The twin of the export census above. Checking a hand-picked few tables let
+   * a table with no FK to Tenant AND no cascading parent survive a "permanent"
+   * delete unnoticed — the screen promises it "cascades across every table".
+   * AuditEvent is the sole deliberate survivor: the ledger outlives its subject.
+   */
+  it("leaves no tenant-scoped row behind, in any table but the ledger", async () => {
+    const survivors: string[] = [];
+    for (const model of Prisma.dmmf.datamodel.models) {
+      if (!model.fields.some((f) => f.name === "tenantId")) continue;
+      if (model.name === "AuditEvent") continue;
+      const delegate = (prismaService as unknown as Record<string, { count: (a: unknown) => Promise<number> }>)[
+        model.name.charAt(0).toLowerCase() + model.name.slice(1)
+      ];
+      const left = await delegate.count({ where: { tenantId: tenantB } });
+      if (left > 0) survivors.push(`${model.name}: ${left}`);
+    }
+    expect(survivors, `rows left behind by deleteTenant: ${survivors.join(", ")}`).toEqual([]);
   });
 });
