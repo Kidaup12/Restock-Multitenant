@@ -156,8 +156,13 @@ model Membership {
   permissions          Json?
   // First time this member finished the welcome/guide. null = show first-run extras.
   welcomedAt           DateTime?
-  // Terms & Conditions consent (server-enforced in the shop layout). Accepted iff
-  // acceptedTermsAt set AND acceptedTermsVersion == current TERMS_VERSION.
+  // Terms & Conditions consent. NOT YET WIRED: nothing reads or writes these two
+  // columns, and there is no TERMS_VERSION constant to compare against — an
+  // earlier comment here claimed both, which would have read as a consent record
+  // the product does not keep. Today consent is obtained only by the notice on
+  // the signup form ("by creating an account you agree to..."), which is not
+  // recorded per member. Wiring it means: a TERMS_VERSION constant, a writer at
+  // signup and invite-accept, and a re-prompt when the version moves.
   acceptedTermsAt      DateTime?
   acceptedTermsVersion String?
   createdAt            DateTime  @default(now())
