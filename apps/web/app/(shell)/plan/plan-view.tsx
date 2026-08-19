@@ -256,6 +256,9 @@ export function PlanView({
           buyList={filteredBuyList}
           canViewCosts={canViewCosts}
           canOverride={canOverride}
+          /* Arriving from the dashboard's critical warning: open already
+             narrowed to those lines, so the link delivers what it offered. */
+          initialUrgentOnly={searchParams.get("urgent") === "1"}
         />
       </div>
     );

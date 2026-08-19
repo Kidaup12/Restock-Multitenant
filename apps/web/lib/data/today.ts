@@ -117,6 +117,10 @@ export type ReorderNeeded = {
   needingRestock: number;
   /** Total products covered by the run (for the "n of m" subtitle). */
   totalPredicted: number;
+  /** How many of the products needing restock are critical. Counted off the
+   *  full list, not the handful this card shows, so the warning above the table
+   *  and the planner agree. */
+  criticalCount: number;
 };
 
 /**
@@ -152,5 +156,6 @@ export async function getReorderNeeded(
     })),
     needingRestock: buyList.rows.length,
     totalPredicted: buyList.totalPredicted,
+    criticalCount: buyList.rows.filter((r) => r.urgency === "critical").length,
   };
 }

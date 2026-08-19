@@ -19,6 +19,7 @@ import { RevenueTrend } from "./revenue-trend";
 import { RunForecastButton } from "./run-forecast-button";
 import { TodayLimitNotice } from "./today-limit-notice";
 import { TodaySetupStrip } from "./today-setup-strip";
+import { CostGapBar } from "./setup-gap-bars";
 
 export const metadata: Metadata = {
   title: "Today",
@@ -32,7 +33,7 @@ export default async function TodayPage() {
   if (!membership) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Today" description="Your replenishment picture this morning" />
+        <PageHeader title="Today's replenishment view" />
         <EmptyState
           title="No workspace yet"
           description="Create your shop's workspace to start, or ask an admin to invite you to theirs."
@@ -60,8 +61,8 @@ export default async function TodayPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Today"
-        description="Your replenishment picture this morning"
+        eyebrow={membership.tenant.name}
+        title="Today's replenishment view"
         actions={<RunForecastButton />}
       />
       <RealtimeRefresh />
@@ -87,6 +88,10 @@ export default async function TodayPage() {
           <TodayLimitNotice tenantId={tenantId} />
         </Suspense>
       ) : null}
+
+      <Suspense fallback={null}>
+        <CostGapBar tenantId={tenantId} canViewCosts={canViewCosts} />
+      </Suspense>
 
       <div data-tour="today-metrics">
         <Suspense

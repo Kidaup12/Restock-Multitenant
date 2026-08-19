@@ -61,6 +61,27 @@ export async function ReorderTable({
     ` · ${freshness.short}`;
 
   return (
+    <>
+      {reorder.criticalCount > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-edge bg-accent-soft p-3 text-sm text-accent-ink">
+          <span>
+            <span className="font-medium">
+              {reorder.criticalCount} critical{" "}
+              {reorder.criticalCount === 1 ? "item is" : "items are"} at or near zero stock
+            </span>{" "}
+            — quantities account for cover, lead time and what is already on the way.
+          </span>
+          {/* Lands on the buy list already narrowed to these, so the link
+              delivers what it says rather than the whole plan. */}
+          <Link
+            href="/plan?mode=list&urgent=1"
+            className="font-medium underline-offset-2 hover:underline"
+          >
+            Reorder critical →
+          </Link>
+        </div>
+      )}
+
     <Card>
       <CardHeader
         title="Reorder needed"
@@ -115,5 +136,6 @@ export async function ReorderTable({
         )}
       </div>
     </Card>
+    </>
   );
 }
