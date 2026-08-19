@@ -44,8 +44,20 @@ function makeCtx(over: Overrides = {}): CapabilityContext {
         posOrMultiLocation: level >= 3,
       },
       nextUnlock: null,
-    locationsToConfirm: 0,
-    locationsPending: [],
+      locationsToConfirm: 0,
+      locationsPending: [],
+      // The resolver reads the ladder, never the raw counts — this fixture only
+      // has to satisfy the shape.
+      facts: {
+        shopifyConnected: level >= 0,
+        activeProducts: 1,
+        trustedCostProducts: level >= 1 ? 1 : 0,
+        revenue30dTotal: 0,
+        revenue30dTrustedCost: 0,
+        suppliedProducts: level >= 2 ? 1 : 0,
+        posFeedConfigured: level >= 3,
+        sellableLocations: 1,
+      },
     },
     limits,
   };

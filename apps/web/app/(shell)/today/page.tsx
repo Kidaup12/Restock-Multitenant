@@ -52,6 +52,10 @@ export default async function TodayPage() {
   // Plan usage is the owner's decision to act on — staff can't free a place or
   // change the plan, so they aren't shown the nudge.
   const canManageTeam = hasPermission(membership, "manage_team");
+  // Whether the setup steps are this caller's to do. The screens they lead to
+  // (connections, costs, plan) gate management on this same permission, so an
+  // offered CTA never dead-ends on a permission error.
+  const canManageShop = hasPermission(membership, "manage_settings");
 
   return (
     <div className="space-y-6">
@@ -71,7 +75,11 @@ export default async function TodayPage() {
           </Card>
         }
       >
-        <TodaySetupStrip tenantId={tenantId} />
+        <TodaySetupStrip
+          tenantId={tenantId}
+          displayName={session.user.name}
+          canManageShop={canManageShop}
+        />
       </Suspense>
 
       {canManageTeam ? (

@@ -67,6 +67,16 @@ export type SetupDepth = {
   /** The unconfirmed ones themselves, so the prompt can be answered where it is
    *  asked instead of sending the owner to another screen to do it. */
   locationsPending: PendingLocation[];
+  /**
+   * The raw counts the signals were decided from.
+   *
+   * The finish-setup checklist asks a different question of the same data — the
+   * ladder asks "is this rung reached", the checklist asks "is this finished" —
+   * and the two must never disagree about how many products carry a cost.
+   * Exposing what was already read here keeps one producer for the numbers
+   * instead of a second query that can drift from this one.
+   */
+  facts: SetupInput;
 };
 
 /** Pre-aggregated inputs the pure signal logic reads. */
@@ -231,5 +241,5 @@ export async function setupDepth(tenantId: string): Promise<SetupDepth> {
     guessedType: l.locationType,
   }));
 
-  return { level, signals, nextUnlock, locationsToConfirm, locationsPending };
+  return { level, signals, nextUnlock, locationsToConfirm, locationsPending, facts: input };
 }
