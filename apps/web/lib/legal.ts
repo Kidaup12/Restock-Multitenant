@@ -29,6 +29,17 @@ export const LEGAL = {
 } as const;
 
 /**
+ * The wording a member's acceptance is recorded against.
+ *
+ * Stored on the membership beside the timestamp, so an acceptance stays
+ * attached to the text that was actually shown. Move it in the SAME change that
+ * edits the terms — an acceptance recorded against wording nobody can retrieve
+ * proves nothing. It is a plain date string rather than the display form of
+ * `effective` because it is compared, not read aloud.
+ */
+export const TERMS_VERSION = "2026-07-29";
+
+/**
  * Every third party that processes merchant data on our behalf, and why.
  *
  * This list is a compliance artefact: a data-protection agreement obliges us to

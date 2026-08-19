@@ -15,6 +15,9 @@ import { Card, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { activeMembership, requireSession } from "@/lib/auth";
+import { readTermsAcceptance } from "@/lib/auth/terms";
+import { TERMS_VERSION } from "@/lib/legal";
+import { TermsAcceptance } from "./terms-acceptance";
 import { getConnectionStatus } from "@/lib/data/connection-status";
 import { getSettingsOverview } from "@/lib/data/settings-overview";
 import { getTenantPlan } from "@/lib/capabilities";
@@ -46,7 +49,13 @@ const CONNECTION_STATUS: Record<string, string> = {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-async function SettingsSections({ tenantId }: { tenantId: string }) {
+async function SettingsSections({
+  tenantId,
+  acceptance,
+}: {
+  tenantId: string;
+  acceptance: { at: Date | null; version: string | null; current: boolean };
+}) {
   const [connection, overview, plan] = await Promise.all([
     getConnectionStatus(tenantId),
     getSettingsOverview(tenantId),
@@ -159,14 +168,26 @@ async function SettingsSections({ tenantId }: { tenantId: string }) {
 
       <Card>
         <CardHeader title="Legal" subtitle="The terms this workspace runs under." />
-        <div className="px-5 pb-5 text-sm">
-          <Link href="/terms" className="font-medium text-accent-ink hover:underline">
-            Terms &amp; Conditions
-          </Link>
-          <span className="px-2 text-ink-faint">·</span>
-          <Link href="/privacy" className="font-medium text-accent-ink hover:underline">
-            Privacy Policy
-          </Link>
+        <div className="space-y-4 px-5 pb-5 text-sm">
+          <div>
+            <Link href="/terms" className="font-medium text-accent-ink hover:underline">
+              Terms &amp; Conditions
+            </Link>
+            <span className="px-2 text-ink-faint">·</span>
+            <Link href="/privacy" className="font-medium text-accent-ink hover:underline">
+              Privacy Policy
+            </Link>
+            <span className="px-2 text-ink-faint">·</span>
+            <span className="text-ink-muted">version {TERMS_VERSION}</span>
+          </div>
+          <div className="border-t border-edge pt-4">
+            <TermsAcceptance
+              acceptedAt={acceptance.at ? acceptance.at.toISOString() : null}
+              acceptedVersion={acceptance.version}
+              current={acceptance.current}
+              version={TERMS_VERSION}
+            />
+          </div>
         </div>
       </Card>
     </>
@@ -182,7 +203,10 @@ export default async function SettingsPage() {
       <PageHeader eyebrow="Account" title="Settings" description="Workspace, team, and integrations" />
       {membership && (
         <Suspense fallback={<SkeletonCard />}>
-          <SettingsSections tenantId={membership.tenantId} />
+          <SettingsSections
+            tenantId={membership.tenantId}
+            acceptance={readTermsAcceptance(membership)}
+          />
         </Suspense>
       )}
     </div>
