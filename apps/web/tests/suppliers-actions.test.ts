@@ -14,7 +14,13 @@ const DAY = 86_400_000;
 const authState = vi.hoisted(() => ({
   session: null as { user: { id: string; name: string | null; email: string } } | null,
   membership: null as
-    | { tenantId: string; displayName: string | null; role: string; permissions: unknown }
+    | {
+        tenantId: string;
+        displayName: string | null;
+        role: string;
+        permissions: unknown;
+        tenant: { currency: string };
+      }
     | null,
 }));
 
@@ -129,9 +135,16 @@ describe.skipIf(!runnable)("suppliers actions (local db)", () => {
     await prismaService.$disconnect();
   });
 
-  function actAs(tenantId: string, permissions: unknown) {
+  function actAs(tenantId: string, permissions: unknown, currency = "KES") {
     authState.session = { user: { id: "actor-1", name: "Owner", email: "owner@example.test" } };
-    authState.membership = { tenantId, displayName: "Owner", role: "OWNER", permissions };
+    authState.membership = {
+      tenantId,
+      displayName: "Owner",
+      role: "OWNER",
+      permissions,
+      // The real resolver includes the tenant; the currency rides on it.
+      tenant: { currency },
+    };
   }
 
   // ── bulk-assign-by-brand ───────────────────────────────────────────────────
@@ -473,4 +486,25 @@ describe.skipIf(!runnable)("suppliers actions (local db)", () => {
       error: "You don't have settings access in this workspace.",
     });
   });
+
+  /**
+   * A supplier created without a currency of its own takes the workspace's.
+   *
+   * `Supplier.currency` carries a schema default of USD, so the question is
+   * whether any create path can fall through to it. AED is used deliberately:
+   * KES is what the code falls back to when a tenant is missing, so a KES
+   * assertion here would pass without the workspace being consulted at all.
+   */
+  it("prices a new supplier in the workspace currency, not the schema default", async () => {
+    actAs(tenantA, null, "AED");
+    const result = await createSupplierAction({ name: "Currency Probe" });
+    expect(result.ok).toBe(true);
+
+    const row = await prismaService.supplier.findFirst({
+      where: { tenantId: tenantA, name: "Currency Probe" },
+      select: { currency: true },
+    });
+    expect(row?.currency).toBe("AED");
+  });
+
 });

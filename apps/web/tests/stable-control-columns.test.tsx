@@ -73,6 +73,7 @@ const renderSuppliers = (canManage: boolean) =>
       unassignedBrands={[]}
       supplierOptions={[]}
       assignableProducts={[]}
+      defaultCurrency="KES"
       canManage={canManage}
     />
   );

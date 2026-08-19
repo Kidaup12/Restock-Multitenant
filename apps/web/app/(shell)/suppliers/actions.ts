@@ -35,8 +35,9 @@ async function actorContext() {
   if (!hasPermission(membership, "manage_settings")) return null;
   return {
     tenantId: membership.tenantId,
-    /** What an imported row without a currency column falls back to. */
-    currency: membership.tenant?.currency ?? "USD",
+    /** What a supplier without an explicit currency falls back to — a new
+     *  supplier, or an imported row with no currency column. */
+    currency: membership.tenant?.currency ?? "KES",
     actor: {
       userId: session.user.id,
       name: membership.displayName ?? session.user.name ?? session.user.email,
@@ -56,7 +57,7 @@ export type SupplierInput = {
 };
 
 /** Normalise + validate a create/edit payload into Prisma data, or an error. */
-function parseSupplier(input: SupplierInput):
+function parseSupplier(input: SupplierInput, fallbackCurrency: string):
   | { ok: true; data: {
       name: string;
       email: string | null;
@@ -71,7 +72,7 @@ function parseSupplier(input: SupplierInput):
   const name = input.name?.trim();
   if (!name) return { ok: false, error: "Give the supplier a name." };
 
-  const currency = (input.currency ?? "USD").trim().toUpperCase();
+  const currency = (input.currency ?? fallbackCurrency).trim().toUpperCase();
   if (!(CURRENCIES as readonly string[]).includes(currency)) {
     return { ok: false, error: "Currency must be one of KES, USD, CNY or AED." };
   }
@@ -117,7 +118,7 @@ export async function createSupplierAction(
 ): Promise<SupplierActionResult> {
   const ctx = await actorContext();
   if (!ctx) return err("You don't have settings access in this workspace.");
-  const parsed = parseSupplier(input);
+  const parsed = parseSupplier(input, ctx.currency);
   if (!parsed.ok) return err(parsed.error);
 
   const ids = [...new Set((input.productIds ?? []).filter((id) => typeof id === "string" && id))];
@@ -157,7 +158,7 @@ export async function updateSupplierAction(
 ): Promise<SupplierActionResult> {
   const ctx = await actorContext();
   if (!ctx) return err("You don't have settings access in this workspace.");
-  const parsed = parseSupplier(input);
+  const parsed = parseSupplier(input, ctx.currency);
   if (!parsed.ok) return err(parsed.error);
 
   const db = prismaForTenant(ctx.tenantId);
@@ -250,7 +251,7 @@ export async function bulkAssignByBrandAction(input: {
     products: result.count,
   });
   revalidatePath("/suppliers");
-  return { ok: true, message: `Assigned ${result.count} ${vendor} products to ${supplier.name}.` };
+  return { ok: true, message: `Assigned ${result.count} ${vendor} product${result.count === 1 ? "" : "s"} to ${supplier.name}.` };
 }
 
 /** How many products one call may move. Generous enough for "assign this whole
@@ -320,8 +321,8 @@ export async function assignProductsToSupplierAction(input: {
     ok: true,
     message:
       reassigned > 0
-        ? `Moved ${result.count} products to ${supplier.name} (${reassigned} from another supplier).`
-        : `Assigned ${result.count} products to ${supplier.name}.`,
+        ? `Moved ${result.count} product${result.count === 1 ? "" : "s"} to ${supplier.name} (${reassigned} from another supplier).`
+        : `Assigned ${result.count} product${result.count === 1 ? "" : "s"} to ${supplier.name}.`,
   };
 }
 
@@ -407,7 +408,7 @@ export async function deleteSupplierAction(input: {
     ok: true,
     message:
       outcome.unlinked > 0
-        ? `Removed ${outcome.supplier.name}. ${outcome.unlinked} products now need a supplier.`
+        ? `Removed ${outcome.supplier.name}. ${outcome.unlinked} product${outcome.unlinked === 1 ? "" : "s"} now need${outcome.unlinked === 1 ? "s" : ""} a supplier.`
         : `Removed ${outcome.supplier.name}.`,
   };
 }

@@ -75,7 +75,12 @@ export default async function SuppliersPage({
           </Card>
         }
       >
-        <SuppliersData tenantId={tenantId} canManage={canManage} query={query} />
+        <SuppliersData
+          tenantId={tenantId}
+          canManage={canManage}
+          query={query}
+          defaultCurrency={membership.tenant.currency}
+        />
       </Suspense>
     </div>
   );
@@ -91,10 +96,12 @@ async function SuppliersData({
   tenantId,
   canManage,
   query,
+  defaultCurrency,
 }: {
   tenantId: string;
   canManage: boolean;
   query: SupplierQuery;
+  defaultCurrency: string;
 }) {
   const [screen, unassignedBrands, supplierOptions, assignableProducts] = await Promise.all([
     getSuppliersScreen(tenantId, query),
@@ -117,6 +124,7 @@ async function SuppliersData({
       unassignedBrands={unassignedBrands}
       supplierOptions={supplierOptions}
       assignableProducts={assignableProducts}
+      defaultCurrency={defaultCurrency}
       canManage={canManage}
     />
   );

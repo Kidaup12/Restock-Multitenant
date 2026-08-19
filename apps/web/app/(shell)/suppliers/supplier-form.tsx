@@ -21,6 +21,7 @@ const CURRENCIES = ["KES", "USD", "CNY", "AED"] as const;
 export function SupplierForm({
   supplier,
   assignableProducts,
+  defaultCurrency,
   onResult,
   onClose,
 }: {
@@ -29,6 +30,10 @@ export function SupplierForm({
   /** Candidates for "what do I buy from them?", offered only while creating —
    *  an existing supplier has its own picker with the current set already ticked. */
   assignableProducts: AssignableProduct[];
+  /** The workspace's own currency: what a new supplier is priced in unless the
+   *  buyer says otherwise. A shop that trades in shillings should not have to
+   *  correct the field on every supplier it adds. */
+  defaultCurrency: string;
   onResult: (result: SupplierActionResult) => void;
   onClose: () => void;
 }) {
@@ -37,7 +42,7 @@ export function SupplierForm({
   const [group, setGroup] = useState(supplier?.group ?? "");
   const [email, setEmail] = useState(supplier?.email ?? "");
   const [country, setCountry] = useState(supplier?.country ?? "");
-  const [currency, setCurrency] = useState(supplier?.currency ?? "USD");
+  const [currency, setCurrency] = useState(supplier?.currency ?? defaultCurrency);
   const [lead, setLead] = useState(
     supplier?.leadTimeTypedDays != null ? String(supplier.leadTimeTypedDays) : "",
   );

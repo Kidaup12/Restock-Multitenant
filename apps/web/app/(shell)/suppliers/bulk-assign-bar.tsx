@@ -53,7 +53,7 @@ export function BulkAssignBar({
     <Card>
       <CardHeader
         title="Products without a supplier"
-        subtitle={`${totalProducts} products across ${brands.length} ${brands.length === 1 ? "brand" : "brands"} — assign a whole brand at once`}
+        subtitle={`${totalProducts} product${totalProducts === 1 ? "" : "s"} across ${brands.length} ${brands.length === 1 ? "brand" : "brands"} — assign a whole brand at once`}
       />
       <CardContent className="space-y-2 pt-4">
         {!canManage && (
