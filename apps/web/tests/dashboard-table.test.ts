@@ -74,22 +74,63 @@ describe.skipIf(!runnable)("dashboard table (seeded local db)", () => {
     expect(table.counts.stockout + table.counts.dead + table.healthy).toBe(metrics.trackedProducts);
   });
 
-  /*
-   * NOT here: a test proving the table shares the tiles' dead-stock RULE.
-   *
-   * It was written and then removed, because it could not fail. The seed's dead
-   * products are exactly the ones that have never sold, so "no sale inside the
-   * window" and the catalogue's "run rate of ~zero" select the same products at
-   * every window length — substituting one rule for the other leaves all these
-   * assertions green. A test that passes whether or not the bug is present is
-   * worse than none: it reads as a guard.
-   *
-   * Guarding it needs a purpose-built fixture — stock on hand, a real sale
-   * inside the run-rate history but outside a short dead window — so the two
-   * rules provably disagree. Until then the rule itself is pinned by the pure
-   * `pileFor` tests above, and what these DB tests actually guard is SCOPE
-   * drift, which is a different (and real) failure.
-   */
+  it("piles by the shop's window, not by run rate — the two disagree here", async () => {
+    // The seed cannot tell these rules apart: its dead products have never sold,
+    // so "no sale inside the window" and "run rate of ~zero" pick the same set
+    // at every window length, and an agreement test passes whether or not the
+    // table shares the tiles' rule. Parting them needs the dead window to be
+    // SHORTER than the run-rate history: stock on the shelf, a real sale 20 days
+    // ago, and a 7-day window. The window says dead; the run rate says alive.
+    const product = await prismaService.product.create({
+      data: {
+        tenantId: seeded.tenantId,
+        sku: "PILE-SPLIT-1",
+        title: "Sold last month, nothing since",
+        priceKes: 1000,
+        costKes: 400,
+        currentStock: 12,
+        shopifyCreatedAt: new Date(Date.now() - 400 * 86_400_000),
+      },
+    });
+    const soldAt = new Date(Date.now() - 20 * 86_400_000);
+    await prismaService.salesHistory.create({
+      data: {
+        tenantId: seeded.tenantId,
+        productId: product.id,
+        date: soldAt,
+        quantity: 30,
+        revenueKes: 30_000,
+      },
+    });
+    await prismaService.tenantConfig.upsert({
+      where: { tenantId: seeded.tenantId },
+      create: { tenantId: seeded.tenantId, deadStockWindowDays: 7 },
+      update: { deadStockWindowDays: 7 },
+    });
+
+    try {
+      const table = await getDashboardTable(seeded.tenantId, { canViewCosts: true });
+      const row = table.rows.dead.find((r) => r.productId === product.id)
+        ?? [...table.rows.all].find((r) => r.productId === product.id);
+
+      // It has a run rate, so the catalogue's `dead` flag would NOT claim it...
+      expect(row, "fixture product missing from the table").toBeTruthy();
+      expect(row!.runRate).toBeGreaterThan(0.0001);
+      // ...but it has not sold inside the shop's window, so this table must.
+      expect(table.rows.dead.map((r) => r.productId)).toContain(product.id);
+
+      // And the tiles above the table agree, which is the whole point.
+      const metrics = await getTodayMetrics(seeded.tenantId, { canViewCosts: true });
+      expect(table.counts.dead).toBe(metrics.deadStock.skus);
+    } finally {
+      await prismaService.salesHistory.deleteMany({ where: { productId: product.id } });
+      await prismaService.product.delete({ where: { id: product.id } });
+      await prismaService.tenantConfig.updateMany({
+        where: { tenantId: seeded.tenantId },
+        data: { deadStockWindowDays: null },
+      });
+    }
+  });
 
   it("takes Reorder from the buy list, not a rule of its own", async () => {
     const [table, buyList] = await Promise.all([
