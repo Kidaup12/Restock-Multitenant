@@ -196,6 +196,14 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
                 canDecrement={coverDays > COVER_MIN}
                 canIncrement={coverDays < COVER_MAX}
                 busy={pending}
+                edit={{
+                  value: coverDays,
+                  min: COVER_MIN,
+                  max: COVER_MAX,
+                  unit: "days",
+                  ariaLabel: "Days of cover",
+                  onCommit: (next) => applyCover(clampCoverDays(next)),
+                }}
               />
             )}
             <p className="max-w-prose text-xs text-ink-muted">
