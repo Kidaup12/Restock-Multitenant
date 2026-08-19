@@ -199,6 +199,13 @@ export type DashboardTable = {
   rows: Record<DashboardTab, CatalogueRow[]>;
   /** The shop's own dead-stock window, so the tab can say what it means. */
   deadWindowDays: number;
+  /** Cash sitting in stock that is not selling — one of the two numbers this
+   *  shop judges the product by, so it leads its card rather than the SKU
+   *  count. Null for a money-blind caller. */
+  deadCostKes: number | null;
+  /** Buy-list lines that cannot wait. Counted over the whole list, not the
+   *  capped rows, so the warning above the table matches the planner. */
+  criticalCount: number;
   /** True when a pile had more rows than the cap, so the screen can say so
    *  rather than quietly showing a prefix. */
   capped: Record<DashboardTab, boolean>;
@@ -279,5 +286,16 @@ export async function getDashboardTable(
     capped_rows[key] = piles[key].slice(0, limit);
   }
 
-  return { counts, healthy, rows: capped_rows, deadWindowDays, capped };
+  return {
+    counts,
+    healthy,
+    rows: capped_rows,
+    deadWindowDays,
+    // Summed over every dead row, not the page of them the table shows.
+    deadCostKes: canViewCosts
+      ? dead.reduce((sum, r) => sum + (r.moneyAtRestKes ?? 0), 0)
+      : null,
+    criticalCount: (buyList?.rows ?? []).filter((r) => r.urgency === "critical").length,
+    capped,
+  };
 }

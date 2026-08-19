@@ -12,14 +12,13 @@ import {
   SkeletonStatTile,
   SkeletonTableRows,
 } from "@/components/ui/skeleton";
-import { MetricsTiles } from "./metrics-tiles";
 import { RealtimeRefresh } from "./realtime-refresh";
-import { ReorderTable } from "./reorder-table";
 import { RevenueTrend } from "./revenue-trend";
 import { RunForecastButton } from "./run-forecast-button";
 import { TodayLimitNotice } from "./today-limit-notice";
 import { TodaySetupStrip } from "./today-setup-strip";
 import { CostGapBar } from "./setup-gap-bars";
+import { ProductBoard } from "./product-board";
 
 export const metadata: Metadata = {
   title: "Today",
@@ -96,39 +95,35 @@ export default async function TodayPage() {
       <div data-tour="today-metrics">
         <Suspense
           fallback={
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <SkeletonStatTile />
-              <SkeletonStatTile />
-              <SkeletonStatTile />
-              <SkeletonStatTile />
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <SkeletonStatTile />
+                <SkeletonStatTile />
+                <SkeletonStatTile />
+                <SkeletonStatTile />
+              </div>
+              <Card className="p-5">
+                <SkeletonChart />
+              </Card>
+              <Card className="p-5">
+                <SkeletonTableRows rows={7} />
+              </Card>
             </div>
           }
         >
-          <MetricsTiles tenantId={tenantId} canViewCosts={canViewCosts} />
+          {/* The chart is rendered here, on the server, and handed to the board
+              so it can sit beside the health list without that list needing its
+              data or a second read. */}
+          <ProductBoard
+            tenantId={tenantId}
+            canViewCosts={canViewCosts}
+            trend={
+              <RevenueTrend tenantId={tenantId} currency={membership.tenant.currency} />
+            }
+          />
         </Suspense>
       </div>
 
-      <Suspense
-        fallback={
-          <Card className="p-5">
-            <SkeletonChart />
-          </Card>
-        }
-      >
-        <RevenueTrend tenantId={tenantId} currency={membership.tenant.currency} />
-      </Suspense>
-
-      <div data-tour="today-reorder">
-        <Suspense
-          fallback={
-            <Card className="p-5">
-              <SkeletonTableRows rows={7} />
-            </Card>
-          }
-        >
-          <ReorderTable tenantId={tenantId} canViewCosts={canViewCosts} />
-        </Suspense>
-      </div>
     </div>
   );
 }
