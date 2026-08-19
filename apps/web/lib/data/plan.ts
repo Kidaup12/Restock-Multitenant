@@ -755,8 +755,13 @@ export type BudgetSplit = {
   deferredAtRiskKes: number | null;
   /** Budget still unspent after funding. */
   leftoverKes: number | null;
-  /** Criticals are non-negotiable: a budget below their cost overflows by this much. */
+  /** How far the plan exceeds the budget. Always 0 under a cap; non-zero only
+   *  when the caller allowed criticals to overflow it. */
   overBudgetKes: number | null;
+  /** Must-restock lines the cap left unfunded. Zero unless capping. */
+  deferredCriticalCount: number;
+  /** What it would cost to bring those must-restock lines back in. */
+  deferredCriticalKes: number | null;
   /** True when the split was withheld from a money-blind caller: the three row
    *  lists are empty and every figure is null, because the split itself reads
    *  costs out. Absent otherwise. Consumers should say so rather than render an
@@ -767,12 +772,26 @@ export type BudgetSplit = {
 /**
  * Split the buy list against a cash cap. Priority: urgency first, then the
  * revenue at risk, then how soon the stockout lands — the budget goes where it
- * earns most. Criticals are always funded (overflow is surfaced, not hidden).
+ * earns most.
+ *
+ * **The budget caps by default.** A cap a plan can exceed is not a budget, and a
+ * plan the shop cannot pay for is not one it can act on. Criticals still sort
+ * first, so they are the last thing dropped; any that still do not fit are
+ * deferred and counted in `deferredCriticalCount` so the screen can say what the
+ * cap is costing rather than quietly leaving a stockout in the plan.
+ *
+ * `strict: false` restores the older behaviour — criticals funded whatever the
+ * budget, the overrun reported in `overBudgetKes`. That is the shop's choice to
+ * make ("let criticals exceed budget"), not a default to inherit.
  *
  * Expects an unredacted list (real costs) — callers acting for a money-blind
  * member fetch with costs visible, split, then `redactBudgetSplit` the result.
  */
-export function splitByBudget(rows: BuyListRow[], budgetKes: number): BudgetSplit {
+export function splitByBudget(
+  rows: BuyListRow[],
+  budgetKes: number,
+  { strict = true }: { strict?: boolean } = {}
+): BudgetSplit {
   const checkCost = rows.filter((r) => r.plannable !== "ok");
   const scored = rows
     .filter((r) => r.plannable === "ok" && (r.lineTotalKes ?? 0) > 0)
@@ -788,8 +807,9 @@ export function splitByBudget(rows: BuyListRow[], budgetKes: number): BudgetSpli
     )
     .map((row) => ({ row, cost: row.lineTotalKes ?? 0, urgency: row.urgency }));
 
-  const { selected, deferred, usedKes } = allocateByBudget(scored, budgetKes);
+  const { selected, deferred, usedKes } = allocateByBudget(scored, budgetKes, strict);
   const deferredRows = deferred.map((s) => s.row);
+  const deferredCriticals = deferredRows.filter((r) => r.urgency === "critical");
 
   return {
     budgetKes,
@@ -801,6 +821,8 @@ export function splitByBudget(rows: BuyListRow[], budgetKes: number): BudgetSpli
     deferredAtRiskKes: deferredRows.reduce((sum, r) => sum + (r.atRiskKes ?? 0), 0),
     leftoverKes: Math.max(0, budgetKes - usedKes),
     overBudgetKes: Math.max(0, usedKes - budgetKes),
+    deferredCriticalCount: deferredCriticals.length,
+    deferredCriticalKes: deferredCriticals.reduce((sum, r) => sum + (r.lineTotalKes ?? 0), 0),
   };
 }
 
@@ -831,6 +853,8 @@ export function redactBudgetSplit(split: BudgetSplit, canViewCosts: boolean): Bu
     deferredAtRiskKes: null,
     leftoverKes: null,
     overBudgetKes: null,
+    deferredCriticalCount: 0,
+    deferredCriticalKes: null,
     withheld: true,
   };
 }

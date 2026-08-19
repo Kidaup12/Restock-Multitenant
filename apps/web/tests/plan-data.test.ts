@@ -773,7 +773,7 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     }
   });
 
-  it("splits the list against a budget: sums reconcile, criticals never wait", async () => {
+  it("splits the list against a budget: sums reconcile, and the cap holds", async () => {
     const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     const rows = buyList!.rows;
 
@@ -799,18 +799,30 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     // No overlap between the splits.
     const fundedIds = new Set(half.funded.map((r) => r.predictionId));
     for (const row of half.deferred) expect(fundedIds.has(row.predictionId)).toBe(false);
-    // Criticals are funded regardless of the cap.
-    for (const row of rows.filter((r) => r.urgency === "critical")) {
-      expect(fundedIds.has(row.predictionId), row.sku).toBe(true);
-    }
+    // The cap holds: a budget the plan can exceed is not a budget.
+    expect(half.fundedCostKes!).toBeLessThanOrEqual(buyList!.totalCostKes! / 2);
+    expect(half.overBudgetKes).toBe(0);
 
-    // Zero budget: only criticals survive, and their cost is the overflow.
+    // Zero budget funds nothing, and says how much of what it dropped was
+    // must-restock — the cost of the cap, stated rather than absorbed.
     const zero = splitByBudget(rows, 0);
     const criticals = rows.filter((r) => r.urgency === "critical");
-    expect(new Set(zero.funded.map((r) => r.predictionId))).toEqual(
+    expect(zero.funded).toHaveLength(0);
+    expect(zero.overBudgetKes).toBe(0);
+    expect(zero.deferredCriticalCount).toBe(criticals.length);
+    expect(zero.deferredCriticalKes).toBeCloseTo(
+      criticals.reduce((sum, r) => sum + r.lineTotalKes!, 0),
+      5
+    );
+
+    // Opting out restores the older behaviour: criticals funded whatever the
+    // cap, the overrun reported instead of hidden.
+    const overflow = splitByBudget(rows, 0, { strict: false });
+    expect(new Set(overflow.funded.map((r) => r.predictionId))).toEqual(
       new Set(criticals.map((r) => r.predictionId))
     );
-    expect(zero.overBudgetKes).toBeCloseTo(
+    expect(overflow.deferredCriticalCount).toBe(0);
+    expect(overflow.overBudgetKes).toBeCloseTo(
       criticals.reduce((sum, r) => sum + r.lineTotalKes!, 0),
       5
     );
@@ -1095,15 +1107,30 @@ describe("splitByBudget (pure)", () => {
     expect(split.deferred).toHaveLength(0);
   });
 
-  it("funds criticals past the cap and reports the overflow", () => {
+  it("defers a critical that does not fit, and says what including it would cost", () => {
     const critical = mkRow({ urgency: "critical", lineTotalKes: 5000 });
     const medium = mkRow({ lineTotalKes: 1000 });
+    // Criticals sort first, so this one is offered the budget before the medium
+    // row — it simply does not fit, and the cap is not negotiable by default.
     const split = splitByBudget([medium, critical], 1000);
+    expect(split.funded.map((r) => r.predictionId)).toEqual([medium.predictionId]);
+    expect(split.fundedCostKes).toBe(1000);
+    expect(split.overBudgetKes).toBe(0);
+    expect(split.deferredCriticalCount).toBe(1);
+    expect(split.deferredCriticalKes).toBe(5000);
+  });
+
+  it("funds criticals past the cap and reports the overflow when told to", () => {
+    const critical = mkRow({ urgency: "critical", lineTotalKes: 5000 });
+    const medium = mkRow({ lineTotalKes: 1000 });
+    const split = splitByBudget([medium, critical], 1000, { strict: false });
     expect(split.funded.map((r) => r.predictionId)).toContain(critical.predictionId);
     expect(split.fundedCostKes).toBe(5000);
     expect(split.overBudgetKes).toBe(4000);
     expect(split.deferred.map((r) => r.predictionId)).toEqual([medium.predictionId]);
     expect(split.deferredCostKes).toBe(1000);
+    // Nothing must-restock was held back, so nothing to warn about.
+    expect(split.deferredCriticalCount).toBe(0);
   });
 
   it("prefers the bigger revenue-at-risk within the same urgency", () => {
