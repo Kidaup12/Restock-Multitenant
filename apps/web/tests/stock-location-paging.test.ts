@@ -2,10 +2,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { prismaService } from "@wezesha/db";
 import { PAGE_SIZE } from "../lib/catalogue";
-import { LocationView } from "../app/(shell)/stock/location-view";
+import { LocationView } from "../app/(shell)/inventory/location-view";
 import {
   getLocationsScreen,
   locationsQueryFields,
+  locationsQueryToSearch,
   matchesLocationLine,
   parseLocationsQuery,
   type LocationLine,
@@ -82,15 +83,19 @@ describe("By-location query <-> URL", () => {
     expect(parseLocationsQuery({ page: "-4" }).page).toBe(0);
   });
 
-  it("keeps the reader on this tab when they search, and starts them at page 1", () => {
-    const fields = locationsQueryFields({ search: "kokoa", page: 6 });
-    // Without this the GET form would drop the tab and answer with the
-    // by-product catalogue instead.
-    expect(fields).toContainEqual({ name: "view", value: "locations" });
-    // The box posts the text itself; a new search cannot land on page 7 of a
+  it("carries nothing the search box supplies itself", () => {
+    // Inventory is its own route now, so there is no tab to preserve — and the
+    // box posts the text itself, so a new search cannot land on page 7 of a
     // list that is now three lines long.
+    const fields = locationsQueryFields();
     expect(fields.map((f) => f.name)).not.toContain("q");
     expect(fields.map((f) => f.name)).not.toContain("page");
+  });
+
+  it("spells its own URL without borrowing the catalogue's params", () => {
+    expect(locationsQueryToSearch({ search: "kokoa", page: 0 })).toBe("?q=kokoa");
+    expect(locationsQueryToSearch({ search: "", page: 2 })).toBe("?page=3");
+    expect(locationsQueryToSearch({ search: "", page: 0 })).toBe("");
   });
 });
 

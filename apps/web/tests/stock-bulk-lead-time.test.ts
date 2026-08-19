@@ -38,7 +38,7 @@ vi.mock("@/lib/auth", () => ({
 
 import { prismaForTenant, prismaService } from "@wezesha/db";
 import { DEFAULT_QUERY } from "@/lib/catalogue";
-import { setLeadTimeForProductsAction } from "../app/(shell)/stock/actions";
+import { setLeadTimeForProductsAction } from "../app/(shell)/products/actions";
 
 const SLUGS = ["bulk-lead-a", "bulk-lead-b"];
 

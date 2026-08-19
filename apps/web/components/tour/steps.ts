@@ -28,8 +28,8 @@ export const STEP_ROUTES: Record<string, string> = {
   "today-reorder": "/today",
   plan: "/plan",
   orders: "/orders",
-  stock: "/stock",
-  "stock-tabs": "/stock",
+  inventory: "/inventory",
+  products: "/products",
   sales: "/sales",
   "sales-overview": "/sales",
   insights: "/insights",
@@ -112,13 +112,6 @@ const todayReorderCosts = step(
   "The forecast's most urgent products, ranked — days of cover left, units to order, and what each order will cost.",
 );
 
-const stockTabs = step(
-  "stock-tabs",
-  ["stock-tabs"],
-  "Two views of stock",
-  "Flip between the full product catalogue and per-location holdings.",
-);
-
 const salesOverview = step(
   "sales-overview",
   ["sales-overview"],
@@ -140,11 +133,18 @@ const orders = step(
   "Purchase orders live here, from draft to received.",
 );
 
-const stock = step(
-  "stock",
-  ["nav-stock"],
-  "Watch your stock",
-  "Stock shows on-hand levels across locations, with items running low on top.",
+const inventory = step(
+  "inventory",
+  ["nav-inventory"],
+  "Find your stock",
+  "Inventory shows what each branch is holding and how long it lasts at that branch's own selling rate.",
+);
+
+const products = step(
+  "products",
+  ["nav-products"],
+  "Check the catalogue",
+  "Products is every item you sell, and whether its cost, supplier and SKU are sound enough to buy on.",
 );
 
 const sales = step(
@@ -213,8 +213,8 @@ export function tourStepsForRole(role: Role, canOpenInsights = true): TourStep[]
       todayRunForecast,
       todayReorder,
       plan,
-      stock,
-      stockTabs,
+      inventory,
+      products,
       sales,
       salesOverview,
       theme,
@@ -228,8 +228,8 @@ export function tourStepsForRole(role: Role, canOpenInsights = true): TourStep[]
     todayReorderCosts,
     plan,
     orders,
-    stock,
-    stockTabs,
+    inventory,
+    products,
     salesCosts,
     salesOverview,
     ...(canOpenInsights ? [insights] : []),

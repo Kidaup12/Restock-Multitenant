@@ -121,7 +121,7 @@ export async function applyCostImportAction(input: {
     },
   });
   revalidatePath("/costs");
-  revalidatePath("/stock");
+  revalidatePath("/products");
   return { ok: true, data: result, message: `Applied ${applied} cost${applied === 1 ? "" : "s"}.` };
 }
 
@@ -157,6 +157,6 @@ export async function dismissCostMovedAction(input: {
     },
   });
   revalidatePath("/costs");
-  revalidatePath("/stock");
+  revalidatePath("/products");
   return { ok: true, message: `Cleared the cost-moved alert on ${product.title}.` };
 }

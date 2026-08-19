@@ -93,7 +93,7 @@ describe("buildSetupSteps", () => {
   });
 
   it("every step names a destination that exists in the shell", () => {
-    const routes = ["/profile", "/settings/connections", "/stock", "/costs", "/suppliers", "/settings/plan"];
+    const routes = ["/profile", "/settings/connections", "/products", "/costs", "/suppliers", "/settings/plan"];
     expect(buildSetupSteps(READY).map((s) => s.href)).toEqual(routes);
   });
 

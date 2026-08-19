@@ -269,7 +269,7 @@ export function ProductTabs({
                   <TableRow key={row.productId}>
                     <TableCell>
                       <Link
-                        href={`/stock/${row.productId}`}
+                        href={`/products/${row.productId}`}
                         className="font-medium text-ink hover:underline"
                       >
                         {row.title}

@@ -95,19 +95,19 @@ export async function LocationView({
   }
 
   const hrefFor = (patch: Partial<LocationsQuery>) =>
-    `/stock${locationsQueryToSearch({ ...query, ...patch })}`;
+    `/inventory${locationsQueryToSearch({ ...query, ...patch })}`;
 
   return (
     <div className="space-y-6">
       <Card className="pb-3">
         <TableSearch
-          action="/stock"
+          action="/inventory"
           value={query.search}
-          hidden={locationsQueryFields(query)}
+          hidden={locationsQueryFields()}
           placeholder="Search by product or SKU"
           matched={query.search ? screen.matched : null}
           clearHref={hrefFor({ search: "", page: 0 })}
-          label="Search stock by location"
+          label="Search inventory by location"
         />
       </Card>
 

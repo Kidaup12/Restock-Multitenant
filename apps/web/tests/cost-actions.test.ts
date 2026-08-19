@@ -43,7 +43,7 @@ import {
   renameCategoryAction,
   setManualCostAction,
   setNotForSaleAction,
-} from "../app/(shell)/stock/actions";
+} from "../app/(shell)/products/actions";
 import { applyCostImportAction } from "../app/(shell)/costs/actions";
 
 const SLUGS = ["cost-action-a", "cost-action-b"];

@@ -15,7 +15,7 @@ import { getCostCoverage } from "@/lib/data/costs";
  *
  * `resolveCost` treats any stored cost <= 0 as missing whatever its label says
  * (`lib/cost/resolve.ts:70-72`), which is the same predicate as the health flag
- * behind `/stock?issue=missing_cost` (`lib/facets/health.ts:65`) — so this
+ * behind `/products?issue=missing_cost` (`lib/facets/health.ts:65`) — so this
  * count and that screen always agree.
  *
  * Owner-only, and not because of the money figure: the catalogue deliberately
@@ -46,7 +46,7 @@ export async function CostGapBar({
         — they stay off the buy list until one is set.
       </span>
       <Link
-        href="/stock?issue=missing_cost"
+        href="/products?issue=missing_cost"
         className="font-medium underline-offset-2 hover:underline"
       >
         Fix costs →

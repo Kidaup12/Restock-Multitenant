@@ -37,8 +37,8 @@ vi.mock("@/lib/auth", () => ({
 
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant, prismaService } from "@wezesha/db";
 import { getStockCatalogue } from "@/lib/data/stock";
-import { getOwnerFlags } from "../app/(shell)/stock/owner-flags";
-import { setPriceAction, setProductActiveAction } from "../app/(shell)/stock/actions";
+import { getOwnerFlags } from "../app/(shell)/products/owner-flags";
+import { setPriceAction, setProductActiveAction } from "../app/(shell)/products/actions";
 
 const SLUGS = ["owner-edit-a", "owner-edit-b"];
 

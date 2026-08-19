@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prismaService } from "@wezesha/db";
 import { getProductDetail, type ProductDetail } from "../lib/data/product-detail";
-import { ProductDetailView } from "../app/(shell)/stock/[productId]/product-detail-view";
+import { ProductDetailView } from "../app/(shell)/products/[productId]/product-detail-view";
 
 /**
  * Cold start is one fact with two screens. The plan chips a too-new or borrowed

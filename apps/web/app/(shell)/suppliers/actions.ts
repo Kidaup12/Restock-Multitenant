@@ -142,7 +142,7 @@ export async function createSupplierAction(
 
   await audit(ctx.tenantId, supplier.id, "created", ctx.actor, { name: supplier.name, products: assigned });
   revalidatePath("/suppliers");
-  if (assigned > 0) revalidatePath("/stock");
+  if (assigned > 0) revalidatePath("/products");
   return {
     ok: true,
     message:
@@ -315,7 +315,7 @@ export async function assignProductsToSupplierAction(input: {
     reassignedFromAnotherSupplier: reassigned,
   });
   revalidatePath("/suppliers");
-  revalidatePath("/stock");
+  revalidatePath("/products");
   return {
     ok: true,
     message:
@@ -365,7 +365,7 @@ export async function setProductLeadTimeAction(input: {
     "Product",
   );
   revalidatePath("/suppliers");
-  revalidatePath("/stock");
+  revalidatePath("/products");
   return {
     ok: true,
     message: lead == null ? "Back to the supplier's lead time." : `Lead time set to ${lead} days.`,

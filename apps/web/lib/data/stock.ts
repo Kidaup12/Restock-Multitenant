@@ -18,9 +18,6 @@ import { getCatalogueMetrics } from "@/lib/metrics";
 import { buildFacetItems, type FacetItem, type FacetSourceRow } from "@/lib/facets";
 import {
   buildAggregates,
-  catalogueQueryFields,
-  catalogueQueryToSearch,
-  DEFAULT_QUERY,
   pageBounds,
   parseCatalogueQuery,
   selectRows,
@@ -574,23 +571,22 @@ export function parseLocationsQuery(params: RawSearchParams): LocationsQuery {
   return { search: q.search, page: q.page };
 }
 
-const asCatalogueQuery = (q: LocationsQuery): CatalogueQuery => ({
-  ...DEFAULT_QUERY,
-  search: q.search,
-  page: q.page,
-});
-
-/** This view's URL. Built through the catalogue's serializer so the two tabs
- *  cannot spell the same params differently. */
+/** This view's URL. Its own serializer now: Inventory carries a search and a
+ *  page and nothing else, and borrowing the catalogue's meant every locations
+ *  link spelled a `view` param that only existed to pick a tab. */
 export function locationsQueryToSearch(q: LocationsQuery): string {
-  return catalogueQueryToSearch(asCatalogueQuery(q), { view: "locations" });
+  const out = new URLSearchParams();
+  if (q.search) out.set("q", q.search);
+  if (q.page > 0) out.set("page", String(q.page + 1));
+  const s = out.toString();
+  return s ? `?${s}` : "";
 }
 
-/** The hidden fields the search box carries — `view` alone, minus `q` and
- *  `page`. Without the tab a search would answer with the by-product catalogue;
- *  without dropping the page it would land on page 7 of a three-line answer. */
-export function locationsQueryFields(q: LocationsQuery): { name: string; value: string }[] {
-  return catalogueQueryFields(asCatalogueQuery(q), { view: "locations" });
+/** The hidden fields the search box carries — minus `q` and `page`, which the
+ *  box supplies itself. Nothing else survives on this view, so this is empty
+ *  today; it stays so the form cannot silently drop a param added later. */
+export function locationsQueryFields(): { name: string; value: string }[] {
+  return [];
 }
 
 /** Product name and SKU: the only two things the per-location table prints as

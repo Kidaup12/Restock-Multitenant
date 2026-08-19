@@ -46,14 +46,18 @@ const nested = pages.filter(({ url, file }) => {
   if (top === "invite") return false; // reached from an email, no parent to return to
   if (top === "workspaces") return false; // creating your first workspace has no list behind it
   const rel = url.join(path.sep);
-  return !CHROMELESS.some((c) => rel.endsWith(c));
+  if (CHROMELESS.some((c) => rel.endsWith(c))) return false;
+  // A forwarder renders nothing to put a trail on. `/stock` split into Products
+  // and Inventory and stayed behind only so old links resolve, so it has no
+  // page of its own to be nested in.
+  return !readFileSync(file, "utf8").includes("permanentRedirect(");
 });
 
 describe("breadcrumbs on nested pages", () => {
   it("finds the nested routes at all (guards the walker itself)", () => {
     const urls = nested.map((p) => "/" + p.url.join("/"));
     expect(urls).toContain("/orders/[id]");
-    expect(urls).toContain("/stock/[productId]");
+    expect(urls).toContain("/products/[productId]");
     expect(urls).toContain("/settings/team");
     expect(urls.length).toBeGreaterThanOrEqual(9);
   });

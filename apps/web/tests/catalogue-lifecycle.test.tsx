@@ -15,7 +15,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }),
 }));
 
-import { CatalogueTable } from "../app/(shell)/stock/catalogue-table";
+import { CatalogueTable } from "../app/(shell)/products/catalogue-table";
 import { DEFAULT_QUERY, inScope, SCOPE_LABELS } from "../lib/catalogue";
 
 /**
