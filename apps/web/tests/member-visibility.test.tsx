@@ -30,7 +30,7 @@ import {
 } from "../lib/cost/surfaces";
 import { getDistributionProposal } from "../lib/data/transfers";
 
-// ReorderTable links to /stock; next/link needs an app-router context that a
+// The dashboard links out to /plan and /products; next/link needs an app-router context that a
 // bare renderToStaticMarkup doesn't provide — a plain anchor is equivalent here.
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: ReactNode }) => (
@@ -44,8 +44,7 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }),
 }));
 
-import { MetricsTiles } from "../app/(shell)/today/metrics-tiles";
-import { ReorderTable } from "../app/(shell)/today/reorder-table";
+import { ProductBoard } from "../app/(shell)/today/product-board";
 import { CatalogueTable } from "../app/(shell)/products/catalogue-table";
 import { CatalogueView } from "../app/(shell)/products/catalogue-view";
 import { DEFAULT_QUERY } from "../lib/catalogue";
@@ -270,7 +269,7 @@ describe("permission chain", () => {
 describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", () => {
   beforeAll(async () => {
     seeded = await seedDev();
-    // The seed ships no predictions; add a run so ReorderTable renders rows
+    // The seed ships no predictions; add a run so the board renders rows
     // with order costs.
     const products = await prismaService.product.findMany({
       where: { tenantId: seeded.tenantId },
@@ -311,34 +310,40 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     await prismaService.$disconnect();
   });
 
-  it("Today metrics: revenue visible, dead-stock cost masked", async () => {
-    const html = renderToStaticMarkup(
-      await MetricsTiles({ tenantId: seeded.tenantId, canViewCosts: false })
+  it("Today board: not one cost figure reaches a money-blind member", async () => {
+    // The dashboard's only cost figure is the dead-stock cash on its card. The
+    // card renders a SKU count instead for a member, so the honest assertion is
+    // that no KES reaches them at all — not that something masks. (The trend
+    // chart carries the revenue and is passed in separately; it is not a cost.)
+    const member = renderToStaticMarkup(
+      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: false, trend: null })
     );
-    // Exactly one real money figure — the 30d revenue tile.
-    expect(kesDigits(html)).toHaveLength(1);
-    expect(html).toContain(MASK);
+    expect(kesDigits(member)).toHaveLength(0);
+    // And not even a masked one. The data layer nulls the figure, so a card that
+    // wrongly rendered it would show "KES •••" rather than digits — which the
+    // digit check alone cannot see. Without this the assertion passes whether or
+    // not the leak exists, which is worse than having no assertion.
+    expect(member).not.toContain(MASK);
 
     const owner = renderToStaticMarkup(
-      await MetricsTiles({ tenantId: seeded.tenantId, canViewCosts: true })
+      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: true, trend: null })
     );
-    expect(kesDigits(owner)).toHaveLength(2); // revenue + dead-stock cost
-    expect(owner).not.toContain(MASK);
+    // The owner sees what the dead stock is costing — the figure this shop
+    // judges the product by.
+    expect(kesDigits(owner).length).toBeGreaterThan(0);
   });
 
-  it("Today reorder table: no order money for anyone, owner included", async () => {
+  it("Today board: no order money for anyone, owner included", async () => {
     // Stronger than masking. The dashboard names what needs attention; how much
     // to buy and what it costs belong to the planner, where the budget and
     // horizon that size an order live. So there is no order cost to mask — for
-    // the owner either — and the row sends you to the planner instead.
+    // the owner either — and the critical warning sends you to the planner.
     for (const canViewCosts of [false, true]) {
       const html = renderToStaticMarkup(
-        await ReorderTable({ tenantId: seeded.tenantId, canViewCosts })
+        await ProductBoard({ tenantId: seeded.tenantId, canViewCosts, trend: null })
       );
-      expect(html).toContain("Reorder needed");
-      expect(kesDigits(html), "no order cost belongs on the dashboard").toHaveLength(0);
-      expect(html).not.toContain("Reorder qty");
       expect(html).not.toContain("Order cost");
+      expect(html).not.toContain("Reorder qty");
       expect(html).toContain("/plan");
     }
   });
