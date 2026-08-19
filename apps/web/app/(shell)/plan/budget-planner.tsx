@@ -58,10 +58,15 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
   // which is what this screen allocated against before the target existed.
   const [coverDays, setCoverDays] = useState<number | null>(DEFAULT_BUDGET_COVER_DAYS);
 
-  function plan(budgetKes: number, cover: number | null) {
+  // The budget caps unless the shop says otherwise. Off means a must-restock
+  // line that does not fit is deferred and counted, rather than quietly pushing
+  // the plan past the cash the shop actually has.
+  const [allowOverflow, setAllowOverflow] = useState(false);
+
+  function plan(budgetKes: number, cover: number | null, overflow = allowOverflow) {
     setError(null);
     startTransition(async () => {
-      const result = await planBudget({ budgetKes, coverDays: cover });
+      const result = await planBudget({ budgetKes, coverDays: cover, allowOverflow: overflow });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -75,6 +80,13 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
   function applyCover(cover: number | null) {
     setCoverDays(cover);
     if (split) plan(Number(budget) || 0, cover);
+  }
+
+  /** Flipping the cap re-plans immediately: the toggle changes the answer, so
+   *  leaving the old split on screen beside the new setting would misreport it. */
+  function applyOverflow(next: boolean) {
+    setAllowOverflow(next);
+    if (split) plan(Number(budget) || 0, coverDays, next);
   }
 
   const exportColumns: ExportColumn<BuyListRow & { status: string }>[] = [
@@ -191,6 +203,21 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
                 ? "Off: the budget is spread over the plan's own horizon, the quantities the nightly run recommends."
                 : `Every line is sized to ${coverDays} days of cover first — never below an item's lead time — and the budget is then spread over that list. Answers "spend this cash, but stock to this long".`}
             </p>
+
+            <label className="flex items-center gap-2 text-sm font-medium text-ink">
+              <input
+                type="checkbox"
+                checked={allowOverflow}
+                onChange={(e) => applyOverflow(e.target.checked)}
+                className="size-4 rounded border-edge accent-accent"
+              />
+              Let criticals exceed budget
+            </label>
+            <p className="max-w-prose text-xs text-ink-muted">
+              {allowOverflow
+                ? "On: must-restock lines are funded whatever they cost, and the plan reports how far past the budget that puts you."
+                : "Off: the budget is a cap. Must-restock lines are funded first, and any that still don't fit are held back and counted rather than quietly spending money you haven't got."}
+            </p>
           </div>
 
           {error && <p className="text-sm text-negative">{error}</p>}
@@ -199,6 +226,18 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
 
       {split && (
         <>
+          {split.deferredCriticalCount > 0 && (
+            <div className="rounded-lg border border-warning bg-warning-soft p-3 text-sm text-warning">
+              <span className="font-medium">
+                {split.deferredCriticalCount} must-restock{" "}
+                {split.deferredCriticalCount === 1 ? "line doesn't" : "lines don't"} fit this budget
+              </span>{" "}
+              — <CostValue amount={split.deferredCriticalKes} canViewCosts={canViewCosts} /> more
+              would cover them. They&apos;re held back below: raise the budget, or accept the
+              stockout risk.
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatTile
               label="Funded now"

@@ -82,6 +82,9 @@ export async function addToOrder(input: {
 export async function planBudget(input: {
   budgetKes: number;
   coverDays?: number | null;
+  /** The shop's own decision to let must-restock lines push past the cap.
+   *  Absent means cap — a budget is a cap unless someone says otherwise. */
+  allowOverflow?: boolean;
 }): Promise<PlanActionResult<BudgetSplit>> {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
@@ -121,7 +124,7 @@ export async function planBudget(input: {
   const buyList = await getBuyList(membership.tenantId, { canViewCosts: true, coverDays });
   if (!buyList) return err("Run a forecast first — there's nothing to plan yet.");
 
-  const split = splitByBudget(buyList.rows, budget);
+  const split = splitByBudget(buyList.rows, budget, { strict: !input.allowOverflow });
   return { ok: true, data: redactBudgetSplit(split, hasPermission(membership, "view_costs")) };
 }
 
