@@ -128,5 +128,16 @@ npm run -w @wezesha/forecast test  # pure unit
 ```
 
 The DB-backed suites need Docker Postgres up (`npm run db:up`). Worker cron tests additionally need
-`REDIS_URL` + `SERVICE_DATABASE_URL` exported, or they skip. See `docs/ARCHITECTURE.md` for the full
-picture, the branch model, and the current feature/route map.
+`REDIS_URL` + `SERVICE_DATABASE_URL` exported, or they skip.
+
+**The suites use their own database.** Several of them call `seedDev()`, which rebuilds the demo
+tenant — run against your development database that silently destroys the orders demo, because
+`seedOrdersDemo` is deliberately not part of `seedDev`: the delivered purchase orders, the queued
+rows and every supplier scorecard disappear, with nothing on screen saying why. So the first test
+run creates `<your database>_test`, migrates it, and every suite works there. Your own database is
+left alone, and there is no re-seed step after testing.
+
+Point them elsewhere with `TEST_DATABASE_URL`. CI is exempt — its Postgres is a throwaway container
+the workflow already migrates.
+
+See `docs/ARCHITECTURE.md` for the full picture, the branch model, and the current feature/route map.

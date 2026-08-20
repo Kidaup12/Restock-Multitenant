@@ -31,3 +31,8 @@ if (process.env.REDIS_URL) {
     process.env.REDIS_URL = url.toString();
   }
 }
+
+// Same rule as the globalSetup, derived rather than passed: these run in
+// separate processes. A no-op in CI and when no database is configured.
+import { redirectToTestDatabase } from "../../../scripts/test-database";
+redirectToTestDatabase();
