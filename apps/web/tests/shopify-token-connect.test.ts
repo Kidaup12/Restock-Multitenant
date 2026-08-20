@@ -37,11 +37,26 @@ vi.mock("@/lib/shopify/queue", () => ({
 // The probe is the only thing that talks to Shopify. Stubbing it here keeps the
 // test about what the ACTION does with each answer.
 const probeState: { result: unknown; error: Error | null } = { result: null, error: null };
+/** What the action actually presented to Shopify, and what the mint was asked
+ *  for — the two things "test the credential the sync uses" is about. */
+const seen: { probedWith: string | null; mintedFor: unknown } = {
+  probedWith: null,
+  mintedFor: null,
+};
+const mintState: { token: string; error: Error | null } = { token: "", error: null };
 vi.mock("@wezesha/shopify", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@wezesha/shopify")>();
   return {
     ...actual,
-    createShopifyClient: () => ({ shopDomain: "stub", graphql: async () => ({}) }),
+    createShopifyClient: (opts: { shopDomain: string; accessToken: string }) => {
+      seen.probedWith = opts.accessToken;
+      return { shopDomain: opts.shopDomain, graphql: async () => ({}) };
+    },
+    mintAdminToken: async (shopDomain: string, credentials: unknown) => {
+      seen.mintedFor = { shopDomain, credentials };
+      if (mintState.error) throw mintState.error;
+      return { accessToken: mintState.token, scopes: [], expiresAt: Date.now() + 3_600_000 };
+    },
     probeConnection: async () => {
       if (probeState.error) throw probeState.error;
       return probeState.result;
@@ -50,7 +65,12 @@ vi.mock("@wezesha/shopify", async (importOriginal) => {
 });
 
 import { prismaService } from "@wezesha/db";
-import { decryptToken, ShopifyAuthError, ShopifyRateLimitedError } from "@wezesha/shopify";
+import {
+  decryptToken,
+  ShopifyAuthError,
+  ShopifyGrantError,
+  ShopifyRateLimitedError,
+} from "@wezesha/shopify";
 import {
   clearShopifyAppCredentials,
   connectShopifyWithToken,
@@ -245,6 +265,64 @@ describe.skipIf(!runnable)("connect a store with a pasted token (local db)", () 
       actAs(tenantA, "MEMBER");
       const res = await testShopifyConnection();
       expect(res.ok).toBe(false);
+    });
+
+    it("probes with the pasted token when that is what the sync would use", async () => {
+      seen.probedWith = null;
+      await testShopifyConnection();
+      expect(seen.probedWith).toBe(GOOD_TOKEN);
+    });
+
+    /**
+     * The defect this replaced, seen on a live workspace: the action decrypted
+     * `connection.accessToken` and probed with it. Where app credentials exist
+     * the worker never presents that token — it mints a fresh one every run —
+     * and a client-credentials token dies in about a day. So the button reported
+     * "the store rejected our access token" over a store syncing perfectly, and
+     * sent whoever pressed it to reconnect a connection that was fine.
+     */
+    describe("on a workspace connected by app credentials", () => {
+      beforeEach(async () => {
+        await saveShopifyAppCredentials({ clientId: "client-id", apiSecret: "client-secret" });
+        mintState.error = null;
+        mintState.token = "shpat_freshly_minted";
+        seen.probedWith = null;
+        seen.mintedFor = null;
+      });
+
+      it("mints a token and probes with that, not the stored one", async () => {
+        const res = await testShopifyConnection();
+        expect(res).toMatchObject({ ok: true });
+        expect(seen.probedWith).toBe("shpat_freshly_minted");
+        // The stored token is exactly what must NOT be presented.
+        expect(seen.probedWith).not.toBe(GOOD_TOKEN);
+        expect(seen.mintedFor).toMatchObject({
+          shopDomain: "amara-demo.myshopify.com",
+          credentials: { clientId: "client-id", clientSecret: "client-secret" },
+        });
+      });
+
+      it("blames the credentials, not the store, when the grant is refused", async () => {
+        mintState.error = new ShopifyGrantError(401, "amara-demo.myshopify.com", "bad client");
+        const res = await testShopifyConnection();
+        expect(res.ok).toBe(false);
+        expect(!res.ok && res.error).toContain("app credentials");
+        // Telling someone to reconnect a healthy store is the wrong remedy.
+        expect(!res.ok && res.error).not.toContain("Reconnect the store");
+      });
+
+      it("still changes nothing", async () => {
+        const before = await prismaService.shopifyConnection.findUnique({
+          where: { tenantId: tenantA },
+        });
+        mintState.error = new ShopifyGrantError(401, "amara-demo.myshopify.com", "bad client");
+        await testShopifyConnection();
+        const after = await prismaService.shopifyConnection.findUnique({
+          where: { tenantId: tenantA },
+        });
+        expect(after!.accessToken).toBe(before!.accessToken);
+        expect(after!.syncPausedAt).toEqual(before!.syncPausedAt);
+      });
     });
   });
 

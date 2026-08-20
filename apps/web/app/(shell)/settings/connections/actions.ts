@@ -7,10 +7,13 @@ import {
   decryptToken,
   encryptToken,
   isValidShopDomain,
+  mintAdminToken,
   probeConnection,
   ShopifyAuthError,
+  ShopifyGrantError,
   ShopifyRateLimitedError,
 } from "@wezesha/shopify";
+import { credentialsForTenant } from "@/lib/shopify/credentials";
 import { enqueueShopifySync } from "@/lib/shopify/queue";
 import { tenantActor, canManageConnections } from "@/lib/shopify/membership";
 import { resetCursorsOnStoreChange } from "@/lib/shopify/store-switch";
@@ -265,14 +268,55 @@ export async function testShopifyConnection(): Promise<ConnectResult> {
     return err("This store is disconnected. Reconnect it before testing.");
   }
 
+  /**
+   * Test the credential the SYNC would use, not whatever token happens to be
+   * stored.
+   *
+   * This used to decrypt `connection.accessToken` and probe with it. On a
+   * workspace connected by app credentials that is a client-credentials token
+   * minted days ago and dead within about a day — the worker never presents it,
+   * because `resolveAccessToken` mints a fresh one every run. So the button
+   * reported "the store rejected our access token" over a store syncing
+   * perfectly, and sent whoever pressed it to reconnect a connection that was
+   * fine. Verified on a live workspace: the probe failed on a token from 4 Aug
+   * while that morning's sync had succeeded.
+   *
+   * The order below mirrors the worker exactly. If the two ever part company
+   * again, this control goes back to answering a question nobody asked.
+   */
+  const credentials = await credentialsForTenant(actor.tenantId);
   let accessToken: string;
-  try {
-    accessToken = decryptToken(connection.accessToken);
-  } catch {
-    // The stored ciphertext cannot be read — almost always TOKEN_ENCRYPTION_KEY
-    // differing between deploys. Worth saying plainly; no amount of retrying
-    // helps, and the sync would fail the same way with less explanation.
-    return err("The stored token could not be read. Reconnect the store to store a fresh one.");
+  if (credentials) {
+    try {
+      accessToken = (
+        await mintAdminToken(connection.shopDomain, {
+          clientId: credentials.clientId,
+          clientSecret: credentials.apiSecret,
+        })
+      ).accessToken;
+    } catch (e) {
+      if (e instanceof ShopifyGrantError) {
+        return err(
+          `${connection.shopDomain} refused this workspace's app credentials. Check the client ID and secret above — the store itself may be fine.`
+        );
+      }
+      return err(`Could not reach ${connection.shopDomain}: ${(e as Error).message}`);
+    }
+  } else if (connection.authMode === "token") {
+    try {
+      accessToken = decryptToken(connection.accessToken);
+    } catch {
+      // The stored ciphertext cannot be read — almost always TOKEN_ENCRYPTION_KEY
+      // differing between deploys. Worth saying plainly; no amount of retrying
+      // helps, and the sync would fail the same way with less explanation.
+      return err("The stored token could not be read. Reconnect the store to store a fresh one.");
+    }
+  } else {
+    // An OAuth token with no credentials to renew it: the sync refuses this
+    // workspace outright, so the honest answer is the same one it gives.
+    return err(
+      `${connection.shopDomain} has no Shopify app credentials in this workspace, so nothing can be minted to reach it. Add the client ID and secret above, or connect the store with an Admin API token.`
+    );
   }
 
   let probe;
