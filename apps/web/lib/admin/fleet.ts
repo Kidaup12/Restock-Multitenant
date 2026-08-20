@@ -236,6 +236,28 @@ export function sortFleet(rows: FleetRow[], sort: FleetSort): FleetRow[] {
   return sorted;
 }
 
+/**
+ * Narrow the fleet by free text.
+ *
+ * The list is every workspace we have and grows with the business; with no way
+ * to search it, finding one shop meant reading the whole table. Matched against
+ * what an operator actually knows about a customer — the workspace name, its
+ * slug, and the store domain they quote when they write in.
+ *
+ * Terms are ANDed and matched case-insensitively, the same shape the shop-facing
+ * table search uses, so the two behave alike.
+ */
+export function filterFleet(rows: FleetRow[], search: string): FleetRow[] {
+  const terms = search.toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return rows;
+  return rows.filter((row) => {
+    const haystack = [row.name, row.slug, row.connection.shopDomain ?? ""]
+      .join(" ")
+      .toLowerCase();
+    return terms.every((t) => haystack.includes(t));
+  });
+}
+
 /** Lightweight id/name list for filter dropdowns (audit view). */
 export async function listTenants(): Promise<{ id: string; name: string; slug: string }[]> {
   // Cross-tenant on purpose: the audit filter offers every workspace — and this
