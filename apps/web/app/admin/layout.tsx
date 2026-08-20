@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { requireAdmin } from "@/lib/admin/gate";
+import { AdminSignOutButton } from "./sign-out-button";
 
 export const metadata: Metadata = {
   title: {
@@ -58,6 +59,11 @@ export default async function AdminLayout({
             <span className="hidden max-w-[16rem] truncate text-xs text-ink-muted sm:block">
               {admin.email}
             </span>
+            {/* The console has no profile menu, so this was the one shell in the
+                app an operator could not sign out of — on a shared machine, the
+                way out was to walk back into a customer's workspace and use its
+                menu instead. */}
+            <AdminSignOutButton />
             <ThemeToggle />
           </div>
         </div>
