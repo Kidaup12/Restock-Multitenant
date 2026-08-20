@@ -30,6 +30,10 @@ Prerequisites and the one command are in [QUICKSTART.md](QUICKSTART.md): clone, 
 `npm run dev`. It installs everything, starts the database, applies migrations and loads demo data.
 It's idempotent — safe to re-run whenever you want a clean shop back.
 
+Running the automated suites will not disturb any of it: they use their own database, created on
+first use. (They used to rebuild the demo tenant in place, which quietly removed the purchase-order
+history and the order queue that sections 10 and 12 depend on.)
+
 Three sign-ins exist in the seeded shop:
 
 | Role | Sign-in | Sees costs and profit? |

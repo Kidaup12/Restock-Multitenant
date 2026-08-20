@@ -8,3 +8,8 @@ import { config } from "dotenv";
 
 const dbEnv = fileURLToPath(new URL("../../db/.env", import.meta.url));
 if (existsSync(dbEnv)) config({ path: dbEnv });
+
+// Same rule as the globalSetup, derived rather than passed: these run in
+// separate processes. A no-op in CI and when no database is configured.
+import { redirectToTestDatabase } from "../../../scripts/test-database";
+redirectToTestDatabase();
