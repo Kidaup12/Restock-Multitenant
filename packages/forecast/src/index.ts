@@ -161,3 +161,13 @@ export {
   type SupplierFacts,
   type PredictionFields,
 } from "./pipeline";
+export {
+  blendedSeasonalMultiplier,
+  boundedMultiplier,
+  monthKeyOf,
+  seasonalLabel,
+  SEASONAL_HORIZON_DAYS,
+  SEASONAL_MAX,
+  SEASONAL_MIN,
+  type MonthlyExpectation,
+} from "./seasonality";
