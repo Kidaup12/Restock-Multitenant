@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { formatNumber } from "@/lib/money";
 import { EmptyState } from "@/components/ui/empty-state";
+import { RunBacktestButton } from "./run-backtest-button";
 
 const dateLabel = (d: Date): string =>
   d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
@@ -37,7 +38,7 @@ export function noGradeYet(firstSaleAt: Date | null, now: Date = new Date()): st
   if (due > now.getTime()) {
     return `The check replays past forecasts against real sales, so it needs about ${ACCURACY_MIN_HISTORY_DAYS} days of history. Yours is due around ${dateLabel(new Date(due))}.`;
   }
-  return "You have enough sales history for the check now — it runs on the first of each month, and the result lands here.";
+  return "You have enough sales history for the check now — it runs on the first of each month, or press Check now.";
 }
 
 function AccuracyBars({ history }: { history: AccuracyCheck[] }) {
@@ -69,7 +70,15 @@ function AccuracyBars({ history }: { history: AccuracyCheck[] }) {
   );
 }
 
-export async function ForecastScorecard({ tenantId }: { tenantId: string }) {
+export async function ForecastScorecard({
+  tenantId,
+  canRunCheck,
+}: {
+  tenantId: string;
+  /** Whether this reader may trigger the check. It writes a grade row, so it
+   *  sits behind the same permission the route re-checks server-side. */
+  canRunCheck: boolean;
+}) {
   const [scorecard, adherence] = await Promise.all([
     getAccuracyScorecard(tenantId),
     getPlanAdherence(tenantId),
@@ -82,6 +91,7 @@ export async function ForecastScorecard({ tenantId }: { tenantId: string }) {
         <CardHeader
           title="How close we've been"
           subtitle="We replay the forecast against what you actually sold, once a month"
+          action={canRunCheck ? <RunBacktestButton /> : undefined}
         />
         <CardContent>
           {!latest ? (
