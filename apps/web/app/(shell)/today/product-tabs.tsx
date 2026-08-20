@@ -136,7 +136,7 @@ export function ProductTabs({
         <KpiCard
           label="Stockouts"
           value={formatNumber(data.counts.stockout)}
-          hint="at or near zero stock"
+          hint="the shelf is empty"
           tone={data.counts.stockout > 0 ? "negative" : undefined}
           active={tab === "stockout"}
           onSelect={() => setTab("stockout")}
