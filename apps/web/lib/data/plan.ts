@@ -1,5 +1,6 @@
 import {
   OUTSTANDING_PO_STATUSES,
+  Prisma,
   effectiveOnOrder,
   outstandingByProduct,
   prismaForTenant,
@@ -37,10 +38,29 @@ import {
 
 const URGENCY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
-/** Open Order statuses = queued to buy or on a live PO, not yet received or
- *  cancelled. A product with one of these is already on the way. Mirrors the
- *  supply calendar's definition so the two screens agree on "already on order". */
-const OPEN_ORDER_STATUSES = ["pending", "ordered"];
+/** An Order row counts as "already on the way" when the shop has actually
+ *  committed to it: queued to buy (no purchase order yet), or on a purchase
+ *  order that has been SENT.
+ *
+ *  A row sitting on an unsent DRAFT is not committed to anything. Creating a PO
+ *  flips its queue rows to "ordered" in the same transaction that writes the PO
+ *  as "draft" (lib/po/create-po.ts), so keying off the Order status alone took a
+ *  stocked-out product off the buy list on the strength of a document nobody had
+ *  posted — and, on a supplier with no email address, could not post. Those rows
+ *  belong on the active list carrying `doubleOrderWarn`, which is what that flag
+ *  was always for. */
+const onTheWayOrderWhere: Prisma.OrderWhereInput = {
+  receivedAt: null,
+  OR: [
+    // Queued to buy — no purchase order exists yet.
+    { status: "pending" },
+    // On a purchase order the supplier has actually been sent.
+    {
+      status: "ordered",
+      purchaseOrder: { status: { in: [...OUTSTANDING_PO_STATUSES] }, deletedAt: null },
+    },
+  ],
+};
 
 /** A "slow mover" the plan holds back: it has plenty of cover (urgency "low")
  *  AND the run sized less than this a day for it, so restocking now just ties up
@@ -433,9 +453,10 @@ export async function getBuyList(
 
   // What's already in flight for these products, so the plan stops re-recommending
   // it. Two independent signals, both tenant-scoped through the same client:
-  //   - an OPEN in-app Order (pending/ordered, not received) → drop from active.
+  //   - an in-app Order the shop has committed to (queued, or on a SENT purchase
+  //     order) → drop from active.
   //   - a DRAFT purchase-order line → keep active, but warn on double-ordering.
-  const openOrderProductIds = new Set<string>();
+  const onTheWayProductIds = new Set<string>();
   const draftPoProductIds = new Set<string>();
   // Units on a SENT PO are stock the shop has already paid for. The nightly run
   // counts them; this screen used to read Shopify's column alone, so between
@@ -444,13 +465,9 @@ export async function getBuyList(
   let outstandingPoUnits = new Map<string, number>();
   if (lookupIds.length > 0) {
     const productIds = lookupIds;
-    const [openOrders, draftLines, sentLines] = await Promise.all([
+    const [onTheWay, draftLines, sentLines] = await Promise.all([
       db.order.findMany({
-        where: {
-          productId: { in: productIds },
-          status: { in: OPEN_ORDER_STATUSES },
-          receivedAt: null,
-        },
+        where: { productId: { in: productIds }, ...onTheWayOrderWhere },
         select: { productId: true },
       }),
       db.purchaseOrderLine.findMany({
@@ -468,7 +485,7 @@ export async function getBuyList(
         select: { productId: true, quantity: true, receivedQty: true },
       }),
     ]);
-    for (const o of openOrders) if (o.productId) openOrderProductIds.add(o.productId);
+    for (const o of onTheWay) if (o.productId) onTheWayProductIds.add(o.productId);
     for (const l of draftLines) draftPoProductIds.add(l.productId);
     outstandingPoUnits = outstandingByProduct(sentLines);
   }
@@ -616,7 +633,7 @@ export async function getBuyList(
   const activeRows: FullBuyListRow[] = [];
   const excludedRows: (FullBuyListRow & { reason: ExcludedReason })[] = [];
   for (const { row, plannedDailyDemand } of built) {
-    const reason = excludedReasonFor(row, plannedDailyDemand, openOrderProductIds.has(row.productId));
+    const reason = excludedReasonFor(row, plannedDailyDemand, onTheWayProductIds.has(row.productId));
     if (reason) excludedRows.push({ ...row, reason });
     else activeRows.push(row);
   }
@@ -627,7 +644,7 @@ export async function getBuyList(
   // "why isn't X here?", and until now no screen answered it.
   for (const p of zeroQty) {
     const row = buildRow(p);
-    excludedRows.push({ ...row, reason: notPlannedReasonFor(row, openOrderProductIds.has(row.productId)) });
+    excludedRows.push({ ...row, reason: notPlannedReasonFor(row, onTheWayProductIds.has(row.productId)) });
   }
 
   // The ordering follows the flag: a money-blind caller's rows are ranked on

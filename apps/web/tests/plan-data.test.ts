@@ -355,6 +355,86 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     }
   });
 
+  /**
+   * The shape `createPoFromOrders` actually writes, which the line-only test
+   * above never built: creating a PO flips the queue rows to "ordered" in the
+   * same transaction that writes the PO as "draft". Keying "already on the way"
+   * off the Order status alone therefore dropped the product, and the
+   * double-order warning could never fire for the one case it was written for.
+   *
+   * Production carried two of these on one workspace — a class-A product at zero
+   * stock, held off the buy list for a fortnight by a draft nobody had sent and,
+   * the supplier having no email address, nobody could send.
+   */
+  async function withPoFor(
+    target: { productId: string; sku: string; title: string; recommendedQty: number; unitCostKes: number | null; lineTotalKes: number | null },
+    status: string,
+    run: () => Promise<void>
+  ) {
+    const po = await prismaService.purchaseOrder.create({
+      data: {
+        tenantId: seeded.tenantId,
+        poNumber: `PO-${status.toUpperCase()}-TEST`,
+        status,
+        ...(status === "draft" ? {} : { sentAt: new Date() }),
+        lines: {
+          create: {
+            tenantId: seeded.tenantId,
+            productId: target.productId,
+            sku: target.sku,
+            title: target.title,
+            quantity: target.recommendedQty,
+            unitCostKes: target.unitCostKes!,
+            lineTotalKes: target.lineTotalKes!,
+          },
+        },
+      },
+    });
+    const order = await prismaService.order.create({
+      data: {
+        tenantId: seeded.tenantId,
+        status: "ordered",
+        productId: target.productId,
+        orderedQty: target.recommendedQty,
+        orderedAt: new Date(),
+        purchaseOrderId: po.id,
+      },
+    });
+    try {
+      await run();
+    } finally {
+      await prismaService.order.delete({ where: { id: order.id } });
+      await prismaService.purchaseOrder.delete({ where: { id: po.id } });
+    }
+  }
+
+  it("keeps a product on the active list when its purchase order is still a draft", async () => {
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0]!;
+    await withPoFor(target, "draft", async () => {
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      const row = after!.rows.find((r) => r.productId === target.productId);
+      expect(row, target.sku).toBeDefined();
+      expect(row!.doubleOrderWarn).toBe(true);
+      expect(after!.excluded.find((r) => r.productId === target.productId)).toBeUndefined();
+    });
+  });
+
+  /** The control the fix must not break: a PO that really went out still takes
+   *  the product off the list. Flip the status here and the test above is the
+   *  one that fails. */
+  it("drops a product whose purchase order has been sent", async () => {
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0]!;
+    await withPoFor(target, "sent", async () => {
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      expect(after!.rows.find((r) => r.productId === target.productId)).toBeUndefined();
+      const held = after!.excluded.find((r) => r.productId === target.productId);
+      expect(held, target.sku).toBeDefined();
+      expect(held!.reason).toBe("already-ordered");
+    });
+  });
+
   it("excludes a product with no usable cost as unplannable", async () => {
     const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
     const target = before!.rows[0]!;
