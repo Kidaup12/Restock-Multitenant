@@ -106,6 +106,7 @@ describe("the suppliers action column", () => {
 const renderTeam = (canManage: boolean) =>
   renderToStaticMarkup(
     <TeamView
+      seats={{ allowed: true, used: 1, max: 5, message: null }}
       rows={[
         {
           id: "mem-1",

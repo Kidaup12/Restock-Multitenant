@@ -3,6 +3,7 @@ import { prismaForTenant, Role } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { listInvites } from "@/lib/auth/invites";
 import { hasPermission } from "@/lib/auth/permissions";
+import { checkLimit } from "@/lib/limits/evaluate";
 import {
   canChangeRole,
   canRemoveMember,
@@ -58,6 +59,10 @@ export default async function TeamPage() {
   };
   const canManage = hasPermission(actor, "manage_team");
   const invites = canManage ? await listInvites(membership.tenantId) : [];
+  // The seat cap, read where the invite form is drawn rather than only inside
+  // the action. A form that accepts an address, sends it, and only then says the
+  // plan is full is a dead end dressed as a working control.
+  const seats = canManage ? await checkLimit(membership.tenantId, "invite_member") : null;
 
   // Per-row allowed actions, precomputed with the same guards the actions
   // re-run server-side.
@@ -94,6 +99,7 @@ export default async function TeamPage() {
         }))}
         canManage={canManage}
         inviteRoles={invitableRoles(actor)}
+        seats={seats && { allowed: seats.allowed, used: seats.used, max: seats.max, message: seats.message }}
       />
     </div>
   );
