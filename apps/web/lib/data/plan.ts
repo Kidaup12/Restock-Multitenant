@@ -779,6 +779,14 @@ export type BudgetSplit = {
   deferredCriticalCount: number;
   /** What it would cost to bring those must-restock lines back in. */
   deferredCriticalKes: number | null;
+  /** How many rows the allocator had to work with, and how many the plan is
+   *  holding back. Counts, not money — they survive redaction — and they are
+   *  what tells "the budget didn't stretch" apart from "there was nothing to
+   *  spend it on". Advising a shop to raise an untouched budget points them away
+   *  from the real cause, which is a buy list held back for missing costs or
+   *  open orders. */
+  incomingCount: number;
+  heldBackCount: number;
   /** True when the split was withheld from a money-blind caller: the three row
    *  lists are empty and every figure is null, because the split itself reads
    *  costs out. Absent otherwise. Consumers should say so rather than render an
@@ -807,7 +815,7 @@ export type BudgetSplit = {
 export function splitByBudget(
   rows: BuyListRow[],
   budgetKes: number,
-  { strict = true }: { strict?: boolean } = {}
+  { strict = true, heldBackCount = 0 }: { strict?: boolean; heldBackCount?: number } = {}
 ): BudgetSplit {
   const checkCost = rows.filter((r) => r.plannable !== "ok");
   const scored = rows
@@ -840,6 +848,8 @@ export function splitByBudget(
     overBudgetKes: Math.max(0, usedKes - budgetKes),
     deferredCriticalCount: deferredCriticals.length,
     deferredCriticalKes: deferredCriticals.reduce((sum, r) => sum + (r.lineTotalKes ?? 0), 0),
+    incomingCount: rows.length,
+    heldBackCount,
   };
 }
 
@@ -872,6 +882,10 @@ export function redactBudgetSplit(split: BudgetSplit, canViewCosts: boolean): Bu
     overBudgetKes: null,
     deferredCriticalCount: 0,
     deferredCriticalKes: null,
+    // Withheld entirely — the screen says so rather than rendering an empty plan,
+    // so these carry nothing either.
+    incomingCount: 0,
+    heldBackCount: 0,
     withheld: true,
   };
 }
