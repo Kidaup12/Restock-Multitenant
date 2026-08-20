@@ -24,7 +24,11 @@ import { buildSetupSteps, type SetupStep } from "./setup-checklist";
  */
 export async function setupChecklistFor(
   tenantId: string,
-  { displayName, canManageShop }: { displayName: string | null; canManageShop: boolean }
+  {
+    displayName,
+    canManageShop,
+    canViewCosts,
+  }: { displayName: string | null; canManageShop: boolean; canViewCosts: boolean }
 ): Promise<{ steps: SetupStep[]; depth: SetupDepth }> {
   const [depth, plan] = await Promise.all([setupDepth(tenantId), getTenantPlan(tenantId)]);
   const { facts } = depth;
@@ -42,6 +46,7 @@ export async function setupChecklistFor(
     leadTimesSet: facts.suppliedProducts > 0,
     planChosen: plan != null,
     canManageShop,
+    canViewCosts,
   });
 
   return { steps, depth };

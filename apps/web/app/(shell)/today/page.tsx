@@ -79,6 +79,7 @@ export default async function TodayPage() {
           tenantId={tenantId}
           displayName={session.user.name}
           canManageShop={canManageShop}
+          canViewCosts={canViewCosts}
         />
       </Suspense>
 

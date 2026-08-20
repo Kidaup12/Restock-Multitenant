@@ -22,12 +22,19 @@ export async function TodaySetupStrip({
   tenantId,
   displayName,
   canManageShop,
+  canViewCosts,
 }: {
   tenantId: string;
   displayName: string | null;
   canManageShop: boolean;
+  /** The cost-coverage step is a cost fact; a money-blind member does not get it. */
+  canViewCosts: boolean;
 }) {
-  const { steps, depth } = await setupChecklistFor(tenantId, { displayName, canManageShop });
+  const { steps, depth } = await setupChecklistFor(tenantId, {
+    displayName,
+    canManageShop,
+    canViewCosts,
+  });
 
   return (
     <>
