@@ -30,15 +30,36 @@ const LEAN_COPY: Record<AccuracyCheck["leans"], { text: string; tone: "positive"
  * the wait is the monthly check, not the history — promising a date that has
  * already passed reads as broken.
  */
-export function noGradeYet(firstSaleAt: Date | null, now: Date = new Date()): string {
-  if (!firstSaleAt) {
+export function noGradeYet(
+  firstSaleAt: Date | null,
+  lastSaleAt: Date | null,
+  now: Date = new Date()
+): string {
+  if (!firstSaleAt || !lastSaleAt) {
     return `The check replays past forecasts against real sales. It can run once you have about ${ACCURACY_MIN_HISTORY_DAYS} days of sales on record.`;
   }
-  const due = firstSaleAt.getTime() + ACCURACY_MIN_HISTORY_DAYS * 86_400_000;
-  if (due > now.getTime()) {
-    return `The check replays past forecasts against real sales, so it needs about ${ACCURACY_MIN_HISTORY_DAYS} days of history. Yours is due around ${dateLabel(new Date(due))}.`;
+
+  // The SPAN of sales, not the time since the first one. A shop whose sales
+  // stopped a fortnight ago gains nothing by waiting, and the old wording told
+  // exactly such a store it had enough — 68 days had passed since its first
+  // sale, but only 54 days separated its first sale from its last, and the
+  // check needs 59. It then declined, on the same card that had just promised it.
+  const spanDays = Math.floor((lastSaleAt.getTime() - firstSaleAt.getTime()) / 86_400_000);
+  if (spanDays >= ACCURACY_MIN_HISTORY_DAYS) {
+    return "You have enough sales history for the check now — it runs on the first of each month, or press Check now.";
   }
-  return "You have enough sales history for the check now — it runs on the first of each month, or press Check now.";
+
+  // What is missing is days OF SALES, not days on the calendar. Naming a due
+  // date would be a promise that selling continues, and the shop this was found
+  // on had stopped: its date would have come and gone with nothing to score.
+  const shortBy = ACCURACY_MIN_HISTORY_DAYS - spanDays;
+  const need = `The check replays past forecasts against real sales, so it needs about ${ACCURACY_MIN_HISTORY_DAYS} days of them from first to last. Yours covers ${spanDays}, so it is about ${shortBy} ${shortBy === 1 ? "day" : "days"} of selling short.`;
+
+  const quietFor = Math.floor((now.getTime() - lastSaleAt.getTime()) / 86_400_000);
+  if (quietFor >= 14) {
+    return `${need} Nothing has come in since ${dateLabel(lastSaleAt)}, so that gap closes when selling resumes rather than with time passing.`;
+  }
+  return need;
 }
 
 function AccuracyBars({ history }: { history: AccuracyCheck[] }) {
@@ -98,7 +119,7 @@ export async function ForecastScorecard({
             <EmptyState
               icon={<BulbIcon />}
               title="We haven't graded ourselves yet"
-              description={noGradeYet(scorecard.firstSaleAt)}
+              description={noGradeYet(scorecard.firstSaleAt, scorecard.lastSaleAt)}
             />
           ) : (
             <>
