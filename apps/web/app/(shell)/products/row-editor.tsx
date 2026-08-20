@@ -98,6 +98,13 @@ export function RowEditor({
                   min="0"
                   step="0.01"
                   placeholder="Type a cost"
+                  /* The captions beside these fields are plain text, not
+                     labels, so a screen reader announced "edit text, blank"
+                     three times over and left someone guessing which box pays
+                     the supplier and which charges the customer. Named for the
+                     product too, the way the receiving inputs are — several of
+                     these editors can be open at once. */
+                  aria-label={`Unit cost for ${row.title}`}
                   value={costInput}
                   onChange={(e) => setCostInput(e.target.value)}
                   className="min-h-9 max-w-40"
@@ -140,6 +147,7 @@ export function RowEditor({
                   min="0"
                   step="0.01"
                   placeholder="Type a price"
+                  aria-label={`Selling price for ${row.title}`}
                   value={priceInput}
                   onChange={(e) => setPriceInput(e.target.value)}
                   className="min-h-9 max-w-40"
@@ -173,6 +181,7 @@ export function RowEditor({
               <Input
                 list="catalogue-categories"
                 placeholder="Assign or + new category"
+                aria-label={`Category for ${row.title}`}
                 value={category}
                 onChange={(e) => setCategory(e.target.value)}
                 className="min-h-9"
