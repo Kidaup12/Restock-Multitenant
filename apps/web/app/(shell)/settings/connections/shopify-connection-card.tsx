@@ -498,6 +498,22 @@ export function ShopifyConnectionCard({
     negative: "bg-negative-soft text-negative",
   } as const;
 
+  /**
+   * The card's one notice, rendered where it can be read.
+   *
+   * It lived only at the top of the card, and the action buttons are the last
+   * thing in it — around 680px below on a connected store. Pressing "Test
+   * connection" in a normal viewport put the answer off screen above, and
+   * inserting it shifted the buttons DOWN, so the only visible effect of the
+   * press was the control moving. Reported, reasonably, as a button that does
+   * nothing at all.
+   */
+  const noticeBlock = notice && (
+    <p className={`rounded-md px-3 py-2 text-sm ${noticeTone[notice.tone]}`} role="status">
+      {notice.text}
+    </p>
+  );
+
   return (
     <Card>
       <CardHeader
@@ -523,9 +539,7 @@ export function ShopifyConnectionCard({
         }
       />
       <CardContent className="space-y-4">
-        {notice && (
-          <p className={`rounded-md px-3 py-2 text-sm ${noticeTone[notice.tone]}`}>{notice.text}</p>
-        )}
+        {noticeBlock}
 
         {canManage && !choosingRoute && appCredentialsPanel}
 
@@ -629,6 +643,10 @@ export function ShopifyConnectionCard({
                 ))}
               </ul>
             </div>
+
+            {/* Repeated here on purpose: this is the row the buttons are in, and
+                a result nobody can see is the same as no result. */}
+            {noticeBlock}
 
             <div className="flex flex-wrap items-center gap-2">
               {live && (
