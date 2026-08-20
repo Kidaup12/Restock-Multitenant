@@ -92,4 +92,147 @@ describe.skipIf(!runnable)("activity log (seeded local db)", () => {
     expect(unknown).toBeDefined();
     expect(unknown!.summary).not.toContain("_"); // the token never shows raw
   });
+
+  /**
+   * The screen calls itself an accounting record — "who changed a cost", "kept
+   * for accounting, entries can't be edited or removed" — and could not answer
+   * "which product?". Every line said "a product" or "a record" while the ids
+   * sat unread in the same rows the operator console renders in full.
+   */
+  describe("naming the record", () => {
+    it("names the product whose cost changed, with its SKU", async () => {
+      const product = await prismaService.product.findFirst({
+        where: { tenantId: seeded.tenantId },
+        select: { id: true, title: true, sku: true },
+      });
+      const row = await prismaService.auditEvent.create({
+        data: {
+          tenantId: seeded.tenantId,
+          entity: "Product",
+          entityId: product!.id,
+          action: "cost_changed",
+          actorName: "The owner",
+          meta: { from: 100, to: 200, field: "costKes" },
+        },
+      });
+      try {
+        const entries = await getActivity(seeded.tenantId, { canViewCosts: true, currency: "KES" });
+        const named = entries.find((e) => e.id === row.id)!;
+        expect(named.summary).toContain(product!.title);
+        expect(named.summary).toContain(product!.sku);
+        // ...and still carries the money it always did.
+        expect(named.summary).toContain("KES 200");
+      } finally {
+        await prismaService.auditEvent.delete({ where: { id: row.id } });
+      }
+    });
+
+    it("falls back to the generic noun for a record that no longer exists", async () => {
+      // Reading a log to find out what was deleted is the commonest reason to
+      // open one, so an unresolvable id must degrade, never blank the entry.
+      const row = await prismaService.auditEvent.create({
+        data: {
+          tenantId: seeded.tenantId,
+          entity: "Supplier",
+          entityId: "supplier-that-was-deleted",
+          action: "deleted",
+          actorName: "The owner",
+        },
+      });
+      try {
+        const entries = await getActivity(seeded.tenantId, { canViewCosts: true, currency: "KES" });
+        const entry = entries.find((e) => e.id === row.id)!;
+        expect(entry.summary).toBe("Deleted a supplier");
+      } finally {
+        await prismaService.auditEvent.delete({ where: { id: row.id } });
+      }
+    });
+
+    it("never resolves a name from another workspace", async () => {
+      // The lookup runs on the tenant-scoped client. An audit row pointing at a
+      // foreign id must read as the generic noun, not as that shop's product.
+      const other = await prismaService.tenant.create({
+        data: { name: "Other Shop", slug: `activity-other-${Date.now()}` },
+      });
+      const foreign = await prismaService.product.create({
+        data: {
+          tenantId: other.id,
+          sku: "FOREIGN-SKU",
+          title: "Another Shop's Secret Product",
+          costKes: 1,
+          priceKes: 2,
+        },
+      });
+      const row = await prismaService.auditEvent.create({
+        data: {
+          tenantId: seeded.tenantId,
+          entity: "Product",
+          entityId: foreign.id,
+          action: "edited",
+          actorName: "The owner",
+        },
+      });
+      try {
+        const entries = await getActivity(seeded.tenantId, { canViewCosts: true, currency: "KES" });
+        const entry = entries.find((e) => e.id === row.id)!;
+        expect(entry.summary).toBe("Edited a product");
+        expect(JSON.stringify(entries)).not.toContain("Another Shop's Secret Product");
+        expect(JSON.stringify(entries)).not.toContain("FOREIGN-SKU");
+      } finally {
+        await prismaService.auditEvent.delete({ where: { id: row.id } });
+        await prismaService.tenant.delete({ where: { id: other.id } });
+      }
+    });
+
+    it("says plainly when support opened the workspace", async () => {
+      // These rows are written against the CUSTOMER's tenant, so they land in
+      // the shop's own log — which is right for an accounting trail. They read
+      // "impersonation start — a record", which tells a shop nothing.
+      const row = await prismaService.auditEvent.create({
+        data: {
+          tenantId: seeded.tenantId,
+          entity: "AdminSession",
+          entityId: "sess-1",
+          action: "impersonation_start",
+          actorName: "An operator",
+        },
+      });
+      try {
+        const entries = await getActivity(seeded.tenantId, { canViewCosts: true, currency: "KES" });
+        const entry = entries.find((e) => e.id === row.id)!;
+        expect(entry.summary).toBe("Wezesha support opened this workspace");
+        expect(entry.summary).not.toContain("impersonation");
+        expect(entry.summary).not.toContain("a record");
+      } finally {
+        await prismaService.auditEvent.delete({ where: { id: row.id } });
+      }
+    });
+
+    it("leaves no production entity reading as 'a record'", async () => {
+      // Every entity the app writes, taken from a census of the live ledger.
+      const entities = [
+        "PurchaseOrder", "Product", "Supplier", "ShopifyConnection", "Tenant",
+        "TenantConfig", "Location", "LocationClosure", "DistributionPlan",
+        "Promo", "Membership",
+      ];
+      const rows = await prismaService.auditEvent.createManyAndReturn({
+        data: entities.map((entity) => ({
+          tenantId: seeded.tenantId,
+          entity,
+          entityId: `census-${entity}`,
+          action: "created",
+          actorName: "The owner",
+        })),
+      });
+      try {
+        const entries = await getActivity(seeded.tenantId, { canViewCosts: true, currency: "KES" });
+        for (const row of rows) {
+          const entry = entries.find((e) => e.id === row.id)!;
+          expect(entry.summary, row.entity).not.toContain("a record");
+        }
+      } finally {
+        await prismaService.auditEvent.deleteMany({ where: { id: { in: rows.map((r) => r.id) } } });
+      }
+    });
+  });
 });

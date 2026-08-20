@@ -252,4 +252,50 @@ describe.skipIf(!runnable)("cost + catalogue actions (local db)", () => {
     const b2 = await prismaForTenant(tenantA).product.findUnique({ where: { id: impB } });
     expect(b2!.costKes).toBe(999);
   });
+
+  /**
+   * The same cost change made two ways left two different levels of detail in a
+   * ledger the screen calls an accounting record: a hand edit said which product
+   * and from what to what, an import of two hundred said neither — one row,
+   * `entityId: "-"`, counts only.
+   */
+  it("records every imported cost the way a typed one is recorded", async () => {
+    const led = await product(tenantA, "LED-A", { costKes: 100, costSource: "shopify", currentStock: 1 });
+    actAs(tenantA, null);
+    await prismaService.auditEvent.deleteMany({ where: { tenantId: tenantA } });
+
+    const applied = await applyCostImportAction({ csv: "sku,cost\nLED-A,275" });
+    expect(applied.ok).toBe(true);
+
+    const rows = await prismaService.auditEvent.findMany({ where: { tenantId: tenantA } });
+
+    // One row per product actually written, naming it and both figures.
+    const perProduct = rows.filter((r) => r.action === "cost_changed");
+    expect(perProduct).toHaveLength(1);
+    expect(perProduct[0]!.entityId).toBe(led);
+    expect(perProduct[0]!.entityId).not.toBe("-");
+    expect(perProduct[0]!.meta).toMatchObject({ field: "costKes", from: 100, to: 275 });
+
+    // ...plus one row for the import itself, filed against the workspace rather
+    // than masquerading as a cost change to "a product".
+    const summary = rows.filter((r) => r.action === "cost_import");
+    expect(summary).toHaveLength(1);
+    expect(summary[0]!.entity).toBe("Tenant");
+    expect(summary[0]!.meta).toMatchObject({ applied: 1 });
+  });
+
+  it("writes no ledger row for a product the import did not change", async () => {
+    // A protected pin is skipped, so nothing happened to it and nothing should
+    // be recorded — a ledger that logs non-events is worse than none.
+    await product(tenantA, "LED-PIN", { costKes: 900, costSource: "manual", currentStock: 1 });
+    actAs(tenantA, null);
+    await prismaService.auditEvent.deleteMany({ where: { tenantId: tenantA } });
+
+    await applyCostImportAction({ csv: "sku,cost\nLED-PIN,999" });
+
+    const changed = await prismaService.auditEvent.findMany({
+      where: { tenantId: tenantA, action: "cost_changed" },
+    });
+    expect(changed).toHaveLength(0);
+  });
 });
