@@ -57,6 +57,7 @@ describe("computeMoneyBand", () => {
     sellableOnHand: 10,
     coverDays: 30,
     leadDays: 14,
+    runRatePerDay: 2,
     revenue30dKes: 1000,
     moneyAtRestKes: 500,
     notForSale: false,
@@ -78,14 +79,36 @@ describe("computeMoneyBand", () => {
     expect(band.deadOverstockKes).toBe(900);
   });
 
-  it("counts revenue at risk for out-of-stock or below-lead rows", () => {
+  it("sizes revenue at risk from expected sales over the days the shelf is short", () => {
     const band = computeMoneyBand([
-      row({ sellableOnHand: 0, revenue30dKes: 400 }), // out
-      row({ coverDays: 8, leadDays: 14, revenue30dKes: 600 }), // below lead
+      // Out of stock: all 30 days missed — 2/day x KES 100 x 30.
+      row({ sellableOnHand: 0, coverDays: 0 }),
+      // Below lead: runs out on day 8, so 22 days missed.
+      row({ coverDays: 8, leadDays: 14 }),
       row({ coverDays: 40 }), // safe
     ]);
     expect(band.revenueAtRiskCount).toBe(2);
-    expect(band.revenueAtRiskKes).toBe(1000);
+    expect(band.revenueAtRiskKes).toBe(6000 + 4400);
+  });
+
+  /**
+   * The defect this replaced. The tile summed each row's TRAILING 30-day
+   * revenue, and a product out of stock for the whole month sold nothing — so
+   * the figure fell towards zero exactly as the stockout got worse and read
+   * KES 0 on a shop losing real money. Reports, sizing the same loss from the
+   * run rate, said KES 338 a day on that same data.
+   */
+  it("still reports a loss when the shelf has been empty long enough to earn nothing", () => {
+    const band = computeMoneyBand([row({ sellableOnHand: 0, coverDays: 0, revenue30dKes: 0 })]);
+    expect(band.revenueAtRiskKes).toBeGreaterThan(0);
+    expect(band.revenueAtRiskKes).toBe(6000);
+  });
+
+  it("holds an at-risk row that never sells at zero", () => {
+    // No velocity, nothing to miss — the count still flags it, the money does not.
+    const band = computeMoneyBand([row({ sellableOnHand: 0, coverDays: 0, runRatePerDay: 0 })]);
+    expect(band.revenueAtRiskCount).toBe(1);
+    expect(band.revenueAtRiskKes).toBe(0);
   });
 
   it("counts rows selling below cost", () => {

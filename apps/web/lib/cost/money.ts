@@ -14,6 +14,9 @@
 /** Overstock / dead-stock threshold: cover beyond this is idle capital (spec). */
 export const OVERSTOCK_COVER_DAYS = 90;
 
+/** Horizon for the revenue-at-risk tile, matching the plan's own figure. */
+export const RISK_HORIZON_DAYS = 30;
+
 /** Margin % of selling price: (price − cost) / price. Null when there is no
  *  price to divide by (a missing-price row can't show a margin). Negative =
  *  selling below cost (loud red in the table). */
@@ -75,6 +78,9 @@ export type MoneyRow = {
   coverDays: number | null;
   /** Resolved lead time (product override → supplier → ASSUMED_LEAD_DAYS). */
   leadDays: number;
+  /** Units a day the product sells at. What the empty shelf is losing is sized
+   *  from this, not from what it managed to sell while it was empty. */
+  runRatePerDay: number;
   revenue30dKes: number;
   /** cost × max(0, sellable) — from the metric engine. */
   moneyAtRestKes: number;
@@ -87,7 +93,8 @@ export type MoneyBand = {
   /** Σ money-at-rest of overstock/dead rows (cover > 90d or no velocity). */
   deadOverstockKes: number;
   deadOverstockCount: number;
-  /** Σ 30-day revenue of rows out of stock or with cover below lead time. */
+  /** Sales the next 30 days are expected to miss across rows out of stock or
+   *  with cover below their lead time. */
   revenueAtRiskKes: number;
   revenueAtRiskCount: number;
   /** Rows selling below cost (margin < 0) and their 30-day revenue exposure. */
@@ -120,7 +127,14 @@ export function computeMoneyBand(rows: MoneyRow[]): MoneyBand {
 
     const atRisk = r.sellableOnHand <= 0 || (r.coverDays != null && r.coverDays < r.leadDays);
     if (atRisk) {
-      band.revenueAtRiskKes += r.revenue30dKes;
+      // What the shelf is expected to MISS, not what it managed to take while it
+      // was empty. Summing trailing revenue drove this figure towards zero as the
+      // stockout got worse — a shop a fortnight out of a product sold nothing, so
+      // it contributed nothing, and the tile read KES 0 in the case that matters
+      // most. Reports has always sized the same loss from the run rate; this is
+      // that number over the horizon, so the two screens agree.
+      const daysOut = Math.max(0, RISK_HORIZON_DAYS - (r.coverDays ?? 0));
+      band.revenueAtRiskKes += r.runRatePerDay * r.priceKes * daysOut;
       band.revenueAtRiskCount += 1;
     }
 
