@@ -124,7 +124,10 @@ export async function planBudget(input: {
   const buyList = await getBuyList(membership.tenantId, { canViewCosts: true, coverDays });
   if (!buyList) return err("Run a forecast first — there's nothing to plan yet.");
 
-  const split = splitByBudget(buyList.rows, budget, { strict: !input.allowOverflow });
+  const split = splitByBudget(buyList.rows, budget, {
+    strict: !input.allowOverflow,
+    heldBackCount: buyList.excluded.length,
+  });
   return { ok: true, data: redactBudgetSplit(split, hasPermission(membership, "view_costs")) };
 }
 

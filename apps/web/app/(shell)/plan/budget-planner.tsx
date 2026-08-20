@@ -297,9 +297,29 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
             <div className="mt-2 pb-2">
               {split.funded.length === 0 ? (
                 <CardContent>
-                  <p className="text-sm text-ink-muted">
-                    The budget doesn&apos;t reach anything — raise it or clear a critical first.
-                  </p>
+                  {/* Two different situations, and only one of them is about the
+                      budget. Telling an owner to raise an untouched KES 800K
+                      because nothing was waiting to be ordered points them away
+                      from the real cause — a buy list held back for missing
+                      costs, products too new, or stock already on order. */}
+                  {split.incomingCount === 0 ? (
+                    <p className="text-sm text-ink-muted">
+                      Nothing is waiting to be ordered, so there is nothing for this budget to
+                      fund.
+                      {split.heldBackCount > 0 && (
+                        <>
+                          {" "}
+                          {split.heldBackCount}{" "}
+                          {split.heldBackCount === 1 ? "product is" : "products are"} held back —
+                          open the buy list to see why.
+                        </>
+                      )}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-ink-muted">
+                      The budget doesn&apos;t reach anything — raise it or clear a critical first.
+                    </p>
+                  )}
                 </CardContent>
               ) : (
                 <BudgetTable rows={split.funded} canViewCosts={canViewCosts} />
