@@ -313,7 +313,14 @@ export function daysOfStockRemaining(currentStock: number, dailyRate: number): n
 }
 
 /** Safety stock via King's formula: buffers both demand variability and
- *  lead-time variability at the service level implied by z. */
+ *  lead-time variability at the service level implied by z.
+ *
+ *  Floored at zero. A buffer is stock held BACK from the reorder point, so a
+ *  negative one silently lowers it — the shop would be told to order later than
+ *  the plain demand maths says, which is the opposite of a safety margin. The
+ *  inputs are clamped at the boundary (resolveForecastKnobs), but this is the
+ *  last line before a number reaches a buy list and does not rely on its
+ *  caller: a stored z of -2 produced a safety stock of -4.5 units. */
 export function kingsSafetyStock(params: {
   z: number;
   leadTimeAvg: number;
@@ -322,9 +329,9 @@ export function kingsSafetyStock(params: {
   demandStd: number;
 }): number {
   const variance =
-    params.leadTimeAvg * Math.pow(params.demandStd, 2) +
+    Math.max(0, params.leadTimeAvg) * Math.pow(params.demandStd, 2) +
     Math.pow(params.demandAvg, 2) * Math.pow(params.leadTimeStd, 2);
-  return params.z * Math.sqrt(variance);
+  return Math.max(0, params.z * Math.sqrt(variance));
 }
 
 export function reorderPoint(demandAvg: number, leadTimeAvg: number, safetyStock: number): number {

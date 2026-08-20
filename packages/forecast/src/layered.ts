@@ -3,9 +3,10 @@
  *
  * Layer 1 is a recency-weighted run rate — walk-forward backtesting on real
  * shop data showed it beats fancier models on this kind of intermittent retail
- * demand. Layer 2 applies owner-entered promo lifts (knowledge, not guesses)
- * and a hard cap at a multiple of the product's best trailing month so no
- * engine edge case can produce a runaway order.
+ * demand. Layer 2 applies what the OWNER has told us — promo lifts and stated
+ * monthly seasonality, knowledge rather than guesses — and a hard cap at a
+ * multiple of the product's best trailing month so no engine edge case can
+ * produce a runaway order.
  *
  * Pure: every fact the forecast depends on arrives as data on ForecastInput.
  */
@@ -34,6 +35,11 @@ import {
   type ConfidenceSignals,
   type ConfidenceWord,
 } from "./confidence-word";
+import {
+  blendedSeasonalMultiplier,
+  seasonalLabel,
+  type MonthlyExpectation,
+} from "./seasonality";
 
 export type ActivePromo = {
   discountPct: number;
@@ -96,6 +102,13 @@ export type ForecastInput = {
    * from stockoutDates. Absent/empty -> no change.
    */
   excludedDates?: Date[];
+  /**
+   * What the owner says each month runs at, 1 = normal (`MonthlyContext`).
+   * Blended over the horizon by the days it spends in each month, so a 30-day
+   * horizon straddling December and January is neither month twice. Absent or
+   * all-normal -> the forecast is untouched.
+   */
+  monthlyExpectations?: MonthlyExpectation[];
   /** Per-class z overrides for safety stock (tenant setting). Absent -> defaults. */
   serviceZ?: Partial<Record<"A" | "B" | "C", number | null>>;
   /** Cap multiple over the best trailing month (tenant setting). Absent -> 3. */
@@ -346,6 +359,22 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
       emoji: "🏷️",
     });
     boosted = boosted * promo.lift;
+  }
+
+  // Stated seasonality, on the same terms as a promo: the owner's knowledge
+  // rather than the calendar's guess, applied to a history-derived number only,
+  // and still bounded by the cap below. An override IS the stated demand, so
+  // layering a month multiplier on top would double-count the owner's own
+  // figure — the same reason promo is skipped there.
+  const seasonal = blendedSeasonalMultiplier(input.monthlyExpectations ?? [], today);
+  const seasonLabel = override ? null : seasonalLabel(seasonal);
+  if (seasonLabel) {
+    signals.push({
+      label: seasonLabel,
+      deltaPct: (seasonal - 1) * 100,
+      emoji: "📅",
+    });
+    boosted = boosted * seasonal;
   }
 
   // ── Safety cap: never exceed capMultiple x the best trailing month ────────

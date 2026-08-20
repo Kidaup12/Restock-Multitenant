@@ -55,14 +55,43 @@ export type ResolvedForecastKnobs = {
 };
 
 /** Overlay a tenant's stored overrides on the code defaults. */
+/**
+ * Bounds on the stored knobs.
+ *
+ * These columns are deliberately absent from the settings screen — raw
+ * statistics are the engine's, not a shop owner's — but nothing stops a value
+ * reaching the column another way: the operator console, a support fix, a
+ * migration, a settings screen someone adds later. They are nullable Floats
+ * with no database constraint, and they were being passed to the engine exactly
+ * as stored. A z of -2 produced a NEGATIVE safety stock, which lowers the
+ * reorder point instead of raising it; a cap multiple of 0 silently zeroes the
+ * entire buy list.
+ *
+ * z 0.5 ≈ 69% service, 4 ≈ 99.997%. Below the floor the buffer is noise; above
+ * the ceiling it is an order nobody placed on purpose.
+ */
+const Z_MIN = 0.5;
+const Z_MAX = 4;
+/** A cap below 1 would clamp the forecast under the best month it is capping
+ *  against, which is a cap that only ever removes demand. */
+const CAP_MIN = 1;
+const CAP_MAX = 20;
+
+/** Keep a stored knob inside its bounds; fall back to the default when it is
+ *  absent or not a usable number at all (NaN, Infinity). */
+function bounded(value: number | null | undefined, min: number, max: number, fallback: number): number {
+  if (value == null || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+
 export function resolveForecastKnobs(cfg?: TenantForecastOverrides | null): ResolvedForecastKnobs {
   return {
     serviceZ: {
-      A: cfg?.serviceLevelZA ?? SERVICE_Z_DEFAULTS.A,
-      B: cfg?.serviceLevelZB ?? SERVICE_Z_DEFAULTS.B,
-      C: cfg?.serviceLevelZC ?? SERVICE_Z_DEFAULTS.C,
+      A: bounded(cfg?.serviceLevelZA, Z_MIN, Z_MAX, SERVICE_Z_DEFAULTS.A),
+      B: bounded(cfg?.serviceLevelZB, Z_MIN, Z_MAX, SERVICE_Z_DEFAULTS.B),
+      C: bounded(cfg?.serviceLevelZC, Z_MIN, Z_MAX, SERVICE_Z_DEFAULTS.C),
     },
-    capMultiple: cfg?.orderCapMultiple ?? DEFAULT_CAP_MULTIPLE,
+    capMultiple: bounded(cfg?.orderCapMultiple, CAP_MIN, CAP_MAX, DEFAULT_CAP_MULTIPLE),
     methods: {
       A: parseOrderMethod(cfg?.methodA) ?? METHOD_DEFAULTS.A,
       B: parseOrderMethod(cfg?.methodB) ?? METHOD_DEFAULTS.B,

@@ -129,7 +129,10 @@ export default async function InsightsPage({
               </div>
             }
           >
-            <ForecastScorecard tenantId={membership.tenantId} />
+            <ForecastScorecard
+              tenantId={membership.tenantId}
+              canRunCheck={hasPermission(membership, "manage_settings")}
+            />
           </Suspense>
           <Suspense
             fallback={
