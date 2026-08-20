@@ -17,14 +17,19 @@ const tones = {
 export function Badge({
   tone = "neutral",
   className,
+  title,
   children,
 }: {
   tone?: keyof typeof tones;
   className?: string;
+  /** Hover/long-press explanation. A chip is a word with no room to say what it
+   *  means, and the shop is left guessing at ones like "Guessing" and "Sure". */
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
     <span
+      title={title}
       className={cn(
         "inline-flex items-center gap-1 rounded-xs px-2 py-0.5 text-2xs font-medium whitespace-nowrap",
         tones[tone],

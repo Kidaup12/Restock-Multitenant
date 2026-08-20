@@ -203,8 +203,20 @@ export function TrustChips({ row }: { row: Pick<BuyListRow, "confidence" | "cold
   if (!confidence && !cold) return null;
   return (
     <>
-      {confidence && <Badge tone={confidence.tone}>{confidence.chip}</Badge>}
-      {cold && <Badge tone="neutral">{cold.chip(row.borrowedFromTitle)}</Badge>}
+      {/* The full sentence rides on the chip. It already existed, but only
+          inside the expanded "why this quantity" panel — so a shop scanning the
+          list met "Guessing" and "Selling like X" with no way to find out what
+          they meant short of opening every row. */}
+      {confidence && (
+        <Badge tone={confidence.tone} title={confidence.sentence}>
+          {confidence.chip}
+        </Badge>
+      )}
+      {cold && (
+        <Badge tone="neutral" title={cold.sentence(row.borrowedFromTitle)}>
+          {cold.chip(row.borrowedFromTitle)}
+        </Badge>
+      )}
     </>
   );
 }
