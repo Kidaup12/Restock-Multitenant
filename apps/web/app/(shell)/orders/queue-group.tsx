@@ -13,9 +13,34 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { OrderQueueGroup } from "@/lib/data/orders";
-import { buildPoLines, subtotal } from "@/lib/po/po-math";
+import { buildPoLines, subtotal, type PoLinePlan } from "@/lib/po/po-math";
 import { createPoAction } from "./actions";
 import { SupplierScoreBadges } from "./supplier-score-badges";
+
+/**
+ * The quantity this line will actually be ordered at.
+ *
+ * A supplier minimum is applied per line, so the number the shop is committing
+ * to can be larger than the one the forecast queued. Showing the queued figure
+ * under a MOQ-inflated header and total left the difference visible nowhere,
+ * and the card could not be added up. The original stays as a hint, because
+ * "why is this 48 when the plan said 30?" is the next question.
+ */
+function QueueQty({ line, planned }: { line: { qty: number }; planned?: PoLinePlan }) {
+  const qty = planned?.quantity ?? line.qty;
+  if (!planned || qty === line.qty) return <>{qty}</>;
+  return (
+    <span className="inline-flex flex-col items-end">
+      <span className="font-medium text-ink">{qty}</span>
+      <span
+        className="font-sans text-2xs text-ink-muted"
+        title="The supplier will not ship fewer than their minimum, so this line is raised to it."
+      >
+        raised from {line.qty}
+      </span>
+    </span>
+  );
+}
 
 /**
  * One supplier's slice of the order queue: pick lines, see the running total,
@@ -74,6 +99,20 @@ export function QueueGroup({
   /** How many units the floor added — worth naming rather than leaving someone
    *  to notice the number is bigger than what they ticked. */
   const moqAddedUnits = selectedUnits - selection.reduce((s, l) => s + l.qty, 0);
+  /**
+   * The planned line for each ticked product, so the rows can show the quantity
+   * that will actually be ordered.
+   *
+   * The header has run `buildPoLines` since the totals were corrected, but the
+   * table went on printing the raw queued quantity — so a card read "60 + 30"
+   * above a button promising 108 units, and the 18 the minimum added appeared
+   * nowhere except a note. The purchase order was always right; only this screen
+   * could not be reconciled against it.
+   */
+  const plannedByProduct = useMemo(
+    () => new Map(planned.map((l) => [l.productId, l])),
+    [planned]
+  );
 
   const toggle = (orderId: string) => {
     setSelected((prev) => {
@@ -177,12 +216,17 @@ export function QueueGroup({
                   <span className="ml-2 font-mono text-xs text-ink-faint">{line.sku}</span>
                 </TableCell>
                 <TableCell numeric>{line.onHandUnits}</TableCell>
-                <TableCell numeric>{line.qty}</TableCell>
+                <TableCell numeric>
+                  <QueueQty line={line} planned={plannedByProduct.get(line.productId)} />
+                </TableCell>
                 <TableCell numeric>
                   <CostValue amount={line.unitCostKes} canViewCosts={canViewCosts} />
                 </TableCell>
                 <TableCell numeric>
-                  <CostValue amount={line.lineCostKes} canViewCosts={canViewCosts} />
+                  <CostValue
+                    amount={plannedByProduct.get(line.productId)?.lineTotalKes ?? line.lineCostKes}
+                    canViewCosts={canViewCosts}
+                  />
                 </TableCell>
               </TableRow>
             ))}
