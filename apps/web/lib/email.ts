@@ -7,11 +7,11 @@ import { prismaService } from "@wezesha/db";
  * SDK); without one it logs to the server console, which keeps local dev and
  * the tests working unchanged.
  *
- * In production a missing key is a hard error, not a fallback. Callers treat a
- * clean return as delivery — sendPoToSupplier marks the purchase order sent and
- * writes the supplier's ETA before it mails them, undoing that only if this
- * throws — so on a deployment with no key the console fallback told a shop its
- * order was placed and nothing left the building.
+ * In production a missing key is a hard error, not a fallback. Outside it the
+ * console fallback returns "skipped" rather than throwing, so the return value —
+ * not the absence of an exception — is what says whether anything left the
+ * building. A caller that reports delivery to a person must read it: saying
+ * "emailed to the supplier" over a console log is a lie the shop acts on.
  *
  * Every attempt lands in EmailLog (envelope only — never the body, never an
  * attachment) so "did that
@@ -96,10 +96,14 @@ async function providerIdOf(res: Response): Promise<string | null> {
   }
 }
 
+/** What became of the message. A failure throws, so these are the only two
+ *  outcomes a caller can be handed. Mirrors the EmailLog row this writes. */
+export type EmailOutcome = "sent" | "skipped";
+
 export async function sendEmail(
   { to, subject, text, html, attachments, tenantId, kind }: EmailMessage,
   fetchImpl: typeof fetch = globalThis.fetch,
-): Promise<void> {
+): Promise<EmailOutcome> {
   const envelope = { tenantId, to, subject, kind };
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
@@ -116,7 +120,7 @@ export async function sendEmail(
       `[email] not sent (no RESEND_API_KEY)\n[email] to: ${to}\n[email] subject: ${subject}${files}\n${text}`,
     );
     await record({ ...envelope, status: "skipped", error: "no RESEND_API_KEY (console fallback)" });
-    return;
+    return "skipped";
   }
 
   const from = process.env.EMAIL_FROM?.trim();
@@ -160,4 +164,5 @@ export async function sendEmail(
   }
 
   await record({ ...envelope, status: "sent", providerId: await providerIdOf(res) });
+  return "sent";
 }

@@ -66,7 +66,15 @@ export async function sendPoAction(input: { poId: string }): Promise<PoActionRes
   }
   revalidatePath("/orders");
   revalidatePath(`/orders/${input.poId}`);
-  return { ok: true, message: "Purchase order emailed to the supplier." };
+  // Say which of the two things happened. The order is marked sent either way —
+  // that part is real — but reporting an email that never left tells a shop the
+  // supplier knows about an order they have never seen.
+  return {
+    ok: true,
+    message: result.emailed
+      ? "Purchase order emailed to the supplier."
+      : "Purchase order marked as sent, but the email did not go out — the supplier has not been told.",
+  };
 }
 
 export async function receivePoAction(input: {

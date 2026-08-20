@@ -1,5 +1,5 @@
 import { prismaForTenant, prismaService } from "@wezesha/db";
-import { sendEmail } from "@/lib/email";
+import { sendEmail, type EmailOutcome } from "@/lib/email";
 import { buildPoDocument } from "@/lib/po/po-model";
 import { poEmailHtml, poEmailSubject, poEmailText } from "@/lib/po/po-email";
 import { poPdfBytes, poPdfFilename } from "@/lib/po/po-pdf";
@@ -9,12 +9,17 @@ import { poPdfBytes, poPdfFilename } from "@/lib/po/po-pdf";
  * order attached as a PDF, send it through the sendEmail seam, and mark the PO
  * sent. A failed send leaves the PO in draft (retryable); the worst retry case
  * is a duplicate email, never a "sent" PO the supplier never saw.
+ *
+ * `emailed` carries the seam's own answer rather than inferring one from the
+ * absence of an exception. Where the console fallback is live the send is
+ * skipped, not failed — the PO is legitimately marked sent, but the supplier has
+ * not been told, and only the caller saying so out loud keeps that honest.
  */
 
 const DAY_MS = 86_400_000;
 
 export type SendPoResult =
-  | { ok: true; expectedAt: Date | null }
+  | { ok: true; expectedAt: Date | null; emailed: boolean }
   | { ok: false; reason: "not_found" | "not_sendable" | "no_supplier_email" };
 
 export async function sendPoToSupplier(
@@ -76,8 +81,9 @@ export async function sendPoToSupplier(
   });
   if (claim.count === 0) return { ok: false, reason: "not_sendable" };
 
+  let outcome: EmailOutcome;
   try {
-    await sendEmail({
+    outcome = await sendEmail({
       to: po.supplier.email,
       subject: poEmailSubject(doc),
       text: poEmailText(doc),
@@ -115,5 +121,5 @@ export async function sendPoToSupplier(
     },
   });
 
-  return { ok: true, expectedAt };
+  return { ok: true, expectedAt, emailed: outcome === "sent" };
 }

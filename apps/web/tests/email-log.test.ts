@@ -14,6 +14,11 @@ import { sendEmail } from "../lib/email";
  * an ETA written, "on order" quantities moved) before it mails the supplier and
  * rolls that claim back only on a throw — so a silent success is an order the
  * shop believes was placed and no supplier ever received.
+ *
+ * Outside production the skipped send is not a failure and must not roll the PO
+ * back; what it must do is say so, which is what `emailed` carries. The screen
+ * used to show a green "emailed to the supplier" toast directly above a banner
+ * reading "the supplier has not been told".
  */
 
 function okFetch(status = 201, id = "resend-message-id") {
@@ -114,14 +119,16 @@ describe.skipIf(!runnable)("email log + missing-key behaviour (local db)", () =>
     ).rejects.toThrow(/RESEND_API_KEY/);
   });
 
-  it("still resolves outside production so local dev keeps working", async () => {
+  it("resolves as 'skipped' outside production so local dev keeps working", async () => {
     vi.stubEnv("NODE_ENV", "test");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const fetchMock = okFetch();
 
+    // Resolving is what keeps local dev working; resolving as "skipped" is what
+    // stops a caller reporting it as delivery.
     await expect(
       sendEmail({ to: "owner@shop.test", subject: "Your code", text: "123456" }, fetchMock),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("skipped");
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining("no RESEND_API_KEY"));
@@ -204,9 +211,51 @@ describe.skipIf(!runnable)("email log + missing-key behaviour (local db)", () =>
 
     await expect(
       sendEmail({ to: SUPPLIER_EMAIL, subject: "Hi", text: "body", tenantId }, fetchMock),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("sent");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("reports a skipped send instead of claiming the supplier was emailed", async () => {
+    // The console fallback: no key, not production. The order is legitimately
+    // marked sent — that is the shop's own record — but nothing left the
+    // building, and the result has to carry that fact to whatever tells a person.
+    delete process.env.RESEND_API_KEY;
+    vi.spyOn(console, "log").mockImplementation(() => {});
+    const poId = await draftPo("skipped");
+
+    const result = await sendPoToSupplier(tenantId, poId);
+
+    expect(result.ok).toBe(true);
+    expect(result).toMatchObject({ ok: true, emailed: false });
+    // The PO still moves — this is not a failure path.
+    const po = await prismaService.purchaseOrder.findUnique({
+      where: { id: poId },
+      select: { status: true, sentAt: true },
+    });
+    expect(po?.status).toBe("sent");
+    expect(po?.sentAt).not.toBeNull();
+    // ...and the ledger agrees with the result the caller was handed.
+    const log = await prismaService.emailLog.findFirst({
+      where: { tenantId, kind: "purchase_order" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(log?.status).toBe("skipped");
+  }, 30_000);
+
+  it("reports a real send as emailed", async () => {
+    // The control: with a key and a provider that accepts it, the same path must
+    // still say the supplier was told. Break `emailed` and this is what fails.
+    // send-po takes no fetch seam, so the global is stubbed — nothing in this
+    // suite is allowed to reach the real provider.
+    process.env.RESEND_API_KEY = KEY;
+    process.env.EMAIL_FROM = FROM;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      okFetch() as unknown as typeof globalThis.fetch
+    );
+    const poId = await draftPo("emailed");
+
+    expect(await sendPoToSupplier(tenantId, poId)).toMatchObject({ ok: true, emailed: true });
+  }, 30_000);
 
   it("rolls the purchase order back to draft when production has no key", async () => {
     // send-po is untouched by this change: its existing try/catch already hands
