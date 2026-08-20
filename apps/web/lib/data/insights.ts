@@ -208,11 +208,21 @@ export type AccuracyScorecard = {
   /** Earliest sale on record — the empty state uses it to say when the first
    *  check becomes possible, rather than an open-ended "coming soon". */
   firstSaleAt: Date | null;
+  /** NEWEST sale on record. The check needs a SPAN of sales, not a span since
+   *  the first one: a shop that stopped selling a fortnight ago gains no
+   *  history by waiting, and telling it otherwise promises a check that cannot
+   *  run (seen live — a store with 54 days of sales was told it had enough
+   *  because 68 days had passed since its first). */
+  lastSaleAt: Date | null;
 };
 
-/** Days of history the walk-forward check needs before it can score anything:
- *  a 30-day training minimum plus one 30-day horizon. */
-export const ACCURACY_MIN_HISTORY_DAYS = 60;
+/**
+ * Days between the first and last sale before the walk-forward check can score
+ * anything: a 30-day training minimum plus one 30-day horizon, less the day the
+ * final window is inclusive of (`walkForwardCutoffs`). Below this there is not a
+ * single cutoff to score.
+ */
+export const ACCURACY_MIN_HISTORY_DAYS = 59;
 
 const LEANS = new Set(["over", "under", "even"]);
 
@@ -239,7 +249,7 @@ export async function getAccuracyScorecard(
     happenedUnits: { not: null },
   } as const;
 
-  const [rows, checksAllTime, firstSale] = await Promise.all([
+  const [rows, checksAllTime, firstSale, lastSale] = await Promise.all([
     db.backtestRun.findMany({
       where,
       orderBy: { runDate: "desc" },
@@ -248,6 +258,7 @@ export async function getAccuracyScorecard(
     }),
     db.backtestRun.count({ where }),
     db.salesHistory.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
+    db.salesHistory.findFirst({ orderBy: { date: "desc" }, select: { date: true } }),
   ]);
 
   const history: AccuracyCheck[] = rows
@@ -266,6 +277,7 @@ export async function getAccuracyScorecard(
     history,
     checksAllTime,
     firstSaleAt: firstSale?.date ?? null,
+    lastSaleAt: lastSale?.date ?? null,
   };
 }
 
