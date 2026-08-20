@@ -164,6 +164,7 @@ describe.skipIf(!runnable)("cost + catalogue actions (local db)", () => {
         sellableOnHand: r.onHandUnits,
         coverDays: r.daysCover,
         leadDays: r.leadDays,
+        runRatePerDay: r.runRate,
         revenue30dKes: r.revenue30dKes,
         moneyAtRestKes: r.moneyAtRestKes ?? 0,
         notForSale: r.notForSale,
