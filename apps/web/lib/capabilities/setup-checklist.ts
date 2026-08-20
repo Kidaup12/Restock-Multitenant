@@ -46,6 +46,17 @@ export type SetupChecklistInput = {
   planChosen: boolean;
   /** OWNER/ADMIN. Decides `actionable` on every shop-level step. */
   canManageShop: boolean;
+  /**
+   * Whether this caller may see cost facts at all.
+   *
+   * A step reading "Add product costs — all 30 priced" is a statement ABOUT the
+   * shop's cost data, and a fact about cost is still a cost fact even carrying
+   * no figure — the same reasoning that took the missing-cost and suspect-cost
+   * chips off Stock for this role. /costs is already closed to them and the link
+   * is already out of their nav, so this line was the one place a money-blind
+   * member was told how much of the catalogue is priced.
+   */
+  canViewCosts: boolean;
 };
 
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
@@ -54,7 +65,7 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
 export function buildSetupSteps(input: SetupChecklistInput): SetupStep[] {
   const shop = input.canManageShop;
 
-  return [
+  const steps: SetupStep[] = [
     {
       id: "displayName",
       label: "Set your display name",
@@ -111,6 +122,8 @@ export function buildSetupSteps(input: SetupChecklistInput): SetupStep[] {
       actionable: shop,
     },
   ];
+
+  return steps.filter((step) => step.id !== "costs" || input.canViewCosts);
 }
 
 function costsDetail(input: SetupChecklistInput): string {

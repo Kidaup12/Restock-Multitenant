@@ -19,6 +19,7 @@ const READY: SetupChecklistInput = {
   leadTimesSet: true,
   planChosen: true,
   canManageShop: true,
+  canViewCosts: true,
 };
 
 const FRESH: SetupChecklistInput = {
@@ -29,6 +30,7 @@ const FRESH: SetupChecklistInput = {
   leadTimesSet: false,
   planChosen: false,
   canManageShop: true,
+  canViewCosts: true,
 };
 
 const byId = (input: SetupChecklistInput) =>
@@ -100,5 +102,39 @@ describe("buildSetupSteps", () => {
   it("floors the percentage so a card never reads 100% with work left", () => {
     const steps = buildSetupSteps({ ...READY, planChosen: false });
     expect(setupProgress(steps)).toEqual({ done: 5, total: 6, percent: 83 });
+  });
+
+  /**
+   * "Add product costs — all 30 priced" is a statement about the shop's cost
+   * data, and a fact about cost is still a cost fact even carrying no figure —
+   * the reasoning that took the missing-cost and suspect-cost chips off Stock
+   * for this role. /costs is already closed to a member and the link is already
+   * out of their nav, so this line was the one place they were told how much of
+   * the catalogue is priced.
+   */
+  describe("money-blind", () => {
+    it("drops the cost step entirely for a caller who cannot see costs", () => {
+      const steps = buildSetupSteps({ ...READY, canViewCosts: false });
+      expect(steps.some((s) => s.id === "costs")).toBe(false);
+    });
+
+    it("tells them nothing about cost coverage, priced or unpriced", () => {
+      for (const input of [READY, FRESH]) {
+        const blind = JSON.stringify(buildSetupSteps({ ...input, canViewCosts: false }));
+        expect(blind).not.toContain("priced");
+        expect(blind).not.toContain("cost");
+        expect(blind).not.toContain("Cost");
+      }
+    });
+
+    it("keeps every other step, so the checklist still means something", () => {
+      const blind = buildSetupSteps({ ...FRESH, canViewCosts: false }).map((s) => s.id);
+      expect(blind).toEqual(["displayName", "shopify", "products", "leadTimes", "plan"]);
+    });
+
+    it("still shows the cost step to a cost viewer", () => {
+      const seeing = buildSetupSteps({ ...READY, canViewCosts: true });
+      expect(seeing.find((s) => s.id === "costs")?.detail).toContain("priced");
+    });
   });
 });
