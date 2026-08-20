@@ -131,29 +131,38 @@ export default async function AdminFleetPage({
     return qs ? `/admin?${qs}` : "/admin";
   };
 
+  /**
+   * The sort control, rendered WITH the table it orders.
+   *
+   * It used to sit in the page header, top right, with the whole console-access
+   * card between it and the first row — so in any normal viewport, pressing a
+   * tab changed nothing you could see except the address bar. Reported, exactly,
+   * as "I have clicked on them and all I see is just the URL change". The sort
+   * itself was always correct.
+   */
+  const sortTabs = (
+    <div className="flex items-center gap-1 rounded-md border border-edge bg-surface p-0.5 text-xs">
+      <span className="px-1.5 text-ink-muted">Sort</span>
+      {SORTS.map((s) => (
+        <Link
+          key={s.key}
+          href={hrefFor({ sort: s.key === "staleness" ? undefined : s.key })}
+          aria-current={s.key === sort ? "true" : undefined}
+          className={
+            s.key === sort
+              ? "rounded bg-surface-2 px-2 py-1 font-medium text-ink"
+              : "rounded px-2 py-1 text-ink-muted transition-colors hover:text-ink"
+          }
+        >
+          {s.label}
+        </Link>
+      ))}
+    </div>
+  );
+
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Fleet"
-        description="Every workspace's sync health at a glance"
-        actions={
-          <div className="flex items-center gap-1 rounded-md border border-edge bg-surface p-0.5 text-xs">
-            {SORTS.map((s) => (
-              <Link
-                key={s.key}
-                href={hrefFor({ sort: s.key === "staleness" ? undefined : s.key })}
-                className={
-                  s.key === sort
-                    ? "rounded bg-surface-2 px-2 py-1 font-medium text-ink"
-                    : "rounded px-2 py-1 text-ink-muted transition-colors hover:text-ink"
-                }
-              >
-                {s.label}
-              </Link>
-            ))}
-          </div>
-        }
-      />
+      <PageHeader title="Fleet" description="Every workspace's sync health at a glance" />
 
       <AdminsCard admins={admins} />
 
@@ -172,6 +181,10 @@ export default async function AdminFleetPage({
         />
       ) : (
         <Card>
+          <div className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4">
+            <span className="text-sm font-medium text-ink">Workspaces</span>
+            {sortTabs}
+          </div>
           <TableSearch
             action="/admin"
             value={search}
