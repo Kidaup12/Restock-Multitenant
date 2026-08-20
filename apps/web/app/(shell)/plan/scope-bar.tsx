@@ -76,6 +76,22 @@ export function matchesScope(row: BuyListRow, sel: ScopeSelection): boolean {
   return true;
 }
 
+/**
+ * What the planner's "Urgent only" lens keeps.
+ *
+ * One predicate, so the checklist, the decision header above it and anything
+ * exported from the screen cannot disagree about which rows are urgent.
+ *
+ * It lives here rather than in `lib/data/plan` because the planner is a client
+ * component: importing a VALUE from that module pulls `prismaForTenant` — and
+ * with it the Prisma clients, which throw on a missing SERVICE_DATABASE_URL —
+ * into the browser bundle, and the page dies before it hydrates. Types are
+ * erased and stay fine; values do not.
+ */
+export function isUrgentRow(row: Pick<BuyListRow, "urgency">): boolean {
+  return row.urgency === "critical" || row.urgency === "high";
+}
+
 /** Pure row filter — the checklist renders the result. Extracted so the AND/OR
  *  logic is unit-tested without React. No selection short-circuits to the input
  *  list (same reference), so an unfiltered plan is untouched. */

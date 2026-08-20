@@ -5,14 +5,20 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BanknoteIcon, CalendarIcon, ClipboardIcon } from "@/components/icons";
 import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-features";
 import type { PlanFreshness as Freshness } from "@/lib/data/forecast-freshness";
-import { isUrgentRow, type BuyList } from "@/lib/data/plan";
+import type { BuyList } from "@/lib/data/plan";
 import { BudgetPlanner } from "./budget-planner";
 import { BuyChecklist } from "./buy-checklist";
 import { PlanDecisionHeader } from "./decision-header";
 import { PlanFreshness } from "./plan-freshness";
 import { PreflightStrip } from "./preflight-strip";
 import { deleteScope, listScopes, saveScope, type SavedScope } from "./scope-actions";
-import { EMPTY_SCOPE, filterBuyListRows, ScopeBar, type ScopeSelection } from "./scope-bar";
+import {
+  EMPTY_SCOPE,
+  filterBuyListRows,
+  isUrgentRow,
+  ScopeBar,
+  type ScopeSelection,
+} from "./scope-bar";
 import { SupplyCalendarMode } from "./supply-calendar";
 
 /**
