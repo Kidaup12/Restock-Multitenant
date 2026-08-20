@@ -38,13 +38,6 @@ import {
 
 const URGENCY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
-/** What the planner's "Urgent only" lens keeps. One predicate, so the checklist,
- *  the decision header above it and anything exported from the screen cannot
- *  disagree about which rows are urgent. */
-export function isUrgentRow(row: Pick<BuyListRow, "urgency">): boolean {
-  return row.urgency === "critical" || row.urgency === "high";
-}
-
 /** An Order row counts as "already on the way" when the shop has actually
  *  committed to it: queued to buy (no purchase order yet), or on a purchase
  *  order that has been SENT.
