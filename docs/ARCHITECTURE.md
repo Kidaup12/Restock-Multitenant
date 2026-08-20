@@ -123,7 +123,7 @@ render regressions aren't caught by the current suites.
 | Today (money picture, reorder list) | `/today` | Surfaced |
 | Restock plan / buy list — checklist, budget allocator, supply calendar | `/plan` | Surfaced |
 | Orders & receiving | `/orders`, `/orders/[id]` | Surfaced |
-| Stock catalogue + money band | `/stock` | Surfaced |
+| Products catalogue + money band | `/products` (`/stock` redirects) | Surfaced |
 | Costs & coverage (money-blind) | `/costs` | Surfaced |
 | Suppliers & lead times | `/suppliers` | Surfaced (in nav) |
 | Sales / POS reconciliation | `/sales` | Surfaced |
@@ -133,8 +133,8 @@ render regressions aren't caught by the current suites.
 | Locations & roles, Team, Plan, Workspace | `/settings/locations`, `/settings/team`, `/settings/plan`, `/settings/workspace` | Surfaced |
 | Own profile; mobile nav overflow | `/profile`, `/more` | Surfaced |
 | Cross-tenant operator console (audit log, per-tenant view) | `/admin`, `/admin/audit`, `/admin/tenant/[id]` | Surfaced, but 404s unless the account holds a live `PlatformAdmin` row (or, while that table is empty, is in `ADMIN_EMAILS`) |
-| Insights — shelf health, stockout trend, money-at-rest impact, forecast accuracy scorecard | `/insights` (two tabs: "Where you stand", "Is it working?") | Surfaced, in nav. Gated to the **Growth** plan and above — a workspace on a lower tier sees a locked card, not the data |
-| Forecast confidence + cold-start | rendered on `/plan` rows and `/stock/[productId]` | Surfaced (chips + one-line explanation per row) |
+| Reports — shelf health, stockout trend, money-at-rest impact, forecast accuracy scorecard | `/insights` (two tabs: "Where you stand", "Is it working?") | Surfaced, in nav. Gated to the **Growth** plan and above — a workspace on a lower tier sees a locked card, not the data |
+| Forecast confidence + cold-start | rendered on `/plan` rows and `/products/[productId]` | Surfaced (chips + one-line explanation per row) |
 | Owner priors ("tell the forecast"), receipts, what-changed | — | **Engine + API only, no UI.** `/api/forecast/priors` is the sole consumer of `lib/forecast-trust/priors.ts`; nothing renders it |
 
 ## Known gaps / in progress (be honest with reviewers)

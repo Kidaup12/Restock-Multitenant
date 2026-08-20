@@ -95,9 +95,9 @@ Staff can see what things sell for; they must never see what they cost or what t
 **Setup:** sign in as the **Member** role (locally `staff@wezesha.test`; on the deployed app, get
 invited as a Member).
 
-**Walk every one of these:** Today · Stock (and the row editor, and a CSV export) · Costs · Plan in
-all three modes (checklist, budget, calendar) and its export · Orders · a purchase order and its
-print view · Suppliers · Sales · Transfers · Insights.
+**Walk every one of these:** Today · Products (and the row editor, and a CSV export) · Costs ·
+Restock Planner in all three modes (checklist, budget, calendar) and its export · Orders · a
+purchase order and its print view · Suppliers · Sales data · Transfers · Reports.
 
 **Expected:** no cost, buying price, margin or profit figure appears anywhere. Cost fields show a
 mask (`•••`). Selling prices and revenue **are** allowed — staff may see those. The only place a
@@ -143,7 +143,7 @@ downloaded file is a failure.
   list. The dashboard deliberately shows **no** order quantities or order cost — that lives on the
   planner. That's intended, not a bug.
 
-### 8. Stock (the catalogue)
+### 8. Products (the catalogue)
 - Product list with ABC class, cover/days-left, run rate; the money band and cost-health chips
   (owner only); the "not for sale" toggle; filters, sorting, the row editor, CSV export.
 - **Expected:** tester and warehouse stock isn't counted as sellable; ABC and cover match Today and
@@ -264,13 +264,13 @@ your-own-store test, and it blocks real customers too — it needs a change in t
 not in the code.
 
 **Plan tier locks out a new workspace.** A newly created workspace has no plan, which counts as
-*starter*, and there is **no upgrade path in the app**. So Insights, Transfers, the budget
+*starter*, and there is **no upgrade path in the app**. So Reports, Transfers, the budget
 allocator, multi-location features and supplier PO email are all locked in any workspace you create
 yourself. The core loop (stock, costs, suppliers, forecast, buy list) is not locked. Test those
 features in the existing seeded/demo shop instead, which is on a higher tier.
 
 **The guided tour points at a locked screen.** The tour that auto-starts for a new workspace
-includes an Insights step, which that same workspace can't open.
+includes a Reports step, which that same workspace can't open.
 
 **The Today setup strip isn't clickable.** It shows "Level 0 of 3" and tells you what to turn on
 next, but the prompt is text — there's no link to the screen it names.

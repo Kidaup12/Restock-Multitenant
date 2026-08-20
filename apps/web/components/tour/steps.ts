@@ -136,14 +136,14 @@ const orders = step(
 const inventory = step(
   "inventory",
   ["nav-inventory"],
-  "Find your stock",
+  "Inventory",
   "Inventory shows what each branch is holding and how long it lasts at that branch's own selling rate.",
 );
 
 const products = step(
   "products",
   ["nav-products"],
-  "Check the catalogue",
+  "Products",
   "Products is every item you sell, and whether its cost, supplier and SKU are sound enough to buy on.",
 );
 
