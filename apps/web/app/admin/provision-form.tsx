@@ -16,6 +16,23 @@ import { StepUpPrompt } from "./step-up-prompt";
  * an existing account gets the shop straight away, a new one gets an invite —
  * because those are different conversations to have with the customer.
  */
+/**
+ * What is still missing, in the order the fields appear.
+ *
+ * The button used to sit disabled on the same condition and say nothing, so
+ * someone who had typed one field — or mistyped an address — got a control that
+ * simply refused to respond, with no way to find out why. Pressing it and being
+ * told is better than being ignored.
+ */
+export function whatIsMissing(name: string, ownerEmail: string): string | null {
+  if (name.trim().length < 2) return "Give the shop a name of at least two characters.";
+  if (ownerEmail.trim().length === 0) return "Enter the owner's email address.";
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ownerEmail.trim())) {
+    return "That doesn't look like an email address.";
+  }
+  return null;
+}
+
 export function ProvisionForm() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -27,6 +44,11 @@ export function ProvisionForm() {
 
   function submit() {
     setNote(null);
+    const problem = whatIsMissing(name, ownerEmail);
+    if (problem) {
+      setNote({ tone: "negative", text: problem });
+      return;
+    }
     startTransition(async () => {
       const body = new FormData();
       body.set("name", name);
@@ -111,12 +133,10 @@ export function ProvisionForm() {
           </div>
         )}
         <div className="mt-3 flex items-center gap-3">
-          <Button
-            size="sm"
-            onClick={submit}
-            loading={pending}
-            disabled={name.trim().length < 2 || ownerEmail.trim().length === 0}
-          >
+          {/* Deliberately not disabled: a dead button is what left someone
+              pressing it with nothing happening. It presses, and says what is
+              still needed. */}
+          <Button size="sm" onClick={submit} loading={pending}>
             Create workspace
           </Button>
           {note && (
