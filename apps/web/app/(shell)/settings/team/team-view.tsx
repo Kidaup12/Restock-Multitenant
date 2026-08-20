@@ -57,11 +57,15 @@ export function TeamView({
   invites,
   canManage,
   inviteRoles,
+  seats,
 }: {
   rows: MemberRow[];
   invites: InviteRow[];
   canManage: boolean;
   inviteRoles: Role[];
+  /** How many team seats the plan includes and whether another may be invited.
+   *  Null when the reader cannot manage the team, so no form is drawn anyway. */
+  seats: { allowed: boolean; used: number; max: number; message: string | null } | null;
 }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>(
@@ -100,11 +104,33 @@ export function TeamView({
   return (
     <div className="space-y-6">
       {dialog}
-      {canManage && inviteRoles.length > 0 && (
+      {canManage && inviteRoles.length > 0 && seats && !seats.allowed && (
+        <Card>
+          <CardHeader
+            title="Your plan's team places are all taken"
+            subtitle={`${seats.used} of ${seats.max} used`}
+          />
+          {/* The form used to stay put and accept an address, send it, and only
+              then report the plan was full — a dead end dressed as a working
+              control. Say it before anything is typed. */}
+          <CardContent className="pt-4">
+            <p className="text-sm text-ink-muted">
+              {seats.message ??
+                "Free a place by removing someone, or ask about moving to a bigger plan."}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {canManage && inviteRoles.length > 0 && (!seats || seats.allowed) && (
         <Card>
           <CardHeader
             title="Invite a teammate"
-            subtitle="They'll get an email link, valid for 7 days"
+            subtitle={
+              seats
+                ? `They'll get an email link, valid for 7 days · ${seats.used} of ${seats.max} places used`
+                : "They'll get an email link, valid for 7 days"
+            }
           />
           <CardContent className="pt-4">
             <form
