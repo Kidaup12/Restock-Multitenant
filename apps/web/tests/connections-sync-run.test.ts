@@ -61,7 +61,7 @@ describe("toSyncRunView", () => {
     )!;
     expect(view.status).toBe("ok");
     expect(view.durationSec).toBe(252); // 11:58:00 → 12:02:12
-    expect(view.summary).toBe("5,310 products · 3 locations · 812 sales days");
+    expect(view.summary).toBe("5,310 products updated · 812 new sales days · 3 locations");
     expect(view.finishedAt).toBe("2026-07-28 12:02 UTC");
   });
 
@@ -97,13 +97,45 @@ describe("summarise", () => {
   });
 
   it("names failures only when there were some", () => {
-    expect(summarise({ products: { written: 2, failed: 0 } })).toBe("2 products");
-    expect(summarise({ products: { written: 2, failed: 1 } })).toBe("2 products · 1 failure");
+    expect(summarise({ products: { written: 2, failed: 0 } })).toBe("2 products updated");
+    expect(summarise({ products: { written: 2, failed: 1 } })).toBe(
+      "2 products updated · 1 failure"
+    );
   });
 
   it("singularises", () => {
     expect(summarise({ inventory: { locations: 1 }, orders: { salesDays: 1 } })).toBe(
-      "1 location · 1 sales day"
+      "1 new sales day · 1 location"
+    );
+  });
+
+  /**
+   * The line a shop read as a failed sync. Products and sales days are deltas
+   * from an incremental pull, so a healthy run against a store that has not
+   * changed reports zero of both — and "0 products · 5 locations · 0 sales days
+   * · took 2m 44s" is indistinguishable from a sync that silently did nothing.
+   */
+  it("says nothing changed rather than printing bare zeroes", () => {
+    expect(summarise({ products: { written: 0 }, inventory: { locations: 5 }, orders: { salesDays: 0 } })).toBe(
+      "no changes since the last sync · 5 locations"
+    );
+  });
+
+  it("still names the deltas when something did change", () => {
+    expect(
+      summarise({ products: { written: 12 }, inventory: { locations: 5 }, orders: { salesDays: 3 } })
+    ).toBe("12 products updated · 3 new sales days · 5 locations");
+  });
+
+  it("does not claim nothing changed when a phase never reported", () => {
+    // Only locations came back — the products and orders phases said nothing at
+    // all, which is not the same as saying zero.
+    expect(summarise({ inventory: { locations: 5 } })).toBe("5 locations");
+  });
+
+  it("names failures even on a run that changed nothing", () => {
+    expect(summarise({ products: { written: 0, failed: 2 }, orders: { salesDays: 0 } })).toBe(
+      "no changes since the last sync · 2 failures"
     );
   });
 });
