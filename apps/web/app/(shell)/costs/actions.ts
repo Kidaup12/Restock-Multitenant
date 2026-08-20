@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { BUYABLE_PRODUCT_WHERE, prismaForTenant, prismaService } from "@wezesha/db";
+import { BUYABLE_PRODUCT_WHERE, Prisma, prismaForTenant, prismaService } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission, type PermissionKey } from "@/lib/auth/permissions";
 import {
@@ -75,7 +75,13 @@ export type ApplyResult = {
 /**
  * Apply the import: re-previews server-side, writes the applicable costs as
  * manual pins (never overwriting an existing pin unless the owner confirmed it),
- * and records one audit row. Nothing was written until now.
+ * and records the ledger. Nothing was written until now.
+ *
+ * The ledger is per product, matching what a cost typed by hand records. One
+ * summary row carrying only counts meant the same change made two ways left two
+ * different levels of detail in a trail the screen calls an accounting record:
+ * a hand edit said which product and from what to what, an import of two hundred
+ * said neither.
  */
 export async function applyCostImportAction(input: {
   csv: string;
@@ -91,13 +97,44 @@ export async function applyCostImportAction(input: {
   const writes = applicableWrites(preview, { overwritePinned: input.overwritePinned });
   const db = prismaForTenant(ctx.tenantId);
   const now = new Date();
+
+  // The costs being replaced, read before anything is written — the ledger's
+  // "from" side. Tenant-scoped, so a row that isn't this workspace's simply
+  // isn't here and its update writes nothing either.
+  const previous = new Map(
+    (
+      await db.product.findMany({
+        where: { id: { in: writes.map((w) => w.productId) } },
+        select: { id: true, costKes: true, costSource: true },
+      })
+    ).map((p) => [p.id, p])
+  );
+
   let applied = 0;
+  const ledger: Prisma.AuditEventCreateManyInput[] = [];
   for (const w of writes) {
     const res = await db.product.updateMany({
       where: { id: w.productId },
       data: { costKes: w.costKes, costSource: "manual", costUpdatedAt: now, costMovedPct: null, costMovedAt: null },
     });
     applied += res.count;
+    if (res.count === 0) continue;
+    const was = previous.get(w.productId);
+    ledger.push({
+      tenantId: ctx.tenantId,
+      entity: "Product",
+      entityId: w.productId,
+      action: "cost_changed",
+      actorUserId: ctx.actor.userId,
+      actorName: ctx.actor.name,
+      meta: {
+        field: "costKes",
+        from: was?.costKes ?? null,
+        to: w.costKes,
+        source: "import",
+        previousSource: was?.costSource ?? null,
+      },
+    });
   }
 
   const result: ApplyResult = {
@@ -109,15 +146,19 @@ export async function applyCostImportAction(input: {
     pinnedSkipped: input.overwritePinned ? 0 : preview.summary.pinned,
   };
 
+  // Per-product rows first, then one row for the import itself. The summary is
+  // filed against the workspace rather than against "a product" — it is not a
+  // cost change to any one of them, and reading as one was half the confusion.
+  if (ledger.length > 0) await prismaService.auditEvent.createMany({ data: ledger });
   await prismaService.auditEvent.create({
     data: {
       tenantId: ctx.tenantId,
-      entity: "Product",
-      entityId: "-",
-      action: "cost_changed",
+      entity: "Tenant",
+      entityId: ctx.tenantId,
+      action: "cost_import",
       actorUserId: ctx.actor.userId,
       actorName: ctx.actor.name,
-      meta: { action: "cost_import", ...result, overwritePinned: Boolean(input.overwritePinned) },
+      meta: { ...result, overwritePinned: Boolean(input.overwritePinned) },
     },
   });
   revalidatePath("/costs");

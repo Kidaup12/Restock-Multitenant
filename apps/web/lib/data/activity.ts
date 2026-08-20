@@ -30,6 +30,13 @@ export type ActivityEntry = {
   summary: string;
 };
 
+/**
+ * What each kind of record is called when it cannot be named.
+ *
+ * Every entity the app actually writes needs an entry: a missing one fell
+ * through to "a record", and most of the ledger was written by entities this
+ * map had never heard of.
+ */
 const ENTITY_NOUN: Record<string, string> = {
   PurchaseOrder: "a purchase order",
   Order: "an order",
@@ -37,7 +44,13 @@ const ENTITY_NOUN: Record<string, string> = {
   Supplier: "a supplier",
   ShopifyConnection: "the Shopify connection",
   Tenant: "the workspace settings",
+  TenantConfig: "the workspace settings",
   Shop: "the store record",
+  Location: "a branch",
+  LocationClosure: "a branch closure",
+  DistributionPlan: "a transfer plan",
+  Promo: "a promotion",
+  Membership: "a team member",
 };
 
 const ACTION_VERB: Record<string, string> = {
@@ -48,10 +61,37 @@ const ACTION_VERB: Record<string, string> = {
   received: "marked as received",
   deleted: "deleted",
   sent: "sent",
+  finalised: "finalised",
+  exported: "exported",
   settings_updated: "updated",
+  plan_changed: "changed the plan on",
+  terms_accepted: "accepted the terms for",
+  owner_invited: "invited the owner of",
+  role_confirmed: "confirmed the role of",
+  closure_declared: "recorded",
+  closure_removed: "removed",
+  promo_declared: "recorded",
+  promo_removed: "removed",
+  pos_secret_rotated: "rotated the till key in",
   shopify_connected_with_token: "connected",
   shopify_app_credentials_saved: "saved credentials for",
+  shopify_app_credentials_cleared: "removed credentials for",
+  cost_import: "imported costs into",
   shop_redact: "erased data for",
+};
+
+/**
+ * Entries that are not "someone did X to a record".
+ *
+ * Support opening a customer's workspace is written against THAT workspace, so
+ * it lands in the shop's own log — which is right, and is the sort of thing an
+ * accounting trail exists to record. It just has to say so in words: it read
+ * "impersonation start — a record", which tells a shop nothing at all.
+ */
+const FULL_SENTENCE: Record<string, string> = {
+  "AdminSession:impersonation_start": "Wezesha support opened this workspace",
+  "AdminSession:impersonation_end": "Wezesha support closed this workspace",
+  "AdminSync:admin_sync_trigger": "Wezesha support started a sync",
 };
 
 /** Human money, only ever built for a caller allowed to see it. */
@@ -63,23 +103,96 @@ function costDelta(meta: unknown, currency: string): string | null {
 }
 
 function summarise(
-  row: { entity: string; action: string; meta: unknown },
+  row: { entity: string; action: string; entityId: string; meta: unknown },
   canViewCosts: boolean,
-  currency: string
+  currency: string,
+  names: Map<string, string>
 ): string {
-  const noun = ENTITY_NOUN[row.entity] ?? "a record";
+  const full = FULL_SENTENCE[`${row.entity}:${row.action}`];
+  if (full) return full;
+
+  // The record itself when we can still resolve it, the generic noun when we
+  // cannot — a deleted row, or one written before its id was recorded.
+  const named = names.get(`${row.entity}:${row.entityId}`);
+  const subject = named ?? ENTITY_NOUN[row.entity] ?? "a record";
 
   if (COST_ACTIONS.has(row.action)) {
     // Only reachable by a cost viewer — members never get these rows at all.
     const delta = canViewCosts ? costDelta(row.meta, currency) : null;
-    return `Changed the cost of ${noun}${delta ?? ""}`;
+    return `Changed the cost of ${subject}${delta ?? ""}`;
   }
 
   const verb = ACTION_VERB[row.action];
   // An action we have not written copy for still shows up, readably, rather
   // than vanishing from a record that claims to be complete.
-  if (!verb) return `${row.action.replace(/_/g, " ")} — ${noun}`;
-  return `${verb.charAt(0).toUpperCase()}${verb.slice(1)} ${noun}`;
+  if (!verb) return `${row.action.replace(/_/g, " ")} — ${subject}`;
+  return `${verb.charAt(0).toUpperCase()}${verb.slice(1)} ${subject}`;
+}
+
+/**
+ * Resolve the page's rows to the things they happened to.
+ *
+ * The trail is presented as an accounting record — "who changed a cost" — and
+ * could not answer "which product?". The ids were always there; only the
+ * customer-facing screen dropped them, while the operator console rendered the
+ * entity and id happily.
+ *
+ * One query per kind per page (50 rows), on the tenant-scoped client — so an id
+ * belonging to another workspace resolves to nothing and the row degrades to its
+ * generic noun rather than leaking a name. Same for anything since deleted,
+ * which is exactly when a log is read.
+ */
+async function resolveNames(
+  db: ReturnType<typeof prismaForTenant>,
+  rows: { entity: string; entityId: string }[]
+): Promise<Map<string, string>> {
+  const idsByEntity = new Map<string, string[]>();
+  for (const r of rows) {
+    if (!r.entityId || r.entityId === "-") continue;
+    if (!idsByEntity.has(r.entity)) idsByEntity.set(r.entity, []);
+    idsByEntity.get(r.entity)!.push(r.entityId);
+  }
+  const names = new Map<string, string>();
+  const take = (entity: string) => [...new Set(idsByEntity.get(entity) ?? [])];
+
+  const [products, suppliers, pos, locations, plans] = await Promise.all([
+    take("Product").length
+      ? db.product.findMany({
+          where: { id: { in: take("Product") } },
+          select: { id: true, title: true, sku: true },
+        })
+      : [],
+    take("Supplier").length
+      ? db.supplier.findMany({ where: { id: { in: take("Supplier") } }, select: { id: true, name: true } })
+      : [],
+    take("PurchaseOrder").length
+      ? db.purchaseOrder.findMany({
+          where: { id: { in: take("PurchaseOrder") } },
+          select: { id: true, poNumber: true },
+        })
+      : [],
+    take("Location").length
+      ? db.location.findMany({ where: { id: { in: take("Location") } }, select: { id: true, name: true } })
+      : [],
+    take("DistributionPlan").length
+      ? db.distributionPlan.findMany({
+          where: { id: { in: take("DistributionPlan") } },
+          select: { id: true, name: true },
+        })
+      : [],
+  ]);
+
+  // The SKU rides along on a product: two shelves of "Vaseline 400ml" is the
+  // case where a title alone still cannot answer "which one?".
+  for (const p of products) {
+    names.set(`Product:${p.id}`, p.sku ? `${p.title} (${p.sku})` : p.title);
+  }
+  for (const s of suppliers) names.set(`Supplier:${s.id}`, s.name);
+  for (const p of pos) names.set(`PurchaseOrder:${p.id}`, p.poNumber);
+  for (const l of locations) names.set(`Location:${l.id}`, l.name);
+  for (const p of plans) if (p.name) names.set(`DistributionPlan:${p.id}`, p.name);
+
+  return names;
 }
 
 /**
@@ -162,13 +275,23 @@ export async function getActivity(
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     skip: Math.max(0, page) * ACTIVITY_PAGE_SIZE,
     take: ACTIVITY_PAGE_SIZE,
-    select: { id: true, entity: true, action: true, actorName: true, meta: true, createdAt: true },
+    select: {
+      id: true,
+      entity: true,
+      entityId: true,
+      action: true,
+      actorName: true,
+      meta: true,
+      createdAt: true,
+    },
   });
+
+  const names = await resolveNames(db, rows);
 
   return rows.map((row) => ({
     id: row.id,
     at: row.createdAt,
     actor: row.actorName,
-    summary: summarise(row, canViewCosts, currency),
+    summary: summarise(row, canViewCosts, currency, names),
   }));
 }
