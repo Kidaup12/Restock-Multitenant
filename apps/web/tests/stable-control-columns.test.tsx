@@ -275,7 +275,15 @@ describe("the inbound figure is named for what it counts", () => {
   it("says so on the buy list", () => {
     const html = renderToStaticMarkup(
       <CurrencyProvider currency="KES">
-        <BuyChecklist buyList={buyList} canViewCosts canOverride={false} />
+        <BuyChecklist
+          buyList={buyList}
+          canViewCosts
+          canOverride={false}
+          urgentOnly={false}
+          onUrgentOnlyChange={() => {}}
+          whatIfActive={false}
+          onWhatIfChange={() => {}}
+        />
       </CurrencyProvider>
     );
     expect(html).toContain("En route");

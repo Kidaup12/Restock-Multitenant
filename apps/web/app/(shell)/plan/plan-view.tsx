@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BanknoteIcon, CalendarIcon, ClipboardIcon } from "@/components/icons";
 import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-features";
 import type { PlanFreshness as Freshness } from "@/lib/data/forecast-freshness";
-import type { BuyList } from "@/lib/data/plan";
+import { isUrgentRow, type BuyList } from "@/lib/data/plan";
 import { BudgetPlanner } from "./budget-planner";
 import { BuyChecklist } from "./buy-checklist";
 import { PlanDecisionHeader } from "./decision-header";
@@ -118,6 +118,19 @@ export function PlanView({
   );
 
   const [scope, setScope] = useState<ScopeSelection>(EMPTY_SCOPE);
+  /**
+   * The two lenses that change WHICH rows the list shows, held here rather than
+   * inside the checklist.
+   *
+   * The decision header's contract is that it totals "the rows the checklist
+   * already has". While the urgency filter and the what-if re-size lived as
+   * checklist state, the header could not see either: turning on Urgent only
+   * narrowed the list to 11 lines under a header still reading 22 items and
+   * KES 1.21M, and the saved PDF was headed with the unfiltered count. One list
+   * is derived here and handed to both, so there is nothing left to disagree.
+   */
+  const [urgentOnly, setUrgentOnly] = useState(searchParams.get("urgent") === "1");
+  const [whatIf, setWhatIf] = useState<BuyList | null>(null);
   const [savedScopes, setSavedScopes] = useState<SavedScope[]>([]);
   const [scopesBusy, startScopes] = useTransition();
   const budgetTier = PLAN_TIER_LABEL[planFeatureTier("budget_planner")];
@@ -219,17 +232,25 @@ export function PlanView({
   );
 
   if (mode === "list") {
-    // Scope the list before the checklist sees it: it renders whatever buyList
-    // it's given, so the filtered rows keep its "N products" line honest. The
-    // total re-sums the visible rows (null stays null for a money-blind member).
-    const filteredRows = filterBuyListRows(buyList.rows, scope);
+    // Scope and narrow the list before the checklist sees it: it renders whatever
+    // buyList it's given, so the filtered rows keep its "N products" line, its
+    // exports and the header above it all describing the same set. The total
+    // re-sums the visible rows (null stays null for a money-blind member).
+    //
+    // A what-if re-size replaces the source list; the scope and urgency lenses
+    // then apply to it exactly as they do to the plan.
+    const source = whatIf ?? buyList;
+    const scopedRows = filterBuyListRows(source.rows, scope);
+    const filteredRows = urgentOnly ? scopedRows.filter(isUrgentRow) : scopedRows;
     const filteredBuyList: BuyList = {
-      ...buyList,
+      ...source,
       rows: filteredRows,
       // The not-on-the-list section is scoped by the same selection: it is now
       // most of the catalogue, so leaving it unfiltered would have the scope bar
-      // narrow the top of the page and not the bottom.
-      excluded: filterBuyListRows(buyList.excluded, scope) as typeof buyList.excluded,
+      // narrow the top of the page and not the bottom. The urgency lens is
+      // deliberately NOT applied here — these rows are not being ordered, so
+      // "only the urgent ones" has nothing to say about them.
+      excluded: filterBuyListRows(source.excluded, scope) as typeof buyList.excluded,
       totalCostKes: canViewCosts
         ? filteredRows.reduce((sum, r) => sum + (r.lineTotalKes ?? 0), 0)
         : null,
@@ -256,9 +277,14 @@ export function PlanView({
           buyList={filteredBuyList}
           canViewCosts={canViewCosts}
           canOverride={canOverride}
-          /* Arriving from the dashboard's critical warning: open already
-             narrowed to those lines, so the link delivers what it offered. */
-          initialUrgentOnly={searchParams.get("urgent") === "1"}
+          /* Both lenses are the parent's state now, so the header, the scope
+             bar's count, the checklist and its exports read one list. Arriving
+             from the dashboard's critical warning opens already narrowed, so the
+             link still delivers what it offered. */
+          urgentOnly={urgentOnly}
+          onUrgentOnlyChange={setUrgentOnly}
+          whatIfActive={whatIf !== null}
+          onWhatIfChange={setWhatIf}
         />
       </div>
     );

@@ -528,14 +528,24 @@ export function BuyChecklist({
   buyList,
   canViewCosts,
   canOverride,
-  initialUrgentOnly = false,
+  urgentOnly,
+  onUrgentOnlyChange,
+  whatIfActive,
+  onWhatIfChange,
 }: {
+  /** Already scoped and narrowed by the parent — this is the list on screen, and
+   *  the same one the decision header above it totals. */
   buyList: BuyList;
   canViewCosts: boolean;
   canOverride: boolean;
-  /** Start narrowed to the critical lines — set by a deep link that promised
-   *  them. Not sticky: clearing it is a click, and the URL is the record. */
-  initialUrgentOnly?: boolean;
+  /** The urgency lens. Owned above so the header sees it too; the button here
+   *  only reports the click. */
+  urgentOnly: boolean;
+  onUrgentOnlyChange: (next: boolean) => void;
+  /** Whether a what-if re-size is applied. The re-sized list itself goes up to
+   *  the parent, which filters it and hands it back as `buyList`. */
+  whatIfActive: boolean;
+  onWhatIfChange: (next: BuyList | null) => void;
 }) {
   const currency = useCurrency();
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -543,34 +553,28 @@ export function BuyChecklist({
   const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [pending, startTransition] = useTransition();
 
-  // What-if lenses: null means "show the plan" (the scoped prop). Once the owner
-  // steps a horizon or a sales push, `whatIf` holds the re-sized list the server
-  // returns. Both lenses share this one slot and re-size on the one engine
-  // server-side; overrides and ordering still act on the underlying plan, so
-  // this stays an exploration, not a second commit path. The two actions each
-  // carry a single dimension, so engaging one lens returns the other to neutral
-  // — the on-screen steppers always reflect the applied view. "Reset to plan"
-  // clears both.
-  const [whatIf, setWhatIf] = useState<BuyList | null>(null);
+  // What-if lenses: the re-sized list the server returns is handed UP, because
+  // the decision header has to total the same rows this renders. Both lenses
+  // share one slot and re-size on the one engine server-side; overrides and
+  // ordering still act on the underlying plan, so this stays an exploration,
+  // not a second commit path. The two actions each carry a single dimension, so
+  // engaging one lens returns the other to neutral — the on-screen steppers
+  // always reflect the applied view. "Reset to plan" clears both.
   const [sort, setSort] = useState<SortKey>("plan");
-  const [urgentOnly, setUrgentOnly] = useState(initialUrgentOnly);
   const [coverDays, setCoverDays] = useState(DEFAULT_COVER_DAYS);
   const [upliftPct, setUpliftPct] = useState(DEFAULT_WHATIF_UPLIFT);
   const [resizeError, setResizeError] = useState<string | null>(null);
   const [resizing, startResize] = useTransition();
 
-  const view = whatIf ?? buyList;
+  const view = buyList;
   const rows = view.rows;
 
-  // What the tiers actually render: the urgency filter first, then the chosen
-  // order. Ticking is unaffected — a row ticked before the filter narrowed stays
-  // ticked and stays in the total.
-  const shownRows = useMemo(() => {
-    const kept = urgentOnly
-      ? rows.filter((r) => r.urgency === "critical" || r.urgency === "high")
-      : rows;
-    return sortRows(kept, sort);
-  }, [rows, urgentOnly, sort]);
+  // What the tiers actually render. The scope and urgency lenses have already
+  // been applied by the parent, so all that is left here is the chosen order —
+  // and every count on this screen therefore describes the same set. Ticking is
+  // unaffected: a row ticked before the filter narrowed stays ticked and stays
+  // in the total.
+  const shownRows = useMemo(() => sortRows(rows, sort), [rows, sort]);
 
   const sortOptions = SORTS.filter((s) => !s.needsCosts || canViewCosts);
 
@@ -585,7 +589,7 @@ export function BuyChecklist({
         return;
       }
       setResizeError(null);
-      setWhatIf(result.data);
+      onWhatIfChange(result.data);
     });
   }
 
@@ -605,12 +609,12 @@ export function BuyChecklist({
         return;
       }
       setResizeError(null);
-      setWhatIf(result.data);
+      onWhatIfChange(result.data);
     });
   }
 
   function resetToPlan() {
-    setWhatIf(null);
+    onWhatIfChange(null);
     setResizeError(null);
     setCoverDays(DEFAULT_COVER_DAYS);
     setUpliftPct(DEFAULT_WHATIF_UPLIFT);
@@ -685,8 +689,11 @@ export function BuyChecklist({
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* "full list" was true only while nothing was filtered. The list on
+            screen is now whatever the scope and urgency lenses left, and this
+            sentence describes that. */}
         <p className="text-sm text-ink-muted">
-          {rows.length} products to order · full list costs{" "}
+          {shownRows.length} products to order · they cost{" "}
           <CostValue amount={view.totalCostKes} canViewCosts={canViewCosts} />
           {view.excluded.length > 0 && <> · {view.excluded.length} held back</>}
         </p>
@@ -694,11 +701,15 @@ export function BuyChecklist({
           rows={shownRows}
           columns={exportColumns}
           filename="buy-list"
+          /* The document describes the rows it contains. Building the subtitle
+             from the unfiltered plan headed a twelve-line PDF "25 products",
+             so the printed page contradicted itself and a supplier reading it
+             could not tell which count was real. */
           document={{
             title: "Restock buy list",
-            subtitle: `Forecast run ${runDay} · ${rows.length} products`,
+            subtitle: `Forecast run ${runDay} · ${shownRows.length} products`,
             footNote: canViewCosts
-              ? `Full list: ${formatMoney(view.totalCostKes ?? 0, currency)}`
+              ? `Listed total: ${formatMoney(view.totalCostKes ?? 0, currency)}`
               : undefined,
           }}
         />
@@ -711,7 +722,7 @@ export function BuyChecklist({
         </span>
         <button
           type="button"
-          onClick={() => setUrgentOnly((v) => !v)}
+          onClick={() => onUrgentOnlyChange(!urgentOnly)}
           aria-pressed={urgentOnly}
           title="Show only the lines that are critical or close to it"
           className={cn(
@@ -798,7 +809,7 @@ export function BuyChecklist({
             onCommit: applyUplift,
           }}
         />
-        {whatIf && (
+        {whatIfActive && (
           <Badge tone="warning" className="font-sans">
             what-if
           </Badge>
@@ -812,7 +823,7 @@ export function BuyChecklist({
         </p>
         <div className="ml-auto flex items-center gap-3">
           {resizeError && <span className="text-xs text-negative">{resizeError}</span>}
-          {whatIf && (
+          {whatIfActive && (
             <button
               type="button"
               onClick={resetToPlan}
