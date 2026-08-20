@@ -95,7 +95,7 @@ describe("web sendEmail", () => {
 
     await expect(
       sendEmail({ to: "user@example.test", subject: "Your code", text: "123456" }, fetchMock),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("skipped");
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining("no RESEND_API_KEY"));
