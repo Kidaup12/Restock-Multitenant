@@ -1,5 +1,6 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
+import { prismaForTenant } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -56,10 +57,20 @@ async function CostsBoard({
   canViewCosts: boolean;
   canManage: boolean;
 }) {
-  const [coverage, alerts] = await Promise.all([
+  const [coverage, alerts, exampleProducts] = await Promise.all([
     getCostCoverage(tenantId, { canViewCosts }),
     getCostMovedAlerts(tenantId, { canViewCosts }),
+    // Two of the shop's own SKUs for the paste box's worked example. Tenant
+    // scoped like everything else here, so the example can only ever show codes
+    // this workspace owns.
+    prismaForTenant(tenantId).product.findMany({
+      where: { sku: { not: "" } },
+      orderBy: { title: "asc" },
+      select: { sku: true },
+      take: 2,
+    }),
   ]);
+  const exampleSkus = exampleProducts.map((p) => p.sku);
 
   return (
     <div className="space-y-6">
@@ -107,7 +118,7 @@ async function CostsBoard({
         </Card>
       )}
 
-      <CostImport canManage={canManage} />
+      <CostImport canManage={canManage} exampleSkus={exampleSkus} />
     </div>
   );
 }

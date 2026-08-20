@@ -15,9 +15,33 @@ import { applyCostImportAction, previewCostImportAction, type ApplyResult } from
  * until Apply, and a manual pin is only overwritten when the owner confirms it.
  */
 
-const PLACEHOLDER = "sku,cost\nCAN-SHE-340,1100\nNL-GLY-750,320";
+/**
+ * The worked example in the paste box.
+ *
+ * It used to hardcode two SKUs from the seeded demo shop, so a brand-new
+ * workspace — and every real customer — was shown another shop's product codes
+ * on the very screen where they hand us their cost data. Built from the shop's
+ * own catalogue when it has one, and from neutral codes when it does not.
+ */
+const NEUTRAL_EXAMPLE = ["SKU-001,1200", "SKU-002,450"];
+const EXAMPLE_COSTS = [1200, 450];
 
-export function CostImport({ canManage }: { canManage: boolean }) {
+export function placeholderFor(skus: string[]): string {
+  const rows =
+    skus.length > 0
+      ? skus.slice(0, 2).map((sku, i) => `${sku},${EXAMPLE_COSTS[i]}`)
+      : NEUTRAL_EXAMPLE;
+  return ["sku,cost", ...rows].join("\n");
+}
+
+export function CostImport({
+  canManage,
+  exampleSkus = [],
+}: {
+  canManage: boolean;
+  /** A couple of the shop's own SKUs, so the example means something to them. */
+  exampleSkus?: string[];
+}) {
   const router = useRouter();
   const currency = useCurrency();
   const [csv, setCsv] = useState("");
@@ -91,7 +115,7 @@ export function CostImport({ canManage }: { canManage: boolean }) {
             reset();
           }}
           rows={5}
-          placeholder={PLACEHOLDER}
+          placeholder={placeholderFor(exampleSkus)}
           className="w-full rounded-md border border-edge bg-surface p-3 font-mono text-xs text-ink outline-accent focus-visible:outline-2"
         />
         <div className="flex flex-wrap items-center gap-2">
