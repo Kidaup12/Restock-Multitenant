@@ -19,6 +19,7 @@ import {
 import { relativeTime } from "@/lib/notifications/format";
 import { requireAdmin } from "@/lib/admin/gate";
 import {
+  filterFleet,
   getFleet,
   isConnected,
   isStale,
@@ -27,6 +28,7 @@ import {
   type FleetRow,
   type FleetSort,
 } from "@/lib/admin/fleet";
+import { TableSearch } from "@/components/ui/table-search";
 import { enterWorkspace } from "./actions";
 import { SyncButton } from "./sync-button";
 
@@ -103,14 +105,31 @@ const connectionBadge = {
 export default async function AdminFleetPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sort?: string }>;
+  searchParams: Promise<{ sort?: string; q?: string }>;
 }) {
   const admin = await requireAdmin();
-  const sort = parseSort((await searchParams).sort);
-  const [rows, admins] = await Promise.all([
+  const params = await searchParams;
+  const sort = parseSort(params.sort);
+  const search = (params.q ?? "").trim().slice(0, 120);
+  const [all, admins] = await Promise.all([
     getFleet().then((f) => sortFleet(f, sort)),
     listPlatformAdmins(admin),
   ]);
+  // Sort first, then narrow: the order an operator chose has to survive a
+  // search, and the count beside the box counts what the search left.
+  const rows = filterFleet(all, search);
+
+  /** One place that builds a link, so the sort tabs and the search box never
+   *  silently drop each other's state. */
+  const hrefFor = (patch: { sort?: string; q?: string }) => {
+    const next = new URLSearchParams();
+    const nextSort = "sort" in patch ? patch.sort : sort === "staleness" ? undefined : sort;
+    const nextQ = "q" in patch ? patch.q : search || undefined;
+    if (nextSort) next.set("sort", nextSort);
+    if (nextQ) next.set("q", nextQ);
+    const qs = next.toString();
+    return qs ? `/admin?${qs}` : "/admin";
+  };
 
   return (
     <div className="space-y-6">
@@ -122,7 +141,7 @@ export default async function AdminFleetPage({
             {SORTS.map((s) => (
               <Link
                 key={s.key}
-                href={s.key === "staleness" ? "/admin" : `/admin?sort=${s.key}`}
+                href={hrefFor({ sort: s.key === "staleness" ? undefined : s.key })}
                 className={
                   s.key === sort
                     ? "rounded bg-surface-2 px-2 py-1 font-medium text-ink"
@@ -141,13 +160,29 @@ export default async function AdminFleetPage({
 
       <ProvisionForm />
 
-      {rows.length === 0 ? (
+      {all.length === 0 ? (
         <EmptyState
           title="No workspaces yet"
           description="Tenants appear here as soon as they exist in the database."
         />
+      ) : rows.length === 0 ? (
+        <EmptyState
+          title="No workspace matches that"
+          description={`Nothing in ${all.length} workspaces matches "${search}". Clear the search to see them all.`}
+        />
       ) : (
         <Card>
+          <TableSearch
+            action="/admin"
+            value={search}
+            hidden={sort === "staleness" ? [] : [{ name: "sort", value: sort }]}
+            placeholder="Search by workspace, slug or store domain"
+            matched={rows.length}
+            total={all.length}
+            clearHref={hrefFor({ q: undefined })}
+            label="Search workspaces"
+            unit="workspace"
+          />
           <Table className="min-w-[960px]">
             <TableHeader>
               <TableHead>Workspace</TableHead>
