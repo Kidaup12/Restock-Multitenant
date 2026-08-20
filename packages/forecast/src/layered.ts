@@ -422,6 +422,20 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   // decision and never a units/day rate of its own (that question has one answer
   // on screen, the live one), and the stock it did decide against is stamped as
   // of the run rather than written in the present tense.
+  /**
+   * How the sentence describes the delivery wait.
+   *
+   * `leadTimeAvg` is 0 when there is no lead data — deliberate, so an order is
+   * never inflated on a guess (see the field's contract above). Printing it
+   * as "lead time 0±7d" told the shop their supplier delivers in no days and
+   * left them no idea why the number looked like that; on a workspace whose one
+   * supplier has no lead time, that was every product on every screen.
+   */
+  const leadClause =
+    input.leadTimeAvg > 0
+      ? `lead time ${input.leadTimeAvg}±${input.leadTimeStd}d`
+      : "no delivery time set for this supplier — sized for the review cycle only";
+
   const stockAtRun =
     daysLeft >= NO_STOCKOUT_DAYS
       ? `Stock at the run was ${input.currentStock}, with no stockout in sight.`
@@ -435,13 +449,13 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
     : override?.source === "borrowed"
       ? [
           `Too new to forecast from its own sales — borrowing an established similar product's shape (${override.label}): ${finalForecast30d.toFixed(0)} units over 30 days. Real sales take over as history builds.`,
-          `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, lead time ${input.leadTimeAvg}±${input.leadTimeStd}d).`,
+          `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, ${leadClause}).`,
           stockAtRun,
         ]
       : override?.source === "owner_prior"
         ? [
             `Using the owner's expectation (${override.label}): ${finalForecast30d.toFixed(0)} units over 30 days.`,
-            `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, lead time ${input.leadTimeAvg}±${input.leadTimeStd}d); reorder point ${rop.toFixed(0)}.`,
+            `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, ${leadClause}); reorder point ${rop.toFixed(0)}.`,
             stockAtRun,
           ]
         : [
@@ -449,7 +463,7 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
               isNew ? `last-${Math.max(1, Math.round(span))}-day rate (new product)` : "recency-weighted run rate (30/90/365-day blend)"
             }.`,
             wasCapped ? `Capped at ${capMultiple}× the best month (${best.toFixed(0)}) to block runaway numbers.` : "",
-            `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, lead time ${input.leadTimeAvg}±${input.leadTimeStd}d); reorder point ${rop.toFixed(0)}.`,
+            `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, ${leadClause}); reorder point ${rop.toFixed(0)}.`,
             stockAtRun,
           ]
   )
