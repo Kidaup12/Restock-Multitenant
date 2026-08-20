@@ -1,5 +1,6 @@
 import { getDeclaredSignals, getSpikeSuggestions } from "@/lib/data/signals";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { MonthExpectationCard } from "./month-expectation-card";
 import { SignalsView } from "./signals-view";
 import { SpikeSuggestions } from "./spike-suggestions";
 
@@ -49,6 +50,8 @@ export async function SignalsSection({
           </p>
         </CardContent>
       </Card>
+
+      <MonthExpectationCard months={data.months} canManage={canManage} />
 
       <SignalsView
         promos={data.promos}

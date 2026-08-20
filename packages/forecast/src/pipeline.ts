@@ -9,6 +9,7 @@
  * table, and the stockout mask comes from inventory snapshots.
  */
 import type { SalesPoint, Urgency } from "./baseline";
+import type { MonthlyExpectation } from "./seasonality";
 import {
   anchorToday,
   layeredForecast,
@@ -58,6 +59,8 @@ export type ProductForecastInput = {
    *  it. Resolved cross-product by the forecast-run (promo table + closures). */
   excludedDates?: Date[];
   activePromos?: ActivePromo[];
+  /** Months the shop has stated run above or below normal (MonthlyContext). */
+  monthlyExpectations?: MonthlyExpectation[];
   abcCategory?: string | null;
   /** Resolved ordering policy for this product's class (config.policyForClass). */
   policy?: OrderPolicy;
@@ -117,6 +120,7 @@ export function forecastProduct(input: ProductForecastInput): PredictionFields {
     leadTimeAvg,
     leadTimeStd,
     activePromos: input.activePromos ?? [],
+    monthlyExpectations: input.monthlyExpectations,
     runDateKey: input.runDateKey,
     stockoutDates: input.stockoutDates,
     snapshotsSince: input.snapshotsSince,

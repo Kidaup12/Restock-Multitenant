@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { boundedMultiplier, SEASONAL_MAX, SEASONAL_MIN } from "@wezesha/forecast";
 import { prismaForTenant, prismaService } from "@wezesha/db";
 import { dayMarker } from "@wezesha/pos";
 import { activeMembership, requireSession } from "@/lib/auth";
@@ -197,6 +198,109 @@ export async function declareClosure(input: {
     ok: true,
     message: `Saved — ${result.days} closed day${result.days === 1 ? "" : "s"} recorded.`,
   };
+}
+
+/**
+ * "December is about triple" — seasonality the shop states.
+ *
+ * Calendar guessing (holidays, paydays) was in the engine and was removed:
+ * backtesting showed it hurt without a full season of history to learn from.
+ * This is the other kind of knowledge — a fact the owner holds that the sales
+ * history cannot yet contain — so the forecast takes it the way it takes a
+ * declared promo, bounded and still under the runaway cap.
+ *
+ * Stored on MonthlyContext, one row per month, so re-stating a month replaces
+ * rather than stacks.
+ */
+export async function declareMonthExpectation(input: {
+  month: string;
+  multiplier: number;
+  note?: string;
+}): Promise<SignalActionResult> {
+  const auth = await manageContext();
+  if (!auth.ok) return err(auth.error);
+  const { tenantId, actor } = auth.ctx;
+
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(input.month ?? "")) return err("Pick a month.");
+  const bounded = boundedMultiplier(input.multiplier);
+  if (bounded == null) {
+    return err(
+      `Enter how busy the month runs against a normal one — between ${SEASONAL_MIN}x and ${SEASONAL_MAX}x.`
+    );
+  }
+  // Said out loud rather than silently clamped: a shop that typed 40 meant
+  // something, and quietly storing 4 would be a number nobody chose.
+  if (Math.abs(bounded - input.multiplier) > 1e-9) {
+    return err(
+      `That is outside what we can size for — keep it between ${SEASONAL_MIN}x and ${SEASONAL_MAX}x a normal month. For a single big week, declare a promotion instead.`
+    );
+  }
+
+  const db = prismaForTenant(tenantId);
+  await db.monthlyContext.upsert({
+    where: { tenantId_month: { tenantId, month: input.month } },
+    create: {
+      tenantId,
+      month: input.month,
+      expectedMultiplier: bounded,
+      notes: input.note?.trim().slice(0, 300) || null,
+    },
+    update: {
+      expectedMultiplier: bounded,
+      ...(input.note?.trim() ? { notes: input.note.trim().slice(0, 300) } : {}),
+    },
+  });
+
+  await prismaService.auditEvent.create({
+    data: {
+      tenantId,
+      entity: "MonthlyContext",
+      entityId: input.month,
+      action: "month_expectation_set",
+      actorUserId: actor.userId,
+      actorName: actor.name,
+      meta: { month: input.month, multiplier: bounded },
+    },
+  });
+
+  revalidatePath("/settings/signals");
+  return {
+    ok: true,
+    message: `Saved — ${input.month} is sized at ${bounded}x a normal month from the next forecast.`,
+  };
+}
+
+/** Put a month back to normal. */
+export async function clearMonthExpectation(input: {
+  month: string;
+}): Promise<SignalActionResult> {
+  const auth = await manageContext();
+  if (!auth.ok) return err(auth.error);
+  const { tenantId, actor } = auth.ctx;
+
+  const db = prismaForTenant(tenantId);
+  // The row may carry the shop's own notes, so only the stated multiplier is
+  // cleared — deleting it would throw away something nobody asked to remove.
+  const cleared = await db.monthlyContext.updateMany({
+    where: { month: input.month, expectedMultiplier: { not: null } },
+    data: { expectedMultiplier: null },
+  });
+  if (cleared.count === 0) return err("That month is already sized as normal.");
+
+  await prismaService.auditEvent.create({
+    data: {
+      tenantId,
+      entity: "MonthlyContext",
+      entityId: input.month,
+      action: "month_expectation_cleared",
+      actorUserId: actor.userId,
+      actorName: actor.name,
+      meta: { month: input.month },
+    },
+  });
+
+  revalidatePath("/settings/signals");
+  return { ok: true, message: "Back to normal from the next forecast." };
 }
 
 export async function removeClosureDay(input: {
