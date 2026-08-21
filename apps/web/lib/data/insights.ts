@@ -1,4 +1,5 @@
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
+import { AS_SHOWN_TAG } from "@wezesha/forecast-run";
 import { getCatalogueMetrics } from "@/lib/metrics";
 import { DEFAULT_DEAD_STOCK_DAYS, getTodayMetrics } from "./today";
 
@@ -245,6 +246,63 @@ export async function getAccuracyScorecard(
     tag: "walkforward",
     abcClass: "ALL",
     method: "run_rate",
+    saidUnits: { not: null },
+    happenedUnits: { not: null },
+  } as const;
+
+  const [rows, checksAllTime, firstSale, lastSale] = await Promise.all([
+    db.backtestRun.findMany({
+      where,
+      orderBy: { runDate: "desc" },
+      take: limit,
+      select: { runDate: true, saidUnits: true, happenedUnits: true, leans: true, sampleSize: true },
+    }),
+    db.backtestRun.count({ where }),
+    db.salesHistory.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
+    db.salesHistory.findFirst({ orderBy: { date: "desc" }, select: { date: true } }),
+  ]);
+
+  const history: AccuracyCheck[] = rows
+    .filter((r) => r.sampleSize > 0 && LEANS.has(r.leans ?? ""))
+    .map((r) => ({
+      runDate: r.runDate,
+      saidUnits: r.saidUnits as number,
+      happenedUnits: r.happenedUnits as number,
+      leans: r.leans as AccuracyCheck["leans"],
+      sampleSize: r.sampleSize,
+    }))
+    .reverse();
+
+  return {
+    latest: history.length ? history[history.length - 1] : null,
+    history,
+    checksAllTime,
+    firstSaleAt: firstSale?.date ?? null,
+    lastSaleAt: lastSale?.date ?? null,
+  };
+}
+
+/**
+ * The same said-vs-happened question asked of the advice the shop was ACTUALLY
+ * shown, rather than of a replay.
+ *
+ * "How close we've been" replays the forecast with today's engine, so it reports
+ * what the engine would say now about back then, and the whole trail moves when
+ * the engine changes. These rows score the number that was on the screen on the
+ * day, which is the only version the shop could have acted on.
+ *
+ * Rows arrive once a run day's 30-day horizon has fully elapsed, so a young
+ * workspace has nothing here for its first month.
+ */
+export async function getAsShownScorecard(
+  tenantId: string,
+  { limit = 6 }: { limit?: number } = {}
+): Promise<AccuracyScorecard> {
+  const db = prismaForTenant(tenantId);
+
+  const where = {
+    tag: AS_SHOWN_TAG,
+    abcClass: "ALL",
     saidUnits: { not: null },
     happenedUnits: { not: null },
   } as const;
