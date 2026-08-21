@@ -7,8 +7,10 @@ import { publishEvent } from "@wezesha/realtime";
 /**
  * Forecast crons — the freshness + accuracy backbone (spec §6).
  *
- *   nightly:  runForecast per tenant at ~02:00, so every screen opens on "the
- *             forecast from last night" instead of a manual re-run.
+ *   twice an hour:  runForecast per tenant, at :07 and :37 (FORECAST_PATTERN), so
+ *             every screen opens on a current buy list instead of a manual
+ *             re-run. It reads as "nightly" in places because it once was —
+ *             believe the pattern, not the prose.
  *   monthly:  the walk-forward backtest per tenant — accuracy tracking, the
  *             champion/challenger audit, and the degradation alert.
  *
@@ -201,10 +203,11 @@ export function createForecastCronWorker(
       }
       if (job.name === FORECAST_TENANT_JOB && job.data.tenantId) {
         await runForecast(job.data.tenantId);
-        // Score the advice whose 30-day horizon has now elapsed. Cheap and
-        // idempotent per run day, and it rides the nightly run so the trail
-        // fills in daily instead of once a month. A failure here must not fail
-        // the forecast itself — the run is what the shop opens on.
+        // Score the advice whose 30-day horizon has now elapsed. Cheap, and
+        // idempotent per run day — which is what makes it safe to hang off a
+        // run that fires twice an hour: the day's first scoring does the work
+        // and the rest cost a lookup. A failure here must not fail the forecast
+        // itself — the run is what the shop opens on.
         try {
           await recordAsShownAccuracy(job.data.tenantId);
         } catch (err) {

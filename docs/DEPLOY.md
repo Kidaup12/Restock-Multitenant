@@ -250,4 +250,6 @@ Stated plainly so nobody discovers it in front of a client:
   a `qb` tier that nothing writes to.
 - **POS connectors are generic.** The ingest endpoint accepts a feed; there is no
   connector for a specific till system.
-- **No backup or restore drill has been run** against a hosted database.
+- **No backup or restore drill has been run** against a hosted database. The procedure is
+  now written down and ready to work through — see `RESTORE-DRILL.md` — but writing it down
+  is not the same as having done it, and it stays on this list until someone has.
