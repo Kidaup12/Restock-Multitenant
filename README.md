@@ -42,4 +42,21 @@ per-tenant data isolation enforced at the database.
 
 - `deploy/RUNBOOK.md` — ordered first-deploy checklist (Supabase, Railway, Vercel).
 - `deploy/ENVIRONMENT.md` — every environment variable, per service and platform.
+- `docs/DEPLOY.md` — the deploy path in prose, how to rotate a secret, and a plainly
+  stated list of what the system does not do yet.
+
+Migrations are applied by hand — neither Vercel nor Railway runs them, and the schema has
+to land before the code that reads it.
+
+## Documentation
+
 - `docs/ARCHITECTURE.md` — how the pieces interconnect, isolation model, route map.
+- `docs/QUICKSTART.md` — a clone to a working app, including the seed.
+- `docs/QA-TESTPLAN.md` — what to verify, surface by surface. Isolation and money-blindness
+  come first because they are the two that cannot be wrong.
+- `docs/QA-BRIEF-untested-paths.md` — the paths automated tests cannot reach, each with the
+  trap that would otherwise be reported as "it didn't work". Read before testing any of them.
+- `docs/RESTORE-DRILL.md` — backup and restore, written to be worked through and to record
+  its result. Not yet run.
+- `docs/INCIDENT-RESPONSE.md` — what to do when production is misbehaving.
+- `docs/SHOPIFY-DEV-STORE.md` — standing up a store to develop against.
