@@ -1,6 +1,7 @@
 import {
   ACCURACY_MIN_HISTORY_DAYS,
   getAccuracyScorecard,
+  getAsShownScorecard,
   getPlanAdherence,
   type AccuracyCheck,
 } from "@/lib/data/insights";
@@ -67,8 +68,11 @@ function AccuracyBars({ history }: { history: AccuracyCheck[] }) {
   return (
     <div className="mt-5 flex h-28 items-end gap-4">
       {history.map((check) => (
-        <div key={check.runDate.getTime()} className="flex flex-1 flex-col items-center gap-1.5">
-          <div className="flex h-full w-full items-end justify-center gap-1">
+        <div key={check.runDate.getTime()} className="flex h-full flex-1 flex-col items-center gap-1.5">
+          {/* flex-1, not h-full: the row aligns to items-end, so a percentage
+              height here resolves against a column the label alone has sized —
+              which is zero, and draws no bars at all. */}
+          <div className="flex w-full min-h-0 flex-1 items-end justify-center gap-1">
             <div
               className="w-1/3 rounded-t bg-accent"
               style={{ height: `${Math.max(2, (check.saidUnits / peak) * 100)}%` }}
@@ -100,11 +104,13 @@ export async function ForecastScorecard({
    *  sits behind the same permission the route re-checks server-side. */
   canRunCheck: boolean;
 }) {
-  const [scorecard, adherence] = await Promise.all([
+  const [scorecard, asShown, adherence] = await Promise.all([
     getAccuracyScorecard(tenantId),
+    getAsShownScorecard(tenantId),
     getPlanAdherence(tenantId),
   ]);
   const latest = scorecard.latest;
+  const asShownLatest = asShown.latest;
 
   return (
     <div className="space-y-6">
@@ -150,6 +156,54 @@ export async function ForecastScorecard({
                 {latest.sampleSize === 1 && " — one check so far, too thin to read a pattern"}.
               </p>
               {scorecard.history.length >= 2 && <AccuracyBars history={scorecard.history} />}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card data-tour="insights-as-shown">
+        <CardHeader
+          title="Was what we told you right?"
+          subtitle="Scored against the buy list you actually saw, once its month has run"
+        />
+        <CardContent>
+          {!asShownLatest ? (
+            <EmptyState
+              icon={<BulbIcon />}
+              title="Nothing has finished its month yet"
+              description="Each day's buy list is scored once the 30 days it covered have passed, so the first result appears a month after your first one. Unlike the check above, this one never changes afterwards — it grades the advice you were given, not what we would say now."
+            />
+          ) : (
+            <>
+              <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3">
+                <div>
+                  <div className="text-xs font-medium tracking-wider text-ink-muted uppercase">
+                    We said
+                  </div>
+                  <div className="font-mono text-3xl font-semibold tabular-nums text-ink-strong">
+                    {formatNumber(asShownLatest.saidUnits)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium tracking-wider text-ink-muted uppercase">
+                    You sold
+                  </div>
+                  <div className="font-mono text-3xl font-semibold tabular-nums text-ink-strong">
+                    {formatNumber(asShownLatest.happenedUnits)}
+                  </div>
+                </div>
+                {asShownLatest.sampleSize > 1 && (
+                  <Badge tone={LEAN_COPY[asShownLatest.leans].tone}>
+                    {LEAN_COPY[asShownLatest.leans].text}
+                  </Badge>
+                )}
+              </div>
+              <p className="mt-3 text-xs text-ink-muted">
+                Covering the 30 days from {dateLabel(asShownLatest.runDate)} across{" "}
+                {formatNumber(asShownLatest.sampleSize)} product
+                {asShownLatest.sampleSize === 1 ? "" : "s"}.
+              </p>
+              {asShown.history.length >= 2 && <AccuracyBars history={asShown.history} />}
             </>
           )}
         </CardContent>

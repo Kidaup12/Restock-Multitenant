@@ -1,7 +1,7 @@
 import { Queue, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { CUSTOMER_TENANTS_WHERE, prismaService } from "@wezesha/db";
-import { runForecast, runBacktest } from "@wezesha/forecast-run";
+import { runForecast, runBacktest, recordAsShownAccuracy } from "@wezesha/forecast-run";
 import { publishEvent } from "@wezesha/realtime";
 
 /**
@@ -201,6 +201,15 @@ export function createForecastCronWorker(
       }
       if (job.name === FORECAST_TENANT_JOB && job.data.tenantId) {
         await runForecast(job.data.tenantId);
+        // Score the advice whose 30-day horizon has now elapsed. Cheap and
+        // idempotent per run day, and it rides the nightly run so the trail
+        // fills in daily instead of once a month. A failure here must not fail
+        // the forecast itself — the run is what the shop opens on.
+        try {
+          await recordAsShownAccuracy(job.data.tenantId);
+        } catch (err) {
+          console.error("worker: as-shown accuracy failed", err);
+        }
         return;
       }
       if (job.name === BACKTEST_TENANT_JOB && job.data.tenantId) {
