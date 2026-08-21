@@ -25,7 +25,9 @@ import {
   applyOwnerPrior,
   windowsForProduct,
   expandPromoWindowsToDays,
+  boundedMultiplier,
   type ActivePromo,
+  type MonthlyExpectation,
   type DemandOverride,
   type OwnerPriorFacts,
   type PredictionFields,
@@ -136,6 +138,7 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
     pastPromos,
     closures,
     locations,
+    monthlyContext,
     sales,
     priorRows,
     emptyShelfDays,
@@ -184,6 +187,13 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
         select: { locationId: true, date: true },
       }),
       locations: await tx.location.findMany({ select: { id: true, locationType: true } }),
+      // Months the shop has told us run above or below normal. Only rows
+      // carrying a multiplier matter here — the rest of MonthlyContext is the
+      // shop's own free-text notes, which the forecast cannot read.
+      monthlyContext: await tx.monthlyContext.findMany({
+        where: { expectedMultiplier: { not: null } },
+        select: { month: true, expectedMultiplier: true },
+      }),
       sales: await tx.salesHistory.findMany({
         where: { date: { gte: historySince } },
         select: { productId: true, date: true, quantity: true, revenueKes: true, channel: true },
@@ -271,6 +281,13 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
     }))
   );
   const activePromos: ActivePromo[] = promos;
+  // Stated seasonality, bounded here so a slipped decimal in the database can
+  // never reach the sizing. The engine blends whichever months its horizon
+  // touches; a month nobody stated counts as normal.
+  const monthlyExpectations: MonthlyExpectation[] = monthlyContext.flatMap((m) => {
+    const multiplier = boundedMultiplier(m.expectedMultiplier);
+    return multiplier == null ? [] : [{ month: m.month, multiplier }];
+  });
   const runDateKey = now.toISOString().slice(0, 10);
   const today = anchorToday(runDateKey);
   const priorFacts: OwnerPriorFacts[] = priorRows.map((p) => ({
@@ -331,6 +348,7 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
       supplier: product.supplier,
       history,
       activePromos,
+      monthlyExpectations,
       abcCategory,
       stockoutDates: stockoutsByProduct.get(product.id),
       snapshotsSince,
@@ -433,6 +451,7 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
             supplier: product.supplier,
             history,
             activePromos,
+            monthlyExpectations,
             abcCategory,
             stockoutDates: stockoutsByProduct.get(product.id),
             snapshotsSince,

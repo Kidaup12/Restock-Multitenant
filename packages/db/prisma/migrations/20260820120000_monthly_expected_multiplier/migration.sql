@@ -1,0 +1,12 @@
+-- What the shop says a month runs at, 1 = normal.
+--
+-- MonthlyContext already carried the shop's own notes about a month
+-- (seasonalExpectation, promotions, marketing budget, cash flow) but every one
+-- of them is free text the forecast cannot read, so the table had no reader at
+-- all. This is the machine-readable half: a multiplier the engine applies the
+-- same way it applies a declared promo.
+--
+-- Nullable on purpose. NULL means the month was noted but the forecast is left
+-- alone, which is what every existing row means and what a shop that has stated
+-- nothing keeps getting.
+ALTER TABLE "MonthlyContext" ADD COLUMN "expectedMultiplier" DOUBLE PRECISION;

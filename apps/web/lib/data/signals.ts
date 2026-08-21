@@ -68,6 +68,8 @@ export type SignalsData = {
   promoDaysExcluded: number;
   closedDaysExcluded: number;
   historyDays: number;
+  /** Months the shop has stated run above or below a normal one. */
+  months: { month: string; multiplier: number }[];
 };
 
 function dayKeyOf(date: Date): string {
@@ -88,7 +90,7 @@ export async function getDeclaredSignals(
   const db = prismaForTenant(tenantId);
   const since = new Date(now.getTime() - HISTORY_DAYS * DAY_MS);
 
-  const [promoRows, closureRows, locationRows, productRows] = await Promise.all([
+  const [promoRows, closureRows, locationRows, productRows, monthRows] = await Promise.all([
     db.promo.findMany({
       where: { deletedAt: null },
       orderBy: { startDate: "desc" },
@@ -116,6 +118,13 @@ export async function getDeclaredSignals(
       where: { ...BUYABLE_PRODUCT_WHERE },
       orderBy: { title: "asc" },
       select: { sku: true, title: true, vendor: true, productType: true },
+    }),
+    // Months the shop has said run above or below normal. Only rows carrying a
+    // multiplier — the rest of MonthlyContext is free-text notes.
+    db.monthlyContext.findMany({
+      where: { expectedMultiplier: { not: null } },
+      orderBy: { month: "asc" },
+      select: { month: true, expectedMultiplier: true },
     }),
   ]);
 
@@ -189,6 +198,7 @@ export async function getDeclaredSignals(
     promoDaysExcluded,
     closedDaysExcluded: fullClosureDays.size,
     historyDays: HISTORY_DAYS,
+    months: monthRows.map((m) => ({ month: m.month, multiplier: m.expectedMultiplier as number })),
   };
 }
 
