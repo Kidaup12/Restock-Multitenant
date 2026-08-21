@@ -2,8 +2,16 @@
  * Assembles a full ForecastResult from an external demand engine's output plus
  * the local inventory math. The demand fields pass through unchanged; safety
  * stock, reorder point, days-until-stockout, recommended qty, and urgency are
- * computed here from the same primitives the built-in engine uses — no
- * duplication, no drift between engines.
+ * computed here from the same primitives the built-in engine uses.
+ *
+ * "Same primitives" is not the same as "no drift": this file re-implements the
+ * assembly around them, so a rule added to the built-in engine has to be added
+ * here by hand. That is exactly how the two came apart once already — the
+ * built-in engine learned to size the shelf on a stated season while this one
+ * went on sizing it from raw history. Anything that changes how a lift reaches
+ * the reorder point, cover or urgency has to change in both.
+ *
+ * Nothing calls this today; it is the seam for an external demand engine.
  */
 import {
   kingsSafetyStock,
@@ -56,6 +64,22 @@ export function assembleForecastResult(
   );
   const dailyRate = rawRate > 0 ? rawRate : demand.finalForecast30d / 30;
 
+  // The rate the shelf math runs on. Whatever the demand engine added over its
+  // own baseline — a season, a promo, a regime — has to reach cover, the reorder
+  // point and urgency too, not just the order quantity, or the buy list sizes
+  // for a busy month while the trigger that fires it waits for a normal one.
+  // The built-in engine sizes the shelf on the same lift it ordered on; this is
+  // that rule, on the demand another engine hands us.
+  //
+  // Only when the history rate is what we are scaling: on the fallback path
+  // dailyRate IS the engine's final number, so applying the lift again would
+  // count it twice.
+  const lift =
+    rawRate > 0 && demand.layer1Forecast30d > 0
+      ? demand.finalForecast30d / demand.layer1Forecast30d
+      : 1;
+  const sizingDailyRate = dailyRate * lift;
+
   // Demand std from last 90 days of history.
   const last90Cutoff = new Date(today);
   last90Cutoff.setUTCDate(last90Cutoff.getUTCDate() - 90);
@@ -86,12 +110,12 @@ export function assembleForecastResult(
     z,
     leadTimeAvg: input.leadTimeAvg,
     leadTimeStd: input.leadTimeStd,
-    demandAvg: dailyRate,
+    demandAvg: sizingDailyRate,
     demandStd,
   });
 
-  const rop = reorderPoint(dailyRate, input.leadTimeAvg, safetyStock);
-  const daysUntilStockout = daysOfStockRemaining(input.currentStock, dailyRate);
+  const rop = reorderPoint(sizingDailyRate, input.leadTimeAvg, safetyStock);
+  const daysUntilStockout = daysOfStockRemaining(input.currentStock, sizingDailyRate);
 
   const recommendedQty = Math.max(
     0,
@@ -100,7 +124,7 @@ export function assembleForecastResult(
 
   // Urgency from days until stockout, velocity-gated (slow movers at zero are
   // "high", not budget-overflowing "critical").
-  const urgency = urgencyFromDays(daysUntilStockout, dailyRate);
+  const urgency = urgencyFromDays(daysUntilStockout, sizingDailyRate);
 
   return {
     // Demand fields — passed through unchanged from the external engine

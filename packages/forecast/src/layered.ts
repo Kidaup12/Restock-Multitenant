@@ -368,6 +368,9 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   // figure — the same reason promo is skipped there.
   const seasonal = blendedSeasonalMultiplier(input.monthlyExpectations ?? [], today);
   const seasonLabel = override ? null : seasonalLabel(seasonal);
+  // What the season is actually worth here, so the inventory math below uses the
+  // same figure the forecast did rather than re-deriving it.
+  const seasonalApplied = seasonLabel ? seasonal : 1;
   if (seasonLabel) {
     signals.push({
       label: seasonLabel,
@@ -395,17 +398,31 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   const layer2Adjustment = finalForecast30d - layer1;
 
   // ── Inventory math (anchored on the same day-aware daily rate) ────────────
+  // A stated season moves the shelf, not just the order. In a month the shop
+  // says runs at 3x, stock drains three times as fast, so cover, the reorder
+  // point and urgency all have to move with it — otherwise the buy list sizes
+  // for the season while the trigger that fires it still waits for a normal
+  // month, and the shop stocks out in the month it warned us about.
+  //
+  // Net of the cap: sizing the shelf on a lift the order quantity was not
+  // allowed to keep would hold the two to different numbers. A month at or
+  // below normal is never clipped — the cap only ever bounds a lift.
+  const clipRatio = boosted > 0 ? capped / boosted : 1;
+  const effectiveSeasonal =
+    seasonalApplied >= 1 ? Math.max(1, seasonalApplied * clipRatio) : seasonalApplied;
+  const sizingDailyRate = dailyRate * effectiveSeasonal;
+
   const demandStd = standardDeviation(last90Pts.map((p) => p.quantity));
   const z = zForServiceLevel(input.abcCategory, input.serviceZ);
   const safety = kingsSafetyStock({
     z,
     leadTimeAvg: input.leadTimeAvg,
     leadTimeStd: input.leadTimeStd,
-    demandAvg: dailyRate,
+    demandAvg: sizingDailyRate,
     demandStd,
   });
-  const rop = reorderPoint(dailyRate, input.leadTimeAvg, safety);
-  const daysLeft = daysOfStockRemaining(input.currentStock, dailyRate);
+  const rop = reorderPoint(sizingDailyRate, input.leadTimeAvg, safety);
+  const daysLeft = daysOfStockRemaining(input.currentStock, sizingDailyRate);
 
   // A product with sales history but no run rate is a dead listing: never
   // recommended, never counted as a stockout, even at zero stock. A product
@@ -427,7 +444,7 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
       emoji: "🆕",
     });
   }
-  const urgency: Urgency = isDead || tooNew ? "low" : urgencyFromDays(daysLeft, dailyRate);
+  const urgency: Urgency = isDead || tooNew ? "low" : urgencyFromDays(daysLeft, sizingDailyRate);
   const recommendedQty =
     isDead || tooNew ? 0 : Math.max(0, Math.ceil(finalForecast30d + safety - input.currentStock));
 
