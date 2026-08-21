@@ -51,7 +51,12 @@ function expectedParts() {
   const last90 = new Date(today);
   last90.setUTCDate(last90.getUTCDate() - 90);
   const demandStd = standardDeviation(history.filter((p) => p.date >= last90).map((p) => p.quantity));
-  return { dailyRate, demandStd };
+  // The shelf is sized on the lift the demand engine put over its own baseline,
+  // not on raw history: whatever it added — a season, a promo, a regime — has to
+  // reach the reorder point, cover and urgency, not just the order quantity.
+  // Same rule the built-in engine follows.
+  const sizingRate = dailyRate * (demand.finalForecast30d / demand.layer1Forecast30d);
+  return { dailyRate, demandStd, sizingRate };
 }
 
 describe("assembleForecastResult", () => {
@@ -73,12 +78,12 @@ describe("assembleForecastResult", () => {
 
   it("safetyStock matches the King's-formula primitives exactly", () => {
     const result = assembleForecastResult(input, demand);
-    const { dailyRate, demandStd } = expectedParts();
+    const { demandStd, sizingRate } = expectedParts();
     const expected = kingsSafetyStock({
       z: zForServiceLevel("A"),
       leadTimeAvg: 30,
       leadTimeStd: 7,
-      demandAvg: dailyRate,
+      demandAvg: sizingRate,
       demandStd,
     });
     expect(result.safetyStock).toBeCloseTo(expected, 6);
@@ -86,15 +91,15 @@ describe("assembleForecastResult", () => {
 
   it("reorderPoint matches the primitives exactly", () => {
     const result = assembleForecastResult(input, demand);
-    const { dailyRate, demandStd } = expectedParts();
+    const { demandStd, sizingRate } = expectedParts();
     const safety = kingsSafetyStock({
       z: zForServiceLevel("A"),
       leadTimeAvg: 30,
       leadTimeStd: 7,
-      demandAvg: dailyRate,
+      demandAvg: sizingRate,
       demandStd,
     });
-    expect(result.reorderPoint).toBeCloseTo(reorderPoint(dailyRate, 30, safety), 6);
+    expect(result.reorderPoint).toBeCloseTo(reorderPoint(sizingRate, 30, safety), 6);
   });
 
   it("recommendedQty > 0 when demand exceeds stock", () => {
@@ -116,15 +121,17 @@ describe("assembleForecastResult", () => {
 
   it("daysUntilStockout matches daysOfStockRemaining on the same rate", () => {
     const result = assembleForecastResult(input, demand);
-    const { dailyRate } = expectedParts();
-    const fallbackRate = dailyRate > 0 ? dailyRate : 120 / 30;
-    expect(result.daysUntilStockout).toBe(daysOfStockRemaining(30, fallbackRate));
+    // This fixture has a real history rate, so the sizing rate is that rate
+    // lifted. With no history rate the assembler falls back to the engine's own
+    // final number, which already carries the lift and must not be lifted twice.
+    const { sizingRate } = expectedParts();
+    expect(result.daysUntilStockout).toBe(daysOfStockRemaining(30, sizingRate));
   });
 
   it("urgency is consistent with daysUntilStockout and the rate gate", () => {
     const result = assembleForecastResult(input, demand);
-    const { dailyRate } = expectedParts();
-    expect(result.urgency).toBe(urgencyFromDays(result.daysUntilStockout, dailyRate));
+    const { sizingRate } = expectedParts();
+    expect(result.urgency).toBe(urgencyFromDays(result.daysUntilStockout, sizingRate));
   });
 
   it("urgency is critical when stock is near zero", () => {
