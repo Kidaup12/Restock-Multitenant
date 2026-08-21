@@ -8,7 +8,7 @@ import {
   SEASONAL_MIN,
 } from "../src/seasonality";
 import { layeredForecast, type ForecastInput } from "../src/layered";
-import type { SalesPoint } from "../src/baseline";
+import type { SalesPoint, Urgency } from "../src/baseline";
 
 /**
  * Seasonality the shop states, not seasonality the calendar guesses.
@@ -235,6 +235,90 @@ describe("the engine takes stated seasonality like a declared promo", () => {
     );
     expect(seasoned.finalForecast30d).toBe(40);
     expect(seasoned.signals.some((s) => /Busier|Quieter/.test(s.label))).toBe(false);
+  });
+
+  it("moves the shelf as well as the order", () => {
+    // The gap this closes: the multiplier reached the order quantity and nothing
+    // else, so a shop that said "September runs at triple" was told to buy 2.3x
+    // more when it bought, while the trigger to buy, the cover it was quoted and
+    // the urgency ranking all still assumed a normal month. That is a stockout in
+    // the one month the shop warned us about.
+    const stocked = { currentStock: 120 };
+    const normal = layeredForecast(input(stocked));
+    const busy = layeredForecast(
+      input({ ...stocked, monthlyExpectations: [{ month: "2026-12", multiplier: 2 }] })
+    );
+
+    expect(busy.reorderPoint).toBeGreaterThan(normal.reorderPoint);
+    expect(busy.safetyStock).toBeGreaterThan(normal.safetyStock);
+    expect(busy.daysUntilStockout).toBeLessThan(normal.daysUntilStockout);
+  });
+
+  it("drains cover in proportion to the month the shop stated", () => {
+    // Twice as busy is half the cover. Asserted as a ratio rather than a fixed
+    // number of days so it cannot drift with the run-rate method, and to within
+    // a day because cover is floored to whole days — an exact halving of an odd
+    // number of days can never land on the nose.
+    const stocked = { currentStock: 120 };
+    const normal = layeredForecast(input(stocked));
+    const busy = layeredForecast(
+      input({ ...stocked, monthlyExpectations: [{ month: "2026-12", multiplier: 2 }] })
+    );
+    expect(Math.abs(busy.daysUntilStockout - normal.daysUntilStockout / 2)).toBeLessThanOrEqual(1);
+  });
+
+  it("lets the shelf relax in a month the shop says is quiet", () => {
+    // The reverse has to hold too, or a quiet month keeps ordering early and the
+    // cash stays on the shelf — the dead-stock number the shop is judged on.
+    const stocked = { currentStock: 120 };
+    const normal = layeredForecast(input(stocked));
+    const quiet = layeredForecast(
+      input({ ...stocked, monthlyExpectations: [{ month: "2026-12", multiplier: 0.5 }] })
+    );
+    expect(quiet.reorderPoint).toBeLessThan(normal.reorderPoint);
+    expect(quiet.daysUntilStockout).toBeGreaterThan(normal.daysUntilStockout);
+  });
+
+  it("raises urgency for stock that only looks comfortable in a normal month", () => {
+    // The whole point of moving cover: the same shelf reads differently once the
+    // shop has said the month is busy, and the buy list has to reorder on it.
+    const stocked = { currentStock: 60 };
+    const normal = layeredForecast(input(stocked));
+    const busy = layeredForecast(
+      input({ ...stocked, monthlyExpectations: [{ month: "2026-12", multiplier: 4 }] })
+    );
+    const rank: Record<Urgency, number> = { low: 0, medium: 1, high: 2, critical: 3 };
+    expect(rank[busy.urgency]).toBeGreaterThan(rank[normal.urgency]);
+  });
+
+  it("sizes the shelf on the lift the cap actually allowed", () => {
+    // The cap bounds the order quantity. If it did not bound the shelf math too,
+    // the reorder point would be sized on a multiplier the order was never
+    // allowed to keep — two numbers from one stated month.
+    const stocked = { currentStock: 120 };
+    const normal = layeredForecast(input(stocked));
+    const beyond = layeredForecast(
+      input({ ...stocked, monthlyExpectations: [{ month: "2026-12", multiplier: 4 }] })
+    );
+    expect(beyond.signals.some((s) => /Capped/.test(s.label)), "the cap never fired").toBe(true);
+
+    // The forecast kept some fraction of the 4x it asked for; the reorder point
+    // must not have kept more than the forecast did.
+    const forecastLift = beyond.finalForecast30d / normal.finalForecast30d;
+    const ropLift = beyond.reorderPoint / normal.reorderPoint;
+    expect(ropLift).toBeLessThanOrEqual(forecastLift + 1e-9);
+    expect(ropLift).toBeGreaterThan(1);
+  });
+
+  it("leaves the shelf untouched when no month is stated", () => {
+    // The guarantee that let this ship: a shop that has declared nothing gets
+    // the pre-seasonality reorder point, cover and urgency exactly.
+    const stocked = { currentStock: 120 };
+    const before = layeredForecast(input(stocked));
+    const after = layeredForecast(input({ ...stocked, monthlyExpectations: [] }));
+    expect(after.reorderPoint).toBe(before.reorderPoint);
+    expect(after.daysUntilStockout).toBe(before.daysUntilStockout);
+    expect(after.urgency).toBe(before.urgency);
   });
 
   it("keeps every engine invariant under a stated month", () => {
