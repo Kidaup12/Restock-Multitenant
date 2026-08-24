@@ -10,10 +10,12 @@ import { renderToStaticMarkup } from "react-dom/server";
  * each. A page that hardcoded a cheerful "sent" would pass a happy-path test,
  * so both outcomes are rendered from the same code and compared.
  *
- * The log rows are correlated to the order by the PO number carried in the
- * email subject, which is unique per workspace; the last assertion pins that
- * subject format so a change to it fails here rather than silently emptying
- * the screen.
+ * Rows written since the send path began stamping the order's id are found by
+ * that id. Older rows carry none and are still matched by the PO number in the
+ * subject, bounded to this order's own lifetime — PO numbers are reused, and an
+ * unbounded match handed a new order the email of a deleted one with the same
+ * number. The subject format is pinned here so a change to it fails a test
+ * rather than silently emptying the screen.
  *
  * Skips without the local database.
  */
@@ -54,6 +56,10 @@ import PoDetailPage from "../app/(shell)/orders/[id]/page";
 const SLUG = "po-email-outcome";
 const SUPPLIER_EMAIL = "orders@po-email-outcome.example";
 const SHOP = "Outcome Shop";
+/** A number whose first order is long gone and which has been issued again. */
+const RECYCLED_NUMBER = "PO-9007";
+const STRAY_ADDRESS = "gone-away@po-email-outcome.example";
+const STAMPED_ADDRESS = "stamped@po-email-outcome.example";
 
 async function render(poId: string): Promise<string> {
   const element = await PoDetailPage({ params: Promise.resolve({ id: poId }) });
@@ -62,6 +68,7 @@ async function render(poId: string): Promise<string> {
 
 describe.skipIf(!runnable)("purchase order email outcome (local db)", () => {
   let tenantId: string;
+  let supplierId: string | null = null;
   const po: Record<string, string> = {};
 
   beforeAll(async () => {
@@ -72,6 +79,7 @@ describe.skipIf(!runnable)("purchase order email outcome (local db)", () => {
       data: { tenantId, name: "Outcome Supplier", email: SUPPLIER_EMAIL, moq: 1, leadTimeAvgDays: 7 },
     });
     const sentAt = new Date("2026-08-12T09:00:00Z");
+    supplierId = supplier.id;
 
     // Three orders, one per outcome: the email went out, the email failed, and
     // no attempt was ever logged.
@@ -97,6 +105,11 @@ describe.skipIf(!runnable)("purchase order email outcome (local db)", () => {
           tenantId,
           supplierId: supplier.id,
           poNumber,
+          // An order exists before it is emailed — the send writes the ledger row
+          // only after the row it describes. Leaving this at "now" while the log
+          // rows sit twelve days earlier describes something that cannot happen,
+          // and the lookup rightly refuses to believe it.
+          createdAt: new Date(sentAt.getTime() - 86_400_000),
           // A failed send hands the order back to draft with no sentAt — the
           // state the shop is left in when the supplier never got the email.
           status: key === "rolledback" ? "draft" : "sent",
@@ -122,6 +135,17 @@ describe.skipIf(!runnable)("purchase order email outcome (local db)", () => {
 
     await prismaService.emailLog.createMany({
       data: [
+        {
+          // The stray: an email for an order that no longer exists, whose number
+          // has since been issued to a new one. Carries no id because it
+          // predates the send path stamping one.
+          tenantId,
+          to: STRAY_ADDRESS,
+          subject: `Purchase order ${RECYCLED_NUMBER} from ${SHOP}`,
+          kind: "purchase_order",
+          status: "sent",
+          createdAt: new Date("2026-08-01T09:00:00Z"),
+        },
         {
           tenantId,
           to: SUPPLIER_EMAIL,
@@ -204,6 +228,63 @@ describe.skipIf(!runnable)("purchase order email outcome (local db)", () => {
     const html = await render(po.rolledback!);
     expect(html).toMatch(/did not go out/i);
     expect(html).toContain(SUPPLIER_EMAIL);
+  });
+
+  it("does not hand an order the email of an earlier order with the same number", async () => {
+    // The defect this file now guards. PO numbers are unique among live orders,
+    // not for all time: delete one and its number is issued again. The ledger
+    // outlives the order, so an unbounded subject match gave a brand-new order
+    // the deleted order's email — the screen said "went out" beside "sent —",
+    // naming an address the supplier no longer had. A shop reading that does
+    // not send the order, and the supplier never hears from them.
+    const reissued = await prismaService.purchaseOrder.create({
+      data: {
+        tenantId,
+        supplierId: supplierId!,
+        poNumber: RECYCLED_NUMBER,
+        status: "draft",
+        subtotalKes: 1000,
+        // Created well after the stray row below, which is what makes the two
+        // distinguishable at all.
+        createdAt: new Date("2026-08-20T09:00:00Z"),
+      },
+    });
+
+    const html = await render(reissued.id);
+    expect(html).not.toMatch(/went out/i);
+    expect(html).not.toContain(STRAY_ADDRESS);
+  });
+
+  it("finds an attempt by the order it was stamped with, whatever the subject says", async () => {
+    // Rows written by the current send path carry the order's id, so the
+    // subject stops being load-bearing. Deliberately given a subject naming a
+    // different order: if the id were ignored this finds nothing.
+    const stamped = await prismaService.purchaseOrder.create({
+      data: {
+        tenantId,
+        supplierId: supplierId!,
+        poNumber: "PO-9500",
+        status: "sent",
+        sentAt: new Date("2026-08-21T09:00:00Z"),
+        subtotalKes: 2000,
+        createdAt: new Date("2026-08-21T08:00:00Z"),
+      },
+    });
+    await prismaService.emailLog.create({
+      data: {
+        tenantId,
+        to: STAMPED_ADDRESS,
+        subject: "Purchase order PO-0001 from somewhere else entirely",
+        kind: "purchase_order",
+        status: "sent",
+        purchaseOrderId: stamped.id,
+        createdAt: new Date("2026-08-21T09:00:05Z"),
+      },
+    });
+
+    const html = await render(stamped.id);
+    expect(html).toMatch(/went out/i);
+    expect(html).toContain(STAMPED_ADDRESS);
   });
 
   it("correlates on a subject the send path actually produces", async () => {

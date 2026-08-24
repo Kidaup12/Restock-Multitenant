@@ -486,14 +486,23 @@ export type PoDetailLine = {
 /**
  * What the email ledger says about the supplier's copy of an order.
  *
- * EmailLog carries no purchaseOrderId, so the rows have to be found by
- * something already on them. The PO number is that something: it is unique per
- * workspace (PurchaseOrder @@unique([tenantId, poNumber])) and the send path
- * puts it in the subject, so the match is exact rather than a guess from
- * timestamps and addresses — two orders emailed to the same supplier in the
- * same minute stay distinguishable. RLS confines the search to this workspace.
+ * Attempts are found by the id the send path now stamps on them. Rows written
+ * before that column existed carry no id, so they are still matched by the PO
+ * number in the subject — but only from this order's own creation onward.
  *
- * The trade is that this read depends on the subject the send path writes. The
+ * That bound is the fix, not a nicety. The PO number is unique among live
+ * orders and was treated as identity, but the ledger outlives the order it
+ * describes: a number freed by a deletion and issued again pulled the earlier
+ * order's email onto the new one. A draft that had never been sent displayed
+ * "email went out" beside "sent —", naming an address the supplier no longer
+ * had. An email cannot predate the order it is about, so anything older than
+ * this order belongs to a different one.
+ *
+ * Drafts are still searched on purpose: a send whose email fails hands the
+ * order back to draft and leaves the failed row behind, and that row is the
+ * only thing telling anyone why the supplier never heard from us.
+ *
+ * The legacy path still depends on the subject the send writes. The
  * po-email-outcome suite pins that format, so a change to it fails a test
  * rather than quietly blanking the screen.
  */
@@ -604,7 +613,14 @@ export async function getPoDetail(
   const attempts = await db.emailLog.findMany({
     where: {
       kind: "purchase_order",
-      subject: { contains: poEmailLogSubjectMatch(po.poNumber) },
+      OR: [
+        { purchaseOrderId: poId },
+        {
+          purchaseOrderId: null,
+          subject: { contains: poEmailLogSubjectMatch(po.poNumber) },
+          createdAt: { gte: po.createdAt },
+        },
+      ],
     },
     orderBy: { createdAt: "desc" },
     select: { status: true, to: true, createdAt: true },
