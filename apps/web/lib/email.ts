@@ -46,6 +46,9 @@ export interface EmailMessage {
   tenantId?: string | null;
   /** What kind of message this is, for the ledger ("purchase_order", "invite"). */
   kind?: string;
+  /** The order this send belongs to, when it belongs to one. The ledger is read
+   *  back by this rather than by the PO number in the subject, which is reused. */
+  purchaseOrderId?: string | null;
 }
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
@@ -57,6 +60,7 @@ type LogEntry = {
   to: string;
   subject: string;
   kind?: string;
+  purchaseOrderId?: string | null;
   status: "sent" | "skipped" | "failed";
   providerId?: string | null;
   error?: string | null;
@@ -76,6 +80,7 @@ async function record(entry: LogEntry): Promise<void> {
         to: entry.to,
         subject: entry.subject,
         kind: entry.kind ?? null,
+        purchaseOrderId: entry.purchaseOrderId ?? null,
         status: entry.status,
         providerId: entry.providerId ?? null,
         error: entry.error ?? null,
@@ -101,10 +106,10 @@ async function providerIdOf(res: Response): Promise<string | null> {
 export type EmailOutcome = "sent" | "skipped";
 
 export async function sendEmail(
-  { to, subject, text, html, attachments, tenantId, kind }: EmailMessage,
+  { to, subject, text, html, attachments, tenantId, kind, purchaseOrderId }: EmailMessage,
   fetchImpl: typeof fetch = globalThis.fetch,
 ): Promise<EmailOutcome> {
-  const envelope = { tenantId, to, subject, kind };
+  const envelope = { tenantId, to, subject, kind, purchaseOrderId };
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     if (process.env.NODE_ENV === "production") {
