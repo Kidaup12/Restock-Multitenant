@@ -91,6 +91,7 @@ export async function sendPoToSupplier(
       attachments: [{ filename: poPdfFilename(doc), content: pdf }],
       tenantId,
       kind: "purchase_order",
+      purchaseOrderId: po.id,
     });
   } catch (err) {
     // Hand the claim back so the owner can retry, rather than leaving a PO that
