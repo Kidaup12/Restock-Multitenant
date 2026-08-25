@@ -323,10 +323,17 @@ function tierFor(urgency: string, daysLeftToOrder: number): BuyTier {
 function excludedReasonFor(
   row: { plannable: PlannableReason; urgency: string },
   plannedDailyDemand: number,
-  hasOpenOrder: boolean
+  hasOpenOrder: boolean,
+  hasOwnerOverride = false
 ): ExcludedReason | null {
   if (hasOpenOrder) return "already-ordered";
   if (row.plannable !== "ok") return "unplannable";
+  // "Sells too slowly to stock" is a judgement about demand, and an override is
+  // the owner overruling that judgement in as many words. The two gates above
+  // are not judgements — stock already on its way is a fact, and a cost the
+  // screen calls untrustworthy would put a wrong number on a real order — so an
+  // override does not clear those.
+  if (hasOwnerOverride) return null;
   if (row.urgency === "low" && plannedDailyDemand < SLOW_MOVER_MAX_DAILY_DEMAND) return "slow-mover";
   return null;
 }
@@ -643,7 +650,12 @@ export async function getBuyList(
   const activeRows: FullBuyListRow[] = [];
   const excludedRows: (FullBuyListRow & { reason: ExcludedReason })[] = [];
   for (const { row, plannedDailyDemand } of built) {
-    const reason = excludedReasonFor(row, plannedDailyDemand, onTheWayProductIds.has(row.productId));
+    const reason = excludedReasonFor(
+      row,
+      plannedDailyDemand,
+      onTheWayProductIds.has(row.productId),
+      overrideByProduct.has(row.productId)
+    );
     if (reason) excludedRows.push({ ...row, reason });
     else activeRows.push(row);
   }

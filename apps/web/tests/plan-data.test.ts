@@ -492,6 +492,84 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     }
   });
 
+  it("orders a slow mover the owner insisted on, but never one already on its way", async () => {
+    // Half a fix is its own bug. Moving the product out of the sized-to-nothing
+    // group only to have the slow-mover gate catch it left the owner clicking
+    // "order anyway", setting a quantity, and watching it hop to a different
+    // held-back group — which reads as nothing happening. "Sells too slowly" is
+    // a judgement an override overrules; stock already on its way is a fact it
+    // must not.
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0]!;
+    const original = await prismaService.prediction.findUnique({
+      where: { id: target.predictionId },
+      select: { urgency: true, finalForecast30d: true },
+    });
+    // The slow-mover shape, forced onto the persisted prediction the same way the
+    // gate's own test does: 0.2 units a day with plenty of cover.
+    await prismaService.prediction.update({
+      where: { id: target.predictionId },
+      data: { urgency: "low", finalForecast30d: 6 },
+    });
+    try {
+      const held = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      expect(
+        held!.excluded.find((r) => r.productId === target.productId)?.reason,
+        "the slow-mover gate did not fire, so there is nothing to overrule"
+      ).toBe("slow-mover");
+
+      await upsertPlanOverride(seeded.tenantId, {
+        productId: target.productId,
+        qty: 5,
+        createdByUserId: null,
+        createdByName: null,
+      });
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      expect(
+        after!.rows.some((r) => r.productId === target.productId),
+        "a slow mover the owner insisted on stayed held back"
+      ).toBe(true);
+    } finally {
+      await removePlanOverride(seeded.tenantId, target.productId);
+      await prismaService.prediction.update({
+        where: { id: target.predictionId },
+        data: { urgency: original!.urgency, finalForecast30d: original!.finalForecast30d },
+      });
+    }
+  });
+
+  it("never lets an override defeat the double-order guard", async () => {
+    // The boundary of the rule above. Stock already on its way is a fact, not a
+    // judgement, so no quantity the owner types may order it twice.
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = before!.rows[0]!;
+    const order = await prismaService.order.create({
+      data: {
+        tenantId: seeded.tenantId,
+        status: "pending",
+        productId: target.productId,
+        orderedQty: 5,
+        stockAtOrder: 0,
+      },
+    });
+    await upsertPlanOverride(seeded.tenantId, {
+      productId: target.productId,
+      qty: 5,
+      createdByUserId: null,
+      createdByName: null,
+    });
+    try {
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      expect(after!.rows.some((r) => r.productId === target.productId)).toBe(false);
+      expect(after!.excluded.find((r) => r.productId === target.productId)?.reason).toBe(
+        "already-ordered"
+      );
+    } finally {
+      await removePlanOverride(seeded.tenantId, target.productId);
+      await prismaService.order.delete({ where: { id: order.id } });
+    }
+  });
+
   it("hands a product back to the run when the override is cleared", async () => {
     // The reverse, so the override is a loan rather than a one-way door.
     const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
