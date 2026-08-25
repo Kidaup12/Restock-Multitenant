@@ -156,6 +156,14 @@ model Membership {
   permissions          Json?
   // First time this member finished the welcome/guide. null = show first-run extras.
   welcomedAt           DateTime?
+  // Which optional emails this person still wants, for THIS workspace — someone
+  // can follow one shop closely and not another. Shape and defaults live in
+  // packages/db/src/notify-prefs.ts; null (and any absent key) means "send it",
+  // so a member who has never opened the setting keeps hearing what they hear
+  // today. Only the weekly summary and the sync-stopped alert are optional;
+  // invites, sign-in codes and purchase orders answer a person's own action and
+  // are deliberately not listed there.
+  notifyPrefs          Json?
   // Terms & Conditions consent. NOT YET WIRED: nothing reads or writes these two
   // columns, and there is no TERMS_VERSION constant to compare against — an
   // earlier comment here claimed both, which would have read as a consent record
