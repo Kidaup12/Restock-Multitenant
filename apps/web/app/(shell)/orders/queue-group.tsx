@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { CostValue } from "@/components/ui/cost-value";
 import {
   Table,
@@ -14,7 +15,7 @@ import {
 } from "@/components/ui/table";
 import type { OrderQueueGroup } from "@/lib/data/orders";
 import { buildPoLines, subtotal, type PoLinePlan } from "@/lib/po/po-math";
-import { createPoAction } from "./actions";
+import { createPoAction, removeFromQueueAction } from "./actions";
 import { SupplierScoreBadges } from "./supplier-score-badges";
 
 /**
@@ -59,6 +60,10 @@ export function QueueGroup({
   );
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const { confirm, dialog } = useConfirm();
+  const [removing, startRemoving] = useTransition();
+  /** Which line is being taken off, so only its own button shows the wait. */
+  const [removingId, setRemovingId] = useState<string | null>(null);
 
   const allSelected = selected.size === group.lines.length;
   const selection = useMemo(
@@ -131,8 +136,26 @@ export function QueueGroup({
     });
   };
 
+  const remove = async (line: { orderId: string; title: string }) => {
+    const ok = await confirm({
+      title: `Take ${line.title} off the queue?`,
+      body: "It goes back on the buy list, ready to tick again.",
+      confirmLabel: "Remove",
+      cancelLabel: "Keep it",
+    });
+    if (!ok) return;
+    setError(null);
+    setRemovingId(line.orderId);
+    startRemoving(async () => {
+      const result = await removeFromQueueAction({ orderId: line.orderId });
+      if (!result.ok) setError(result.error);
+      setRemovingId(null);
+    });
+  };
+
   return (
     <Card>
+      {dialog}
       <CardHeader
         title={group.supplierName ?? "No supplier assigned"}
         subtitle={`${group.lines.length} product${group.lines.length === 1 ? "" : "s"} queued${
@@ -198,6 +221,11 @@ export function QueueGroup({
             <TableHead numeric>Order qty</TableHead>
             <TableHead numeric>Unit cost</TableHead>
             <TableHead numeric>Line cost</TableHead>
+            {/* Always present, so the row's numbers don't shift sideways
+                between a card that can be edited and one that can't. */}
+            <TableHead className="w-14">
+              <span className="sr-only">Remove from queue</span>
+            </TableHead>
           </TableHeader>
           <TableBody>
             {group.lines.map((line) => (
@@ -227,6 +255,33 @@ export function QueueGroup({
                     amount={plannedByProduct.get(line.productId)?.lineTotalKes ?? line.lineCostKes}
                     canViewCosts={canViewCosts}
                   />
+                </TableCell>
+                {/* An icon, not the word: six columns already fill the card at
+                    a laptop width, and a labelled button pushed the table into
+                    a horizontal scroll. The name lives on the control. */}
+                <TableCell className="pl-2 pr-4">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="px-2"
+                    aria-label={`Remove ${line.title} from the queue`}
+                    title="Remove from the queue"
+                    onClick={() => remove(line)}
+                    loading={removing && removingId === line.orderId}
+                    disabled={removing}
+                  >
+                    <svg
+                      viewBox="0 0 16 16"
+                      className="size-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 4l8 8M12 4l-8 8" />
+                    </svg>
+                  </Button>
                 </TableCell>
               </TableRow>
             ))}
