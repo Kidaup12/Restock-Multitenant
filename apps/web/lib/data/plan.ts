@@ -941,10 +941,25 @@ export async function createOrdersForPredictions(
       },
     });
 
+    // The owner's quantity, where they set one. Without this the override was
+    // display-only: the buy list showed the number they typed and the order —
+    // and the purchase order built from it — carried the engine's instead, so a
+    // supplier was sent a quantity nobody had chosen. Held back products make it
+    // plainest, since the engine's number there is zero and the line floored to
+    // one, but it applied to every override ever set.
+    const overrides = await tx.productPlanOverride.findMany({
+      where: { productId: { in: predictions.map((p) => p.productId) } },
+      select: { productId: true, qty: true },
+    });
+    const overrideByProduct = new Map(overrides.map((o) => [o.productId, o.qty]));
+
     let created = 0;
     let updated = 0;
     for (const p of predictions) {
-      const qty = Math.max(1, Math.round(p.recommendedQty));
+      const qty = Math.max(
+        1,
+        Math.round(overrideByProduct.get(p.productId) ?? p.recommendedQty)
+      );
       const existing = await tx.order.findFirst({
         where: { predictionId: p.id, status: "pending" },
         select: { id: true },
