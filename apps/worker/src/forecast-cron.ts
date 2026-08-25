@@ -2,6 +2,7 @@ import { Queue, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { CUSTOMER_TENANTS_WHERE, prismaService } from "@wezesha/db";
 import { runForecast, runBacktest, recordAsShownAccuracy } from "@wezesha/forecast-run";
+import { sendFirstSuggestions } from "./first-suggestions";
 import { publishEvent } from "@wezesha/realtime";
 
 /**
@@ -212,6 +213,14 @@ export function createForecastCronWorker(
           await recordAsShownAccuracy(job.data.tenantId);
         } catch (err) {
           console.error("worker: as-shown accuracy failed", err);
+        }
+        // The welcome, at most once in a workspace's life. Same reasoning as
+        // above: it hangs off the run because that is when first value happens,
+        // and a failure here must not fail the run the shop opens on.
+        try {
+          await sendFirstSuggestions(job.data.tenantId);
+        } catch (err) {
+          console.error("worker: first-suggestions email failed", err);
         }
         return;
       }

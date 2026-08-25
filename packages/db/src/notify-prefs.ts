@@ -24,7 +24,11 @@
  * deliberately centralised its mail keeps doing exactly that.
  */
 
-export const OPTIONAL_EMAIL_KINDS = ["weekly_summary", "reconnect_alert"] as const;
+export const OPTIONAL_EMAIL_KINDS = [
+  "weekly_summary",
+  "reconnect_alert",
+  "first_suggestions",
+] as const;
 
 export type OptionalEmailKind = (typeof OPTIONAL_EMAIL_KINDS)[number];
 
@@ -40,6 +44,10 @@ export const OPTIONAL_EMAIL_LABELS: Record<OptionalEmailKind, { title: string; b
   reconnect_alert: {
     title: "Sync stopped working",
     body: "Tells you once when your store stops sending data, so the numbers here do not go quietly stale.",
+  },
+  first_suggestions: {
+    title: "Your first buy list is ready",
+    body: "A single message the first time this workspace has something to recommend. Never sent twice.",
   },
 };
 
