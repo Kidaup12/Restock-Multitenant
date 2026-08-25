@@ -416,18 +416,19 @@ export async function getBuyList(
   });
 
   const sized = predictions.map((p) => ({ ...p, qty: Math.round(p.recommendedQty) }));
-  const kept = sized.filter((p) => p.qty > 0);
-  // Everything the run sized to nothing. Built into rows too, so the owner can
-  // see WHY a product they expected isn't on the list — they used to be dropped
-  // here and never appear anywhere, not even under `excluded`.
-  const zeroQty = sized.filter((p) => p.qty <= 0);
-  // Per-product lookups below cover both sets. Widening them cannot change an
-  // active row: every one is keyed by productId.
-  const lookupIds = [...kept, ...zeroQty].map((p) => p.productId);
+  // Per-product lookups below cover every prediction. Widening them cannot
+  // change an active row: every one is keyed by productId.
+  const lookupIds = sized.map((p) => p.productId);
 
   // Owner overrides of the recommended quantity, keyed by productId so they
   // outlive the nightly re-plan (it wipes and recreates every prediction). A
   // product with no override is untouched below — the one-engine default.
+  //
+  // Read BEFORE the split, because the override decides which side of it a
+  // product falls on. Reading them after meant a product the run sized to
+  // nothing stayed held back however large a quantity the owner set — the
+  // override applied to a row nobody could order, which is the one case the
+  // feature exists for: the owner knows something the run does not.
   const overrideByProduct = new Map<string, number>();
   if (lookupIds.length > 0) {
     const overrides = await db.productPlanOverride.findMany({
@@ -436,6 +437,15 @@ export async function getBuyList(
     });
     for (const o of overrides) overrideByProduct.set(o.productId, o.qty);
   }
+
+  /** What this product is worth ordering once the owner has had their say. */
+  const decidedQty = (p: { productId: string; qty: number }) =>
+    overrideByProduct.get(p.productId) ?? p.qty;
+  const kept = sized.filter((p) => decidedQty(p) > 0);
+  // Everything left at nothing. Built into rows too, so the owner can see WHY a
+  // product they expected isn't on the list — they used to be dropped here and
+  // never appear anywhere, not even under `excluded`.
+  const zeroQty = sized.filter((p) => decidedQty(p) <= 0);
 
   // Trailing-30-day actual revenue per buy-list product: one tenant-scoped SQL
   // sum. A sales figure — member-visible like Stock/Today's revenue30dKes, not

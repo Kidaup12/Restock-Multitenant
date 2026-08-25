@@ -462,6 +462,54 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     }
   });
 
+  it("puts a held-back product on the list when the owner orders it anyway", async () => {
+    // The gap this closes. A product the run sized to nothing is held back, and
+    // an override is the owner saying they know something the run does not — a
+    // promotion nobody declared, a supplier about to close. The override used to
+    // be read AFTER the list was split, so it changed the row's quantity while
+    // leaving it in the held-back group: a number nobody could order, on exactly
+    // the products the feature exists for.
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const held = before!.excluded.find((r) => r.reason !== "unplannable");
+    expect(held, "nothing was held back to override").toBeDefined();
+    expect(before!.rows.some((r) => r.productId === held!.productId)).toBe(false);
+
+    await upsertPlanOverride(seeded.tenantId, {
+      productId: held!.productId,
+      qty: 9,
+      createdByUserId: null,
+      createdByName: null,
+    });
+    try {
+      const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+      const now = after!.rows.find((r) => r.productId === held!.productId);
+      expect(now, "the override did not move it onto the list").toBeDefined();
+      expect(now!.overriddenQty).toBe(9);
+      // And it is gone from the held-back side — not listed in both.
+      expect(after!.excluded.some((r) => r.productId === held!.productId)).toBe(false);
+    } finally {
+      await removePlanOverride(seeded.tenantId, held!.productId);
+    }
+  });
+
+  it("hands a product back to the run when the override is cleared", async () => {
+    // The reverse, so the override is a loan rather than a one-way door.
+    const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const held = before!.excluded.find((r) => r.reason !== "unplannable")!;
+
+    await upsertPlanOverride(seeded.tenantId, {
+      productId: held.productId,
+      qty: 4,
+      createdByUserId: null,
+      createdByName: null,
+    });
+    await removePlanOverride(seeded.tenantId, held.productId);
+
+    const after = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    expect(after!.rows.some((r) => r.productId === held.productId)).toBe(false);
+    expect(after!.excluded.some((r) => r.productId === held.productId)).toBe(true);
+  });
+
   it("excludes a slow mover: plenty of cover (low urgency) and a low run rate", async () => {
     const before = await getBuyList(seeded.tenantId, { canViewCosts: true });
     const target = before!.rows[0]!;
