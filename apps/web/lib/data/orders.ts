@@ -1,4 +1,4 @@
-import { Prisma, prismaForTenant, prismaService } from "@wezesha/db";
+import { Prisma, prismaForTenant, prismaForTenantTx, prismaService } from "@wezesha/db";
 import { buildPoDocument, isPoLate, type PoDocumentData } from "@/lib/po/po-model";
 import { computeSupplierScore, type SupplierScore } from "@/lib/po/supplier-stats";
 
@@ -288,14 +288,18 @@ export type RemoveQueuedResult = { ok: true } | { ok: false; reason: "not_found"
  * rather than turning into a "cancelled" Order — nothing writes that status
  * today, and reviving it would mean teaching every queue query to exclude it —
  * so the trail is kept as an audit event instead.
+ *
+ * The read and the delete share one `prismaForTenantTx`, not a transaction of
+ * this module's own making: `prismaForTenant` wraps every operation in its own
+ * transaction, so nesting one inside another asks the pool for a connection it
+ * is already holding. A pool big enough to absorb that hides it entirely.
  */
 export async function removeQueuedOrder(
   tenantId: string,
   orderId: string,
   actor?: { userId: string; name: string | null }
 ): Promise<RemoveQueuedResult> {
-  const db = prismaForTenant(tenantId);
-  const removed = await db.$transaction(async (tx) => {
+  const removed = await prismaForTenantTx(tenantId, async (tx) => {
     const order = await tx.order.findFirst({
       where: { id: orderId, status: "pending" },
       select: { id: true, productId: true, orderedQty: true },
