@@ -82,7 +82,13 @@ export type ProductDetail = {
 
   /** The latest run's view of this product, or null before the first run. */
   prediction: {
+    /** What to order: the engine's number, or the owner's override when one is
+     *  set — the same rule the buy list follows, so the two screens cannot
+     *  quote different quantities for the same product. */
     recommendedQty: number;
+    /** The owner's override when one exists, else null. Lets the screen say
+     *  whose number it is showing rather than passing it off as the run's. */
+    overriddenQty: number | null;
     urgency: string;
     confidenceWord: string | null;
     reasoning: string;
@@ -159,7 +165,8 @@ export async function getProductDetail(
   // it, and the same product read differently on the two screens.
   const since = new Date(now.getTime() - 365 * 86_400_000);
 
-  const [sales, poLines, latestPrediction, emptyShelfDays, firstSnapshot] = await Promise.all([
+  const [sales, poLines, latestPrediction, emptyShelfDays, firstSnapshot, planOverride] =
+    await Promise.all([
     db.salesHistory.findMany({
       where: { productId, date: { gte: since } },
       select: { date: true, quantity: true, revenueKes: true, channel: true },
@@ -202,6 +209,12 @@ export async function getProductDetail(
       select: { date: true },
     }),
     db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
+    // The owner's standing quantity for this product. Read here for the same
+    // reason the buy list reads it: without it this page quotes the run's
+    // number while every other surface — the list, the queue, the purchase
+    // order — quotes the owner's, and a held-back product reads "0 suggested"
+    // beside an order for six.
+    db.productPlanOverride.findFirst({ where: { productId }, select: { qty: true } }),
   ]);
 
   // Title for a cold-start borrow. Tenant-scoped through the same client, so a
@@ -287,7 +300,10 @@ export async function getProductDetail(
 
     prediction: latestPrediction
       ? {
-          recommendedQty: Math.round(latestPrediction.recommendedQty),
+          // The override wins outright and is never re-derived — the same rule
+          // the buy list applies, so the two agree by construction.
+          recommendedQty: planOverride?.qty ?? Math.round(latestPrediction.recommendedQty),
+          overriddenQty: planOverride?.qty ?? null,
           urgency: latestPrediction.urgency,
           confidenceWord: latestPrediction.confidenceWord,
           reasoning: latestPrediction.reasoning,

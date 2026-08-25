@@ -151,6 +151,7 @@ const detailFixture = (
   revenue30dKes: 0,
   prediction: prediction && {
     recommendedQty: 0,
+    overriddenQty: null,
     urgency: "low",
     confidenceWord: "guessing",
     reasoning: "No sales history yet — too new to forecast.",
