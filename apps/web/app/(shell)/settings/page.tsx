@@ -5,6 +5,7 @@ import {
   BoxIcon,
   CalendarIcon,
   BanknoteIcon,
+  BellIcon,
   ChartIcon,
   ChevronRightIcon,
   GearIcon,
@@ -68,6 +69,13 @@ async function SettingsSections({
       icon: <GearIcon />,
       title: "Workspace",
       description: "Name, trading day, alert email, dead stock, and how you buy.",
+      status: null,
+    },
+    {
+      href: "/settings/notifications",
+      icon: <BellIcon />,
+      title: "Your emails",
+      description: "Which messages this workspace sends to you. Teammates choose their own.",
       status: null,
     },
     {

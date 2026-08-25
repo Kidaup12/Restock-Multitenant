@@ -87,17 +87,59 @@ describe.skipIf(!runnable)("incident alerts (real redis + db)", () => {
     await incident.clearIncident(redis, configuredId, "latch-probe");
   });
 
-  it("routes to alertEmail, then falls back to the owner, then to nobody", async () => {
-    await expect(incident.alertRecipient(configuredId)).resolves.toEqual({
-      email: ALERT_EMAIL,
+  it("routes to alertEmail, then falls back to the members, then to nobody", async () => {
+    await expect(incident.alertRecipients(configuredId, "reconnect_alert")).resolves.toEqual({
+      emails: [ALERT_EMAIL],
       tenantName: "Incident Configured",
     });
-    await expect(incident.alertRecipient(ownerOnlyId)).resolves.toEqual({
-      email: OWNER_EMAIL,
+    await expect(incident.alertRecipients(ownerOnlyId, "reconnect_alert")).resolves.toEqual({
+      emails: [OWNER_EMAIL],
       tenantName: "Incident Owner Only",
     });
-    await expect(incident.alertRecipient(bareId)).resolves.toBeNull();
-    await expect(incident.alertRecipient("no-such-tenant")).resolves.toBeNull();
+    await expect(incident.alertRecipients(bareId, "reconnect_alert")).resolves.toBeNull();
+    await expect(incident.alertRecipients("no-such-tenant", "reconnect_alert")).resolves.toBeNull();
+  });
+
+  it("skips a member who switched the kind off, and only that kind", async () => {
+    const membership = await prismaService.membership.findFirstOrThrow({
+      where: { tenantId: ownerOnlyId },
+      select: { id: true },
+    });
+    try {
+      await prismaService.membership.update({
+        where: { id: membership.id },
+        data: { notifyPrefs: { reconnect_alert: false } },
+      });
+      // Silenced: the only member wants none of these, so there is nobody left.
+      await expect(incident.alertRecipients(ownerOnlyId, "reconnect_alert")).resolves.toBeNull();
+      // Untouched: switching one off must not switch the other off with it.
+      await expect(incident.alertRecipients(ownerOnlyId, "weekly_summary")).resolves.toEqual({
+        emails: [OWNER_EMAIL],
+        tenantName: "Incident Owner Only",
+      });
+    } finally {
+      // An empty object, not null: absent keys already mean "send it", so this
+      // restores the default without reaching for Prisma's null sentinel in a
+      // suite that imports the client dynamically.
+      await prismaService.membership.update({
+        where: { id: membership.id },
+        data: { notifyPrefs: {} },
+      });
+    }
+    // Back to where it started, or a later test inherits the silence.
+    await expect(incident.alertRecipients(ownerOnlyId, "reconnect_alert")).resolves.toEqual({
+      emails: [OWNER_EMAIL],
+      tenantName: "Incident Owner Only",
+    });
+  });
+
+  it("an alert email keeps its routing whatever the members prefer", async () => {
+    // The address is not a member and has no preferences; a shop that has
+    // centralised its mail keeps doing so.
+    await expect(incident.alertRecipients(configuredId, "weekly_summary")).resolves.toEqual({
+      emails: [ALERT_EMAIL],
+      tenantName: "Incident Configured",
+    });
   });
 
   it("healthy→failed emails exactly once; repeats stay silent; recovery re-arms", async () => {

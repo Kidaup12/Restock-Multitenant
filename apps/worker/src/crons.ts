@@ -2,7 +2,7 @@ import { Queue, Worker, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { CUSTOMER_TENANTS_WHERE, prismaService } from "@wezesha/db";
 import { sendEmail, type SendEmail } from "./email";
-import { alertRecipient } from "./incident";
+import { alertRecipients } from "./incident";
 import { buildWeeklySummary, renderWeeklySummary } from "./weekly-summary";
 
 /**
@@ -54,22 +54,27 @@ export async function dispatchWeeklySummaries(queue: EmailCronQueue): Promise<nu
 }
 
 /** Build, render, and send one tenant's summary. False = nothing sent (tenant
- *  gone or no alert recipient configured). */
+ *  gone, nothing to say, or nobody left who wants it). */
 export async function sendWeeklySummary(
   tenantId: string,
   send: SendEmail = sendEmail
 ): Promise<boolean> {
-  const recipient = await alertRecipient(tenantId);
-  if (!recipient) return false;
+  const recipients = await alertRecipients(tenantId, "weekly_summary");
+  if (!recipients) return false;
   const summary = await buildWeeklySummary(tenantId);
   if (!summary) return false;
-  await send({
-    to: recipient.email,
-    subject: `Weekly stock summary — ${summary.tenantName}`,
-    text: renderWeeklySummary(summary),
-    tenantId,
-    kind: "weekly_summary",
-  });
+  // One copy each, in series: the same body, addressed to whoever still wants
+  // it. Built once — the summary is the workspace's, not the reader's.
+  const body = renderWeeklySummary(summary);
+  for (const to of recipients.emails) {
+    await send({
+      to,
+      subject: `Weekly stock summary — ${summary.tenantName}`,
+      text: body,
+      tenantId,
+      kind: "weekly_summary",
+    });
+  }
   return true;
 }
 
