@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
+import { removeQueuedOrder } from "@/lib/data/orders";
 import { cancelPo } from "@/lib/po/cancel-po";
 import { createPoFromOrders } from "@/lib/po/create-po";
 import { receivePoLines, type ReceiveEntry } from "@/lib/po/receive-po";
@@ -117,6 +118,20 @@ export async function receivePoAction(input: {
       ? `${booked} Stock stays as your store reports it — add the delivery there and it shows here after the next sync.`
       : booked,
   };
+}
+
+export async function removeFromQueueAction(input: { orderId: string }): Promise<PoActionResult> {
+  const ctx = await actorContext();
+  if (!ctx) return err("You don't have ordering access in this workspace.");
+
+  const result = await removeQueuedOrder(ctx.tenantId, input.orderId, ctx.actor);
+  if (!result.ok) return err("That queue item is no longer pending.");
+
+  // The plan too, not just this screen: a queued product counts as already on
+  // the way, so removing its line is what puts it back on the buy list.
+  revalidatePath("/orders");
+  revalidatePath("/plan");
+  return { ok: true, message: "Removed from the queue — it's back on the buy list." };
 }
 
 export async function cancelPoAction(input: { poId: string }): Promise<PoActionResult> {

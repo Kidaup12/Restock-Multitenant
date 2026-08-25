@@ -1,11 +1,11 @@
-import { Prisma, prismaForTenant } from "@wezesha/db";
+import { Prisma, prismaForTenant, prismaService } from "@wezesha/db";
 import { buildPoDocument, isPoLate, type PoDocumentData } from "@/lib/po/po-model";
 import { computeSupplierScore, type SupplierScore } from "@/lib/po/supplier-stats";
 
 /**
- * Orders-screen queries. Server-only: every function takes an explicit
- * tenantId and runs on the RLS-enforced tenant client — no query here can
- * read another tenant's rows even if a `where` is wrong.
+ * Orders-screen data. Server-only: every function takes an explicit tenantId
+ * and runs on the RLS-enforced tenant client — no query here can read (or
+ * remove) another tenant's rows even if a `where` is wrong.
  *
  * Cost fields are redacted here, not at render: every getter that returns KES
  * cost figures takes an explicit `canViewCosts` and nulls those figures when it
@@ -269,6 +269,55 @@ export async function getOrderQueue(
     totalCostKes: null,
     lines: group.lines.map((line) => ({ ...line, unitCostKes: null, lineCostKes: null })),
   }));
+}
+
+export type RemoveQueuedResult = { ok: true } | { ok: false; reason: "not_found" };
+
+/**
+ * Take one line back off the order queue — the inverse of the planner's
+ * add-to-order, and the queue's only mutation.
+ *
+ * Queueing a product makes the plan count it as already on the way, so it
+ * leaves the buy list; without this the only exit was a purchase order for
+ * stock nobody wanted. Scoped to `pending` on purpose: once a line is on a
+ * purchase order the supplier has been told about it, and dropping the row
+ * would leave that document asking for stock with nothing behind it.
+ *
+ * `deleteMany` rather than `delete` so a foreign or already-ordered id matches
+ * nothing under RLS instead of throwing; the count is the answer. The row goes
+ * rather than turning into a "cancelled" Order — nothing writes that status
+ * today, and reviving it would mean teaching every queue query to exclude it —
+ * so the trail is kept as an audit event instead.
+ */
+export async function removeQueuedOrder(
+  tenantId: string,
+  orderId: string,
+  actor?: { userId: string; name: string | null }
+): Promise<RemoveQueuedResult> {
+  const db = prismaForTenant(tenantId);
+  const removed = await db.$transaction(async (tx) => {
+    const order = await tx.order.findFirst({
+      where: { id: orderId, status: "pending" },
+      select: { id: true, productId: true, orderedQty: true },
+    });
+    if (!order) return null;
+    const { count } = await tx.order.deleteMany({ where: { id: order.id, status: "pending" } });
+    return count === 1 ? order : null;
+  });
+  if (!removed) return { ok: false, reason: "not_found" };
+
+  await prismaService.auditEvent.create({
+    data: {
+      tenantId,
+      entity: "Order",
+      entityId: removed.id,
+      action: "deleted",
+      actorUserId: actor?.userId ?? null,
+      actorName: actor?.name ?? null,
+      meta: { productId: removed.productId, orderedQty: removed.orderedQty },
+    },
+  });
+  return { ok: true };
 }
 
 /** Supplier cards on one page of the queue. A card is a table with its own
