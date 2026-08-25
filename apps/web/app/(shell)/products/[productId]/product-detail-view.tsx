@@ -95,7 +95,9 @@ export function ProductDetailView({
                   <span className="text-2xl text-ink">
                     {detail.prediction.recommendedQty}
                   </span>
-                  <span className="text-sm text-ink-muted">units suggested</span>
+                  <span className="text-sm text-ink-muted">
+                    {detail.prediction.overriddenQty != null ? "units you set" : "units suggested"}
+                  </span>
                   <Badge tone={URGENCY_TONE[detail.prediction.urgency] ?? "neutral"}>
                     {detail.prediction.urgency}
                   </Badge>
@@ -117,6 +119,16 @@ export function ProductDetailView({
                     }}
                   />
                 </div>
+                {/* The note below is the run's arithmetic, and an override
+                    replaces its answer without changing its working. Saying so
+                    keeps a reader from taking the explanation as the basis for
+                    a number the owner chose. */}
+                {detail.prediction.overriddenQty != null && (
+                  <p className="text-xs text-ink-faint">
+                    You set this quantity. The run&apos;s own working is below — change it on the
+                    buy list.
+                  </p>
+                )}
                 <p className="text-sm text-ink-secondary">{detail.prediction.reasoning}</p>
                 {detail.prediction.daysUntilStockout != null && (
                   <p className="text-xs text-ink-faint">
