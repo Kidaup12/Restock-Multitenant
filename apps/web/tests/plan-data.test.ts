@@ -1034,6 +1034,36 @@ describe.skipIf(!runnable)("plan data (seeded local db)", () => {
     );
   });
 
+  it("orders the quantity the owner set, not the one the engine suggested", async () => {
+    // The override was display-only: the buy list showed the owner's number while
+    // the order — and the purchase order built from it — carried the engine's, so
+    // a supplier was sent a quantity nobody chose. Asserted against the engine's
+    // own figure so it cannot pass by coincidence.
+    const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
+    const target = buyList!.rows[0]!;
+    const owner = Math.round(target.recommendedQty) + 17;
+
+    await upsertPlanOverride(seeded.tenantId, {
+      productId: target.productId,
+      qty: owner,
+      createdByUserId: null,
+      createdByName: null,
+    });
+    try {
+      await createOrdersForPredictions(seeded.tenantId, [target.predictionId]);
+      const order = await prismaService.order.findFirst({
+        where: { tenantId: seeded.tenantId, predictionId: target.predictionId, status: "pending" },
+        select: { orderedQty: true },
+      });
+      expect(order?.orderedQty, "the order carried the engine's quantity").toBe(owner);
+    } finally {
+      await prismaService.order.deleteMany({
+        where: { tenantId: seeded.tenantId, predictionId: target.predictionId },
+      });
+      await removePlanOverride(seeded.tenantId, target.productId);
+    }
+  });
+
   it("creates pending Orders for ticked predictions and updates on re-add", async () => {
     const buyList = await getBuyList(seeded.tenantId, { canViewCosts: true });
     const ids = buyList!.rows.slice(0, 3).map((r) => r.predictionId);
