@@ -148,15 +148,15 @@ const QTY_GROUPS = new Set<ExcludedReason>(["already-ordered", "unplannable", "s
 /**
  * Where "order it anyway" actually moves a product onto the list.
  *
- * These two are held back because the run sized them to nothing, so an owner
- * quantity is the whole decision and the product moves. The others are held
- * back by a rule that runs after the sizing — stock already on its way, a cost
- * the screen has just called untrustworthy, a mover too slow to stock — and a
- * quantity does not clear that rule. Offering the affordance there would be a
- * button that saves a number and changes nothing on screen, which is worse than
- * not offering it: the owner would think the order was placed.
+ * These are held back by a judgement an owner is entitled to overrule: the run
+ * sized them to nothing, or decided they sell too slowly to stock. The two left
+ * out are not judgements — stock already on its way is a fact, and a cost the
+ * screen has just called untrustworthy would put a wrong number on a real order.
+ * Offering the affordance there would be a button that saves a number and
+ * changes nothing on screen, which is worse than not offering it: the owner
+ * would think the order was placed.
  */
-const OVERRIDABLE_GROUPS = new Set<ExcludedReason>(["covered", "too-new"]);
+const OVERRIDABLE_GROUPS = new Set<ExcludedReason>(["covered", "too-new", "slow-mover"]);
 
 // The run's own honesty words, in shop language. The engine's tokens
 // ("fairly_sure", "min_max") must never reach a screen.
