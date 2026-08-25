@@ -95,9 +95,6 @@ export {
   type GuardrailDecision,
 } from "./guardrail";
 
-// External-engine assembly
-export { assembleForecastResult, type DemandForecast } from "./assemble";
-
 // Reorder sizing
 export { recommendedQty, reorderMethod, type ReorderInput } from "./reorder";
 export { explainQty, type QtyExplanation } from "./explain";
