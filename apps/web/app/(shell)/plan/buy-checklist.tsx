@@ -145,6 +145,19 @@ export const EXCLUDED_GROUPS: { reason: ExcludedReason; title: string; subtitle:
  *  a narrower table — a column of 0 and KES 0 is noise, not information. */
 const QTY_GROUPS = new Set<ExcludedReason>(["already-ordered", "unplannable", "slow-mover"]);
 
+/**
+ * Where "order it anyway" actually moves a product onto the list.
+ *
+ * These two are held back because the run sized them to nothing, so an owner
+ * quantity is the whole decision and the product moves. The others are held
+ * back by a rule that runs after the sizing — stock already on its way, a cost
+ * the screen has just called untrustworthy, a mover too slow to stock — and a
+ * quantity does not clear that rule. Offering the affordance there would be a
+ * button that saves a number and changes nothing on screen, which is worse than
+ * not offering it: the owner would think the order was placed.
+ */
+const OVERRIDABLE_GROUPS = new Set<ExcludedReason>(["covered", "too-new"]);
+
 // The run's own honesty words, in shop language. The engine's tokens
 // ("fairly_sure", "min_max") must never reach a screen.
 export const CONFIDENCE_COPY: Record<
@@ -429,15 +442,107 @@ function MoqNote({ preview }: { preview: MoqPreview }) {
 
 /**
  * The "Excluded" section: products the run sized but held off the active list,
- * grouped by why. Read-only — no ticking, no override — so it reads as context,
- * not a second buy list. Costs redact through the same CostValue as the tiers.
+ * grouped by why. No ticking — it reads as context, not a second buy list — but
+ * a quantity can be set, because "why isn't X here?" is often followed by "order
+ * it anyway". The owner knows things the run does not: a promotion nobody
+ * declared, a supplier closing for a month, a customer who always takes a case.
+ * Setting a quantity moves the product onto the buy list, where it is ticked and
+ * ordered like any other line.
+ *
+ * Offered only where a quantity is the whole decision — see OVERRIDABLE_GROUPS.
+ *
+ * Costs redact through the same CostValue as the tiers.
  */
+/**
+ * Set a quantity on a product the run held back, which moves it onto the buy
+ * list. Deliberately not the tiers' `QtyCell`: that one edits a number the run
+ * already produced, while this one supplies the first number there has been, so
+ * it opens empty rather than pre-filled with a zero the owner would have to
+ * clear. Clearing the override hands the product back to the run's judgement.
+ */
+function OrderAnyway({ row }: { row: ExcludedRow }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function save() {
+    const qty = Math.round(Number(value));
+    if (!Number.isFinite(qty) || qty < 1) {
+      setError("1 or more");
+      return;
+    }
+    startTransition(async () => {
+      const result = await setPlanOverride({ productId: row.productId, qty });
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      setError(null);
+      setEditing(false);
+    });
+  }
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="text-xs font-medium text-accent-ink hover:underline"
+      >
+        Order anyway
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <div className="flex items-center gap-1.5">
+        <input
+          type="number"
+          min={1}
+          autoFocus
+          value={value}
+          disabled={pending}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+            if (e.key === "Escape") setEditing(false);
+          }}
+          aria-label={`Quantity to order of ${row.title}`}
+          className="h-8 w-20 rounded-md border border-edge bg-surface px-2 text-right text-sm text-ink"
+        />
+        <button
+          type="button"
+          onClick={save}
+          disabled={pending}
+          className="text-xs font-medium text-accent-ink hover:underline"
+        >
+          Save
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing(false)}
+          disabled={pending}
+          className="text-xs text-ink-muted hover:underline"
+        >
+          Cancel
+        </button>
+      </div>
+      {error && <span className="text-xs text-negative">{error}</span>}
+    </div>
+  );
+}
+
 export function ExcludedSection({
   excluded,
   canViewCosts,
+  canOverride = false,
 }: {
   excluded: ExcludedRow[];
   canViewCosts: boolean;
+  /** Whether this reader may order — the same permission the tiers check. */
+  canOverride?: boolean;
 }) {
   return (
     <div className="space-y-4">
@@ -455,6 +560,7 @@ export function ExcludedSection({
         // A run that sized these to nothing has no quantity or line total worth
         // a column — 0 and KES 0 down the page is noise, not information.
         const showsQty = QTY_GROUPS.has(reason);
+        const offersOverride = canOverride && OVERRIDABLE_GROUPS.has(reason);
         return (
           <Card key={reason}>
             <CardHeader title={`${title} · ${groupRows.length}`} subtitle={subtitle} />
@@ -472,6 +578,7 @@ export function ExcludedSection({
                         <th scope="col" className={TH_NUM}>Line total</th>
                       </>
                     )}
+                    {offersOverride && <th scope="col" className={TH_NUM}>Order anyway</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -522,6 +629,11 @@ export function ExcludedSection({
                               <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
                             </td>
                           </>
+                        )}
+                        {offersOverride && (
+                          <td className={TD_NUM}>
+                            <OrderAnyway row={row} />
+                          </td>
                         )}
                       </tr>
                     );
@@ -992,7 +1104,11 @@ export function BuyChecklist({
       })}
 
       {view.excluded.length > 0 && (
-        <ExcludedSection excluded={view.excluded} canViewCosts={canViewCosts} />
+        <ExcludedSection
+          excluded={view.excluded}
+          canViewCosts={canViewCosts}
+          canOverride={canOverride}
+        />
       )}
 
       {(picked.size > 0 || notice) && (
