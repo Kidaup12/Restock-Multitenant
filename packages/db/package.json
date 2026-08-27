@@ -8,7 +8,8 @@
     "./roles": "./src/roles.ts",
     "./inventory": "./src/inventory.ts",
     "./platform-tenant": "./src/platform-tenant.ts",
-    "./notify-prefs": "./src/notify-prefs.ts"
+    "./notify-prefs": "./src/notify-prefs.ts",
+    "./crypto": "./src/crypto.ts"
   },
   "scripts": {
     "postinstall": "prisma generate",

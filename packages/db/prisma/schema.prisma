@@ -129,6 +129,7 @@ model Tenant {
   purchaseOrders          PurchaseOrder[]
   distributionPlans       DistributionPlan[]
   shopifyConnection       ShopifyConnection?
+  quickBooksConnection    QuickBooksConnection?
   shopifyAppCredential    ShopifyAppCredential?
   ingestCursors           IngestCursor[]
   syncRuns                SyncRun[]
@@ -991,6 +992,46 @@ model ShopifyConnection {
   // this store until a reconnect or a manual "Sync now" clears it. Not derived
   // from SyncRun, which is pruned after 14 days — a store paused longer than
   // that would read as healthy and start over.
+  authFailureCount Int       @default(0)
+  syncPausedAt     DateTime?
+  lastAuthErrorAt  DateTime?
+  lastAuthError    String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+// A workspace's QuickBooks Online connection.
+//
+// Unlike Shopify, there is ONE Intuit app — ours — that every workspace connects
+// to, so the client id and secret are app-level environment variables and what
+// lives per tenant is the company (realmId) plus its tokens.
+//
+// Both tokens are AES-256-GCM ciphertext. The refresh token is stored because
+// Intuit's access tokens last about an hour; it carries its own expiry because
+// the refresh token itself expires (~100 days) and a workspace that has not
+// synced in that long needs a human to reconnect rather than a retry.
+//
+// The auth-failure trio is deliberately the same shape as ShopifyConnection's:
+// an expired or revoked refresh token answers every request the same way, and no
+// amount of retrying fixes it. Counting consecutive failures and setting
+// syncPausedAt lets the scheduler give up until someone reconnects.
+model QuickBooksConnection {
+  id       String @id @default(cuid())
+  tenantId String @unique
+  // Intuit's company id. Unique: one QuickBooks company belongs to one
+  // workspace, and connecting it somewhere else has to be a deliberate move
+  // rather than two workspaces silently writing the same books.
+  realmId  String @unique
+
+  accessToken           String // AES-256-GCM ciphertext
+  refreshToken          String // AES-256-GCM ciphertext, rotated on every refresh
+  accessTokenExpiresAt  DateTime
+  refreshTokenExpiresAt DateTime
+  scopes                String // space-separated, as granted
+
+  connectedAt    DateTime  @default(now())
+  disconnectedAt DateTime? // in-app disconnect or revoked upstream; null = live
+
   authFailureCount Int       @default(0)
   syncPausedAt     DateTime?
   lastAuthErrorAt  DateTime?

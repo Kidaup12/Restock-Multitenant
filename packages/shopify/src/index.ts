@@ -1,5 +1,8 @@
 export { numericCore, toGid } from "./ids";
-export { encryptToken, decryptToken } from "./crypto";
+// Token encryption moved to @wezesha/db so the QuickBooks connector can share
+// it rather than re-implement AES-256-GCM. Re-exported here because every
+// existing caller imports it from this package.
+export { encryptToken, decryptToken } from "@wezesha/db/crypto";
 export { verifyWebhookHmac, verifyOAuthHmac } from "./hmac";
 export {
   REQUIRED_SCOPES,
