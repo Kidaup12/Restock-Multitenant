@@ -9,6 +9,7 @@ import {
 } from "@wezesha/shopify";
 import { STATE_COOKIE, STATE_COOKIE_PATH } from "@/lib/shopify/cookies";
 import { credentialsForTenant } from "@/lib/shopify/credentials";
+import { shopifyAppUrl } from "@/lib/shopify/env";
 import { canManageConnections, tenantActor } from "@/lib/shopify/membership";
 import { enqueueShopifySync } from "@/lib/shopify/queue";
 import { resetCursorsOnStoreChange } from "@/lib/shopify/store-switch";
@@ -36,7 +37,12 @@ function timingSafeEq(a: string, b: string): boolean {
 }
 
 export const GET = withCapture(async (req: NextRequest) => {
-  const origin = req.nextUrl.origin;
+  // Our own public origin, not the request's. Behind a proxy the incoming
+  // request resolves to the container's listener, which sent a merchant to
+  // https://localhost:8080/settings/connections after a successful connect.
+  // This is the same value the install route builds redirect_uri from, so the
+  // two halves of the handshake cannot disagree.
+  const origin = shopifyAppUrl();
   const actor = await tenantActor();
   if (!actor) return NextResponse.redirect(new URL("/login", origin));
   if (!canManageConnections(actor)) return done(origin, "error", "forbidden");
