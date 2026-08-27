@@ -8,6 +8,7 @@ import {
   type EmailCronQueue,
 } from "./crons";
 import { startHeartbeat } from "./heartbeat";
+import { startIntake } from "./intake";
 import {
   OPS_CRON_QUEUE,
   createOpsCronQueue,
@@ -105,6 +106,22 @@ async function main(): Promise<void> {
     captureError(err, { tenantId: job?.data.tenantId, jobId: job?.id, queue: "sync" });
   });
   console.log("worker: listening on queue \"sync\"");
+
+  // HTTP intake for the web app. Only starts when a secret is configured:
+  // unauthenticated job submission is worse than the feature being absent, so
+  // this fails closed rather than open. Unset is the correct configuration when
+  // the web app shares this platform's private network and talks to Redis
+  // directly.
+  const intakeSecret = process.env.INTERNAL_API_SECRET;
+  const intake = intakeSecret
+    ? await startIntake({
+        port: Number(process.env.PORT ?? 8082),
+        secret: intakeSecret,
+        queue: createSyncQueue(connection),
+        publisher,
+      })
+    : null;
+  if (!intakeSecret) console.log("worker: INTERNAL_API_SECRET unset - HTTP intake disabled");
 
   let cronQueue: EmailCronQueue | null = null;
   let cronWorker: Worker | null = null;
@@ -213,6 +230,7 @@ async function main(): Promise<void> {
     closing = true;
     console.log(`worker: ${signal} received, shutting down`);
     stopHeartbeat();
+    void intake?.close();
     void Promise.all([
       worker.close(), // waits for the in-flight job before releasing it
       cronWorker?.close(),

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { Redis } from "ioredis";
 import { prismaService } from "@wezesha/db";
 import { WORKER_HEARTBEAT_KEY } from "@wezesha/observability";
+import { intakeConfigured, intakeLive } from "@/lib/worker-intake";
 
 /**
  * Uptime probe for external pingers (see deploy/RUNBOOK.md, Uptime
@@ -60,6 +61,13 @@ export async function GET(): Promise<NextResponse> {
     )) === true;
 
   let worker: boolean | null = null;
+  if (intakeConfigured()) {
+    // Hosted apart from the worker: ask it directly. Answering proves the
+    // process is up AND its event loop is turning, which is what the heartbeat
+    // was standing in for when there was no port to talk to.
+    worker = await intakeLive();
+    return NextResponse.json({ ok: db, db, worker }, { status: db ? 200 : 503 });
+  }
   const redis = getHealthRedis();
   if (redis) {
     // Wrap the value so "key absent" (worker down) stays distinguishable from

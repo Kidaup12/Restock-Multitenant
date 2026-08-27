@@ -6,6 +6,7 @@ import {
   type SyncQueue,
 } from "@wezesha/queue";
 import { publishEvent } from "@wezesha/realtime";
+import { intakeConfigured, intakeEnqueue, intakePublish } from "@/lib/worker-intake";
 import type { RealtimeEvent } from "@wezesha/realtime";
 
 /**
@@ -35,12 +36,15 @@ function getSyncQueue(): SyncQueue {
   return globalForQueue.wezeshaSyncQueue;
 }
 
-/** Enqueue a Shopify sync for the tenant unless one is already queued/running. */
+/** Enqueue a Shopify sync for the tenant unless one is already queued/running.
+ *  Goes over HTTPS when the worker is hosted apart from this app, so Redis
+ *  never has to be reachable from the internet — see lib/worker-intake. */
 export function enqueueShopifySync(tenantId: string): Promise<EnqueueResult> {
-  return enqueueSyncOnce(getSyncQueue(), { tenantId, source: "shopify" });
+  const data = { tenantId, source: "shopify" } as const;
+  return intakeConfigured() ? intakeEnqueue(data) : enqueueSyncOnce(getSyncQueue(), data);
 }
 
 /** Publish a realtime event from a request path (best-effort callers catch). */
 export function publishRealtime(event: RealtimeEvent): Promise<number> {
-  return publishEvent(getRedis(), event);
+  return intakeConfigured() ? intakePublish(event) : publishEvent(getRedis(), event);
 }
