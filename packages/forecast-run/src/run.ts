@@ -6,6 +6,7 @@ import {
   effectiveOnOrder,
   isSellable,
   outstandingByProduct,
+  prismaForTenant,
   prismaForTenantTx,
 } from "@wezesha/db";
 import {
@@ -26,6 +27,8 @@ import {
   windowsForProduct,
   expandPromoWindowsToDays,
   boundedMultiplier,
+  assessIngestHealth,
+  type IngestVerdict,
   type ActivePromo,
   type MonthlyExpectation,
   type DemandOverride,
@@ -111,7 +114,16 @@ function fullClosureDayKeys(
   return out;
 }
 
-export type ForecastRunResult = { created: number; forecastRunId: string };
+export type ForecastRunResult = {
+  created: number;
+  forecastRunId: string;
+  /** Set when the run was skipped to protect the last-good forecast — currently
+   *  only "ingest_stale" (the sales feed looked stopped, so nothing was written). */
+  skipped?: "ingest_stale";
+};
+
+/** Feed considered stopped past this — one notification per rolling window. */
+const INGEST_STALL_DEDUP_DAYS = 3;
 
 const r0 = (n: number) => Math.round(n);
 
@@ -120,6 +132,69 @@ function priorLabel(p: OwnerPriorFacts): string {
   if (p.expectedUnits != null) return `Owner expects ~${r0(p.expectedUnits)}/mo`;
   if (p.multiplier != null) return `Owner set ${p.multiplier}× for this ${p.scope}`;
   return "Owner prior applied";
+}
+
+/**
+ * Assess the whole tenant's ingest before forecasting. Rolls the loaded sales
+ * rows up into one units-per-day series (all products, all channels), excluding
+ * today (partial), and finds the newest sale timestamp — the two facts the pure
+ * `assessIngestHealth` needs to tell a stopped feed from a genuinely quiet shop.
+ */
+function assessTenantIngest(
+  sales: ReadonlyArray<{ date: Date; quantity: number }>,
+  now: Date
+): IngestVerdict {
+  const todayKey = dayKeyMs(now);
+  const byDay = new Map<number, number>();
+  let latestSaleAt: Date | null = null;
+  for (const row of sales) {
+    const key = dayKeyMs(row.date);
+    if (key >= todayKey) continue; // today is partial — judge completed days only
+    byDay.set(key, (byDay.get(key) ?? 0) + row.quantity);
+    if (latestSaleAt == null || row.date > latestSaleAt) latestSaleAt = row.date;
+  }
+  const daily = [...byDay.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([dayKey, units]) => ({ dayKey, units }));
+  // A shop that has barely ever sold has no established feed to call "stopped" —
+  // an empty history is a young tenant, not a broken feed. Only judge staleness
+  // once there is a real trading history to compare the silence against, so the
+  // gate never blocks a new shop's very first forecast.
+  const MIN_DAYS_TO_JUDGE = 14;
+  if (daily.filter((d) => d.units > 0).length < MIN_DAYS_TO_JUDGE) {
+    return { ok: true, stop: false, impute: false, gapDayKeys: [], reasons: [], stale: false, trailingNorm: 0 };
+  }
+  return assessIngestHealth(daily, latestSaleAt, now);
+}
+
+/**
+ * Tell the owner the feed looks stopped and the forecast was held. One bell
+ * notification per rolling window so a multi-day outage doesn't spam. Best-
+ * effort: the stall protection (keeping the last-good forecast) already
+ * happened; a failed notification write must not turn a safe skip into an error.
+ */
+async function raiseIngestStall(tenantId: string, verdict: IngestVerdict, now: Date): Promise<void> {
+  try {
+    const db = prismaForTenant(tenantId);
+    const dedupSince = new Date(now.getTime() - INGEST_STALL_DEDUP_DAYS * DAY_MS);
+    const recent = await db.notification.findFirst({
+      where: { kind: "forecast_held_stale_feed", createdAt: { gte: dedupSince } },
+      select: { id: true },
+    });
+    if (recent) return;
+    await db.notification.create({
+      data: {
+        tenantId,
+        kind: "forecast_held_stale_feed",
+        title: "Forecast paused — your sales feed looks stopped",
+        body:
+          `${verdict.reasons.join(" ")} We kept your last buy list rather than ` +
+          `telling you to order nothing off a gap. Reconnect the feed and it will refresh.`,
+      },
+    });
+  } catch {
+    // never let a bookkeeping failure undo a safe skip
+  }
 }
 
 export async function runForecast(tenantId: string): Promise<ForecastRunResult> {
@@ -265,6 +340,20 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
     list.push(row.date);
   }
   const snapshotsSince = firstSnapshot?.date ?? undefined;
+
+  // ── Ingest-health gate: "no data ≠ no demand" ────────────────────────────
+  // A silently broken sales feed looks exactly like a shop that sold nothing.
+  // Forecasting off that hole would confidently tell the owner to order nothing
+  // for a month. Before writing a fresh forecast, sanity-check the ingest
+  // against the shop's own recent norm: if the feed is STALE (or too many recent
+  // days came in far below normal), keep the last-good predictions and alert the
+  // owner rather than overwrite them with a zero-demand run.
+  const ingest = assessTenantIngest(sales, now);
+  if (ingest.stop) {
+    await raiseIngestStall(tenantId, ingest, now);
+    // Keep the last-good forecast: return without touching Prediction rows.
+    return { created: 0, forecastRunId: "", skipped: "ingest_stale" };
+  }
 
   // Cross-product steps the pure pipeline leaves to the caller.
   const knobs = resolveForecastKnobs(config);

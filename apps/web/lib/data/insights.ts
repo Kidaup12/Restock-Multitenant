@@ -58,6 +58,29 @@ export type CashAsleepRow = {
   costKnown: boolean;
 };
 
+/**
+ * One idle-capital line as the full-list CSV wants it. The on-screen "cash
+ * asleep" table pages to a handful of rows; the download is every idle row the
+ * shop has, with the vendor and the plain-words action the file names.
+ *
+ * Frozen cash is a cost figure and carries the money-blind redaction — null for
+ * a caller without view_costs. Days cover and the risk/action words are
+ * derived, not money, so they stay for every role.
+ */
+export type CashExportRow = {
+  title: string;
+  sku: string;
+  vendor: string | null;
+  /** Whole days of cover; null when there is no run rate to divide by. */
+  coverDays: number | null;
+  /** cost × on-hand. Null for a money-blind caller. */
+  cashKes: number | null;
+  /** The risk pile in the table's own words. */
+  risk: "Not selling" | "Way too much";
+  /** What to do about this pile, in plain words. */
+  action: string;
+};
+
 export type InsightsOverview = {
   stockouts: {
     /** Canonical count — the same number Today shows. */
@@ -74,9 +97,19 @@ export type InsightsOverview = {
   shelfRows: EmptyShelfRow[];
   /** Idle capital ranked by cash frozen. */
   cashRows: CashAsleepRow[];
+  /** EVERY idle row for the CSV — not the page `cashRows` shows — in the same
+   *  ranking, carrying the vendor and plain-words action the file names. */
+  cashExport: CashExportRow[];
   /** Total cash across every idle row, not just the returned page. */
   cashTotalKes: number | null;
   overstockCoverDays: number;
+};
+
+/** The plain-words next step for each idle pile — the file spells out what the
+ *  badge implies. Kept beside the type so table and CSV read the same. */
+const CASH_ACTION: Record<CashAsleepRow["reason"], string> = {
+  not_selling: "Discount / stop reorder",
+  too_much: "Slow reorder",
 };
 
 const redactCashRow = (r: CashAsleepRow): CashAsleepRow => ({ ...r, cashKes: null });
@@ -113,12 +146,13 @@ export async function getInsightsOverview(
     getCatalogueMetrics(tenantId),
     db.product.findMany({
       where: { ...BUYABLE_PRODUCT_WHERE },
-      select: { id: true, sku: true, title: true, priceKes: true, costKes: true, currentStock: true },
+      select: { id: true, sku: true, title: true, vendor: true, priceKes: true, costKes: true, currentStock: true },
     }),
     db.salesHistory.groupBy({ by: ["productId"], _max: { date: true } }),
   ]);
 
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date]));
+  const vendorById = new Map(products.map((p) => [p.id, p.vendor]));
   const deadCutoff = Date.now() - today.deadStock.windowDays * 86_400_000;
 
   const shelfRows: EmptyShelfRow[] = [];
@@ -172,6 +206,19 @@ export async function getInsightsOverview(
   const pagedShelf = shelfRows.slice(0, limit);
   const pagedCash = cashRows.slice(0, limit);
 
+  // The CSV is every idle row in the same ranking, not the page — with the
+  // vendor and the plain-words action added and the same cost redaction as the
+  // table (frozen cash nulled for a money-blind caller).
+  const cashExport: CashExportRow[] = cashRows.map((r) => ({
+    title: r.title,
+    sku: r.sku,
+    vendor: vendorById.get(r.productId) ?? null,
+    coverDays: r.coverDays == null ? null : Math.round(r.coverDays),
+    cashKes: canViewCosts && r.costKnown ? r.cashKes : null,
+    risk: r.reason === "not_selling" ? "Not selling" : "Way too much",
+    action: CASH_ACTION[r.reason],
+  }));
+
   return {
     stockouts: {
       skus: today.stockedOutProducts,
@@ -184,6 +231,7 @@ export async function getInsightsOverview(
     deadStock: today.deadStock,
     shelfRows: pagedShelf,
     cashRows: canViewCosts ? pagedCash : pagedCash.map(redactCashRow),
+    cashExport,
     cashTotalKes: canViewCosts ? cashTotal : null,
     overstockCoverDays: OVERSTOCK_COVER_DAYS,
   };

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { destinationShares, sizeTransfers } from "../lib/data/transfers";
+// The pure sizing engine now lives in @wezesha/forecast (extracted so the
+// worker's owner report can share it). Import it directly — no DB env needed.
+import { destinationShares, sizeTransfers } from "@wezesha/forecast";
 
 /**
  * The transfer sizing engine, driven directly (it is pure, so no database is

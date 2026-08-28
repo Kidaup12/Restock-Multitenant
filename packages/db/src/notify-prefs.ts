@@ -1,9 +1,10 @@
 /**
  * Which optional emails a workspace still wants.
  *
- * Only two messages are sent on the app's initiative rather than a person's:
- * the weekly summary, and the alert that a feed has stopped arriving. Those are
- * the ones a shop can silence. Everything else the app sends — an invite, a
+ * A handful of messages are sent on the app's initiative rather than a person's:
+ * the weekly summary, the monthly owner report, and the alert that a feed has
+ * stopped arriving. Those are the ones a shop can silence. Everything else the
+ * app sends — an invite, a
  * sign-in code, a password reset, the purchase order itself — is the answer to
  * something someone just did, and is deliberately not mutable here: a shop that
  * had switched off its own purchase-order emails would be a support call, not a
@@ -26,6 +27,7 @@
 
 export const OPTIONAL_EMAIL_KINDS = [
   "weekly_summary",
+  "monthly_report",
   "reconnect_alert",
   "first_suggestions",
 ] as const;
@@ -40,6 +42,10 @@ export const OPTIONAL_EMAIL_LABELS: Record<OptionalEmailKind, { title: string; b
   weekly_summary: {
     title: "Weekly stock summary",
     body: "One email a week: what sold, what needs restocking, and what is tying up cash.",
+  },
+  monthly_report: {
+    title: "Monthly owner report",
+    body: "Once a month: how your shop is trending week by week, the bestsellers stocked out now, and this month's buy list.",
   },
   reconnect_alert: {
     title: "Sync stopped working",
