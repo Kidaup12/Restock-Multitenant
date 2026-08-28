@@ -222,6 +222,13 @@ model TenantConfig {
   // The user never picks a model and never sees these names.
   forecastChampions Json?
 
+  // The audit-engine's raw per-segment model routing plan for this tenant,
+  // stored verbatim for audit + future use. Shape:
+  // { tier, routing: <routing_table>, runId, client, requestedAt, source: "audit-engine" }.
+  // Distinct from forecastChampions (which the forecast dispatches on and whose
+  // validator rejects unknown model names) — this holds the engine's own model ids.
+  forecastEnginePlan Json?
+
   // When this tenant first went over any plan limit (grace window anchor).
   // Cleared when usage drops back under; null = within limits.
   limitsExceededAt DateTime?

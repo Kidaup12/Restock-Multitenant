@@ -1,0 +1,112 @@
+# ==========================================================================
+# DECISION POLICY — the engine's standing rulebook.
+#
+# This is the professional demand-planning logic the engine applies to EVERY
+# client, not just one. It is data, not code: tune a threshold here and the
+# engine's decisions change, with the reason it emits updating to match.
+#
+# Every rule block has: thresholds, and — where the client may not supply the
+# data — an explicit `assume` default so the engine always reaches a decision
+# and tags what it assumed. Nothing here silently guesses.
+#
+# Precedence when rules conflict is fixed in decisions.py and documented in
+# docs/DECISION_POLICY.md: data-sufficiency gate -> lifecycle -> intermittency
+# -> value x steadiness -> model auto-pick.
+# ==========================================================================
+
+version: 1
+
+# --- 1. Data sufficiency: is there enough to decide at all? ----------------
+data_sufficiency:
+  # weeks of usable history a SKU needs before it is forecastable at all
+  min_weeks_forecastable: 13
+  # weeks needed before the backtest may pick a model for it (below -> rule default)
+  min_weeks_backtest: 49
+  # weeks needed for the full nested (validated) selection
+  min_weeks_validated: 65
+  # a SKU with fewer than this many non-zero weeks cannot be classified reliably
+  min_nonzero_weeks: 4
+  assume:
+    # if a SKU is below min_weeks_forecastable: borrow its cluster/category analog
+    thin_history: cluster_analog          # cluster_analog | no_forecast
+    # if the whole file is below min_weeks_backtest: skip selection, use rule defaults
+    no_backtest: rule_default_model
+
+# --- 2. Price & money: can findings be monetised? --------------------------
+price:
+  # a line's price is usable if present and > 0
+  min_price_coverage_pct: 80              # below this -> units-only, no money figures
+  assume:
+    missing_price: units_only             # units_only | skip_money
+    # per-SKU selling price when some lines lack it
+    price_fill: sku_median_then_global    # sku_median_then_global | global_median
+
+# --- 3. Promotions: clean event tagging ------------------------------------
+promotions:
+  # preferred source: a supplied promo calendar (sku, week, flag). If absent:
+  detection: price_based_retro            # price_based_retro | calendar_only
+  price_drop_threshold_pct: 15            # >= this drop below trailing modal price = promo
+  assume:
+    no_calendar: derive_from_price        # derive_from_price | ignore_promos
+    # promo weeks are excluded from the baseline so they don't inflate "normal"
+    exclude_from_baseline: true
+
+# --- 4. Classification: the professional segmentation axes ------------------
+classification:
+  abc_thresholds: [0.80, 0.95]            # A <=80% cum value, B <=95%, else C
+  xyz_cv_thresholds: [0.5, 1.0]           # X (steady) < 0.5 <= Y < 1.0 <= Z (erratic), CV of demand
+  intermittent_adi: 1.32                  # ADI >= this = intermittent (routing axis, ADI alone)
+  intermittent_cv2: 0.49                  # with CV^2 >= this = classic "lumpy/intermittent" quadrant
+  dormancy_weeks: 8                       # no sale in >= this many weeks = dormant
+  new_weeks: 8                            # first sale within this many weeks = new/launch
+  launch_min_weeks: 4                     # below this since launch = not assessable (burst != demand)
+  assume:
+    # if no category column is supplied, cluster SKUs by demand correlation for pooling
+    no_category: correlation_cluster      # correlation_cluster | no_pooling
+    min_cluster_size: 20
+
+# --- 5. Action routing: how each SKU is handled (playbook) -----------------
+# maps (value x steadiness x lifecycle) -> action. Precedence top to bottom.
+actions:
+  dormant:            run_down            # any dormant SKU
+  new:                launch_watch        # any new SKU
+  intermittent_high:  buffer_rule         # intermittent/erratic AND A-class
+  intermittent_other: pool_rule           # intermittent/erratic, B or C
+  a_steady:           forecast_review     # A, X (steady, active)
+  a_variable:         forecast_buffer     # A, Y (variable, active)
+  b_steady:           forecast_auto       # B, X
+  default:            pool_rule           # everything else (C steady etc.)
+
+# --- 6. Model auto-pick: rules first, backtest breaks ties -----------------
+autopick:
+  # the rule default per segment class. The backtest may override ONLY if a
+  # challenger clears override_margin AND passes the gates below.
+  segment_defaults:
+    intermittent:     M9                  # TSB — decays dead items
+    intermittent_alt: M8                  # Croston-SBA fallback
+    seasonal_2yr:     M10                 # ETS, only with 104w+ and real seasonality
+    smooth_a:         M7                  # Theta for steady high-value
+    smooth_b:         M5                  # robust median for steady mid-value
+    erratic:          M5
+    new:              cluster_analog
+    dormant:          none
+    global_default:   M5                  # the presumed champion everywhere else
+  intermittent_default: M9
+  # a backtest challenger must beat the rule default by this much to win
+  override:
+    min_relative_wape_gain: 0.10          # >=10% lower WAPE than the rule default
+    max_bias_abs_pct: 20                  # challenger's |bias| must be <= this
+    require_beats_naive_floor: true       # and beat the naive floor
+    require_validated: true               # and the gain must hold on the validation block
+  # combinations: only ship a combo if its members are diverse
+  combo_residual_corr_max: 0.90
+  exclude_intermittent_from_combos: true
+
+# --- 7. Confidence: how sure is the decision? ------------------------------
+confidence:
+  # high: validated backtest + enough history + not censored
+  # medium: rule default or inner-only selection
+  # low: thin history / cluster analog / heavy censoring
+  # provisional: always, until a stock snapshot de-censors (v1 caveat)
+  max_censored_pct_for_high: 25           # >25% scoring weeks censored -> cap at medium
+  status: provisional

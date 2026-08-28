@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+runs/
+data/
+.pytest_cache/
+.hypothesis/
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+.env
+
+# Client sales data — never commit
+*.csv

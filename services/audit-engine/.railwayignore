@@ -1,0 +1,8 @@
+.venv/
+.git/
+runs/
+data/
+frontend/
+.pytest_cache/
+.hypothesis/
+__pycache__/

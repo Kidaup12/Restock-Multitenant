@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+.pytest_cache
+.hypothesis
+__pycache__
+**/__pycache__
+*.pyc
+runs/
+data/
+frontend/
+tests/
+scratchpad/
+*.md
+!README.md
+.dockerignore
