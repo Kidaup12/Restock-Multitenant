@@ -13,6 +13,4 @@ tests/
 scratchpad/
 *.md
 !README.md
-Dockerfile
 .dockerignore
-railway.toml
