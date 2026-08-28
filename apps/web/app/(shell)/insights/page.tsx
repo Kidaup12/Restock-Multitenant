@@ -109,7 +109,11 @@ export default async function InsightsPage({
             </div>
           }
         >
-          <ShelfHealth tenantId={membership.tenantId} canViewCosts={canViewCosts} />
+          <ShelfHealth
+            tenantId={membership.tenantId}
+            canViewCosts={canViewCosts}
+            currency={membership.tenant.currency}
+          />
         </Suspense>
       ) : (
         <div className="space-y-6">

@@ -40,6 +40,8 @@ import {
   seasonalLabel,
   type MonthlyExpectation,
 } from "./seasonality";
+import { applyAbcRateFloor } from "./rate-floor";
+import type { AbcCategory } from "./abc";
 
 export type ActivePromo = {
   discountPct: number;
@@ -310,7 +312,7 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   const override = input.demandOverride ?? null;
 
   // ── Layer 1: recency-weighted run rate (or an external demand override) ────
-  const historyDailyRate = demandRateFor(
+  const rawHistoryDailyRate = demandRateFor(
     input.demandMethod ?? CHAMPION_DEFAULT,
     input.history,
     today,
@@ -320,6 +322,19 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
       snapshotsSince: input.snapshotsSince,
     }
   );
+  // ABC-class rate floor: a bestseller stocked out for most of the window can
+  // have its censored rate decay toward zero and drop off the buy list. The
+  // floor serves an A/B product at a real minimum speed — but ONLY when it has
+  // proven recent demand, so a genuinely dead listing (no recent sales) stays
+  // at its computed rate and the dead-stock guard below still fires on it.
+  const floorWindowStart = new Date(today);
+  floorWindowStart.setUTCDate(floorWindowStart.getUTCDate() - 30);
+  const hadRecentSales = input.history.some((p) => p.quantity > 0 && p.date >= floorWindowStart);
+  const abcForFloor: AbcCategory | null =
+    input.abcCategory === "A" || input.abcCategory === "B" || input.abcCategory === "C"
+      ? input.abcCategory
+      : null;
+  const historyDailyRate = applyAbcRateFloor(rawHistoryDailyRate, abcForFloor, hadRecentSales);
   // The rate the inventory + sizing math runs on: the override when present
   // (cold-start borrow / owner expectation), else the history run rate.
   const dailyRate = override ? override.forecast30d / 30 : historyDailyRate;

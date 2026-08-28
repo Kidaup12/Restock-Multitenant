@@ -68,7 +68,8 @@ import { createSyncWorker } from "./worker";
  *   EMAIL_FROM            — outbound sender ("Name <address>" or bare address);
  *                           required once RESEND_API_KEY is set
  *   EMAIL_CRONS           — "1" registers + runs the email cron schedules
- *                           (weekly summaries); unset keeps dev/CI quiet
+ *                           (weekly summaries + monthly owner reports); unset
+ *                           keeps dev/CI quiet
  *   OPS_CRONS             — "1" registers + runs the ops cron schedules
  *                           (daily plan-limit checks); unset keeps dev/CI quiet
  *   POS_CRONS             — "1" registers + runs the POS cron schedules
@@ -133,7 +134,7 @@ async function main(): Promise<void> {
       console.error(`worker: cron ${job?.id} failed`, err);
       captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: "email-crons" });
     });
-    console.log("worker: email crons registered (weekly summary)");
+    console.log("worker: email crons registered (weekly summary + monthly report)");
   }
 
   let opsQueue: OpsCronQueue | null = null;

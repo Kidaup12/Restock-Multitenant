@@ -189,6 +189,31 @@ export async function getReorderNeeded(
 /** The five piles the dashboard table tabs between. */
 export type DashboardTab = "stockout" | "reorder" | "onway" | "dead" | "all";
 
+/**
+ * One dead-stock line as the CSV wants it. The dashboard table caps its dead
+ * pile at the row limit and shows cost/capital only; the download is the whole
+ * pile with the last-sale facts the export names, so the file is not "the
+ * twenty-five rows you happen to be looking at".
+ *
+ * Value at cost carries the same redaction as everywhere else — null for a
+ * money-blind caller. Value at retail is price × on-hand, a sales figure, so it
+ * stays visible to every role.
+ */
+export type DeadStockExportRow = {
+  sku: string;
+  title: string;
+  vendor: string | null;
+  onHandUnits: number;
+  lastSaleAt: Date | null;
+  /** Whole days since the last sale; null when nothing has ever sold. */
+  daysSinceLastSale: number | null;
+  /** cost × on-hand — the same money-at-rest figure the tab shows. Null for a
+   *  money-blind caller. */
+  valueAtCostKes: number | null;
+  /** price × on-hand — a sales figure, visible to every role. */
+  valueAtRetailKes: number;
+};
+
 export type DashboardTable = {
   /** Full counts — the tab pills and the health panel read these, never the
    *  length of the capped rows below. */
@@ -209,6 +234,10 @@ export type DashboardTable = {
   /** True when a pile had more rows than the cap, so the screen can say so
    *  rather than quietly showing a prefix. */
   capped: Record<DashboardTab, boolean>;
+  /** The FULL dead pile for the CSV — every dead row, not the capped page the
+   *  `dead` tab renders — ranked by frozen cash (cost when visible, else
+   *  retail) so the file leads with the most capital sitting still. */
+  deadStockExport: DeadStockExportRow[];
 };
 
 const DASHBOARD_ROW_CAP = 25;
@@ -286,6 +315,33 @@ export async function getDashboardTable(
     capped_rows[key] = piles[key].slice(0, limit);
   }
 
+  // The export takes the whole dead pile, not the capped page, and adds the
+  // last-sale facts the file names. On-hand, cost and price all come from the
+  // catalogue row, so the numbers match the tab; last sale is the map already
+  // fetched for the piling. Ranked by frozen cash — cost when the caller can see
+  // it, retail otherwise — so a money-blind file still leads with the biggest
+  // pile of unsold stock rather than sorting on a redacted null.
+  const now = Date.now();
+  const deadStockExport: DeadStockExportRow[] = piles.dead
+    .map((row) => {
+      const last = lastSale.get(row.productId) ?? null;
+      return {
+        sku: row.sku,
+        title: row.title,
+        vendor: row.vendor,
+        onHandUnits: row.onHandUnits,
+        lastSaleAt: last,
+        daysSinceLastSale: last ? Math.floor((now - last.getTime()) / DAY_MS) : null,
+        valueAtCostKes: row.moneyAtRestKes,
+        valueAtRetailKes: row.priceKes * Math.max(0, row.onHandUnits),
+      };
+    })
+    .sort(
+      (a, b) =>
+        (canViewCosts ? (b.valueAtCostKes ?? 0) - (a.valueAtCostKes ?? 0) : 0) ||
+        b.valueAtRetailKes - a.valueAtRetailKes
+    );
+
   return {
     counts,
     healthy,
@@ -297,5 +353,6 @@ export async function getDashboardTable(
       : null,
     criticalCount: (buyList?.rows ?? []).filter((r) => r.urgency === "critical").length,
     capped,
+    deadStockExport,
   };
 }
