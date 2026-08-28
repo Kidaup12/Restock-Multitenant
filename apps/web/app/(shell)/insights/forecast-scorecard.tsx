@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { formatNumber } from "@/lib/money";
 import { EmptyState } from "@/components/ui/empty-state";
 import { RunBacktestButton } from "./run-backtest-button";
+import { OnboardingAuditButton } from "./onboarding-audit-button";
 
 const dateLabel = (d: Date): string =>
   d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
@@ -118,7 +119,14 @@ export async function ForecastScorecard({
         <CardHeader
           title="How close we've been"
           subtitle="We replay the forecast against what you actually sold, once a month"
-          action={canRunCheck ? <RunBacktestButton /> : undefined}
+          action={
+            canRunCheck ? (
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <OnboardingAuditButton canRun={canRunCheck} />
+                <RunBacktestButton />
+              </div>
+            ) : undefined
+          }
         />
         <CardContent>
           {!latest ? (

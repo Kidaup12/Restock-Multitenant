@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory audit — {{ client }}</title>
+<style>
+  :root {
+    --accent: #14608a;
+    --ink: #1c2530;
+    --muted: #5b6773;
+    --line: #d9dee4;
+    --bg-soft: #f5f7f9;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+    line-height: 1.5;
+    font-size: 15px;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+  }
+  header.report-head { border-bottom: 3px solid var(--accent); padding-bottom: 16px; margin-bottom: 8px; }
+  header.report-head h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: -0.01em; }
+  header.report-head .meta { color: var(--muted); font-size: 13px; }
+  section { margin-top: 36px; }
+  h2 {
+    font-size: 19px; color: var(--accent); margin: 0 0 12px;
+    padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  }
+  h3 { font-size: 15px; margin: 20px 0 8px; }
+  p { margin: 8px 0; }
+  .note { color: var(--muted); font-size: 13px; }
+  .cards { display: flex; gap: 16px; flex-wrap: wrap; margin: 16px 0; }
+  .card {
+    flex: 1 1 200px; background: var(--bg-soft); border: 1px solid var(--line);
+    border-left: 4px solid var(--accent); border-radius: 6px; padding: 14px 16px;
+  }
+  .card .label {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .card .value { font-size: 24px; font-weight: 700; color: var(--accent); }
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0 18px; font-size: 13.5px; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+  td:not(:first-child), th:not(:first-child) { text-align: right; }
+  tr:nth-child(even) td { background: var(--bg-soft); }
+  .empty { color: var(--muted); font-style: italic; }
+  .status-pass { color: #2e7d4f; }
+  .status-flag { color: #a06a00; font-weight: 600; }
+  .status-fail { color: #b3352b; font-weight: 700; }
+  .caveat {
+    background: var(--bg-soft); border-left: 4px solid var(--accent);
+    padding: 10px 14px; font-size: 13px; color: var(--muted); margin: 12px 0;
+  }
+  ul, ol { margin: 8px 0 8px 22px; padding: 0; }
+  li { margin: 4px 0; }
+  @media print {
+    body { max-width: none; padding: 0; font-size: 11.5px; }
+    section { break-before: page; page-break-before: always; margin-top: 0; padding-top: 18px; }
+    section.first { break-before: auto; page-break-before: auto; }
+    .card { border: 1px solid #bbb; }
+    tr, .card { break-inside: avoid; page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+{%- set es = exec_summary or {} -%}
+{%- set ia = immediate_actions or {} -%}
+{%- set ls = lost_sales or {} -%}
+{%- set lst = ls.get('total') or {} -%}
+{%- set sp = stock_position or {} -%}
+{%- set spd = sp.get('dead_stock') or {} -%}
+{%- set cat = catalogue or {} -%}
+{%- set dq = data_quality or {} -%}
+{%- set cur = currency or '£' -%}
+
+<header class="report-head">
+  <h1>Inventory audit — {{ client }}</h1>
+  <div class="meta">
+    Run {{ run_id or 'n/a' }} · generated {{ generated or 'n/a' }} ·
+    all money figures are estimates stated as ranges
+  </div>
+</header>
+
+<!-- 1 ==================================================================== -->
+<section class="first" id="exec-summary">
+  <h2>1. Executive summary</h2>
+  {%- set lsr = es.get('lost_sales_range') %}
+  {%- if not lsr and (lst.get('revenue_low') is not none or lst.get('revenue_high') is not none) %}
+    {%- set lsr = lst.get('revenue_low') | money_range(lst.get('revenue_high'), cur) %}
+  {%- endif %}
+  {%- set dsv = es.get('dead_stock_value') %}
+  {%- if dsv is none %}{% set dsv = spd.get('total_value') %}{% endif %}
+  {%- set cap = es.get('capital_tied_up') %}
+  {%- if cap is none %}{% set cap = sp.get('overstock_value') %}{% endif %}
+  <div class="cards">
+    <div class="card">
+      <div class="label">Estimated lost sales</div>
+      <div class="value">{{ lsr or 'not assessed' }}</div>
+      <div class="sub">revenue missed while items were unavailable (range)</div>
+    </div>
+    <div class="card">
+      <div class="label">Dead stock</div>
+      <div class="value">{{ dsv | money(cur) }}</div>
+      <div class="sub">at cost; no sale in {{ (spd.get('threshold_weeks') or 8) }}+ weeks</div>
+    </div>
+    <div class="card">
+      <div class="label">Capital tied up in overstock</div>
+      <div class="value">{{ cap | money(cur) }}</div>
+      <div class="sub">stock beyond a defensible cover level</div>
+    </div>
+  </div>
+  <p class="note">
+    These are estimates built from your sales history, stated as ranges with the
+    assumptions documented in each section below. They are intended to be
+    directionally reliable, not exact.
+  </p>
+</section>
+
+<!-- 2 ==================================================================== -->
+<section id="immediate-actions">
+  <h2>2. Immediate actions</h2>
+
+  <h3>Imminent runouts (A-class items)</h3>
+  {%- set runouts = ia.get('runouts') or [] %}
+  {%- if runouts %}
+  <table>
+    <thead><tr><th>SKU</th><th>Location</th><th>On hand</th><th>Baseline / wk</th><th>Weeks of cover</th></tr></thead>
+    <tbody>
+    {%- for r in runouts %}
+      <tr>
+        <td>{{ r.get('sku') }}</td>
+        <td>{{ r.get('location') }}</td>
+        <td>{{ r.get('qty_on_hand') | num }}</td>
+        <td>{{ r.get('baseline_weekly') | num1 }}</td>
+        <td>{{ r.get('weeks_of_cover') | num1 }}</td>
+      </tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- else %}
+  <p class="empty">No imminent runouts identified among A-class items as of the stock export.</p>
+  {%- endif %}
+
+  <h3>Repeat stockout offenders</h3>
+  {%- set offenders = ia.get('repeat_offenders') or [] %}
+  {%- if offenders %}
+  <table>
+    <thead><tr><th>SKU</th><th>Location</th><th>Episodes</th><th>Total days out</th><th>Est. lost revenue</th></tr></thead>
+    <tbody>
+    {%- for r in offenders %}
+      <tr>
+        <td>{{ r.get('sku') }}</td>
+        <td>{{ r.get('location') }}</td>
+        <td>{{ r.get('episodes') | num }}</td>
+        <td>{{ r.get('total_days') | num }}</td>
+        <td>{{ r.get('est_lost_revenue') | money(cur) }}</td>
+      </tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- else %}
+  <p class="empty">No SKUs crossed the repeat-offender threshold in the analysis window.</p>
+  {%- endif %}
+</section>
+
+<!-- 3 ==================================================================== -->
+<section id="lost-sales">
+  <h2>3. Lost sales analysis</h2>
+  <p>
+    Estimated lost revenue:
+    <strong>{{ lst.get('revenue_low') | money_range(lst.get('revenue_high'), cur) }}</strong>
+    ({{ lst.get('units_low') | num }}&ndash;{{ lst.get('units_high') | num }} units)
+    across {{ lst.get('episodes') | num }} stockout episodes assessed at High or
+    Medium confidence.
+  </p>
+
+  <h3>By month</h3>
+  {%- set by_month = ls.get('by_month') or [] %}
+  {%- if by_month %}
+  <table>
+    <thead><tr><th>Month</th><th>Units (low)</th><th>Units (high)</th><th>Revenue (low)</th><th>Revenue (high)</th></tr></thead>
+    <tbody>
+    {%- for r in by_month %}
+      <tr>
+        <td>{{ r.get('month') }}</td>
+        <td>{{ r.get('lost_units_low') | num }}</td>
+        <td>{{ r.get('lost_units_high') | num }}</td>
+        <td>{{ r.get('lost_revenue_low') | money(cur) }}</td>
+        <td>{{ r.get('lost_revenue_high') | money(cur) }}</td>
+      </tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- else %}
+  <p class="empty">No monetisable stockout episodes were detected in the window.</p>
+  {%- endif %}
+
+  <h3>Top SKUs by estimated lost revenue</h3>
+  {%- set top_skus = ls.get('top_skus') or [] %}
+  {%- if top_skus %}
+  <table>
+    <thead><tr><th>SKU</th><th>Location</th><th>Days out</th><th>Episodes</th><th>Lost revenue (low)</th><th>Lost revenue (high)</th><th>Confidence</th></tr></thead>
+    <tbody>
+    {%- for r in top_skus[:20] %}
+      <tr>
+        <td>{{ r.get('sku') }}</td>
+        <td>{{ r.get('location') }}</td>
+        <td>{{ r.get('stockout_days') | num }}</td>
+        <td>{{ r.get('episodes') | num }}</td>
+        <td>{{ r.get('lost_revenue_low') | money(cur) }}</td>
+        <td>{{ r.get('lost_revenue_high') | money(cur) }}</td>
+        <td>{{ r.get('confidence') }}</td>
+      </tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- else %}
+  <p class="empty">No SKU-level lost-sales detail available.</p>
+  {%- endif %}
+
+  <h3>Method note</h3>
+  <p class="note">
+    {%- if ls.get('method_note') %}{{ ls.get('method_note') }}{% else -%}
+    Stockout days are inferred from statistically improbable zero-sale runs,
+    cross-checked against the rest of the catalogue to separate item-level
+    stockouts from closures. Lost units are each item's normal daily rate
+    multiplied by its inferred days out; revenue uses the item's median selling
+    price. The low end of the range counts High-confidence episodes only; the
+    high end adds Medium-confidence episodes plus an allowance
+    ({{ (lst.get('not_assessable_value_share') or 0) | pct }} of revenue) for
+    slow-moving items whose availability cannot be assessed from sales gaps.
+    {%- endif %}
+  </p>
+</section>
+
+<!-- 4 ==================================================================== -->
+<section id="stock-position">
+  <h2>4. Stock position</h2>
+
+  <h3>Cover distribution</h3>
+  {%- set cover_buckets = sp.get('cover_buckets') or [] %}
+  {%- if cover_buckets %}
+  <table>
+    <thead><tr><th>Bucket</th><th>SKUs</th><th>Units</th><th>Value at cost</th></tr></thead>
+    <tbody>
+    {%- for r in cover_buckets %}
+      <tr>
+        <td>{{ r.get('bucket') }}</td>
+        <td>{{ r.get('n_skus') | num }}</td>
+        <td>{{ r.get('units') | num }}</td>
+        <td>{{ r.get('value') | money(cur) }}</td>
+      </tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- else %}
+  <p class="empty">No stock export was supplied; cover analysis unavailable.</p>
+  {%- endif %}
+
+  <h3>Dead stock</h3>
+  {%- set dead_buckets = spd.get('buckets') or [] %}
+  {%- if dead_buckets %}
+  <table>
+    <thead><tr><th>Age since last sale</th><th>SKUs</th><th>Units</th><th>Value at cost</th></tr></thead>
+    <tbody>
+    {%- for r in dead_buckets %}
+      <tr>
+        <td>{{ r.get('bucket') }}</td>
+        <td>{{ r.get('n_skus') | num }}</td>
+        <td>{{ r.get('units') | num }}</td>
+        <td>{{ r.get('value') | money(cur) }}</td>
+      </tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  <p class="note">
+    The oldest bucket is best treated as a write-off decision: the capital is
+    already spent, and the shelf or warehouse space has a carrying cost.
+  </p>
+  {%- else %}
+  <p class="empty">No dead stock identified.</p>
+  {%- endif %}
+
+  <p>
+    Total stock value at cost: <strong>{{ sp.get('total_stock_value') | money(cur) }}</strong>.
+    Of this, <strong>{{ sp.get('overstock_value') | money(cur) }}</strong> sits in
+    overstock or severe overstock, and
+    <strong>{{ spd.get('total_value') | money(cur) }}</strong> in dead stock.
+  </p>
+</section>
+
+<!-- 5 ==================================================================== -->
+<section id="catalogue">
+  <h2>5. Catalogue structure</h2>
+
+  <h3>Value concentration (ABC, trailing 52 weeks)</h3>
+  {%- set abc = cat.get('abc') or {} %}
+  {%- if abc %}
+  <table>
+    <thead><tr><th>Class</th><th>SKUs</th><th>Share of catalogue</th><th>Share of revenue</th></tr></thead>
+    <tbody>
+    {%- for cls in ['A', 'B', 'C'] %}{% set r = abc.get(cls) or {} %}
+      <tr>
+        <td>{{ cls }}</td>
+        <td>{{ r.get('n_skus') | num }}</td>
+        <td>{{ r.get('count_share') | pct }}</td>
+        <td>{{ r.get('revenue_share') | pct }}</td>
+      </tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  <p class="note">Top 10 SKUs account for {{ cat.get('top10_revenue_share') | pct }} of trailing-52-week revenue.</p>
+  {%- else %}
+  <p class="empty">Concentration analysis unavailable.</p>
+  {%- endif %}
+
+  <h3>Forecastability</h3>
+  {%- set fc = cat.get('forecastability') or {} %}
+  {%- if fc %}
+  <table>
+    <thead><tr><th>Demand pattern</th><th>SKUs</th><th>Share of catalogue</th><th>Share of revenue</th></tr></thead>
+    <tbody>
+    {%- for cls in ['smooth', 'intermittent', 'erratic', 'lumpy'] %}{% set r = fc.get(cls) or {} %}
+      <tr>
+        <td>{{ cls }}</td>
+        <td>{{ r.get('n_skus') | num }}</td>
+        <td>{{ r.get('count_share') | pct }}</td>
+        <td>{{ r.get('revenue_share') | pct }}</td>
+      </tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- else %}
+  <p class="empty">Forecastability split unavailable.</p>
+  {%- endif %}
+
+  {%- set life = cat.get('lifecycle') or {} %}
+  {%- if life %}
+  <p class="note">
+    Lifecycle: {{ life.get('active') | num }} active,
+    {{ life.get('new') | num }} new (&lt; 8 weeks),
+    {{ life.get('dormant') | num }} dormant SKUs.
+  </p>
+  {%- endif %}
+</section>
+
+<!-- 5b =================================================================== -->
+{%- set pb = playbook or {} %}
+{%- if pb.get('by_action') %}
+<section id="playbook">
+  <h2>5b. Management playbook (how to handle each item)</h2>
+  <p class="note">
+    Before any forecast runs, each SKU is routed by value (ABC), steadiness
+    (XYZ) and lifecycle to a handling rule. High-value steady items are
+    forecast and reviewed; erratic items are buffered with reorder rules;
+    dormant items are run-down decisions. This uses sales history only &mdash;
+    no stock file required.
+  </p>
+  <table>
+    <thead><tr><th>Action</th><th class="r">SKUs</th><th class="r">Revenue (52w)</th><th class="r">Share</th></tr></thead>
+    <tbody>
+    {%- for a in pb.get('by_action') %}
+      <tr>
+        <td>{{ a.action_label }}</td>
+        <td class="r">{{ a.n_skus | num }}</td>
+        <td class="r">{{ a.revenue_52w | money }}</td>
+        <td class="r">{{ (a.revenue_share * 100) | round(1) }}%</td>
+      </tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- if pb.get('a_breakout') %}
+  <h3>A-items broken out (the tier worth forecasting)</h3>
+  <p class="note">A-items split by steadiness / lifecycle. The X (steady) cells
+    are forecast tightly; Y/Z and dormant cells need buffering or run-down, not
+    a weekly forecast &mdash; even among your best sellers.</p>
+  <table>
+    <thead><tr><th>XYZ / lifecycle</th><th class="r">SKUs</th><th class="r">Revenue (52w)</th></tr></thead>
+    <tbody>
+    {%- for c in pb.get('a_breakout') %}
+      <tr><td>{{ c.cell }}</td><td class="r">{{ c.n_skus | num }}</td><td class="r">{{ c.revenue_52w | money }}</td></tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- endif %}
+</section>
+{%- endif %}
+
+<!-- 6 ==================================================================== -->
+<section id="routing">
+  <h2>6. Recommended starting model</h2>
+  {%- if routing %}
+  {%- set rtable = routing.get('table') or [] %}
+  {%- if rtable %}
+  <table>
+    <thead><tr><th>Segment</th><th>Champion</th><th>Fallback</th><th>SKUs</th><th>Evidence</th></tr></thead>
+    <tbody>
+    {%- for r in rtable %}
+      <tr>
+        <td>{{ r.get('segment') }}</td>
+        <td>{{ r.get('champion') }}</td>
+        <td>{{ r.get('fallback') }}</td>
+        <td>{{ r.get('n_skus') | num }}</td>
+        <td>{{ r.get('evidence') or '' }}</td>
+      </tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- endif %}
+  {%- if routing.get('note') %}<p class="note">{{ routing.get('note') }}</p>{% endif %}
+  <div class="caveat">
+    <strong>Provisional selection.</strong> This routing was chosen on history
+    that is itself censored by past stockouts, so the comparison is relative —
+    each method is scored against a naive floor, never on absolute accuracy.
+    Expect the selection to shift once availability snapshots are collected,
+    and re-run it before committing orders to any model.
+  </div>
+  {%- else %}
+  <p class="empty">
+    Model selection is pending: either the sales history is too short to run a
+    trustworthy nested backtest, or this run covered Phase A only. Until then
+    the defensible default is the robust trailing median (M5) for regular
+    sellers and a slow-mover method (TSB) for intermittent items.
+  </p>
+  {%- endif %}
+</section>
+
+<!-- 6b =================================================================== -->
+{%- set dec = decisions or {} %}
+{%- if dec.get('summary') %}
+<section id="decisions">
+  <h2>6b. Decision policy (what the engine decided, and why)</h2>
+  <p class="note">
+    Each SKU is routed to an action and a forecasting model by a fixed
+    professional rulebook (value &times; steadiness &times; lifecycle; rules
+    first, backtest breaks ties). Every decision below cites the rule that
+    fired. Policy version {{ dec.get('policy_version') }}.
+  </p>
+  <table>
+    <thead><tr><th>Action</th><th class="r">SKUs</th><th class="r">Revenue share</th></tr></thead>
+    <tbody>
+    {%- for a in dec.get('summary') %}
+      <tr><td>{{ a.action }}</td><td class="r">{{ a.n_skus | num }}</td><td class="r">{{ (a.revenue_share * 100) | round(1) }}%</td></tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- if dec.get('assumptions') %}
+  <h3>Assumptions made (where data was missing)</h3>
+  <ul class="note">
+    {%- for a in dec.get('assumptions') %}<li>{{ a }}</li>{%- endfor %}
+  </ul>
+  {%- endif %}
+  <h3>Sample decisions</h3>
+  <table>
+    <thead><tr><th>SKU</th><th>Action</th><th>Model</th><th>Confidence</th><th>Reason</th></tr></thead>
+    <tbody>
+    {%- for d in dec.get('examples') %}
+      <tr><td>{{ d.sku }}</td><td>{{ d.action }}</td><td>{{ d.model }}</td><td>{{ d.confidence }}</td><td class="note">{{ d.reason }}</td></tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  <p class="note">Full per-SKU decisions, reasons and assumptions are in the workbook (<em>decisions</em> sheet).</p>
+</section>
+{%- endif %}
+
+<!-- 6c =================================================================== -->
+{%- set ft = forward_test or {} %}
+{%- if ft.get('headline') %}
+{%- set h = ft.get('headline') %}
+<section id="forward-test">
+  <h2>6c. Forward test (how the chosen models would have done)</h2>
+  <p class="note">{{ ft.get('note') }}</p>
+  <table>
+    <tbody>
+      <tr><td>Validation WAPE (honest, untouched weeks)</td><td class="r">{{ h.val_wape if h.val_wape is not none else 'n/a' }}</td></tr>
+      <tr><td>Selection WAPE (weeks used to pick)</td><td class="r">{{ h.sel_wape if h.sel_wape is not none else 'n/a' }}</td></tr>
+      <tr><td>Selection gap (winner's curse)</td><td class="r">{{ h.gap if h.gap is not none else 'n/a' }}</td></tr>
+      <tr><td>Bias on validation weeks</td><td class="r">{{ h.bias if h.bias is not none else 'n/a' }}%</td></tr>
+      <tr><td>Forward-test origins (pick / holdout)</td><td class="r">{{ h.n_origins_sel }} / {{ h.n_origins_val }}</td></tr>
+      <tr><td>Scoring weeks excluded as censored</td><td class="r">{{ h.excluded_pct }}%</td></tr>
+    </tbody>
+  </table>
+  {%- if h.excluded_pct and h.excluded_pct > 25 %}
+  <p class="note"><strong>Caution:</strong> over 25% of scoring weeks were excluded as
+    likely-censored, so this forward test is thin &mdash; treat the model ranking as
+    provisional until a stock snapshot de-censors the history.</p>
+  {%- endif %}
+
+  {%- if ft.get('by_segment') %}
+  <h3>By segment (the model the engine chose)</h3>
+  <table>
+    <thead><tr><th>Segment</th><th>Chosen model</th><th class="r">Val WAPE</th><th class="r">Bias</th><th class="r">Gap</th></tr></thead>
+    <tbody>
+    {%- for r in ft.get('by_segment') %}
+      <tr><td>{{ r.segment }}</td><td>{{ r.chosen_model }}</td>
+          <td class="r">{{ r.val_wape if r.val_wape is not none else 'n/a' }}</td>
+          <td class="r">{{ r.bias if r.bias is not none else 'n/a' }}%</td>
+          <td class="r">{{ r.gap if r.gap is not none else 'n/a' }}</td></tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- endif %}
+
+  {%- set origins = ft.get('by_origin') %}
+  {%- if origins %}
+  <h3>Rolled forward, one cutoff at a time</h3>
+  <p class="note">Each row is a forward test: stand at that date, predict the next
+    weeks, compare to what sold. Watch how accuracy moves &mdash; a spike hitting
+    every model at once is an event none could see, not a model failure.</p>
+  <table>
+    <thead><tr><th>Cutoff</th><th>Block</th><th class="r">WAPE</th><th class="r">Bias</th></tr></thead>
+    <tbody>
+    {%- for r in origins %}
+      <tr><td>{{ r.origin_date }}</td><td>{{ r.block }}</td>
+          <td class="r">{{ r.wape if r.wape is not none else 'n/a' }}</td>
+          <td class="r">{{ r.bias if r.bias is not none else 'n/a' }}%</td></tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- endif %}
+</section>
+{%- endif %}
+
+<!-- 7 ==================================================================== -->
+<section id="data-quality">
+  <h2>7. Data quality</h2>
+  {%- set checks = dq.get('checks') or [] %}
+  {%- if dq.get('verdict') %}
+  <p>
+    Phase-0 verdict: <strong>{{ dq.get('verdict') }}</strong>
+    ({{ dq.get('n_pass') | num }} checks passed, {{ dq.get('n_flag') | num }} flagged,
+    {{ dq.get('n_fail') | num }} failed).
+  </p>
+  {%- endif %}
+  {%- set halts = dq.get('halt_reasons') or [] %}
+  {%- if halts %}
+  <div class="caveat"><strong>Halt reasons:</strong>
+    <ul>{% for h in halts %}<li>{{ h }}</li>{% endfor %}</ul>
+  </div>
+  {%- endif %}
+  {%- if checks %}
+  <table>
+    <thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead>
+    <tbody>
+    {%- for c in checks %}
+      <tr>
+        <td>{{ c.get('name') }}</td>
+        <td class="status-{{ c.get('status') }}" style="text-align:left">{{ c.get('status') }}</td>
+        <td style="text-align:left">{{ c.get('detail') }}</td>
+      </tr>
+    {%- endfor %}
+    </tbody>
+  </table>
+  {%- else %}
+  <p class="empty">No health-check detail available for this run.</p>
+  {%- endif %}
+
+  {%- set proc = dq.get('processing') or {} %}
+  {%- if proc %}
+  <h3>Preprocessing activity</h3>
+  <table>
+    <thead><tr><th>Measure</th><th>Count</th></tr></thead>
+    <tbody>
+      <tr><td>Rows dropped or excluded by cleaning rules</td><td>{{ proc.get('rows_dropped_total') | num }}</td></tr>
+      <tr><td>Cells winsorized (untagged spikes capped)</td><td>{{ proc.get('cells_winsorized') | num }}</td></tr>
+      <tr><td>Promo weeks detected from price history</td><td>{{ proc.get('promo_weeks_detected') | num }}</td></tr>
+      <tr><td>Bulk orders excluded from the baseline</td><td>{{ proc.get('bulk_orders_excluded') | num }}</td></tr>
+      <tr><td>Total audit-log entries</td><td>{{ proc.get('total_log_rows') | num }}</td></tr>
+    </tbody>
+  </table>
+  {%- endif %}
+</section>
+
+<!-- 8 ==================================================================== -->
+<section id="limitations">
+  <h2>8. What we could not see</h2>
+  <p class="note">
+    This audit works from sales history and a single stock export. It infers
+    availability rather than observing it, and the following limits apply to
+    every number above.
+  </p>
+  <ul>
+  {%- for l in (limitations or []) %}
+    <li>{{ l }}</li>
+  {%- else %}
+    <li>
+      No run-specific limitations were recorded, but the structural ones still
+      apply: stockouts shorter than the detection threshold, items selling too
+      slowly for their gaps to be readable, and days excluded as possible
+      closures are not counted in any total.
+    </li>
+  {%- endfor %}
+  </ul>
+</section>
+
+<!-- 9 ==================================================================== -->
+<section id="recommendations">
+  <h2>9. Recommendations</h2>
+  {%- set recs = recommendations or [] %}
+  {%- if recs %}
+  <ol>
+  {%- for r in recs %}
+    {%- if r is mapping %}
+    <li><strong>{{ r.get('title') }}</strong>{% if r.get('detail') %} — {{ r.get('detail') }}{% endif %}</li>
+    {%- else %}
+    <li>{{ r }}</li>
+    {%- endif %}
+  {%- endfor %}
+  </ol>
+  {%- else %}
+  <p class="empty">
+    Recommendations will be finalised with the client; at minimum, begin a daily
+    stock snapshot (date, SKU, location, quantity on hand) — it cannot be
+    backfilled and it converts every inferred figure above into an observed one.
+  </p>
+  {%- endif %}
+</section>
+
+</body>
+</html>

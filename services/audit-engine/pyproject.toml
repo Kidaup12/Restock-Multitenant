@@ -1,0 +1,44 @@
+[project]
+name = "audit-engine"
+version = "0.1.0"
+description = "Retail inventory audit engine: lost sales, dead stock, overstock, data quality"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pandas>=2.2",
+    "numpy>=1.26",
+    "pandera>=0.20",
+    "pydantic>=2.7",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "pyarrow>=16.0",
+    "xlsxwriter>=3.2",
+    "jinja2>=3.1",
+    "statsmodels>=0.14",
+    "joblib>=1.4",
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+pdf = ["playwright>=1.44"]
+ml = ["lightgbm>=4.3"]
+
+[project.scripts]
+audit = "audit_engine.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "hypothesis>=6.100",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/audit_engine"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
