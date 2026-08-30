@@ -1,5 +1,6 @@
 import { Redis } from "ioredis";
 import { createSyncQueue, enqueueSyncOnce, type EnqueueResult, type SyncQueue } from "@wezesha/queue";
+import { intakeConfigured, intakeEnqueue } from "@/lib/worker-intake";
 
 /**
  * Web-side POS-sync enqueue — the "feed issue, re-pull that day" action on a
@@ -31,7 +32,9 @@ function getSyncQueue(): SyncQueue {
   return globalForQueue.wezeshaSyncQueue;
 }
 
-/** Enqueue a POS re-pull for the tenant unless one is already queued/running. */
+/** Enqueue a POS re-pull for the tenant unless one is already queued/running.
+ *  Same transport choice as lib/shopify/queue. */
 export function enqueuePosSync(tenantId: string): Promise<EnqueueResult> {
-  return enqueueSyncOnce(getSyncQueue(), { tenantId, source: "pos" });
+  const data = { tenantId, source: "pos" } as const;
+  return intakeConfigured() ? intakeEnqueue(data) : enqueueSyncOnce(getSyncQueue(), data);
 }

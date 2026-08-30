@@ -8,6 +8,7 @@ import {
   type EmailCronQueue,
 } from "./crons";
 import { startHeartbeat } from "./heartbeat";
+import { startIntake } from "./intake";
 import {
   OPS_CRON_QUEUE,
   createOpsCronQueue,
@@ -67,7 +68,8 @@ import { createSyncWorker } from "./worker";
  *   EMAIL_FROM            — outbound sender ("Name <address>" or bare address);
  *                           required once RESEND_API_KEY is set
  *   EMAIL_CRONS           — "1" registers + runs the email cron schedules
- *                           (weekly summaries); unset keeps dev/CI quiet
+ *                           (weekly summaries + monthly owner reports); unset
+ *                           keeps dev/CI quiet
  *   OPS_CRONS             — "1" registers + runs the ops cron schedules
  *                           (daily plan-limit checks); unset keeps dev/CI quiet
  *   POS_CRONS             — "1" registers + runs the POS cron schedules
@@ -106,6 +108,22 @@ async function main(): Promise<void> {
   });
   console.log("worker: listening on queue \"sync\"");
 
+  // HTTP intake for the web app. Only starts when a secret is configured:
+  // unauthenticated job submission is worse than the feature being absent, so
+  // this fails closed rather than open. Unset is the correct configuration when
+  // the web app shares this platform's private network and talks to Redis
+  // directly.
+  const intakeSecret = process.env.INTERNAL_API_SECRET;
+  const intake = intakeSecret
+    ? await startIntake({
+        port: Number(process.env.PORT ?? 8082),
+        secret: intakeSecret,
+        queue: createSyncQueue(connection),
+        publisher,
+      })
+    : null;
+  if (!intakeSecret) console.log("worker: INTERNAL_API_SECRET unset - HTTP intake disabled");
+
   let cronQueue: EmailCronQueue | null = null;
   let cronWorker: Worker | null = null;
   if (process.env.EMAIL_CRONS === "1") {
@@ -116,7 +134,7 @@ async function main(): Promise<void> {
       console.error(`worker: cron ${job?.id} failed`, err);
       captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: "email-crons" });
     });
-    console.log("worker: email crons registered (weekly summary)");
+    console.log("worker: email crons registered (weekly summary + monthly report)");
   }
 
   let opsQueue: OpsCronQueue | null = null;
@@ -213,6 +231,7 @@ async function main(): Promise<void> {
     closing = true;
     console.log(`worker: ${signal} received, shutting down`);
     stopHeartbeat();
+    void intake?.close();
     void Promise.all([
       worker.close(), // waits for the in-flight job before releasing it
       cronWorker?.close(),

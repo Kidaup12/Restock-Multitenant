@@ -146,13 +146,16 @@ describe.skipIf(!runnable)("email crons (real redis + db)", () => {
     const send = async (message: EmailMessage) => {
       sent.push(message);
     };
+    // The weekly path now sends the rich owner report (week-by-week trend),
+    // built via buildOwnerReport + renderReportEmail, under the same
+    // "weekly_summary" opt-out kind.
     await expect(crons.sendWeeklySummary(tenantId, send)).resolves.toBe(true);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe(ALERT_EMAIL);
-    expect(sent[0]!.subject).toBe("Weekly stock summary — Crons Test");
-    expect(sent[0]!.text).toContain("Revenue, last 30 days: KES 8,600");
-    expect(sent[0]!.text).toContain("Products stocked out right now: 1");
-    expect(sent[0]!.text).toContain("Marula Oil 50ml");
+    expect(sent[0]!.subject).toContain("Weekly report — Crons Test");
+    expect(sent[0]!.kind).toBe("weekly_summary");
+    expect(sent[0]!.html).toContain("How your shop is trending");
+    expect(sent[0]!.text).toContain("Weekly report — Crons Test");
   });
 
   it("labels the money in the workspace's own currency", async () => {

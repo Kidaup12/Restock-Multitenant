@@ -19,6 +19,7 @@ import { cn } from "@/lib/cn";
 import { formatNumber } from "@/lib/money";
 import type { CatalogueRow } from "@/lib/data/stock";
 import type { DashboardTab, DashboardTable } from "@/lib/data/today";
+import { DeadStockExportBar } from "./dead-stock-export";
 
 /**
  * The morning's products, in the five piles worth looking at, with the four
@@ -231,6 +232,13 @@ export function ProductTabs({
             <span className="ml-auto text-2xs text-ink-muted">
               showing the first {rows.length} of {formatNumber(data.counts[tab])}
             </span>
+          )}
+          {/* The download is the whole dead pile, not the capped page above —
+              offered on this tab only, where the file has a definition. */}
+          {tab === "dead" && data.deadStockExport.length > 0 && (
+            <div className={data.capped[tab] ? "" : "ml-auto"}>
+              <DeadStockExportBar rows={data.deadStockExport} canViewCosts={canViewCosts} />
+            </div>
           )}
         </div>
 

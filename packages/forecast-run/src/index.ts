@@ -32,3 +32,26 @@ export {
   type OwnerPriorRecord,
   type OwnerPriorScope,
 } from "./owner-priors";
+
+// Onboarding audit — one-shot handshake with the external Python audit-engine
+// that seeds a new tenant's per-class champions from a real model selection.
+export {
+  runOnboardingAudit,
+  engineModelToDemandMethod,
+  segmentChampionsToClasses,
+  type OnboardingAuditOutcome,
+} from "./onboarding-audit";
+
+// The audit-engine wire: sales-CSV export, run + poll, and the typed errors the
+// orchestrator branches on.
+export {
+  exportSalesCsv,
+  runEngineAudit,
+  auditEngineConfigured,
+  EngineHaltedError,
+  EngineFailedError,
+  EngineUnreachableError,
+  type RoutingTable,
+  type RoutingSegment,
+  type EngineAuditResult,
+} from "./engine-client";

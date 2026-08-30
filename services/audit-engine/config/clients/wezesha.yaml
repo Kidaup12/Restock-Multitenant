@@ -1,0 +1,9 @@
+selection:
+  selection_origins_minimum: 3
+  validation_origins_minimum: 2
+  selection_origins_target: 4
+  validation_origins_target: 2
+  step_weeks: 2
+  horizon_weeks: 2
+  min_weeks_nested: 25
+  min_weeks_inner_only: 19

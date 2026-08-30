@@ -118,6 +118,37 @@ export {
 // ABC classification
 export { assignAbc, dailySalesValue, type AbcInput, type AbcCategory } from "./abc";
 
+// ABC-class minimum serving rate
+export { applyAbcRateFloor, ABC_RATE_FLOORS } from "./rate-floor";
+
+// Ingest-health gate ("no data ≠ no demand")
+export {
+  assessIngestHealth,
+  DEFAULT_INGEST_HEALTH,
+  type DailyPoint,
+  type IngestHealthConfig,
+  type IngestVerdict,
+} from "./ingest-health";
+
+// Transfer sizing (pure engine, shared by web + worker)
+export {
+  sizeTransfers,
+  destinationShares,
+  clampCoverDays,
+  clampWindowDays,
+  NO_RATE_EPSILON,
+  DEFAULT_COVER_DAYS,
+  DEFAULT_WINDOW_DAYS,
+  COVER_DAY_CHOICES,
+  MIN_COVER_DAYS,
+  MAX_COVER_DAYS,
+  MIN_WINDOW_DAYS,
+  MAX_WINDOW_DAYS,
+  type DestinationPosition,
+  type SizedTransfer,
+  type RateBasis,
+} from "./transfers";
+
 // Tenant config resolution (pure)
 export {
   methodToPolicy,
