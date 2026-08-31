@@ -43,6 +43,11 @@ const DELIBERATELY_UNGUARDED = [
   // This IS the step-up: it verifies the password and mints the grant. Its own
   // guards are the throttle and the gate.
   "step-up-actions.ts:confirmStepUp",
+  // The same step-up for an account that has no password to be asked for -
+  // created through email-code sign-in. Same throttle, same lockout, same
+  // 30-minute grant; guarding it with hasStepUp would mean needing a grant to
+  // get a grant, which is how such an account was locked out of its own role.
+  "step-up-actions.ts:confirmStepUpCode",
 ];
 
 function actionFiles(dir: string): string[] {
