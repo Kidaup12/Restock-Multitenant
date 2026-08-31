@@ -245,6 +245,45 @@ export async function clearShopifyAppCredentials(): Promise<ConnectResult> {
 }
 
 /**
+ * Remove a store from the workspace outright.
+ *
+ * Disconnect is a PAUSE: it stamps uninstalledAt and keeps the row and its
+ * encrypted token so Reconnect can reuse them. Nothing deleted the row, and
+ * `shopDomain` is unique across the whole database — so a shop stayed claimed
+ * by its workspace permanently. It kept showing on this page after a
+ * disconnect, and no other workspace could ever connect it. A merchant who had
+ * disconnected and cleared their credentials still could not get rid of it.
+ *
+ * Scope is deliberate. This erases the LINK — the token, the sync cursors and
+ * the run history. Products and sales history stay: they are the shop's
+ * trading record and the forecast is built on them, so throwing them away is a
+ * different decision that belongs behind a different question. (Shopify's own
+ * shop/redact does delete them; that is a legal erasure, not a disconnect.)
+ *
+ * The token goes last, as in the redact path: while it exists the store is
+ * still reachable, and dropping it early would strand the rows above it.
+ */
+export async function removeShopifyStore(): Promise<ConnectResult> {
+  const actor = await actorContext();
+  if (!actor) return err("Only owners and admins can remove a store.");
+
+  const db = prismaForTenant(actor.tenantId);
+  const connection = await db.shopifyConnection.findFirst({ select: { shopDomain: true } });
+  if (!connection) return err("There is no store to remove.");
+
+  await db.ingestCursor.deleteMany({ where: { tenantId: actor.tenantId, source: "shopify" } });
+  await db.syncRun.deleteMany({ where: { tenantId: actor.tenantId, source: "shopify" } });
+  await db.shopifyConnection.deleteMany({ where: { tenantId: actor.tenantId } });
+
+  await audit(actor.tenantId, "shopify_store_removed", actor.userId, {
+    shopDomain: connection.shopDomain,
+  });
+
+  revalidatePath("/settings/connections");
+  return { ok: true, message: `${connection.shopDomain} removed. Your products and sales history are unchanged.` };
+}
+
+/**
  * Answer "is this store actually reachable right now", on demand.
  *
  * The question this replaces is a bad one: today the only way to find out is to

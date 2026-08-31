@@ -14,6 +14,7 @@ import type { SyncRunView } from "@/lib/shopify/sync-run";
 import {
   clearShopifyAppCredentials,
   connectShopifyWithToken,
+  removeShopifyStore,
   saveShopifyAppCredentials,
   testShopifyConnection,
 } from "./actions";
@@ -106,7 +107,7 @@ export function ShopifyConnectionCard({
   const [clientId, setClientId] = useState(appClientId ?? "");
   const [apiSecret, setApiSecret] = useState("");
   const [busy, setBusy] = useState<
-    "sync" | "disconnect" | "token" | "test" | "creds" | "clearCreds" | "install" | null
+    "sync" | "disconnect" | "token" | "test" | "creds" | "clearCreds" | "install" | "remove" | null
   >(null);
   // Covers the gap between the queue accepting the job and the worker opening
   // its row — the one moment a run exists but nothing durable says so.
@@ -310,6 +311,33 @@ export function ShopifyConnectionCard({
       }
     } catch {
       setNotice({ tone: "negative", text: "Could not save the credentials." });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Disconnect pauses; this erases the link so the store stops being this
+   *  workspace's, and the domain is free for another one. */
+  async function removeStore() {
+    const ok = await confirm({
+      title: `Remove ${connection?.shopDomain ?? "this store"} from this workspace`,
+      body: "The connection, its token and its sync history go. Your products and sales history stay, so the forecast keeps working. You can connect a different store afterwards.",
+      confirmLabel: "Remove store",
+    });
+    if (!ok) return;
+    setBusy("remove");
+    setNotice(null);
+    try {
+      const res = await removeShopifyStore();
+      if (res.ok) {
+        setShop("");
+        setTokenShop("");
+        setToken("");
+        setNotice({ tone: "positive", text: res.message });
+        router.refresh();
+      } else {
+        setNotice({ tone: "negative", text: res.error });
+      }
     } finally {
       setBusy(null);
     }
@@ -761,6 +789,16 @@ export function ShopifyConnectionCard({
                   disabled={busy !== null}
                 >
                   Disconnect
+                </Button>
+              )}
+              {canManage && (
+                <Button
+                  variant="ghost"
+                  onClick={removeStore}
+                  loading={busy === "remove"}
+                  disabled={busy !== null}
+                >
+                  Remove store
                 </Button>
               )}
               {/* The way back matches the way in: a store that installed our
