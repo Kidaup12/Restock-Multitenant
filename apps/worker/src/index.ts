@@ -39,6 +39,13 @@ import {
   type CostCronQueue,
 } from "./cost-moved-cron";
 import {
+  QB_CRON_QUEUE,
+  createQuickBooksCronQueue,
+  createQuickBooksCronWorker,
+  registerQuickBooksCronSchedules,
+  type QuickBooksCronQueue,
+} from "./quickbooks-cron";
+import {
   SNAPSHOT_CRON_QUEUE,
   createSnapshotCronQueue,
   createSnapshotCronWorker,
@@ -77,6 +84,7 @@ import { createSyncWorker } from "./worker";
  *   FORECAST_CRON         — "1" registers + runs the forecast crons (nightly
  *                           forecast run + monthly backtest); unset keeps dev/CI quiet
  *   COST_CRONS            — "1" registers + runs the cost cron schedules
+ *   QUICKBOOKS_CRONS      — "1" registers + runs the QuickBooks reconcile schedule
  *                           (nightly cost-moved checks); unset keeps dev/CI quiet
  *   SNAPSHOT_CRON         — "1" registers + runs the inventory-snapshot cron
  *                           (nightly on-hand history); unset keeps dev/CI quiet
@@ -190,6 +198,19 @@ async function main(): Promise<void> {
       captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: COST_CRON_QUEUE });
     });
     console.log("worker: cost crons registered (cost-moved check)");
+  }
+
+  let qbQueue: QuickBooksCronQueue | null = null;
+  let qbWorker: Worker | null = null;
+  if (process.env.QUICKBOOKS_CRONS === "1") {
+    qbQueue = createQuickBooksCronQueue(connection);
+    await registerQuickBooksCronSchedules(qbQueue);
+    qbWorker = createQuickBooksCronWorker({ connection, queue: qbQueue });
+    qbWorker.on("failed", (job, err) => {
+      console.error(`worker: quickbooks cron ${job?.id} failed`, err);
+      captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: QB_CRON_QUEUE });
+    });
+    console.log("worker: quickbooks crons registered (purchase-order reconcile)");
   }
 
   let snapshotQueue: SnapshotCronQueue | null = null;
