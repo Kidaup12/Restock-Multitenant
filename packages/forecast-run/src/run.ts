@@ -140,7 +140,7 @@ function priorLabel(p: OwnerPriorFacts): string {
  * today (partial), and finds the newest sale timestamp — the two facts the pure
  * `assessIngestHealth` needs to tell a stopped feed from a genuinely quiet shop.
  */
-function assessTenantIngest(
+export function assessTenantIngest(
   sales: ReadonlyArray<{ date: Date; quantity: number }>,
   now: Date
 ): IngestVerdict {
@@ -195,6 +195,25 @@ async function raiseIngestStall(tenantId: string, verdict: IngestVerdict, now: D
   } catch {
     // never let a bookkeeping failure undo a safe skip
   }
+}
+
+/**
+ * The ingest verdict for a workspace, for screens rather than for a run.
+ *
+ * Deliberately the same `assessTenantIngest` the forecast itself gates on, over
+ * the same history window — so a page can say "the forecast is paused and here
+ * is why" and be describing the actual reason, not a second opinion that agrees
+ * with it most of the time. A screen that decides "stale" by its own rule is
+ * how a buy list ends up inviting a run that silently does nothing.
+ */
+export async function tenantIngestVerdict(tenantId: string): Promise<IngestVerdict> {
+  const now = new Date();
+  const historySince = new Date(now.getTime() - HISTORY_DAYS * DAY_MS);
+  const sales = await prismaForTenant(tenantId).salesHistory.findMany({
+    where: { date: { gte: historySince } },
+    select: { date: true, quantity: true },
+  });
+  return assessTenantIngest(sales, now);
 }
 
 export async function runForecast(tenantId: string): Promise<ForecastRunResult> {

@@ -1,6 +1,11 @@
 // Nightly forecast run (cold-start borrow, owner priors, confidence word,
 // explainParts persistence).
-export { runForecast, type ForecastRunResult } from "./run";
+export {
+  runForecast,
+  tenantIngestVerdict,
+  assessTenantIngest,
+  type ForecastRunResult,
+} from "./run";
 
 // Monthly walk-forward backtest, champion audit, degradation alert.
 export {
