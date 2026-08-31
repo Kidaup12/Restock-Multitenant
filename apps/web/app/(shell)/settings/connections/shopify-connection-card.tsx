@@ -56,7 +56,7 @@ type LastSyncRow = { resource: string; syncedAt: string | null };
 const OAUTH_ERRORS: Record<string, string> = {
   forbidden: "Only owners and admins can connect a store.",
   no_app_credentials:
-    "That install needs your own app's client ID and secret. Add them above, or paste an Admin API token instead — the token route needs neither.",
+    "That install needs your app's client ID and secret. Add them in step 1 of “Use an app you registered with Shopify”, or paste a token from your store instead — that route needs neither.",
   // Almost always a stale tab: the state cookie lives ten minutes, so a second
   // attempt started in another tab invalidates the first. Saying "expired or
   // tampered with" alone reads as a security event and tells nobody what to do.
@@ -110,18 +110,24 @@ export function ShopifyConnectionCard({
   // the next full page load.
   const [syncActive, setSyncActive] = useState(syncRun?.status === "running");
   /**
-   * Which way in. The three routes used to be stacked on one page, all fillable
-   * at once — and filling two is not a harmless duplicate: the worker resolves
-   * app credentials FIRST and never reads a pasted token when a credential row
-   * exists, so a store connected both ways probes green and then dies about a
-   * day later on a minted token nobody renewed. Tabs make that combination
-   * impossible to reach rather than merely discouraged.
+   * Which way in. Two routes, because there are only two: an app the shop makes
+   * in its own admin (paste its token), or an app registered in the Partner
+   * dashboard (save its credentials, then install with them).
    *
-   * The token route is the default because it is the one that always works. The
-   * install route needs an app whose distribution is configured in the Partner
-   * dashboard, which is the step most workspaces have not done.
+   * They were once stacked on one page, all fillable at once — and filling two
+   * is not a harmless duplicate: the worker resolves app credentials FIRST and
+   * never reads a pasted token when a credential row exists, so a store
+   * connected both ways probes green and then dies about a day later on a
+   * minted token nobody renewed. Tabs make that combination unreachable rather
+   * than merely discouraged.
+   *
+   * Saving credentials then had its own tab, which put a prerequisite BESIDE
+   * the thing needing it — and listed after it. It is now step 1 of the app
+   * route, with the install disabled until it is done.
+   *
+   * The token route is the default because it is the one that always works.
    */
-  const [route, setRoute] = useState<"token" | "install" | "credentials">("token");
+  const [route, setRoute] = useState<"token" | "app">("token");
 
   const [notice, setNotice] = useState<{ tone: "positive" | "warning" | "negative"; text: string } | null>(
     errorCode
@@ -331,7 +337,9 @@ export function ShopifyConnectionCard({
     <div id={TOKEN_PANEL_ID} className="scroll-mt-4 space-y-3 border-t border-edge pt-4">
       <div>
         <h3 className="text-sm font-medium text-ink">
-          {connection === null ? "Connect with your own app" : "Connect with your own app instead"}
+          {connection === null
+            ? "Create an app in your store admin"
+            : "Create an app in your store admin instead"}
         </h3>
         <p className="mt-1 text-sm text-ink-muted">
           In your Shopify admin, go to Settings → Apps and sales channels → Develop
@@ -392,7 +400,7 @@ export function ShopifyConnectionCard({
     <div className="space-y-3 rounded-md border border-edge p-3">
       <div>
         <h3 className="text-sm font-medium text-ink">
-          Your Shopify app{" "}
+          1. Add your app&apos;s credentials{" "}
           {appCredentialsConfigured ? (
             <Badge tone="positive">Configured</Badge>
           ) : (
@@ -470,9 +478,8 @@ export function ShopifyConnectionCard({
     <div role="tablist" aria-label="How to connect" className="flex flex-wrap gap-1 rounded-md bg-surface-2 p-1">
       {(
         [
-          ["token", "Admin API token"],
-          ["install", "Install a published app"],
-          ["credentials", "Client ID & secret"],
+          ["token", "Paste a token from your store"],
+          ["app", "Use an app you registered with Shopify"],
         ] as const
       ).map(([key, label]) => (
         <button
@@ -555,40 +562,46 @@ export function ShopifyConnectionCard({
 
               {route === "token" && tokenConnectPanel}
 
-              {route === "credentials" && appCredentialsPanel}
-
-              {route === "install" && (
-                <div className="space-y-3 border-t border-edge pt-4">
-                  <div>
-                    <h3 className="text-sm font-medium text-ink">Install a published app</h3>
-                    <p className="mt-1 text-sm text-ink-muted">
-                      Only for an app whose distribution is already configured in the
-                      Shopify Partner dashboard. If you see &ldquo;this app can&apos;t
-                      be installed yet&rdquo;, use the Admin API token tab instead.
-                    </p>
-                    <p className="mt-1 text-xs text-ink-faint">
-                      Needs the {REQUIRED_SCOPE_LABEL} scopes, and the client ID and
-                      secret saved under Client ID &amp; secret.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Input
-                      value={shop}
-                      onChange={(e) => setShop(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && connect()}
-                      placeholder="your-store.myshopify.com"
-                      className="max-w-xs"
-                      aria-label="Shop domain"
-                      autoComplete="off"
-                      name="shopify-install-shop"
-                    />
-                    <Button
-                      onClick={connect}
-                      loading={busy === "install"}
-                      disabled={busy !== null || !shop.trim()}
-                    >
-                      Connect store
-                    </Button>
+              {route === "app" && (
+                <div className="space-y-4">
+                  {appCredentialsPanel}
+                  <div className="space-y-3 border-t border-edge pt-4">
+                    <div>
+                      <h3 className="text-sm font-medium text-ink">
+                        2. Install it on your store
+                      </h3>
+                      <p className="mt-1 text-sm text-ink-muted">
+                        {appCredentialsConfigured
+                          ? "Enter your store address and we’ll send you to Shopify to approve the install."
+                          : "Save the client ID and secret in step 1 first — the install uses them to ask Shopify for access."}
+                      </p>
+                      <p className="mt-1 text-xs text-ink-faint">
+                        {/* One expression on purpose: JSX drops the space at
+                            every text/expression boundary here, which shipped
+                            "read_ordersscopes" to the screen. */}
+                        {`Your app needs the ${REQUIRED_SCOPE_LABEL} scopes. If Shopify says the app can’t be installed yet, its distribution is not set up — paste a token from your store instead.`}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Input
+                        value={shop}
+                        onChange={(e) => setShop(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && connect()}
+                        placeholder="your-store.myshopify.com"
+                        className="max-w-xs"
+                        aria-label="Shop domain"
+                        autoComplete="off"
+                        name="shopify-install-shop"
+                        disabled={!appCredentialsConfigured}
+                      />
+                      <Button
+                        onClick={connect}
+                        loading={busy === "install"}
+                        disabled={busy !== null || !shop.trim() || !appCredentialsConfigured}
+                      >
+                        Connect store
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}
