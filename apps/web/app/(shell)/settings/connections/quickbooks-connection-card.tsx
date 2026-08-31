@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 
 /**
  * QuickBooks connection card.
@@ -34,10 +35,17 @@ export function QuickBooksConnectionCard({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
 
   const live = connection !== null && connection.disconnectedAt === null;
 
   async function onDisconnect() {
+    const ok = await confirm({
+      title: "Disconnect QuickBooks",
+      body: "We stop reading this workspace's books, and the stored tokens are dropped. Reconnecting means approving the app in Intuit again.",
+      confirmLabel: "Disconnect",
+    });
+    if (!ok) return;
     setError(null);
     const res = await fetch("/api/quickbooks/disconnect", { method: "POST" });
     if (!res.ok) {
@@ -131,6 +139,7 @@ export function QuickBooksConnectionCard({
           Only owners and admins can change this.
         </p>
       )}
+      {dialog}
     </section>
   );
 }

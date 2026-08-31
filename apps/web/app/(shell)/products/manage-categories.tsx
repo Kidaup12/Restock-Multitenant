@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TrashIcon } from "@/components/icons";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import type { CategoryUsage } from "@/lib/data/stock";
 import { deleteCategoryAction, renameCategoryAction, type CatalogueActionResult } from "./actions";
 
@@ -16,6 +17,7 @@ import { deleteCategoryAction, renameCategoryAction, type CatalogueActionResult 
  */
 export function ManageCategories({ categories }: { categories: CategoryUsage[] }) {
   const router = useRouter();
+  const { confirm, dialog } = useConfirm();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -63,7 +65,14 @@ export function ManageCategories({ categories }: { categories: CategoryUsage[] }
             <button
               type="button"
               disabled={pending}
-              onClick={() => run(() => deleteCategoryAction({ name: c.name }))}
+              onClick={async () => {
+                const ok = await confirm({
+                  title: `Delete the ${c.name} category`,
+                  body: `Its ${c.count} product${c.count === 1 ? "" : "s"} stay, uncategorised. Re-grouping them means editing each one.`,
+                  confirmLabel: "Delete category",
+                });
+                if (ok) run(() => deleteCategoryAction({ name: c.name }));
+              }}
               className="grid size-8 shrink-0 place-items-center rounded-md border border-edge text-ink-muted hover:border-negative hover:text-negative disabled:opacity-60"
               aria-label={`Delete ${c.name}`}
             >
@@ -73,6 +82,7 @@ export function ManageCategories({ categories }: { categories: CategoryUsage[] }
         ))}
         {msg && <p className={msg.tone === "ok" ? "text-xs text-positive" : "text-xs text-negative"}>{msg.text}</p>}
       </div>
+      {dialog}
     </details>
   );
 }

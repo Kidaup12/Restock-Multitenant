@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BanknoteIcon, CalendarIcon, ClipboardIcon } from "@/components/icons";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-features";
 import type { PlanFreshness as Freshness } from "@/lib/data/forecast-freshness";
 import type { BuyList } from "@/lib/data/plan";
@@ -138,6 +139,7 @@ export function PlanView({
   const [urgentOnly, setUrgentOnly] = useState(searchParams.get("urgent") === "1");
   const [whatIf, setWhatIf] = useState<BuyList | null>(null);
   const [savedScopes, setSavedScopes] = useState<SavedScope[]>([]);
+  const { confirm, dialog } = useConfirm();
   const [scopesBusy, startScopes] = useTransition();
   const budgetTier = PLAN_TIER_LABEL[planFeatureTier("budget_planner")];
 
@@ -160,7 +162,14 @@ export function PlanView({
     });
   }
 
-  function handleDeleteScope(id: string) {
+  async function handleDeleteScope(id: string) {
+    const saved = savedScopes.find((s) => s.id === id);
+    const ok = await confirm({
+      title: saved ? `Delete the "${saved.name}" list` : "Delete this saved list",
+      body: "The products stay; only the saved selection goes. Rebuilding it means picking them again.",
+      confirmLabel: "Delete list",
+    });
+    if (!ok) return;
     startScopes(async () => {
       const res = await deleteScope({ id });
       if (res.ok) setSavedScopes((prev) => prev.filter((s) => s.id !== id));
@@ -292,6 +301,9 @@ export function PlanView({
           whatIfActive={whatIf !== null}
           onWhatIfChange={setWhatIf}
         />
+        {/* Saved lists are deleted from the scope bar, which only this mode
+            renders — so the dialog lives here rather than in every branch. */}
+        {dialog}
       </div>
     );
   }
