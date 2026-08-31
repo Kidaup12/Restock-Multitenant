@@ -45,7 +45,7 @@ describe("the QuickBooks card only offers what can actually work", () => {
     // The negative control: without this assertion the test above passes even
     // if the button is always rendered.
     expect(html).not.toContain("/api/quickbooks/install");
-    expect(html).toContain("not set up on this deployment");
+    expect(html).toContain("not switched on for this deployment");
   });
 
   it("offers Disconnect instead of Connect once connected", () => {
