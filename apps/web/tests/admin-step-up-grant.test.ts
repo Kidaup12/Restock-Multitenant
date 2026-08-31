@@ -179,6 +179,60 @@ describe.skipIf(!runnable)("grantStepUp", () => {
     expect(result).toMatchObject({ ok: false, reason: "no_password" });
   });
 
+  it("offers a code to an account with no password, and a password to one with", async () => {
+    // The gap this closes: step-up gates EVERY admin mutation, so an account
+    // that could only ever be asked for a password it does not have was locked
+    // out of its own role - including out of the screen that would fix it.
+    const codeOnly = {
+      userId: otpId,
+      email: OTP_EMAIL,
+      name: "Code Only",
+      sessionId: "sess-test",
+      viaFallback: false,
+    };
+    expect(await stepUp.stepUpMethod(codeOnly)).toBe("code");
+    // The negative control: an account WITH a password must still be asked for
+    // one, or this "fix" would have quietly weakened every admin.
+    expect(await stepUp.stepUpMethod(actor())).toBe("password");
+  });
+
+  it("refuses a wrong code, and counts it against the same throttle", async () => {
+    const codeOnly = {
+      userId: otpId,
+      email: OTP_EMAIL,
+      name: "Code Only",
+      sessionId: "sess-test",
+      viaFallback: false,
+    };
+    // beforeEach recreates only the password admin's row, so this account needs
+    // its own - without it the throttle has nowhere to count and the result is
+    // "not eligible" rather than "wrong code".
+    await prismaService.platformAdmin.create({ data: { userId: otpId, email: OTP_EMAIL } });
+    const before = await prismaService.platformAdmin.findUnique({
+      where: { userId: otpId },
+      select: { failedStepUps: true },
+    });
+    const result = await stepUp.grantStepUpByCode(codeOnly, "000000");
+    expect(result).toMatchObject({ ok: false, reason: "wrong_code" });
+    // Same counter as the password route - the weaker-looking door must not be
+    // the wider one.
+    const after = await prismaService.platformAdmin.findUnique({
+      where: { userId: otpId },
+      select: { failedStepUps: true },
+    });
+    expect(after!.failedStepUps).toBeGreaterThan(before!.failedStepUps);
+    // And a wrong code mints nothing.
+    expect(await stepUp.hasStepUp(codeOnly)).toBe(false);
+  });
+
+  it("refuses a code from a bootstrap admin, same as a password", async () => {
+    const result = await stepUp.grantStepUpByCode(
+      { ...actor(), sessionId: "sess-test", viaFallback: true },
+      "000000"
+    );
+    expect(result).toMatchObject({ ok: false, reason: "not_eligible" });
+  });
+
   it("refuses a bootstrap admin, who has no row to hold a failure count", async () => {
     const result = await stepUp.grantStepUp({ ...actor(), sessionId: "sess-test", viaFallback: true }, PASSWORD);
     expect(result).toMatchObject({ ok: false, reason: "not_eligible" });

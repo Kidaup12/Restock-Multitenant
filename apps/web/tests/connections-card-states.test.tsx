@@ -161,6 +161,8 @@ describe("connections card — sync states", () => {
   it("asks for the workspace's own app credentials, and never echoes the secret", () => {
     const html = render(null);
     expect(html).toContain("Your Shopify app");
+    // Maintenance, not onboarding: no step numbering when there is no step two.
+    expect(html).not.toContain("1. Add your app");
     expect(html).toContain("Configured");
     expect(html).toContain('aria-label="Shopify app API secret"');
     // The client id is not a secret and is shown back; the stored secret never
@@ -168,22 +170,21 @@ describe("connections card — sync states", () => {
     expect(html).toContain("client-abc");
   });
 
-  it("leads a new workspace with the route that always works", () => {
-    // The OAuth install needs an app whose distribution is configured in the
-    // Partner dashboard; until that is done Shopify answers "this app can't be
-    // installed yet", which reads as our fault and gives the shop nothing to
-    // act on. A tester hit exactly that. The token route needs no distribution,
-    // no review and no Partner account, so it goes first.
-    // The routes are tabs now rather than one stacked page, so "first" is which
-    // one is selected, not which appears higher. They stopped being stacked
-    // because all three were fillable at once, and app credentials silently beat
-    // a pasted token in the worker — see shopify-connect-routes.test.tsx.
+  it("leads a new workspace with the install link, and keeps the token route reachable", () => {
+    // The install link is the route merchants are asked for, so it is the tab a
+    // new workspace opens on. The token route stays one click away rather than
+    // buried: it needs no distribution, no review and no Partner account, so it
+    // is the way through when Shopify answers "this app can't be installed yet"
+    // — which a tester hit, and which reads as our fault.
+    // "First" is which tab is selected, not which appears higher. They are tabs
+    // rather than one stacked page because all three were fillable at once, and
+    // app credentials silently beat a pasted token in the worker — see
+    // shopify-connect-routes.test.tsx.
     const html = render(null, false, null);
-    expect(html).toContain("Connect with your own app");
-    expect(html).toContain('name="shopify-admin-token"');
-    // The install route is offered, but as a tab the reader has to choose.
-    expect(html).toContain("Install a published app");
-    expect(html).not.toContain('name="shopify-install-shop"');
+    expect(html).toContain("Install it on your store");
+    // The other routes are offered, but as tabs the reader has to choose.
+    expect(html).toContain("Admin API token");
+    expect(html).not.toContain('name="shopify-admin-token"');
   });
 
   it("offers the token route to a store that is connected but cannot sync", () => {
@@ -194,14 +195,14 @@ describe("connections card — sync states", () => {
     // yet" — unreachable exactly when it was needed.
     const paused = { ...CONNECTION, syncPausedAt: "2026-08-04 08:15 UTC" };
     const html = render(run({ status: "failed", error: "Shopify auth failed (403)" }), false, paused);
-    expect(html).toContain("Connect with your own app instead");
+    expect(html).toContain("Create an app in your store admin instead");
     expect(html).toContain('aria-label="Admin API access token"');
     expect(html).toContain("This replaces the current connection.");
   });
 
   it("does not invite a healthy store to swap its credentials", () => {
     const html = render(run({ status: "ok", summary: "12 products", finishedAt: "2026-08-04 08:00 UTC" }));
-    expect(html).not.toContain("Connect with your own app instead");
+    expect(html).not.toContain("Create an app in your store admin instead");
     expect(html).not.toContain('aria-label="Admin API access token"');
   });
 

@@ -21,6 +21,34 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/**": ["node_modules/.prisma/client/**"],
   },
+  /**
+   * Who may frame this app.
+   *
+   * Shopify admin only - it is meant to be openable from a shop's Apps menu -
+   * and nobody else, which closes the clickjacking hole on a product that
+   * raises purchase orders. X-Frame-Options is deliberately NOT set: it has no
+   * allow-list, so DENY would block Shopify and SAMEORIGIN is ignored by
+   * browsers that honour frame-ancestors anyway.
+   *
+   * This permits the frame. It does NOT make sign-in work inside it: the
+   * session cookie is sameSite=lax and a browser will not send it cross-site,
+   * which is why the login button spins forever in the admin frame. Embedded
+   * auth needs App Bridge session tokens, not a cookie - see the note in
+   * lib/auth.ts.
+   */
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "frame-ancestors 'self' https://admin.shopify.com https://*.myshopify.com",
+          },
+        ],
+      },
+    ];
+  },
   turbopack: {
     root: path.join(__dirname, "../.."),
   },

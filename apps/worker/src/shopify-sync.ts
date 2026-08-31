@@ -681,7 +681,14 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       if (err instanceof ShopifyGrantError) {
         // The app credentials themselves are wrong or the app is no longer
         // installed on that store. Retrying mints the same rejection.
-        throw new UnrecoverableError(err.message);
+        //
+        // `cause` carries the original across the wrap. Without it the final
+        // hook had only the message to go on, and "Shopify rejected the app
+        // credentials" matched none of the phrases it looked for - so a
+        // credential rejection was the one auth failure that never counted,
+        // never paused the store and never reached the screen. The shop sat on
+        // "the first sync is running in the background" indefinitely.
+        throw Object.assign(new UnrecoverableError(err.message), { cause: err });
       }
       throw new UnrecoverableError(`stored Shopify token unusable: ${(err as Error).message}`);
     }
@@ -804,7 +811,7 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
         // path. Next tick re-mints instead of re-presenting a dead token.
         tokens.invalidate(connection.shopDomain);
         // Token revoked / app uninstalled: retrying THIS job is still pointless.
-        throw new UnrecoverableError(err.message);
+        throw Object.assign(new UnrecoverableError(err.message), { cause: err });
       }
       throw err;
     }
@@ -951,9 +958,19 @@ export async function handleSyncFailure(
   const { tenantId } = job.data;
   // The processor wraps ShopifyAuthError in UnrecoverableError, so match on the
   // message too — the class identity does not survive the wrap.
+  // The wrap keeps the original as `cause`, so the kind of failure survives it.
+  // The message match stays as a backstop for errors raised without a cause -
+  // but it is the backstop, not the test: it silently missed "Shopify rejected
+  // the app credentials", which is precisely an auth failure.
+  const cause = (err as { cause?: unknown }).cause;
   const reconnect =
     err instanceof ShopifyAuthError ||
-    /auth failed|token revoked|no live Shopify connection|token unusable/.test(err.message);
+    err instanceof ShopifyGrantError ||
+    cause instanceof ShopifyAuthError ||
+    cause instanceof ShopifyGrantError ||
+    /auth failed|token revoked|no live Shopify connection|token unusable|rejected the app credentials/.test(
+      err.message
+    );
   // Counting happens before the notification so the pause can change what it says.
   const paused = reconnect ? await recordAuthFailure(tenantId, err.message).catch(() => false) : false;
 

@@ -36,6 +36,13 @@ export type ConnectionView = {
    *  or "token" (pasted from an app the shop made in its own admin). Absent
    *  reads as oauth, the same default the column carries. */
   authMode?: string;
+  /** The last thing Shopify refused us with, shown from the FIRST failure
+   *  rather than only once the store is paused. A sync that cannot authenticate
+   *  fails before a run row is ever opened, so "Last sync: never" and "the first
+   *  sync is running in the background" were the only things on screen while the
+   *  real answer sat in the worker log. */
+  lastAuthError?: string | null;
+  lastAuthErrorAt?: string | null;
 };
 
 /** The primary-button look on an anchor. The two ways back out of a broken
@@ -121,14 +128,19 @@ export function ShopifyConnectionCard({
    * minted token nobody renewed. Tabs make that combination unreachable rather
    * than merely discouraged.
    *
-   * Saving credentials then had its own tab, which put a prerequisite BESIDE
-   * the thing needing it — and listed after it. It is now step 1 of the app
-   * route, with the install disabled until it is done.
+   * Credentials keep their own tab, listed straight after the install link
+   * that needs them: a merchant who has not saved them yet is shown the way
+   * there rather than a disabled field.
    *
-   * The token route is the default because it is the one that always works.
+   * Install is the default because it is the route we ask merchants for. The
+   * token route is last and always works — it is the fallback when an app's
+   * distribution is not set up for the store.
    */
-  const [route, setRoute] = useState<"token" | "app">("token");
+  const [route, setRoute] = useState<"install" | "credentials" | "token">("install");
 
+  /** Disconnect drops the tokens and every sync cursor, and the way back for
+   *  an OAuth store is a whole install round trip. One click was too few. */
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [notice, setNotice] = useState<{ tone: "positive" | "warning" | "negative"; text: string } | null>(
     errorCode
       ? { tone: "negative", text: OAUTH_ERRORS[errorCode] ?? "Connecting the store failed." }
@@ -195,6 +207,15 @@ export function ShopifyConnectionCard({
     try {
       const res = await fetch("/api/shopify/disconnect", { method: "POST" });
       if (res.ok) {
+        // Cursors and tokens are gone server-side; leaving the old store's
+        // address and a half-typed token in the boxes invites reconnecting to
+        // whatever happened to still be sitting there.
+        setConfirmingDisconnect(false);
+        setShop("");
+        setTokenShop("");
+        setToken("");
+        setClientId("");
+        setApiSecret("");
         router.refresh();
       } else {
         const body = (await res.json()) as { error?: string };
@@ -333,6 +354,10 @@ export function ShopifyConnectionCard({
    * route back that does not depend on our app at all. Hiding it behind
    * "no connection yet" made it unreachable exactly when it was needed.
    */
+  /** Connecting for the first time, so the route tabs are on screen and the
+   *  credentials box belongs to its own tab rather than above them. */
+  const choosingRoute = connection === null && canManage;
+
   const tokenConnectPanel = (
     <div id={TOKEN_PANEL_ID} className="scroll-mt-4 space-y-3 border-t border-edge pt-4">
       <div>
@@ -400,7 +425,7 @@ export function ShopifyConnectionCard({
     <div className="space-y-3 rounded-md border border-edge p-3">
       <div>
         <h3 className="text-sm font-medium text-ink">
-          1. Add your app&apos;s credentials{" "}
+          Your Shopify app{" "}
           {appCredentialsConfigured ? (
             <Badge tone="positive">Configured</Badge>
           ) : (
@@ -472,14 +497,14 @@ export function ShopifyConnectionCard({
   /** A store that has never connected chooses one route; a connected one keeps
    *  its credential box on the page, because changing an app's secret is a
    *  maintenance job rather than a way in. */
-  const choosingRoute = connection === null && canManage;
 
   const routeTabs = (
     <div role="tablist" aria-label="How to connect" className="flex flex-wrap gap-1 rounded-md bg-surface-2 p-1">
       {(
         [
-          ["token", "Paste a token from your store"],
-          ["app", "Use an app you registered with Shopify"],
+          ["install", "Install link"],
+          ["credentials", "Client ID & secret"],
+          ["token", "Admin API token"],
         ] as const
       ).map(([key, label]) => (
         <button
@@ -560,28 +585,25 @@ export function ShopifyConnectionCard({
 
               {routeTabs}
 
-              {route === "token" && tokenConnectPanel}
-
-              {route === "app" && (
-                <div className="space-y-4">
-                  {appCredentialsPanel}
-                  <div className="space-y-3 border-t border-edge pt-4">
-                    <div>
-                      <h3 className="text-sm font-medium text-ink">
-                        2. Install it on your store
-                      </h3>
-                      <p className="mt-1 text-sm text-ink-muted">
-                        {appCredentialsConfigured
-                          ? "Enter your store address and we’ll send you to Shopify to approve the install."
-                          : "Save the client ID and secret in step 1 first — the install uses them to ask Shopify for access."}
-                      </p>
-                      <p className="mt-1 text-xs text-ink-faint">
-                        {/* One expression on purpose: JSX drops the space at
-                            every text/expression boundary here, which shipped
-                            "read_ordersscopes" to the screen. */}
-                        {`Your app needs the ${REQUIRED_SCOPE_LABEL} scopes. If Shopify says the app can’t be installed yet, its distribution is not set up — paste a token from your store instead.`}
-                      </p>
-                    </div>
+              {route === "install" && (
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="text-sm font-medium text-ink">
+                      Install it on your store
+                    </h3>
+                    <p className="mt-1 text-sm text-ink-muted">
+                      {appCredentialsConfigured
+                        ? "Enter your store address and we’ll send you to Shopify to approve the install."
+                        : "This route uses your app’s client ID and secret. Add them first and come back."}
+                    </p>
+                    <p className="mt-1 text-xs text-ink-faint">
+                      {/* One expression on purpose: JSX drops the space at
+                          every text/expression boundary here, which shipped
+                          "read_ordersscopes" to the screen. */}
+                      {`Your app needs the ${REQUIRED_SCOPE_LABEL} scopes. If Shopify says the app cannot be installed on this store, its distribution is not set up for it — use an Admin API token instead.`}
+                    </p>
+                  </div>
+                  {appCredentialsConfigured ? (
                     <div className="flex flex-wrap items-center gap-2">
                       <Input
                         value={shop}
@@ -592,19 +614,26 @@ export function ShopifyConnectionCard({
                         aria-label="Shop domain"
                         autoComplete="off"
                         name="shopify-install-shop"
-                        disabled={!appCredentialsConfigured}
                       />
                       <Button
                         onClick={connect}
                         loading={busy === "install"}
-                        disabled={busy !== null || !shop.trim() || !appCredentialsConfigured}
+                        disabled={busy !== null || !shop.trim()}
                       >
                         Connect store
                       </Button>
                     </div>
-                  </div>
+                  ) : (
+                    <Button variant="ghost" onClick={() => setRoute("credentials")}>
+                      Add client ID &amp; secret
+                    </Button>
+                  )}
                 </div>
               )}
+
+              {route === "credentials" && appCredentialsPanel}
+
+              {route === "token" && tokenConnectPanel}
             </div>
           ) : (
             <p className="text-sm text-ink-muted">
@@ -613,6 +642,18 @@ export function ShopifyConnectionCard({
           )
         ) : (
           <div className="space-y-4">
+            {/* Not gated on `paused`: the point is to say something on the
+                first failure, not the third. */}
+            {!paused && connection.lastAuthError && (
+              <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">
+                Shopify refused our last attempt
+                {connection.lastAuthErrorAt ? ` (${connection.lastAuthErrorAt})` : ""} —{" "}
+                {connection.lastAuthError}{" "}
+                {canReinstall
+                  ? "Reconnect the store, or check the app is installed on it."
+                  : "Paste a fresh token below."}
+              </p>
+            )}
             {paused && (
               <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">
                 Automatic syncs are paused — the store kept refusing our access token.{" "}
@@ -683,15 +724,48 @@ export function ShopifyConnectionCard({
                   Test connection
                 </Button>
               )}
-              {canManage && live && (
+              {/* Live updates need a websocket the deployment does not have a
+                  domain for yet, so this page cannot push its own changes. A
+                  button that re-reads the server beats a status line that
+                  quietly goes stale and reads as "still running". */}
+              <Button
+                variant="ghost"
+                onClick={() => router.refresh()}
+                disabled={busy !== null}
+              >
+                Refresh
+              </Button>
+              {canManage && live && !confirmingDisconnect && (
                 <Button
                   variant="ghost"
-                  onClick={disconnect}
-                  loading={busy === "disconnect"}
+                  onClick={() => setConfirmingDisconnect(true)}
                   disabled={busy !== null}
                 >
                   Disconnect
                 </Button>
+              )}
+              {canManage && live && confirmingDisconnect && (
+                <>
+                  <span className="text-sm text-ink">
+                    Disconnect {connection.shopDomain}? Stock and sales stop updating, and
+                    reconnecting starts a fresh sync.
+                  </span>
+                  <Button
+                    variant="ghost"
+                    onClick={disconnect}
+                    loading={busy === "disconnect"}
+                    disabled={busy !== null}
+                  >
+                    Yes, disconnect
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setConfirmingDisconnect(false)}
+                    disabled={busy !== null}
+                  >
+                    Keep it
+                  </Button>
+                </>
               )}
               {/* The way back matches the way in: a store that installed our
                   app reinstalls it, a store that pasted a token pastes another.

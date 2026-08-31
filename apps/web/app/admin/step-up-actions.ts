@@ -4,7 +4,12 @@ import { revalidatePath } from "next/cache";
 import { PLATFORM_TENANT_ID } from "@wezesha/db";
 import { requireAdmin } from "@/lib/admin/gate";
 import { recordAdminEvent } from "@/lib/admin/audit";
-import { grantStepUp } from "@/lib/admin/step-up";
+import {
+  grantStepUp,
+  grantStepUpByCode,
+  requestStepUpCode,
+  stepUpMethod,
+} from "@/lib/admin/step-up";
 
 /**
  * Confirm the admin's password and mint a step-up grant.
@@ -19,6 +24,51 @@ import { grantStepUp } from "@/lib/admin/step-up";
  */
 
 export type StepUpActionResult = { ok: true } | { ok: false; error: string };
+
+/** Whether this admin is asked for a password or a code. An account created
+ *  through email-code sign-in has no password to be asked for. */
+export async function stepUpFactor(): Promise<"password" | "code"> {
+  return stepUpMethod(await requireAdmin());
+}
+
+/** Send the admin a one-time code. Not audited and not throttled: a delivery
+ *  attempt proves nothing, and counting it would let a locked-out admin be
+ *  kept out by the very request meant to let them back in. */
+export async function sendStepUpCode(): Promise<StepUpActionResult> {
+  const result = await requestStepUpCode(await requireAdmin());
+  return result.ok ? { ok: true } : { ok: false, error: result.message };
+}
+
+/** Confirm a one-time code and mint the same grant the password route mints. */
+export async function confirmStepUpCode(formData: FormData): Promise<StepUpActionResult> {
+  const admin = await requireAdmin();
+  const code = String(formData.get("code") ?? "").trim();
+  if (!code) return { ok: false, error: "Enter the code we emailed you." };
+
+  const result = await grantStepUpByCode(admin, code);
+
+  if (result.ok) {
+    await recordAdminEvent({
+      tenantId: PLATFORM_TENANT_ID,
+      action: "step_up_granted",
+      admin,
+    });
+    revalidatePath("/admin", "layout");
+    return { ok: true };
+  }
+
+  // Same rule as the password route: only a genuinely wrong answer is logged,
+  // so a lockout cannot be used to fill the ledger.
+  if (result.reason === "wrong_code") {
+    await recordAdminEvent({
+      tenantId: PLATFORM_TENANT_ID,
+      action: "step_up_failed",
+      admin,
+    });
+  }
+
+  return { ok: false, error: result.message };
+}
 
 export async function confirmStepUp(formData: FormData): Promise<StepUpActionResult> {
   const admin = await requireAdmin();
