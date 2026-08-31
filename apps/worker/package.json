@@ -16,6 +16,7 @@
     "@wezesha/forecast-run": "*",
     "@wezesha/observability": "*",
     "@wezesha/pos": "*",
+    "@wezesha/quickbooks": "*",
     "@wezesha/queue": "*",
     "@wezesha/realtime": "*",
     "@wezesha/shopify": "*",
