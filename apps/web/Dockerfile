@@ -22,6 +22,7 @@ COPY packages/observability/package.json packages/observability/
 COPY packages/pos/package.json packages/pos/
 COPY packages/queue/package.json packages/queue/
 COPY packages/realtime/package.json packages/realtime/
+COPY packages/quickbooks/package.json packages/quickbooks/
 COPY packages/shopify/package.json packages/shopify/
 # packages/db's postinstall is `prisma generate`, so the schema has to be in the
 # image BEFORE the install — copying it with the rest of the source below is too
@@ -36,6 +37,7 @@ COPY packages/observability/ packages/observability/
 COPY packages/pos/ packages/pos/
 COPY packages/queue/ packages/queue/
 COPY packages/realtime/ packages/realtime/
+COPY packages/quickbooks/ packages/quickbooks/
 COPY packages/shopify/ packages/shopify/
 # `next build` type-checks the test files too, and tests/require-infra.ts imports
 # the repo-root guard. Build stage only — the runner copies Next's standalone

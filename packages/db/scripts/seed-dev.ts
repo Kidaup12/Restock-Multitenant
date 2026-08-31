@@ -57,6 +57,33 @@ function utcDay(daysAgo: number): Date {
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysAgo));
 }
 
+/**
+ * When during its day a sale happened.
+ *
+ * A real feed stamps sales through trading hours, so the newest COMPLETED day's
+ * last sale is an evening one. Stamping every row at midnight instead made the
+ * most recent judgeable sale always "yesterday 00:00" — and the ingest-health
+ * gate, which excludes today as partial, reads that as 24h plus however long
+ * today has run. It crosses the 36h staleness threshold every day at noon UTC,
+ * so the forecast paused itself on data that was perfectly fine and the seeded
+ * suites failed only in the afternoon.
+ *
+ * Only the last few completed days are re-stamped, and deliberately so. The
+ * gate reads the NEWEST completed day; the 30-day revenue windows measure from
+ * `now - 30d`, so moving the oldest rows off midnight would slide them in and
+ * out of that window depending on the hour the seed ran. Recent days fix the
+ * staleness, older days keep the day-alignment those windows assume.
+ *
+ * Today keeps midnight too: it is excluded from the gate anyway, and an evening
+ * stamp would put sales in the future for anyone seeding before 20:00.
+ */
+const EVENING_MS = 20 * 3_600_000;
+function saleAt(daysAgo: number): Date {
+  const day = utcDay(daysAgo);
+  const recentCompleted = daysAgo >= 1 && daysAgo <= 3;
+  return recentCompleted ? new Date(day.getTime() + EVENING_MS) : day;
+}
+
 type Pattern = "steady" | "riser" | "faller" | "stockout_gap" | "dead";
 
 type SeedProduct = {
@@ -340,7 +367,7 @@ export async function seedDev(): Promise<SeedResult> {
     for (let day = 0; day < DAYS; day++) {
       const qty = curve[day]!;
       if (qty === 0) continue;
-      const date = utcDay(DAYS - 1 - day);
+      const date = saleAt(DAYS - 1 - day);
       const posQty = Math.round(qty * p.posShare);
       const webQty = qty - posQty;
       if (posQty > 0)

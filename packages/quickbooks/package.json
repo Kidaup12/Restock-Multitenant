@@ -1,8 +1,8 @@
 {
-  "name": "@wezesha/shopify",
+  "name": "@wezesha/quickbooks",
   "version": "0.1.0",
   "private": true,
-  "description": "Shopify Admin API core: OAuth + HMAC verification, typed GraphQL client with rate-limit handling, id/sales mappers, token crypto",
+  "description": "QuickBooks Online core: OAuth 2.0 authorization-code flow with refresh-token rotation, token revocation, environment-aware API hosts",
   "exports": {
     ".": "./src/index.ts"
   },
@@ -12,7 +12,6 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
-    "@wezesha/db": "*",
     "typescript": "^5",
     "vitest": "^4.1.7"
   },

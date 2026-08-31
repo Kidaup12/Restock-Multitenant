@@ -31,6 +31,30 @@ describe.skipIf(!runnable)("forecast run (seeded local db)", () => {
     await prismaService.$disconnect();
   });
 
+  it("seeds sales recent enough for the ingest gate at ANY hour of the day", async () => {
+    // The gate judges only COMPLETED days, so the newest sale it can see is
+    // yesterday's last one, and it stops the run past 36h. Seeding every row at
+    // UTC midnight made that 24h + however long today had run — under the limit
+    // all morning and over it every afternoon, so this suite passed or failed by
+    // clock time. Measure against the END of today: if it holds there it holds
+    // whenever the suite runs.
+    const startOfToday = new Date();
+    startOfToday.setUTCHours(0, 0, 0, 0);
+    const latest = await prismaService.salesHistory.aggregate({
+      where: { tenantId: seeded.tenantId, date: { lt: startOfToday } },
+      _max: { date: true },
+    });
+    const newest = latest._max.date;
+    expect(newest, "no completed-day sales were seeded at all").not.toBeNull();
+    const endOfToday = startOfToday.getTime() + 24 * 3_600_000;
+    const worstCaseHours = (endOfToday - newest!.getTime()) / 3_600_000;
+    expect(
+      worstCaseHours,
+      `newest completed-day sale is ${newest!.toISOString()}, which is ${worstCaseHours.toFixed(1)}h ` +
+        `before the end of today — the ingest gate stops the forecast past 36h`,
+    ).toBeLessThan(36);
+  });
+
   it("writes one prediction per active product under a shared run id", async () => {
     const result = await runForecast(seeded.tenantId);
     expect(result.created).toBe(seeded.productCount);
