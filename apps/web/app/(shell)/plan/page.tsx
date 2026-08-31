@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { planFreshnessLabel } from "@/lib/data/forecast-freshness";
 import { getBuyList } from "@/lib/data/plan";
+import { tenantIngestVerdict } from "@wezesha/forecast-run";
 import { getTenantPlan, planAllows } from "@/lib/capabilities";
 import { RunForecastButton } from "../today/run-forecast-button";
 import { PlanView } from "./plan-view";
@@ -38,6 +39,22 @@ async function PlanContent({
   const canBudget = planAllows(plan, "budget_planner");
 
   if (!buyList) {
+    // "No forecast yet" is only true when nothing is stopping one. The run
+    // refuses outright while the sales feed looks stopped — it keeps the
+    // last-good predictions rather than telling a shop to order nothing off a
+    // gap — so offering Run forecast there is a button that silently does
+    // nothing, and the shop concludes the product is broken. Same verdict the
+    // run gates on, so this cannot disagree with it.
+    const ingest = await tenantIngestVerdict(tenantId);
+    if (ingest.stop) {
+      return (
+        <EmptyState
+          icon={<CalendarIcon />}
+          title="Forecast paused — your sales feed looks stopped"
+          description={`${ingest.reasons.join(" ")} We hold the buy list rather than build one off a gap. It picks up on its own once sales come through again.`}
+        />
+      );
+    }
     return (
       <EmptyState
         icon={<CalendarIcon />}
