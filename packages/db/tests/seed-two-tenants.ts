@@ -245,6 +245,17 @@ export const builders: Record<string, Builder> = {
     accessToken: `ciphertext-${key}`,
     scopes: "read_products",
   }),
+  QuickBooksConnection: (tenantId, key) => ({
+    tenantId,
+    // realmId is unique across the table, so it must differ per tenant or the
+    // second seed collides before RLS is ever exercised.
+    realmId: `realm-${key}`,
+    accessToken: `ciphertext-${key}`,
+    refreshToken: `ciphertext-refresh-${key}`,
+    accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+    refreshTokenExpiresAt: new Date(Date.now() + 86_400_000),
+    scopes: "com.intuit.quickbooks.accounting",
+  }),
   ShopifyAppCredential: (tenantId, key) => ({
     tenantId,
     clientId: `client-${key}`,

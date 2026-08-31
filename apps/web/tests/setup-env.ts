@@ -11,6 +11,10 @@ if (existsSync(dbEnv)) config({ path: dbEnv });
 
 process.env.BETTER_AUTH_SECRET ??= "auth-flow-test-secret";
 process.env.BETTER_AUTH_URL ??= "http://auth-flow.test";
+// The Shopify and QuickBooks callbacks build their redirects from configured
+// origins rather than the request, so both throw when this is unset. That is
+// deliberate in production; the suite has to supply one.
+process.env.SHOPIFY_APP_URL ??= "http://auth-flow.test";
 
 /**
  * Put the suite's queue state on its own Redis database.

@@ -64,6 +64,13 @@ export const EXPORTED_MODELS: ReadonlyArray<{
   { model: "DistributionPlanLine", delegate: "distributionPlanLine" },
   { model: "ProductPlanOverride", delegate: "productPlanOverride" },
   { model: "ShopifyConnection", delegate: "shopifyConnection", omit: { accessToken: true } },
+  // Both tokens omitted: an export lands in the owner's hands, and a refresh
+  // token is a standing grant on their books, not a record of their data.
+  {
+    model: "QuickBooksConnection",
+    delegate: "quickBooksConnection",
+    omit: { accessToken: true, refreshToken: true },
+  },
   // clientId is exportable (it is not a secret and the shop owns it); the
   // signing secret is not, same rule as the access token.
   { model: "ShopifyAppCredential", delegate: "shopifyAppCredential", omit: { apiSecret: true } },
