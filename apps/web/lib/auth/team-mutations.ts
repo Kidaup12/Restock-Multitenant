@@ -1,10 +1,12 @@
-import { prismaForTenantTx, type Prisma, type Role } from "@wezesha/db";
+import { Prisma, prismaForTenantTx, type Role } from "@wezesha/db";
 import {
   canChangeRole,
   canRemoveMember,
+  canSetPermissions,
   type GuardResult,
   type TeamActor,
 } from "@/lib/auth/team-guards";
+import type { PermissionKey } from "@/lib/auth/permissions";
 
 /**
  * The two team writes whose guard depends on a COUNT of owners rather than on
@@ -48,6 +50,37 @@ export function changeMemberRoleGuarded(
     );
     if (!guard.ok) return guard;
     await tx.membership.update({ where: { id: target.id }, data: { role: nextRole } });
+    return { ok: true };
+  });
+}
+
+/**
+ * Set one member's explicit permissions, or `null` to go back to inheriting the
+ * role's preset.
+ *
+ * No owner count is involved, so this needs no advisory lock — but it takes the
+ * same shape as its neighbours so the guard always runs against the row as it
+ * is at write time, not as it was when the page rendered.
+ */
+export function setMemberPermissionsGuarded(
+  tenantId: string,
+  actor: TeamActor,
+  membershipId: string,
+  next: readonly PermissionKey[] | null,
+): Promise<GuardResult> {
+  return prismaForTenantTx(tenantId, async (tx) => {
+    const target = await tx.membership.findUnique({
+      where: { id: membershipId },
+      select: { id: true, role: true },
+    });
+    if (!target) return gone;
+    const guard = canSetPermissions(actor, { membershipId: target.id, role: target.role }, next ?? []);
+    if (!guard.ok) return guard;
+    await tx.membership.update({
+      where: { id: target.id },
+      // null clears the override; an array (even empty) is an explicit grant.
+      data: { permissions: next === null ? Prisma.DbNull : [...next] },
+    });
     return { ok: true };
   });
 }

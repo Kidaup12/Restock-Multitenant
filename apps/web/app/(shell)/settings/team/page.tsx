@@ -2,11 +2,13 @@ import type { Metadata } from "next";
 import { prismaForTenant, Role } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { listInvites } from "@/lib/auth/invites";
-import { hasPermission } from "@/lib/auth/permissions";
+import { hasPermission, resolvePermissions } from "@/lib/auth/permissions";
 import { checkLimit } from "@/lib/limits/evaluate";
 import {
+  GRANTABLE_PERMISSIONS,
   canChangeRole,
   canRemoveMember,
+  canSetPermissions,
   invitableRoles,
   type TeamActor,
 } from "@/lib/auth/team-guards";
@@ -79,6 +81,12 @@ export default async function TeamPage() {
         (role) => canChangeRole(actor, target, role, ownerCount).ok,
       ),
       canRemove: canRemoveMember(actor, target, ownerCount).ok,
+      // What this person may actually do right now, and whether it is their
+      // own choice of permissions or just their role's preset — the difference
+      // is what the reader needs to understand the row.
+      permissions: [...resolvePermissions(member)],
+      hasOverride: Array.isArray(member.permissions),
+      canSetPermissions: canSetPermissions(actor, target, []).ok,
     };
   });
 
@@ -90,6 +98,7 @@ export default async function TeamPage() {
         description={`Who has access to ${membership.tenant.name}`}
       />
       <TeamView
+        grantable={[...GRANTABLE_PERMISSIONS]}
         rows={rows}
         invites={invites.map((invite) => ({
           token: invite.token,

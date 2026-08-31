@@ -105,7 +105,7 @@ describe("the suppliers action column", () => {
 
 const renderTeam = (canManage: boolean) =>
   renderToStaticMarkup(
-    <TeamView
+    <TeamView grantable={[]}
       seats={{ allowed: true, used: 1, max: 5, message: null }}
       rows={[
         {
@@ -119,6 +119,9 @@ const renderTeam = (canManage: boolean) =>
           // Removable either way, so `canManage` is the only thing deciding
           // whether the button renders.
           canRemove: true,
+    permissions: [],
+    hasOverride: false,
+    canSetPermissions: false,
         },
       ]}
       invites={[]}
