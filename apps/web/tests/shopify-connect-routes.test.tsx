@@ -60,12 +60,25 @@ describe("connecting a store: one route at a time", () => {
     expect(render()).not.toContain('name="shopify-install-shop"');
   });
 
-  it("offers all three routes as tabs", () => {
+  it("offers two routes, named for what the shop owner has", () => {
     const html = render();
     expect(html).toContain('role="tablist"');
-    for (const label of ["Admin API token", "Install a published app", "Client ID &amp; secret"]) {
+    for (const label of [
+      "Paste a token from your store",
+      "Use an app you registered with Shopify",
+    ]) {
       expect(html).toContain(label);
     }
+  });
+
+  it("does not offer a third route for what is only step one of the second", () => {
+    // Saving a client ID and secret is not an alternative to installing with
+    // them - it is the step before. Presented as a sibling tab it sat AFTER the
+    // tab that depends on it, and the install error told people to look
+    // "above", where nothing was.
+    const html = render();
+    expect(html).not.toContain("Client ID &amp; secret");
+    expect(html).not.toContain("Install a published app");
   });
 
   it("keeps the credential box on the page once a store is connected", () => {
