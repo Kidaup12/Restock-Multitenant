@@ -170,22 +170,21 @@ describe("connections card — sync states", () => {
     expect(html).toContain("client-abc");
   });
 
-  it("leads a new workspace with the route that always works", () => {
-    // The OAuth install needs an app whose distribution is configured in the
-    // Partner dashboard; until that is done Shopify answers "this app can't be
-    // installed yet", which reads as our fault and gives the shop nothing to
-    // act on. A tester hit exactly that. The token route needs no distribution,
-    // no review and no Partner account, so it goes first.
-    // The routes are tabs now rather than one stacked page, so "first" is which
-    // one is selected, not which appears higher. They stopped being stacked
-    // because all three were fillable at once, and app credentials silently beat
-    // a pasted token in the worker — see shopify-connect-routes.test.tsx.
+  it("leads a new workspace with the install link, and keeps the token route reachable", () => {
+    // The install link is the route merchants are asked for, so it is the tab a
+    // new workspace opens on. The token route stays one click away rather than
+    // buried: it needs no distribution, no review and no Partner account, so it
+    // is the way through when Shopify answers "this app can't be installed yet"
+    // — which a tester hit, and which reads as our fault.
+    // "First" is which tab is selected, not which appears higher. They are tabs
+    // rather than one stacked page because all three were fillable at once, and
+    // app credentials silently beat a pasted token in the worker — see
+    // shopify-connect-routes.test.tsx.
     const html = render(null, false, null);
-    expect(html).toContain("Create an app in your store admin");
-    expect(html).toContain('name="shopify-admin-token"');
-    // The other route is offered, but as a tab the reader has to choose.
-    expect(html).toContain("Use an app you registered with Shopify");
-    expect(html).not.toContain('name="shopify-install-shop"');
+    expect(html).toContain("Install it on your store");
+    // The other routes are offered, but as tabs the reader has to choose.
+    expect(html).toContain("Admin API token");
+    expect(html).not.toContain('name="shopify-admin-token"');
   });
 
   it("offers the token route to a store that is connected but cannot sync", () => {

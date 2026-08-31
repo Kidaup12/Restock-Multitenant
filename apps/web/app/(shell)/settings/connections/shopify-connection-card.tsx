@@ -128,13 +128,15 @@ export function ShopifyConnectionCard({
    * minted token nobody renewed. Tabs make that combination unreachable rather
    * than merely discouraged.
    *
-   * Saving credentials then had its own tab, which put a prerequisite BESIDE
-   * the thing needing it — and listed after it. It is now step 1 of the app
-   * route, with the install disabled until it is done.
+   * Credentials keep their own tab, listed straight after the install link
+   * that needs them: a merchant who has not saved them yet is shown the way
+   * there rather than a disabled field.
    *
-   * The token route is the default because it is the one that always works.
+   * Install is the default because it is the route we ask merchants for. The
+   * token route is last and always works — it is the fallback when an app's
+   * distribution is not set up for the store.
    */
-  const [route, setRoute] = useState<"token" | "app">("token");
+  const [route, setRoute] = useState<"install" | "credentials" | "token">("install");
 
   /** Disconnect drops the tokens and every sync cursor, and the way back for
    *  an OAuth store is a whole install round trip. One click was too few. */
@@ -352,9 +354,8 @@ export function ShopifyConnectionCard({
    * route back that does not depend on our app at all. Hiding it behind
    * "no connection yet" made it unreachable exactly when it was needed.
    */
-  /** Connecting for the first time, so the route tabs are on screen. Also
-   *  decides whether the credentials box reads as step one or as plain
-   *  maintenance. */
+  /** Connecting for the first time, so the route tabs are on screen and the
+   *  credentials box belongs to its own tab rather than above them. */
   const choosingRoute = connection === null && canManage;
 
   const tokenConnectPanel = (
@@ -424,10 +425,7 @@ export function ShopifyConnectionCard({
     <div className="space-y-3 rounded-md border border-edge p-3">
       <div>
         <h3 className="text-sm font-medium text-ink">
-          {/* Two homes: step one of the app route while connecting, and plain
-              maintenance once a store is connected (line ~551), where there is
-              no step two to be the first of. */}
-          {choosingRoute ? "1. Add your app’s credentials" : "Your Shopify app"}{" "}
+          Your Shopify app{" "}
           {appCredentialsConfigured ? (
             <Badge tone="positive">Configured</Badge>
           ) : (
@@ -504,8 +502,9 @@ export function ShopifyConnectionCard({
     <div role="tablist" aria-label="How to connect" className="flex flex-wrap gap-1 rounded-md bg-surface-2 p-1">
       {(
         [
-          ["token", "Paste a token from your store"],
-          ["app", "Use an app you registered with Shopify"],
+          ["install", "Install link"],
+          ["credentials", "Client ID & secret"],
+          ["token", "Admin API token"],
         ] as const
       ).map(([key, label]) => (
         <button
@@ -586,28 +585,25 @@ export function ShopifyConnectionCard({
 
               {routeTabs}
 
-              {route === "token" && tokenConnectPanel}
-
-              {route === "app" && (
-                <div className="space-y-4">
-                  {appCredentialsPanel}
-                  <div className="space-y-3 border-t border-edge pt-4">
-                    <div>
-                      <h3 className="text-sm font-medium text-ink">
-                        2. Install it on your store
-                      </h3>
-                      <p className="mt-1 text-sm text-ink-muted">
-                        {appCredentialsConfigured
-                          ? "Enter your store address and we’ll send you to Shopify to approve the install."
-                          : "Save the client ID and secret in step 1 first — the install uses them to ask Shopify for access."}
-                      </p>
-                      <p className="mt-1 text-xs text-ink-faint">
-                        {/* One expression on purpose: JSX drops the space at
-                            every text/expression boundary here, which shipped
-                            "read_ordersscopes" to the screen. */}
-                        {`Your app needs the ${REQUIRED_SCOPE_LABEL} scopes. If Shopify says the app can’t be installed yet, its distribution is not set up — paste a token from your store instead.`}
-                      </p>
-                    </div>
+              {route === "install" && (
+                <div className="space-y-3">
+                  <div>
+                    <h3 className="text-sm font-medium text-ink">
+                      Install it on your store
+                    </h3>
+                    <p className="mt-1 text-sm text-ink-muted">
+                      {appCredentialsConfigured
+                        ? "Enter your store address and we’ll send you to Shopify to approve the install."
+                        : "This route uses your app’s client ID and secret. Add them first and come back."}
+                    </p>
+                    <p className="mt-1 text-xs text-ink-faint">
+                      {/* One expression on purpose: JSX drops the space at
+                          every text/expression boundary here, which shipped
+                          "read_ordersscopes" to the screen. */}
+                      {`Your app needs the ${REQUIRED_SCOPE_LABEL} scopes. If Shopify says the app cannot be installed on this store, its distribution is not set up for it — use an Admin API token instead.`}
+                    </p>
+                  </div>
+                  {appCredentialsConfigured ? (
                     <div className="flex flex-wrap items-center gap-2">
                       <Input
                         value={shop}
@@ -618,19 +614,26 @@ export function ShopifyConnectionCard({
                         aria-label="Shop domain"
                         autoComplete="off"
                         name="shopify-install-shop"
-                        disabled={!appCredentialsConfigured}
                       />
                       <Button
                         onClick={connect}
                         loading={busy === "install"}
-                        disabled={busy !== null || !shop.trim() || !appCredentialsConfigured}
+                        disabled={busy !== null || !shop.trim()}
                       >
                         Connect store
                       </Button>
                     </div>
-                  </div>
+                  ) : (
+                    <Button variant="ghost" onClick={() => setRoute("credentials")}>
+                      Add client ID &amp; secret
+                    </Button>
+                  )}
                 </div>
               )}
+
+              {route === "credentials" && appCredentialsPanel}
+
+              {route === "token" && tokenConnectPanel}
             </div>
           ) : (
             <p className="text-sm text-ink-muted">
