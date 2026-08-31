@@ -333,6 +333,11 @@ export function ShopifyConnectionCard({
    * route back that does not depend on our app at all. Hiding it behind
    * "no connection yet" made it unreachable exactly when it was needed.
    */
+  /** Connecting for the first time, so the route tabs are on screen. Also
+   *  decides whether the credentials box reads as step one or as plain
+   *  maintenance. */
+  const choosingRoute = connection === null && canManage;
+
   const tokenConnectPanel = (
     <div id={TOKEN_PANEL_ID} className="scroll-mt-4 space-y-3 border-t border-edge pt-4">
       <div>
@@ -400,7 +405,10 @@ export function ShopifyConnectionCard({
     <div className="space-y-3 rounded-md border border-edge p-3">
       <div>
         <h3 className="text-sm font-medium text-ink">
-          1. Add your app&apos;s credentials{" "}
+          {/* Two homes: step one of the app route while connecting, and plain
+              maintenance once a store is connected (line ~551), where there is
+              no step two to be the first of. */}
+          {choosingRoute ? "1. Add your app’s credentials" : "Your Shopify app"}{" "}
           {appCredentialsConfigured ? (
             <Badge tone="positive">Configured</Badge>
           ) : (
@@ -472,7 +480,6 @@ export function ShopifyConnectionCard({
   /** A store that has never connected chooses one route; a connected one keeps
    *  its credential box on the page, because changing an app's secret is a
    *  maintenance job rather than a way in. */
-  const choosingRoute = connection === null && canManage;
 
   const routeTabs = (
     <div role="tablist" aria-label="How to connect" className="flex flex-wrap gap-1 rounded-md bg-surface-2 p-1">

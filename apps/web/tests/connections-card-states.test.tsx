@@ -161,6 +161,8 @@ describe("connections card — sync states", () => {
   it("asks for the workspace's own app credentials, and never echoes the secret", () => {
     const html = render(null);
     expect(html).toContain("Your Shopify app");
+    // Maintenance, not onboarding: no step numbering when there is no step two.
+    expect(html).not.toContain("1. Add your app");
     expect(html).toContain("Configured");
     expect(html).toContain('aria-label="Shopify app API secret"');
     // The client id is not a secret and is shown back; the stored secret never
@@ -179,10 +181,10 @@ describe("connections card — sync states", () => {
     // because all three were fillable at once, and app credentials silently beat
     // a pasted token in the worker — see shopify-connect-routes.test.tsx.
     const html = render(null, false, null);
-    expect(html).toContain("Connect with your own app");
+    expect(html).toContain("Create an app in your store admin");
     expect(html).toContain('name="shopify-admin-token"');
-    // The install route is offered, but as a tab the reader has to choose.
-    expect(html).toContain("Install a published app");
+    // The other route is offered, but as a tab the reader has to choose.
+    expect(html).toContain("Use an app you registered with Shopify");
     expect(html).not.toContain('name="shopify-install-shop"');
   });
 
@@ -194,14 +196,14 @@ describe("connections card — sync states", () => {
     // yet" — unreachable exactly when it was needed.
     const paused = { ...CONNECTION, syncPausedAt: "2026-08-04 08:15 UTC" };
     const html = render(run({ status: "failed", error: "Shopify auth failed (403)" }), false, paused);
-    expect(html).toContain("Connect with your own app instead");
+    expect(html).toContain("Create an app in your store admin instead");
     expect(html).toContain('aria-label="Admin API access token"');
     expect(html).toContain("This replaces the current connection.");
   });
 
   it("does not invite a healthy store to swap its credentials", () => {
     const html = render(run({ status: "ok", summary: "12 products", finishedAt: "2026-08-04 08:00 UTC" }));
-    expect(html).not.toContain("Connect with your own app instead");
+    expect(html).not.toContain("Create an app in your store admin instead");
     expect(html).not.toContain('aria-label="Admin API access token"');
   });
 
