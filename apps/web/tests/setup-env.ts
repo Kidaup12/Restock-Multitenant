@@ -11,11 +11,12 @@ if (existsSync(dbEnv)) config({ path: dbEnv });
 
 process.env.BETTER_AUTH_SECRET ??= "auth-flow-test-secret";
 process.env.BETTER_AUTH_URL ??= "http://auth-flow.test";
-// The Shopify callback builds its redirects from this configured origin rather
-// than from the request, so it throws when unset. That is deliberate — behind a
-// proxy the request resolves to the container itself, and a merchant who
-// connected successfully was sent to https://localhost:8080. The suite has to
-// supply an origin like production does.
+// The Shopify and QuickBooks callbacks build their redirects from this
+// configured origin rather than from the request, so both throw when it is
+// unset. That is deliberate — behind a proxy the request resolves to the
+// container itself, and a merchant who connected successfully was sent to
+// https://localhost:8080. The suite has to supply an origin like production
+// does.
 process.env.SHOPIFY_APP_URL ??= "http://auth-flow.test";
 
 /**
