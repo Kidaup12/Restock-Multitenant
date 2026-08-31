@@ -20,6 +20,18 @@ const utcDay = (daysAgo: number): Date => {
   return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() - daysAgo));
 };
 
+/**
+ * A sale's timestamp within its day. The ingest-health gate judges only
+ * COMPLETED days, so the newest sale it can see is yesterday's last one, and it
+ * holds the forecast past 36h. Stamping every row at UTC midnight made that
+ * 24h plus however long today had run — under the limit all morning and over it
+ * every afternoon, so this test passed or failed by the clock. Today keeps
+ * midnight: it is excluded from the gate anyway, and an evening stamp would put
+ * sales in the future for a run before 20:00.
+ */
+const saleAt = (daysAgo: number): Date =>
+  daysAgo === 0 ? utcDay(0) : new Date(utcDay(daysAgo).getTime() + 20 * 3_600_000);
+
 describe.skipIf(!runnable)("forecast crons (real redis + db)", () => {
   let prismaService: typeof import("@wezesha/db").prismaService;
   let cron: typeof import("../src/forecast-cron");
@@ -51,7 +63,7 @@ describe.skipIf(!runnable)("forecast crons (real redis + db)", () => {
       });
       const rows = [];
       for (let d = 120; d >= 0; d--) {
-        rows.push({ tenantId, productId: product.id, date: utcDay(d), quantity: rate, revenueKes: rate * 1000, channel: "shopify" });
+        rows.push({ tenantId, productId: product.id, date: saleAt(d), quantity: rate, revenueKes: rate * 1000, channel: "shopify" });
       }
       await prismaService.salesHistory.createMany({ data: rows });
     }
