@@ -74,8 +74,9 @@ export function QuickBooksConnectionCard({
             told apart from the ones raised here.
           </p>
           <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-            Connecting stores the link only. The buy list does not read
-            QuickBooks orders yet, so nothing on it changes today.
+            We check your books daily and flag orders that never reached them,
+            or were raised outside Wezesha. Your buy list figures do not change
+            — this tells orders apart, it does not count them.
           </p>
         </div>
         <span
