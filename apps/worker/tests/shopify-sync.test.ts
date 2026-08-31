@@ -6,6 +6,7 @@ import type { SyncJobData } from "@wezesha/queue";
 import { decodeEnvelope } from "@wezesha/realtime";
 import {
   ShopifyAuthError,
+  ShopifyGrantError,
   encryptToken,
   type ShopifyLocationNode,
   type ShopifyOrderNode,
@@ -469,6 +470,41 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     await handleFailure(jobStub(tenantId), wrapped, publisher);
     const notifications = await prismaService.notification.findMany({ where: { tenantId } });
     expect(notifications.some((n) => n.kind === "shopify_reconnect" && n.readAt === null)).toBe(true);
+  });
+
+  it("records a credential rejection as an auth failure, not a generic one", async () => {
+    // The live fault this covers: a Partner app that Shopify will not accept
+    // client credentials for ("shop_not_permitted") failed every tick, and the
+    // hook decided what kind of failure it was by matching prose. "Shopify
+    // rejected the app credentials" matched none of the phrases it looked for,
+    // so nothing was counted, the store never paused, lastAuthError stayed null
+    // - and the Connections screen had nothing to show but "the first sync is
+    // running in the background". A merchant sat on that indefinitely.
+    await prismaService.shopifyConnection.updateMany({
+      where: { tenantId },
+      data: { authFailureCount: 0, lastAuthError: null, lastAuthErrorAt: null, syncPausedAt: null },
+    });
+    const grant = new ShopifyGrantError(
+      400,
+      SHOP,
+      '{"error":"shop_not_permitted","error_description":"Client credentials cannot be performed on this shop."}'
+    );
+    // Exactly how the processor re-throws it: the wrap loses the class, so the
+    // cause is what carries the kind across.
+    const wrapped = Object.assign(new UnrecoverableError(grant.message), { cause: grant });
+
+    await handleFailure(jobStub(tenantId), wrapped, publisher);
+
+    const connection = await prismaService.shopifyConnection.findFirst({
+      where: { tenantId },
+      select: { authFailureCount: true, lastAuthError: true },
+    });
+    // Counted, and the sentence is kept so the screen can say it.
+    expect(connection!.authFailureCount).toBeGreaterThan(0);
+    expect(connection!.lastAuthError).toContain("shop_not_permitted");
+    // And it is filed as something a reconnect fixes, not a generic sync error.
+    const notifications = await prismaService.notification.findMany({ where: { tenantId } });
+    expect(notifications.some((n) => n.kind === "shopify_reconnect")).toBe(true);
   });
 
   it("retry-pending failures stay silent (no notification spam)", async () => {

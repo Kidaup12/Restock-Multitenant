@@ -21,7 +21,7 @@ import { ShopifyConnectionCard } from "../app/(shell)/settings/connections/shopi
  * reads as the merchant revoking us.
  *
  * So this asserts the shape of the first screen a new workspace sees, not the
- * styling: the token fields are present, and the credential fields are not
+ * styling: one route's fields are on screen, and the other two are not
  * reachable without changing tab.
  */
 
@@ -42,10 +42,12 @@ const render = (over: Partial<Props> = {}) =>
   renderToStaticMarkup(<ShopifyConnectionCard {...props} {...over} />);
 
 describe("connecting a store: one route at a time", () => {
-  it("opens on the token route, which is the one that always works", () => {
+  it("opens on the install route, which is the one merchants are asked for", () => {
     const html = render();
-    expect(html).toContain('name="shopify-admin-token"');
-    expect(html).toContain('name="shopify-token-shop"');
+    expect(html).toContain("Install it on your store");
+    // The other two routes' fields stay off the first paint.
+    expect(html).not.toContain('name="shopify-admin-token"');
+    expect(html).not.toContain('name="shopify-client-id"');
   });
 
   it("does not put the app-credential fields on the same screen", () => {
@@ -60,25 +62,32 @@ describe("connecting a store: one route at a time", () => {
     expect(render()).not.toContain('name="shopify-install-shop"');
   });
 
-  it("offers two routes, named for what the shop owner has", () => {
+  it("offers three routes, named for what the shop owner has", () => {
     const html = render();
     expect(html).toContain('role="tablist"');
-    for (const label of [
-      "Paste a token from your store",
-      "Use an app you registered with Shopify",
-    ]) {
+    for (const label of ["Install link", "Client ID &amp; secret", "Admin API token"]) {
       expect(html).toContain(label);
     }
   });
 
-  it("does not offer a third route for what is only step one of the second", () => {
-    // Saving a client ID and secret is not an alternative to installing with
-    // them - it is the step before. Presented as a sibling tab it sat AFTER the
-    // tab that depends on it, and the install error told people to look
-    // "above", where nothing was.
+  it("lists credentials directly after the install link that needs them", () => {
+    // Saving a client ID and secret is the step before installing with them, so
+    // it sits next to the install tab rather than at the end. Order is the whole
+    // point: a prerequisite listed last is one people look for and miss.
     const html = render();
-    expect(html).not.toContain("Client ID &amp; secret");
-    expect(html).not.toContain("Install a published app");
+    const order = ["Install link", "Client ID &amp; secret", "Admin API token"].map((l) =>
+      html.indexOf(l),
+    );
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it("sends someone with no credentials saved to the tab that takes them", () => {
+    // The install route cannot work without them, and a disabled field with no
+    // way out was the dead end this replaced.
+    const html = render({ appCredentialsConfigured: false });
+    expect(html).toContain("Add client ID &amp; secret");
+    expect(html).not.toContain('name="shopify-install-shop"');
   });
 
   it("keeps the credential box on the page once a store is connected", () => {

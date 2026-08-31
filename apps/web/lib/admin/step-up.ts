@@ -142,7 +142,11 @@ export async function hasStepUp(actor: AdminActor): Promise<boolean> {
 
 export type StepUpResult =
   | { ok: true }
-  | { ok: false; reason: "wrong_password" | "locked" | "no_password" | "not_eligible"; message: string };
+  | {
+      ok: false;
+      reason: "wrong_password" | "locked" | "no_password" | "not_eligible" | "wrong_code" | "send_failed";
+      message: string;
+    };
 
 type ThrottleRow = { failedStepUps: number; lockedUntil: Date | null };
 
@@ -236,4 +240,101 @@ export async function grantStepUp(actor: AdminActor, password: string): Promise<
 function lockedMessage(until: Date): string {
   const minutes = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 60_000));
   return `Too many wrong passwords. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+}
+
+/**
+ * Which second factor this admin can actually produce.
+ *
+ * An account created through the email-code sign-in has no credential row, so
+ * asking it for a password is asking for something that does not exist. That
+ * was not merely a bad message: step-up gates EVERY admin mutation, so such an
+ * account could hold the console and never grant access, add an owner, change a
+ * plan, export or delete. It was locked out of its own role.
+ */
+export async function stepUpMethod(actor: AdminActor): Promise<"password" | "code"> {
+  const account = await prismaService.account.findFirst({
+    where: { userId: actor.userId, providerId: "credential", password: { not: null } },
+    select: { id: true },
+  });
+  return account ? "password" : "code";
+}
+
+/**
+ * Send a one-time code to the admin's own address.
+ *
+ * Deliberately the same email-code machinery the account already signs in with,
+ * rather than a second secret of our own: one code path to reason about, one
+ * expiry, one delivery route. Sending does NOT touch the throttle - only a
+ * wrong code counts as an attempt, or a locked-out admin could never receive
+ * the code that would let them back in.
+ */
+export async function requestStepUpCode(actor: AdminActor): Promise<StepUpResult> {
+  if (actor.viaFallback) {
+    return {
+      ok: false,
+      reason: "not_eligible",
+      message: "Your access comes from the bootstrap list. Ask an admin to grant you access properly.",
+    };
+  }
+  try {
+    await auth.api.sendVerificationOTP({ body: { email: actor.email, type: "sign-in" } });
+    return { ok: true };
+  } catch {
+    return {
+      ok: false,
+      reason: "send_failed",
+      message: "We could not send the code. Try again in a moment.",
+    };
+  }
+}
+
+/**
+ * Verify a code and, on success, mint the grant.
+ *
+ * `checkVerificationOTP` verifies WITHOUT signing anyone in - the sign-in
+ * variant would mint a session, which is not what a step-up is: the admin is
+ * already signed in and is proving it is still them at the keyboard.
+ *
+ * Same throttle, same lockout and same 30-minute grant as the password route,
+ * so the weaker-looking door is not actually the wider one.
+ */
+export async function grantStepUpByCode(actor: AdminActor, code: string): Promise<StepUpResult> {
+  if (actor.viaFallback) {
+    return {
+      ok: false,
+      reason: "not_eligible",
+      message: "Your access comes from the bootstrap list. Ask an admin to grant you access properly.",
+    };
+  }
+
+  const throttle = await countAttempt(actor.userId);
+  if (!throttle) {
+    return { ok: false, reason: "not_eligible", message: "You are not a platform admin." };
+  }
+  if (throttle.lockedUntil && throttle.lockedUntil.getTime() > Date.now()) {
+    return { ok: false, reason: "locked", message: lockedMessage(throttle.lockedUntil) };
+  }
+  if (throttle.failedStepUps > STEPUP_MAX_ATTEMPTS) {
+    const until = new Date(Date.now() + STEPUP_LOCKOUT_MS);
+    await prismaService.platformAdmin.update({
+      where: { userId: actor.userId },
+      data: { lockedUntil: until },
+    });
+    return { ok: false, reason: "locked", message: lockedMessage(until) };
+  }
+
+  try {
+    await auth.api.checkVerificationOTP({
+      body: { email: actor.email, type: "sign-in", otp: code },
+    });
+  } catch {
+    return { ok: false, reason: "wrong_code", message: "That code is not right, or it has expired." };
+  }
+
+  await prismaService.platformAdmin.update({
+    where: { userId: actor.userId },
+    data: { failedStepUps: 0, lockedUntil: null },
+  });
+  await setStepUpCookie(actor.userId, actor.sessionId);
+  return { ok: true };
 }
