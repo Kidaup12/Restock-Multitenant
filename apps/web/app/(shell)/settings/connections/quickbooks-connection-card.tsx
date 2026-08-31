@@ -65,9 +65,17 @@ export function QuickBooksConnectionCard({
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="text-base font-semibold">QuickBooks</h2>
+          {/* Says what connecting does TODAY and what it is for, kept apart.
+              The old line promised the buy list already skipped stock on its
+              way; nothing reads the connection yet, so a shop would have
+              connected, seen "Connected", and had no number change. */}
           <p className="text-sm text-[var(--muted-foreground)]">
-            Spots purchase orders raised in QuickBooks, so the buy list does not
-            re-order stock that is already on its way.
+            Links your books so purchase orders you raise in QuickBooks can be
+            told apart from the ones raised here.
+          </p>
+          <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+            Connecting stores the link only. The buy list does not read
+            QuickBooks orders yet, so nothing on it changes today.
           </p>
         </div>
         <span
@@ -108,7 +116,8 @@ export function QuickBooksConnectionCard({
 
       {!configured && (
         <p className="text-sm text-amber-400">
-          QuickBooks is not set up on this deployment yet. Nothing to do here for now.
+          QuickBooks is not switched on for this deployment yet, so there is nothing
+          to connect here.
         </p>
       )}
 
