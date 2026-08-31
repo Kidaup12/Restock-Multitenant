@@ -30,12 +30,15 @@ const rows = [
     isSelf: false,
     roleOptions: [],
     canRemove: true,
+    permissions: [],
+    hasOverride: false,
+    canSetPermissions: false,
   },
 ];
 
 const render = (seats: Parameters<typeof TeamView>[0]["seats"]) =>
   renderToStaticMarkup(
-    <TeamView rows={rows} invites={[]} canManage inviteRoles={["MEMBER"]} seats={seats} />
+    <TeamView grantable={[]} rows={rows} invites={[]} canManage inviteRoles={["MEMBER"]} seats={seats} />
   );
 
 describe("the team seat cap is visible before you type", () => {
