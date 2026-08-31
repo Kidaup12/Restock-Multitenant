@@ -36,6 +36,13 @@ export type ConnectionView = {
    *  or "token" (pasted from an app the shop made in its own admin). Absent
    *  reads as oauth, the same default the column carries. */
   authMode?: string;
+  /** The last thing Shopify refused us with, shown from the FIRST failure
+   *  rather than only once the store is paused. A sync that cannot authenticate
+   *  fails before a run row is ever opened, so "Last sync: never" and "the first
+   *  sync is running in the background" were the only things on screen while the
+   *  real answer sat in the worker log. */
+  lastAuthError?: string | null;
+  lastAuthErrorAt?: string | null;
 };
 
 /** The primary-button look on an anchor. The two ways back out of a broken
@@ -129,6 +136,9 @@ export function ShopifyConnectionCard({
    */
   const [route, setRoute] = useState<"token" | "app">("token");
 
+  /** Disconnect drops the tokens and every sync cursor, and the way back for
+   *  an OAuth store is a whole install round trip. One click was too few. */
+  const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
   const [notice, setNotice] = useState<{ tone: "positive" | "warning" | "negative"; text: string } | null>(
     errorCode
       ? { tone: "negative", text: OAUTH_ERRORS[errorCode] ?? "Connecting the store failed." }
@@ -195,6 +205,15 @@ export function ShopifyConnectionCard({
     try {
       const res = await fetch("/api/shopify/disconnect", { method: "POST" });
       if (res.ok) {
+        // Cursors and tokens are gone server-side; leaving the old store's
+        // address and a half-typed token in the boxes invites reconnecting to
+        // whatever happened to still be sitting there.
+        setConfirmingDisconnect(false);
+        setShop("");
+        setTokenShop("");
+        setToken("");
+        setClientId("");
+        setApiSecret("");
         router.refresh();
       } else {
         const body = (await res.json()) as { error?: string };
@@ -620,6 +639,18 @@ export function ShopifyConnectionCard({
           )
         ) : (
           <div className="space-y-4">
+            {/* Not gated on `paused`: the point is to say something on the
+                first failure, not the third. */}
+            {!paused && connection.lastAuthError && (
+              <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">
+                Shopify refused our last attempt
+                {connection.lastAuthErrorAt ? ` (${connection.lastAuthErrorAt})` : ""} —{" "}
+                {connection.lastAuthError}{" "}
+                {canReinstall
+                  ? "Reconnect the store, or check the app is installed on it."
+                  : "Paste a fresh token below."}
+              </p>
+            )}
             {paused && (
               <p className="rounded-md bg-warning-soft px-3 py-2 text-sm text-warning">
                 Automatic syncs are paused — the store kept refusing our access token.{" "}
@@ -690,15 +721,48 @@ export function ShopifyConnectionCard({
                   Test connection
                 </Button>
               )}
-              {canManage && live && (
+              {/* Live updates need a websocket the deployment does not have a
+                  domain for yet, so this page cannot push its own changes. A
+                  button that re-reads the server beats a status line that
+                  quietly goes stale and reads as "still running". */}
+              <Button
+                variant="ghost"
+                onClick={() => router.refresh()}
+                disabled={busy !== null}
+              >
+                Refresh
+              </Button>
+              {canManage && live && !confirmingDisconnect && (
                 <Button
                   variant="ghost"
-                  onClick={disconnect}
-                  loading={busy === "disconnect"}
+                  onClick={() => setConfirmingDisconnect(true)}
                   disabled={busy !== null}
                 >
                   Disconnect
                 </Button>
+              )}
+              {canManage && live && confirmingDisconnect && (
+                <>
+                  <span className="text-sm text-ink">
+                    Disconnect {connection.shopDomain}? Stock and sales stop updating, and
+                    reconnecting starts a fresh sync.
+                  </span>
+                  <Button
+                    variant="ghost"
+                    onClick={disconnect}
+                    loading={busy === "disconnect"}
+                    disabled={busy !== null}
+                  >
+                    Yes, disconnect
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setConfirmingDisconnect(false)}
+                    disabled={busy !== null}
+                  >
+                    Keep it
+                  </Button>
+                </>
               )}
               {/* The way back matches the way in: a store that installed our
                   app reinstalls it, a store that pasted a token pastes another.

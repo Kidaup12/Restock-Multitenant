@@ -65,6 +65,13 @@ export default async function ConnectionsPage({
                 // Decides which recovery the card offers a broken store — the
                 // install round trip cannot complete for a token connection.
                 authMode: connection.authMode,
+                // Surfaced from the first failure. A credential rejection never
+                // opens a run row, so without this the screen had nothing to
+                // show but "running".
+                lastAuthError: connection.lastAuthError,
+                lastAuthErrorAt: connection.lastAuthErrorAt
+                  ? formatUtc(connection.lastAuthErrorAt)
+                  : null,
               }
             : null
         }
