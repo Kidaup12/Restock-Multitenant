@@ -25,6 +25,7 @@ import {
   inviteTeammate,
   removeMember,
   type TeamActionResult,
+  setMemberPermissions,
 } from "./actions";
 
 export type MemberRow = {
@@ -37,6 +38,12 @@ export type MemberRow = {
   /* Roles the viewer may move this member to (guards precomputed server-side). */
   roleOptions: Role[];
   canRemove: boolean;
+  /** What this person may do right now, role preset or override alike. */
+  permissions: string[];
+  /** True when these are their own permissions rather than the role's preset —
+   *  worth showing, because "member" then no longer describes what they can do. */
+  hasOverride: boolean;
+  canSetPermissions: boolean;
 };
 
 export type InviteRow = {
@@ -52,12 +59,19 @@ const roleLabels: Record<Role, string> = {
   MEMBER: "Member",
 };
 
+const permissionLabels: Record<string, string> = {
+  view_costs: "See costs & margins",
+  manage_settings: "Change settings, suppliers & catalogue",
+  approve_orders: "Work purchase orders",
+};
+
 export function TeamView({
   rows,
   invites,
   canManage,
   inviteRoles,
   seats,
+  grantable,
 }: {
   rows: MemberRow[];
   invites: InviteRow[];
@@ -66,6 +80,10 @@ export function TeamView({
   /** How many team seats the plan includes and whether another may be invited.
    *  Null when the reader cannot manage the team, so no form is drawn anyway. */
   seats: { allowed: boolean; used: number; max: number; message: string | null } | null;
+  /** The permission keys the server will accept. Passed in rather than listed
+   *  here so the form cannot offer one the guard would refuse — team management
+   *  is deliberately not among them; that is a role change. */
+  grantable: string[];
 }) {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<Role>(
@@ -193,6 +211,7 @@ export function TeamView({
               <TableHead>Member</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Role</TableHead>
+              <TableHead>Access</TableHead>
               <TableHead>Joined</TableHead>
               {/* Always here so the table has one shape; the remove button
                   inside it stays with the permission. */}
@@ -237,6 +256,63 @@ export function TeamView({
                       <Badge tone={member.role === "OWNER" ? "accent" : "neutral"}>
                         {roleLabels[member.role]}
                       </Badge>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {canManage && member.canSetPermissions ? (
+                      <details className="text-sm">
+                        <summary className="cursor-pointer text-ink-muted hover:text-ink">
+                          {member.hasOverride ? "Custom access" : "Role default"}
+                        </summary>
+                        <div className="mt-2 space-y-1.5">
+                          {grantable.map((key) => (
+                            <label key={key} className="flex items-start gap-2 text-xs text-ink">
+                              <input
+                                type="checkbox"
+                                className="mt-0.5"
+                                checked={member.permissions.includes(key)}
+                                disabled={pending}
+                                onChange={(e) => {
+                                  const next = e.target.checked
+                                    ? [...member.permissions, key]
+                                    : member.permissions.filter((p) => p !== key);
+                                  // Only the grantable ones travel: the role's
+                                  // own preset may include more, and sending
+                                  // those back would be asking to be refused.
+                                  run(() =>
+                                    setMemberPermissions({
+                                      membershipId: member.id,
+                                      permissions: next.filter((p) => grantable.includes(p)),
+                                    }),
+                                  );
+                                }}
+                              />
+                              {permissionLabels[key] ?? key}
+                            </label>
+                          ))}
+                          {member.hasOverride && (
+                            <button
+                              type="button"
+                              className="text-xs text-ink-muted underline hover:text-ink"
+                              disabled={pending}
+                              onClick={() =>
+                                run(() =>
+                                  setMemberPermissions({
+                                    membershipId: member.id,
+                                    permissions: null,
+                                  }),
+                                )
+                              }
+                            >
+                              Back to what the role gives
+                            </button>
+                          )}
+                        </div>
+                      </details>
+                    ) : (
+                      <span className="text-sm text-ink-faint">
+                        {member.hasOverride ? "Custom access" : "Role default"}
+                      </span>
                     )}
                   </TableCell>
                   <TableCell>{member.joined}</TableCell>

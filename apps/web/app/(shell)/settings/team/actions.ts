@@ -11,7 +11,13 @@ import {
 } from "@/lib/auth/invites";
 import { hasPermission } from "@/lib/auth/permissions";
 import { invitableRoles, type TeamActor } from "@/lib/auth/team-guards";
-import { changeMemberRoleGuarded, removeMemberGuarded } from "@/lib/auth/team-mutations";
+import {
+  changeMemberRoleGuarded,
+  removeMemberGuarded,
+  setMemberPermissionsGuarded,
+} from "@/lib/auth/team-mutations";
+import { GRANTABLE_PERMISSIONS } from "@/lib/auth/team-guards";
+import type { PermissionKey } from "@/lib/auth/permissions";
 
 /**
  * Team management actions. Every action re-resolves the caller's active
@@ -110,6 +116,41 @@ export async function changeMemberRole(input: {
     input.role,
   );
   if (!guard.ok) return err(guard.reason);
+  revalidatePath("/settings/team");
+  return { ok: true };
+}
+
+/**
+ * Set what one person may see and do, beyond what their role gives them.
+ *
+ * `permissions: null` puts them back on the role's preset — the difference
+ * between "this person is a member" and "this person is a member EXCEPT they
+ * may see costs" is worth keeping visible, so the override is stored as an
+ * override rather than flattened into a copied list.
+ */
+export async function setMemberPermissions(input: {
+  membershipId: string;
+  permissions: string[] | null;
+}): Promise<TeamActionResult> {
+  const ctx = await actorContext();
+  if (!ctx) return err("You're not in a workspace.");
+
+  let next: PermissionKey[] | null = null;
+  if (input.permissions !== null) {
+    const allowed = new Set<string>(GRANTABLE_PERMISSIONS);
+    // Unknown keys are dropped rather than rejected: the guard decides what may
+    // be granted, and a stale checkbox from an old tab should not be an error.
+    next = input.permissions.filter((k): k is PermissionKey => allowed.has(k));
+  }
+
+  const guard = await setMemberPermissionsGuarded(
+    ctx.membership.tenantId,
+    ctx.actor,
+    input.membershipId,
+    next,
+  );
+  if (!guard.ok) return err(guard.reason);
+  // What the shell shows depends on it, for that person on their next load.
   revalidatePath("/settings/team");
   return { ok: true };
 }
