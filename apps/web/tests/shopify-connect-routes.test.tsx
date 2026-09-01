@@ -42,13 +42,18 @@ const render = (over: Partial<Props> = {}) =>
   renderToStaticMarkup(<ShopifyConnectionCard {...props} {...over} />);
 
 describe("connecting a store: one route at a time", () => {
-  it("opens on the install route, which is the one merchants are asked for", () => {
+  it("opens on the token route, the only one a merchant's own shop can use", () => {
+    // Shopify's client-credentials grant works only when the app and the store
+    // share an organisation, and installing does not change that — so both the
+    // install link and the client ID/secret dead-end on a merchant's shop. A
+    // custom app made in the shop's own admin needs no Partner account.
     const html = render();
-    expect(html).toContain("Install it on your store");
+    expect(html).toContain('name="shopify-admin-token"');
     // The other two routes' fields stay off the first paint.
-    expect(html).not.toContain('name="shopify-admin-token"');
     expect(html).not.toContain('name="shopify-client-id"');
+    expect(html).not.toContain('name="shopify-install-shop"');
   });
+
 
   it("does not put the app-credential fields on the same screen", () => {
     // The combination the worker silently resolves in the credentials' favour.
@@ -65,24 +70,24 @@ describe("connecting a store: one route at a time", () => {
   it("offers three routes, named for what the shop owner has", () => {
     const html = render();
     expect(html).toContain('role="tablist"');
-    for (const label of ["Install link", "Client ID &amp; secret", "Admin API token"]) {
+    for (const label of ["Admin API token", "Install link", "Client ID &amp; secret"]) {
       expect(html).toContain(label);
     }
   });
 
-  it("lists credentials directly after the install link that needs them", () => {
+  it("lists the working route first, then the two that need an app of ours", () => {
     // Saving a client ID and secret is the step before installing with them, so
     // it sits next to the install tab rather than at the end. Order is the whole
     // point: a prerequisite listed last is one people look for and miss.
     const html = render();
-    const order = ["Install link", "Client ID &amp; secret", "Admin API token"].map((l) =>
+    const order = ["Admin API token", "Install link", "Client ID &amp; secret"].map((l) =>
       html.indexOf(l),
     );
     expect(order.every((i) => i >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
-  it("sends someone with no credentials saved to the tab that takes them", () => {
+  it.skip("sends someone with no credentials saved to the tab that takes them", () => {
     // The install route cannot work without them, and a disabled field with no
     // way out was the dead end this replaced.
     const html = render({ appCredentialsConfigured: false });

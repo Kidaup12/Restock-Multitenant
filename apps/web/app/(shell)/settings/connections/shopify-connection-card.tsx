@@ -134,11 +134,16 @@ export function ShopifyConnectionCard({
    * that needs them: a merchant who has not saved them yet is shown the way
    * there rather than a disabled field.
    *
-   * Install is the default because it is the route we ask merchants for. The
-   * token route is last and always works — it is the fallback when an app's
-   * distribution is not set up for the store.
+   * The token route leads, and this reverses an earlier ordering deliberately.
+   * The install link and the client ID/secret both go through an app in OUR
+   * Shopify organisation, and Shopify's client-credentials grant only works
+   * when the app and the store share an organisation — installing does not
+   * change that. A merchant's own shop answers shop_not_permitted whichever of
+   * those two they try. A custom app made in the shop's own admin needs no
+   * Partner account and no distribution, and its token does not expire, so it
+   * is the only route that works for the shops we are actually onboarding.
    */
-  const [route, setRoute] = useState<"install" | "credentials" | "token">("install");
+  const [route, setRoute] = useState<"install" | "credentials" | "token">("token");
 
   const { confirm, dialog } = useConfirm();
   const [notice, setNotice] = useState<{ tone: "positive" | "warning" | "negative"; text: string } | null>(
@@ -477,8 +482,20 @@ export function ShopifyConnectionCard({
           )}
         </h3>
         <p className="mt-1 text-sm text-ink-muted">
-          For an app you registered in the Shopify Partner dashboard. We
-          refresh access with these instead of holding a token.{" "}
+          {/* Shopify's rule, not ours: the client-credentials grant works only
+              when the app and the store belong to the SAME Shopify
+              organisation. These credentials are the shop's own app, not ours —
+              nothing here is shared — but a LIVE shop is not in any Dev
+              Dashboard organisation, so it is refused whoever owns the app.
+              Only development stores created in that dashboard qualify.
+              Installing does not change it: install grants permission on a
+              shop, this grant asks whether the shop is one of yours. */}
+          <strong className="font-medium text-ink">
+            Only works if the store is a development store in the same Shopify
+            organisation as the app.
+          </strong>{" "}
+          A live shop is not, so Shopify refuses this route for it — even after
+          the app is installed. Use the Admin API token instead.{" "}
           <strong className="font-medium text-ink">
             Do not fill these in as well as pasting a token
           </strong>{" "}
@@ -546,9 +563,9 @@ export function ShopifyConnectionCard({
     <div role="tablist" aria-label="How to connect" className="flex flex-wrap gap-1 rounded-md bg-surface-2 p-1">
       {(
         [
-          ["install", "Install link"],
-          ["credentials", "Client ID & secret"],
           ["token", "Admin API token"],
+          ["install", "Install link"],
+          ["credentials", "Client ID & secret (dev stores)"],
         ] as const
       ).map(([key, label]) => (
         <button
@@ -652,7 +669,7 @@ export function ShopifyConnectionCard({
                       {/* One expression on purpose: JSX drops the space at
                           every text/expression boundary here, which shipped
                           "read_ordersscopes" to the screen. */}
-                      {`Your app needs the ${REQUIRED_SCOPE_LABEL} scopes. If Shopify says the app cannot be installed on this store, its distribution is not set up for it — use an Admin API token instead.`}
+                      {`Your app needs the ${REQUIRED_SCOPE_LABEL} scopes, and its distribution must be set up for this exact store — one app covers one store. If Shopify will not install it, or it installs and syncs still fail, use an Admin API token instead.`}
                     </p>
                   </div>
                   {appCredentialsConfigured ? (
