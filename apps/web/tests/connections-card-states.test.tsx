@@ -170,6 +170,26 @@ describe("connections card — sync states", () => {
     expect(html).toContain("client-abc");
   });
 
+  it("does not say a sync is running while the store is refusing us", () => {
+    // Dave's screenshot: a "Syncing" badge and "the first sync is running in
+    // the background" sitting directly above a banner explaining the store had
+    // rejected the credentials. A queued run is not a working one - after a
+    // refusal there is ALWAYS one queued, and it fails for the same reason.
+    // A run IS queued — that is the point. render(syncRun, justConnected, connection).
+    const html = render(run({ status: "running" }), true, {
+      shopDomain: "shop.myshopify.com",
+      installedAt: "2026-09-01T07:23:00.000Z",
+      uninstalledAt: null,
+      scopes: "read_products",
+      syncPausedAt: null,
+      lastAuthError: "Shopify rejected the app credentials (400)",
+      lastAuthErrorAt: "2026-09-01T07:23:00.000Z",
+    } as ConnectionView);
+
+    expect(html, "the badge still reads Syncing over a refusal").toContain("Needs attention");
+    expect(html).not.toContain("The first sync is running in the background");
+  });
+
   it("leads a new workspace with the install link, and keeps the token route reachable", () => {
     // The install link is the route merchants are asked for, so it is the tab a
     // new workspace opens on. The token route stays one click away rather than

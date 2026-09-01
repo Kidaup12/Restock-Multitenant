@@ -144,7 +144,11 @@ export function ShopifyConnectionCard({
   const [notice, setNotice] = useState<{ tone: "positive" | "warning" | "negative"; text: string } | null>(
     errorCode
       ? { tone: "negative", text: OAUTH_ERRORS[errorCode] ?? "Connecting the store failed." }
-      : justConnected
+      : // Not while the store is refusing us. The connection row exists, so
+        // "connected" is technically true and the sync IS queued — but saying
+        // the first sync is running above a banner explaining it was refused
+        // reads as reassurance, and it is the sentence a merchant believes.
+        justConnected && !connection?.lastAuthError
         ? { tone: "positive", text: "Store connected. The first sync is running in the background." }
         : null
   );
@@ -596,15 +600,19 @@ export function ShopifyConnectionCard({
             <Badge tone="neutral">Not connected</Badge>
           ) : !live ? (
             <Badge tone="warning">Disconnected</Badge>
-          ) : syncing ? (
-            <Badge tone="accent">Syncing</Badge>
           ) : paused ? (
             // Ahead of "Sync failed": both are true, but only one says what to do.
             <Badge tone="warning">Reconnect required</Badge>
           ) : connection.lastAuthError ? (
-            // Pausing needs several refusals; the badge must not read "Connected"
-            // through the ones before it, while the banner says we were refused.
+            // Ahead of "Syncing" too. A queued run does not mean a working one:
+            // after a refusal there is always a sync waiting, and it will fail
+            // for the same reason. Showing "Syncing" over a refusal banner is
+            // how a store sat on "the first sync is running" for a whole day.
+            // Safe to lead with, because a successful run clears this
+            // (clearAuthFailureState) and so does a reconnect.
             <Badge tone="warning">Needs attention</Badge>
+          ) : syncing ? (
+            <Badge tone="accent">Syncing</Badge>
           ) : syncRun?.status === "failed" ? (
             <Badge tone="negative">Sync failed</Badge>
           ) : syncRun?.status === "stalled" ? (
