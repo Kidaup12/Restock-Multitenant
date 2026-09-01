@@ -213,6 +213,26 @@ describe.skipIf(!runnable)("connect a store with a pasted token (local db)", () 
         shopDomain: "amara-demo.myshopify.com",
         accessToken: GOOD_TOKEN,
       });
+      // Testing the connection is throttled per workspace, counted from the
+      // audit trail. These cases press it far more often than a person would,
+      // so each starts from a clean count — they are about what the probe uses,
+      // not about the throttle, which has its own test.
+      await prismaService.auditEvent.deleteMany({
+        where: { action: "shopify_connection_tested" },
+      });
+    });
+
+    it("stops a person hammering it, and says why", async () => {
+      // Each press mints a token against the shop's OAuth endpoint, and Shopify
+      // rate limits that — the throttling lands on the MERCHANT, not on us. The
+      // press count is exactly what rises when someone is staring at a red
+      // error, which is when it matters.
+      const results = [];
+      for (let i = 0; i < 7; i++) results.push(await testShopifyConnection());
+
+      const refused = results.filter((r) => !r.ok);
+      expect(refused.length, "nothing stopped seven presses in a row").toBeGreaterThan(0);
+      expect((refused[0] as { error: string }).error).toContain("as often as Shopify will let us");
     });
 
     it("names the store and its currency when everything works", async () => {
