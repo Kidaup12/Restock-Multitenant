@@ -7,6 +7,9 @@ import { getUnreadCount } from "@/lib/notifications/data";
 import { getConnectionStatus } from "@/lib/data/connection-status";
 import { isStale, staleDays } from "@/lib/sync/staleness";
 import { AppShell } from "@/components/shell/app-shell";
+import { readTermsAcceptance } from "@/lib/auth/terms";
+import { TERMS_VERSION } from "@/lib/legal";
+import { TermsGate } from "./terms-gate";
 
 const roleLabels: Record<Role, string> = {
   OWNER: "Owner",
@@ -89,6 +92,18 @@ export default async function ShellLayout({
       }
     >
       {children}
+      {/* Asked here rather than offered in Settings. Acceptance was recorded
+          correctly but only if someone went looking for it, so the consent
+          trail was empty for everyone who did not — which proves nothing. The
+          shell is the one place both routes in arrive at: a new owner on first
+          load, and an invited teammate the moment they join.
+
+          Rendered alongside the children rather than instead of them so the
+          page behind is already there when the gate clears — but it covers the
+          viewport and has no dismiss, so nothing behind it can be used. */}
+      {membership && !readTermsAcceptance(membership).current && (
+        <TermsGate version={TERMS_VERSION} />
+      )}
     </AppShell>
   );
 }
