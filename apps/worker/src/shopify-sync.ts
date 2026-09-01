@@ -623,6 +623,22 @@ async function resolveAccessToken(
   connection: { shopDomain: string; accessToken: string; authMode: string },
   tokens: ReturnType<typeof createTokenCache>
 ): Promise<string> {
+  // The STORED token wins. Every token we hold is long-lived: a pasted Admin API
+  // token, or the offline token the OAuth callback exchanged the code for. There
+  // is no path that stores a client-credentials token (the three writers are the
+  // paste action and the two callback branches), so the old assumption that a
+  // stored token "lives about a day" was never true of the data.
+  //
+  // Preferring credentials over it made the install route self-defeating: the
+  // authorize URL needs a client ID, so saving credentials is a PRECONDITION of
+  // installing — and having them saved is exactly what made the sync throw the
+  // resulting token away and mint instead. Client credentials only work when the
+  // app and the store share a Shopify organisation, which a live shop never
+  // does, so a merchant who installed correctly was refused every tick.
+  if (connection.accessToken) return decryptToken(connection.accessToken);
+
+  // No stored token at all. Mint, if this workspace has an app to mint with —
+  // the dev-store path, where app and store share an organisation.
   const credential = await prismaService.shopifyAppCredential.findUnique({
     where: { tenantId },
     select: { clientId: true, apiSecret: true },
@@ -634,23 +650,13 @@ async function resolveAccessToken(
     });
   }
 
-  // A pasted Admin API token is long-lived and is the credential in its own
-  // right — nothing to mint, use it.
-  if (connection.authMode === "token") return decryptToken(connection.accessToken);
-
-  // Anything else stored an OAuth token, and one minted by the
-  // client-credentials grant lives about a day. Presenting it now would earn a
-  // 403 that reads "token revoked or app uninstalled" and send the next person
-  // hunting a revocation that never happened — the store is fine, this
-  // workspace simply has no app credentials to mint with.
-  //
   // The cache is dropped too: a worker that minted before the credentials were
   // removed would otherwise keep syncing on a token nobody can renew, so the
   // screen would say "connected" until the token quietly aged out.
   tokens.invalidate(connection.shopDomain);
   throw new UnrecoverableError(
-    `${connection.shopDomain} has no Shopify app credentials for this workspace. ` +
-      `Add the client ID and secret under Settings → Connections, or connect the store with an Admin API token.`
+    `${connection.shopDomain} has no usable Shopify credential for this workspace. ` +
+      `Reconnect the store, or connect it with an Admin API token.`
   );
 }
 

@@ -190,7 +190,16 @@ describe("connections card — sync states", () => {
     expect(html).not.toContain("The first sync is running in the background");
   });
 
-  it("leads a new workspace with the install link, and keeps the token route reachable", () => {
+  it("warns that the credentials route is limited to our own organisation", () => {
+    // These credentials are the shop's OWN app - nothing here is shared, and
+    // Wezesha holds no Shopify app at all. The grant still requires the store to
+    // sit in the same Shopify organisation as the app, which only a development
+    // store does. Three rounds of setup went into a live store that could never
+    // have used it, so the limit is stated where the fields are.
+    expect(render(null)).toContain("Only works if the store is a development store");
+  });
+
+  it("leads a new workspace with the route its own shop can actually use", () => {
     // The install link is the route merchants are asked for, so it is the tab a
     // new workspace opens on. The token route stays one click away rather than
     // buried: it needs no distribution, no review and no Partner account, so it
@@ -201,10 +210,10 @@ describe("connections card — sync states", () => {
     // app credentials silently beat a pasted token in the worker — see
     // shopify-connect-routes.test.tsx.
     const html = render(null, false, null);
-    expect(html).toContain("Install it on your store");
+    expect(html).toContain('name="shopify-admin-token"');
     // The other routes are offered, but as tabs the reader has to choose.
-    expect(html).toContain("Admin API token");
-    expect(html).not.toContain('name="shopify-admin-token"');
+    expect(html).toContain("Install link");
+    expect(html).not.toContain('name="shopify-install-shop"');
   });
 
   it("offers the token route to a store that is connected but cannot sync", () => {
