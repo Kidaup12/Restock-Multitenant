@@ -273,9 +273,12 @@ function RailContent({
             {/* Desktop only: on mobile this lives in the top bar, where it can be
                 seen without opening the drawer. */}
             <span className="hidden lg:inline-flex">
+              {/* Bottom-left corner of the sidebar: the panel has to open
+                  upward and to the right, or it lands off screen. */}
               <NotificationBell
                 initialUnread={unreadNotifications}
                 workspaceId={workspace?.id ?? null}
+                placement="above-start"
               />
             </span>
             <ThemeToggle data-tour="theme-toggle" />
