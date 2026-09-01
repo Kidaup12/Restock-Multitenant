@@ -67,14 +67,35 @@ async function markRead(body: { ids: string[] } | { all: true }): Promise<number
   }
 }
 
+/**
+ * Where the panel opens from, because the bell is mounted in two corners.
+ *
+ * The desktop bell sits at the BOTTOM-LEFT of the sidebar. Opening down and to
+ * the left from there put the panel at left:-199 in a 1264px viewport and
+ * top:649 in a 649px one — entirely off screen on both axes. It still opened,
+ * still fetched, and still marked everything read, so the only visible effect
+ * of pressing it was the unread badge clearing: worse than doing nothing,
+ * because it silently consumed notices nobody saw.
+ */
+export type BellPlacement = "below-end" | "above-start";
+
+/** The positioning half of the panel's classes, exported so it can be tested:
+ *  the bug was a coordinate, and a test that only checks the panel exists would
+ *  have passed throughout — it did exist, at left:-199. */
+export function panelPlacementClass(placement: BellPlacement): string {
+  return placement === "above-start" ? "bottom-full left-0 mb-2" : "right-0 mt-2";
+}
+
 export function NotificationBell({
   initialUnread,
   workspaceId,
+  placement = "below-end",
 }: {
   initialUnread: number;
   /** Active workspace — a change re-binds the socket and re-seeds the badge
    *  (workspace switches are router.refresh(), which keeps client state). */
   workspaceId: string | null;
+  placement?: BellPlacement;
 }) {
   const [unread, setUnread] = useState(initialUnread);
   const [open, setOpen] = useState(false);
@@ -203,7 +224,7 @@ export function NotificationBell({
           onKeyDown={(event) => {
             if (event.key === "Escape") setOpen(false);
           }}
-          className="absolute right-0 z-30 mt-2 w-[min(380px,calc(100vw-24px))] rounded-lg border border-edge bg-surface shadow-pop"
+          className={`absolute z-30 w-[min(380px,calc(100vw-24px))] rounded-lg border border-edge bg-surface shadow-pop ${panelPlacementClass(placement)}`}
         >
           <div className="flex items-center justify-between border-b border-edge px-4 py-2.5">
             <div className="flex items-center gap-2">
