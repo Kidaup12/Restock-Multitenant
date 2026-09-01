@@ -33,6 +33,8 @@ export type MintedToken = { accessToken: string; scopes: string[]; expiresAt: nu
 
 export type ShopifyAppCredentials = { clientId: string; clientSecret: string };
 
+import { ShopifyRateLimitedError } from "./client";
+
 export class ShopifyGrantError extends Error {
   readonly status: number;
   constructor(status: number, shopDomain: string, detail: string) {
@@ -59,6 +61,17 @@ export async function mintAdminToken(
 
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    // 429 is Shopify asking us to slow down, not refusing the credentials.
+    // Raised as a grant error it would count as an auth failure and, after
+    // enough of them, PAUSE a perfectly good connection and tell the shop to
+    // reconnect — turning our own retry rate into "your store rejected us".
+    if (res.status === 429) {
+      const raw = res.headers.get("Retry-After");
+      const seconds = raw ? Number.parseFloat(raw) : Number.NaN;
+      const retryAfterMs =
+        Number.isFinite(seconds) && seconds > 0 ? Math.ceil(seconds * 1000) : 2_000;
+      throw new ShopifyRateLimitedError(retryAfterMs, `minting a token for ${shopDomain}`);
+    }
     throw new ShopifyGrantError(res.status, shopDomain, body.slice(0, 200));
   }
 

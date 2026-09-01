@@ -296,6 +296,31 @@ export async function removeShopifyStore(): Promise<ConnectResult> {
  * unsure; making it mutate state would mean an unlucky press could pause syncs
  * or clear a pause on evidence nobody asked it to gather.
  */
+/**
+ * How often a workspace may ask Shopify to prove a credential.
+ *
+ * Each press mints a token against the shop's OAuth endpoint, and Shopify rate
+ * limits that. Nothing stopped a person pressing it repeatedly while reading a
+ * red error — exactly when someone presses it most — and the throttling that
+ * follows is charged to the SHOP, not to us. It also used to be self-punishing:
+ * a 429 came back as a grant error, counted as an auth failure, and would
+ * eventually pause the connection.
+ *
+ * Counted from the audit trail rather than memory: on serverless there is no
+ * shared memory between requests, so an in-process counter would reset itself
+ * every few presses and enforce nothing.
+ */
+const TEST_ATTEMPT_WINDOW_MS = 60_000;
+const TEST_ATTEMPTS_PER_WINDOW = 5;
+
+async function tooManyTests(tenantId: string, now: Date): Promise<boolean> {
+  const since = new Date(now.getTime() - TEST_ATTEMPT_WINDOW_MS);
+  const recent = await prismaService.auditEvent.count({
+    where: { tenantId, entity: "ShopifyConnection", action: "shopify_connection_tested", createdAt: { gte: since } },
+  });
+  return recent >= TEST_ATTEMPTS_PER_WINDOW;
+}
+
 export async function testShopifyConnection(): Promise<ConnectResult> {
   const actor = await actorContext();
   if (!actor) return err("Only owners and admins can test a store connection.");
@@ -306,6 +331,16 @@ export async function testShopifyConnection(): Promise<ConnectResult> {
   if (connection.uninstalledAt) {
     return err("This store is disconnected. Reconnect it before testing.");
   }
+
+  const now = new Date();
+  if (await tooManyTests(actor.tenantId, now)) {
+    return err(
+      "That is as often as Shopify will let us check. Wait a minute and try again — pressing it more will not get an answer sooner."
+    );
+  }
+  await audit(actor.tenantId, "shopify_connection_tested", actor.userId, {
+    shopDomain: connection.shopDomain,
+  });
 
   /**
    * Test the credential the SYNC would use, not whatever token happens to be
