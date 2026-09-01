@@ -310,19 +310,28 @@ describe.skipIf(!runnable)("connect a store with a pasted token (local db)", () 
         seen.mintedFor = null;
       });
 
-      it("mints a token and probes with that, not the stored one", async () => {
+      it("probes with the stored token, which is what the sync now uses", async () => {
+        // The invariant here has always been "test what the sync would use" —
+        // that has not changed, the sync has. It used to mint on every run, so
+        // this asserted minting. It now prefers the stored token, because every
+        // token we store is long-lived and preferring credentials made the
+        // install route unusable for a live shop: saving credentials is a
+        // precondition of installing, and having them saved was what threw the
+        // resulting token away.
         const res = await testShopifyConnection();
         expect(res).toMatchObject({ ok: true });
-        expect(seen.probedWith).toBe("shpat_freshly_minted");
-        // The stored token is exactly what must NOT be presented.
-        expect(seen.probedWith).not.toBe(GOOD_TOKEN);
-        expect(seen.mintedFor).toMatchObject({
-          shopDomain: "amara-demo.myshopify.com",
-          credentials: { clientId: "client-id", clientSecret: "client-secret" },
-        });
+        expect(seen.probedWith).toBe(GOOD_TOKEN);
+        expect(seen.mintedFor, "minted despite holding a working token").toBeNull();
       });
 
       it("blames the credentials, not the store, when the grant is refused", async () => {
+        // Minting is the fallback now, so reaching it means there is no stored
+        // token to prefer. Kept rather than deleted: the branch still exists,
+        // and this is the message it must give.
+        await prismaService.shopifyConnection.updateMany({
+          where: { tenantId: tenantA },
+          data: { accessToken: "" },
+        });
         mintState.error = new ShopifyGrantError(401, "amara-demo.myshopify.com", "bad client");
         const res = await testShopifyConnection();
         expect(res.ok).toBe(false);

@@ -360,7 +360,20 @@ export async function testShopifyConnection(): Promise<ConnectResult> {
    */
   const credentials = await credentialsForTenant(actor.tenantId);
   let accessToken: string;
-  if (credentials) {
+  if (connection.accessToken) {
+    // Same order as resolveAccessToken: the STORED token wins. Both a pasted
+    // Admin API token and the offline token from an OAuth install are
+    // long-lived, and minting instead is what made a correctly installed store
+    // report a failure it did not have.
+    try {
+      accessToken = decryptToken(connection.accessToken);
+    } catch {
+      // The stored ciphertext cannot be read — almost always TOKEN_ENCRYPTION_KEY
+      // differing between deploys. Worth saying plainly; no amount of retrying
+      // helps, and the sync would fail the same way with less explanation.
+      return err("The stored token could not be read. Reconnect the store to store a fresh one.");
+    }
+  } else if (credentials) {
     try {
       accessToken = (
         await mintAdminToken(connection.shopDomain, {
@@ -371,25 +384,14 @@ export async function testShopifyConnection(): Promise<ConnectResult> {
     } catch (e) {
       if (e instanceof ShopifyGrantError) {
         return err(
-          `${connection.shopDomain} refused this workspace's app credentials. Check the client ID and secret above — the store itself may be fine.`
+          `${connection.shopDomain} refused this workspace's app credentials. Client ID and secret only work for a development store in the same Shopify organisation as the app — connect a live shop with an Admin API token instead.`
         );
       }
       return err(`Could not reach ${connection.shopDomain}: ${(e as Error).message}`);
     }
-  } else if (connection.authMode === "token") {
-    try {
-      accessToken = decryptToken(connection.accessToken);
-    } catch {
-      // The stored ciphertext cannot be read — almost always TOKEN_ENCRYPTION_KEY
-      // differing between deploys. Worth saying plainly; no amount of retrying
-      // helps, and the sync would fail the same way with less explanation.
-      return err("The stored token could not be read. Reconnect the store to store a fresh one.");
-    }
   } else {
-    // An OAuth token with no credentials to renew it: the sync refuses this
-    // workspace outright, so the honest answer is the same one it gives.
     return err(
-      `${connection.shopDomain} has no Shopify app credentials in this workspace, so nothing can be minted to reach it. Add the client ID and secret above, or connect the store with an Admin API token.`
+      `${connection.shopDomain} has no usable credential in this workspace. Reconnect the store, or connect it with an Admin API token.`
     );
   }
 

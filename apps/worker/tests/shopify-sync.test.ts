@@ -402,6 +402,66 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     await expect(failing(jobStub(tenantId))).rejects.toBeInstanceOf(UnrecoverableError);
   });
 
+  it("uses the token an OAuth install stored, instead of minting a new one", async () => {
+    // The live fault. A merchant completed the redirect on their own account,
+    // so the authorization-code grant succeeded and the callback stored a
+    // working offline token for their shop. resolveAccessToken then checked app
+    // credentials FIRST and minted via client_credentials, throwing that token
+    // away — and client credentials only work when the app and the store share
+    // a Shopify organisation, which a live shop never does. So every tick was
+    // refused with shop_not_permitted.
+    //
+    // The route could not have worked: the authorize URL needs a client ID, so
+    // saving credentials is a PRECONDITION of installing, and having them saved
+    // was what broke it.
+    // Exactly the client's shape: connected by the OAuth install, AND app
+    // credentials saved (the install could not have been started without them).
+    await prismaService.shopifyConnection.updateMany({
+      where: { tenantId },
+      data: { authMode: "oauth" },
+    });
+    await prismaService.shopifyAppCredential.upsert({
+      where: { tenantId },
+      create: { tenantId, clientId: "client-abc", apiSecret: encryptToken("shhh") },
+      update: { clientId: "client-abc", apiSecret: encryptToken("shhh") },
+    });
+
+    let minted = false;
+    const spyCache = {
+      get: async () => {
+        minted = true;
+        return "minted-token";
+      },
+      invalidate: () => {},
+      get size() {
+        return 0;
+      },
+    } as unknown as Parameters<typeof import("../src/shopify-sync").createShopifySyncProcessor>[0]["tokenCache"];
+
+    const seen: string[] = [];
+    const mod = await import("../src/shopify-sync");
+    const processor = mod.createShopifySyncProcessor({
+      publisher,
+      makeApi: (_shop: string, token: string) => {
+        seen.push(token);
+        return fakeApi;
+      },
+      appUrl: "https://app.example",
+      tokenCache: spyCache,
+    });
+
+    await processor(jobStub(tenantId));
+
+    expect(minted, "minted a token instead of using the one the install stored").toBe(false);
+    expect(seen[0], "the stored token never reached Shopify").toBe(TOKEN);
+
+    await prismaService.shopifyAppCredential.deleteMany({ where: { tenantId } });
+    await prismaService.shopifyConnection.updateMany({
+      where: { tenantId },
+      data: { authMode: "token" },
+    });
+  });
+
   it("drops the cached token when Shopify rejects it mid-sync", async () => {
     // The cache expires on the token's STATED lifetime, so a token revoked
     // early stayed in memory and was re-presented every tick. Three rejections
@@ -516,18 +576,23 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
   });
 
 
-  it("says the credentials are missing rather than blaming the store's token", async () => {
-    // An OAuth connection's stored token was minted by the client-credentials
-    // grant and lives about a day. With no app credentials there is nothing to
-    // mint with, and presenting the stale token earns a 403 that reads "token
-    // revoked or app uninstalled" — sending the next person after a revocation
-    // that never happened. The store is fine; the workspace is unconfigured.
+  it("uses an OAuth connection's stored token even with no app credentials", async () => {
+    // This asserted the opposite until 1 Sep, on the premise that a stored
+    // OAuth token was minted by client credentials and lived about a day. That
+    // premise was never true of the data: the only writers of accessToken are
+    // the paste action and the two callback branches, and BOTH store a
+    // long-lived token. Refusing to use it is what broke the install route for
+    // every live shop.
+    //
+    // A legacy row holding a genuinely stale token now earns a 403 instead,
+    // which surfaces as an auth failure and a reconnect prompt — recoverable,
+    // and honest about what happened.
     await prismaService.shopifyConnection.updateMany({
       where: { tenantId },
       data: { authMode: "oauth" },
     });
     try {
-      await expect(processor(jobStub(tenantId))).rejects.toThrow(/no Shopify app credentials/);
+      await expect(processor(jobStub(tenantId))).resolves.toBeUndefined();
     } finally {
       await prismaService.shopifyConnection.updateMany({
         where: { tenantId },
