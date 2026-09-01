@@ -7,6 +7,7 @@ import { decodeEnvelope } from "@wezesha/realtime";
 import {
   ShopifyAuthError,
   ShopifyGrantError,
+  ShopifyRateLimitedError,
   encryptToken,
   type ShopifyLocationNode,
   type ShopifyOrderNode,
@@ -514,6 +515,7 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     expect(await prismaService.notification.count({ where: { tenantId } })).toBe(before);
   });
 
+
   it("says the credentials are missing rather than blaming the store's token", async () => {
     // An OAuth connection's stored token was minted by the client-credentials
     // grant and lives about a day. With no app credentials there is nothing to
@@ -644,6 +646,40 @@ describe.skipIf(!runnable)("shopify sync processor (real db + redis)", () => {
     expect(sent).toHaveLength(2);
 
     await incident.clearIncident(publisher, tenantId, "shopify");
+  });
+
+  it("does not count Shopify throttling us as the shop refusing us", async () => {
+    // Our own retry rate must not read as the merchant's Shopify being broken.
+    // Minting a token used to turn every non-OK status into a grant error, so a
+    // run of 429s counted as auth failures and would eventually pause a healthy
+    // store and tell the shop to reconnect.
+    await prismaService.shopifyConnection.updateMany({
+      where: { tenantId },
+      data: { authFailureCount: 0, lastAuthError: null, lastAuthErrorAt: null, syncPausedAt: null },
+    });
+    const startedAt = new Date();
+    const limited = new ShopifyRateLimitedError(2_000, `minting a token for ${SHOP}`);
+    const wrapped = Object.assign(new UnrecoverableError(limited.message), { cause: limited });
+
+    await handleFailure(jobStub(tenantId), wrapped, publisher);
+
+    const connection = await prismaService.shopifyConnection.findFirst({
+      where: { tenantId },
+      select: { authFailureCount: true, syncPausedAt: true, lastAuthError: true },
+    });
+    expect(connection!.authFailureCount, "throttling was counted against the connection").toBe(0);
+    expect(connection!.syncPausedAt, "throttling paused a healthy store").toBeNull();
+    expect(connection!.lastAuthError).toBeNull();
+
+    // Scoped to what THIS call wrote: earlier cases in this file legitimately
+    // leave reconnect notices on the same tenant, and asserting on the whole
+    // table would pass or fail on their order rather than on this behaviour.
+    expect(
+      await prismaService.notification.count({
+        where: { tenantId, kind: "shopify_reconnect", createdAt: { gt: startedAt } },
+      }),
+      "the shop was told to reconnect because we were rate limited",
+    ).toBe(0);
   });
 });
 
@@ -1018,6 +1054,7 @@ describe.skipIf(!runnable)("on-route without an en-route location (real db + red
     expect(product.currentStock).toBe(23);
     expect(product.onOrder).toBe(0);
   });
+
 });
 
 describe("catalogue notice wording", () => {
@@ -1277,4 +1314,5 @@ describe.skipIf(!runnable)("sales writes across chunk boundaries (real db + redi
     });
     expect(total).toBe(602);
   });
+
 });
