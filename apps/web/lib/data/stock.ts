@@ -599,6 +599,10 @@ export type LocationsQuery = {
   page: number;
   sortKey: LocationSortKey;
   desc: boolean;
+  /** Which optional columns are hidden. Hidden rather than shown, so a column
+   *  added later appears for everyone instead of being invisible to every
+   *  reader who ever touched this control. */
+  hidden: LocationOptionalColumn[];
   /** Lines per page. A branch with 500 SKUs is a scroll, not a hunt, and 50 at
    *  a time makes finding one product a paging exercise — but the page cost
    *  grows with this number, so it stays the reader's choice rather than a
@@ -611,6 +615,25 @@ export type LocationsQuery = {
  *  catalogue in one response. */
 export const LOCATION_PAGE_SIZES = [50, 100, 200] as const;
 export type LocationPageSize = (typeof LOCATION_PAGE_SIZES)[number];
+
+/**
+ * Columns a reader may hide.
+ *
+ * Product and On hand are absent from this list on purpose: a stock table
+ * without the product or the quantity is not a shorter table, it is a
+ * different and useless one. Everything else is a preference — a single-branch
+ * shop has no use for the shop-wide caveats, and a member cannot see Value at
+ * all.
+ */
+export const LOCATION_OPTIONAL_COLUMNS = ["sku", "daysCover", "onOrderUnits", "valueKes"] as const;
+export type LocationOptionalColumn = (typeof LOCATION_OPTIONAL_COLUMNS)[number];
+
+export const LOCATION_COLUMN_LABELS: Record<LocationOptionalColumn, string> = {
+  sku: "SKU",
+  daysCover: "Cover",
+  onOrderUnits: "En route",
+  valueKes: "Value",
+};
 
 /** Default order: most stock first. What the screen showed before sorting
  *  existed, so turning this on does not silently rearrange anyone's view. */
@@ -649,6 +672,12 @@ export function parseLocationsQuery(params: RawSearchParams): LocationsQuery {
   const dir = Array.isArray(dirRaw) ? dirRaw[0] : dirRaw;
   const sizeRaw = params["per"];
   const size = Number(Array.isArray(sizeRaw) ? sizeRaw[0] : sizeRaw);
+  const hideRaw = params["hide"];
+  const hide = (Array.isArray(hideRaw) ? hideRaw : hideRaw ? [hideRaw] : [])
+    .flatMap((v) => v.split(","))
+    .filter((v): v is LocationOptionalColumn =>
+      (LOCATION_OPTIONAL_COLUMNS as readonly string[]).includes(v),
+    );
   return {
     search: q.search,
     page: q.page,
@@ -660,6 +689,7 @@ export function parseLocationsQuery(params: RawSearchParams): LocationsQuery {
       ? (sort as LocationSortKey)
       : DEFAULT_LOCATION_SORT,
     desc: dir === "asc" ? false : true,
+    hidden: [...new Set(hide)],
     pageSize: (LOCATION_PAGE_SIZES as readonly number[]).includes(size)
       ? (size as LocationPageSize)
       : PAGE_SIZE,
@@ -678,6 +708,12 @@ export function locationsQueryToSearch(q: LocationsQuery): string {
   if (q.sortKey !== DEFAULT_LOCATION_SORT) out.set("lsort", q.sortKey);
   if (!q.desc) out.set("ldir", "asc");
   if (q.pageSize !== PAGE_SIZE) out.set("per", String(q.pageSize));
+  // Repeated rather than delimited, matching the facet params, and emitted in a
+  // fixed order so the same choice always spells the same URL — two links to
+  // one view should compare equal however the reader arrived at it.
+  for (const column of LOCATION_OPTIONAL_COLUMNS) {
+    if (q.hidden.includes(column)) out.append("hide", column);
+  }
   const s = out.toString();
   return s ? `?${s}` : "";
 }

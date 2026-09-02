@@ -25,9 +25,12 @@ import {
   locationsQueryFields,
   locationsQueryToSearch,
   LOCATION_PAGE_SIZES,
+  LOCATION_OPTIONAL_COLUMNS,
+  LOCATION_COLUMN_LABELS,
   parseLocationsQuery,
   type LocationsQuery,
   type LocationSortKey,
+  type LocationOptionalColumn,
 } from "@/lib/data/stock";
 
 const roleLabels: Record<LocationRole, string> = {
@@ -139,6 +142,9 @@ export async function LocationView({
     );
   };
 
+  /** Whether a column the reader may hide is currently showing. */
+  const showing = (column: LocationOptionalColumn) => !query.hidden.includes(column);
+
   const hrefFor = (patch: Partial<LocationsQuery>) =>
     `/inventory${locationsQueryToSearch({ ...query, ...patch })}`;
 
@@ -207,7 +213,7 @@ export async function LocationView({
               <Table dense>
                 <TableHeader>
                   <SortableHead label="Product" sortKey="title" startAsc />
-                  <SortableHead label="SKU" sortKey="sku" startAsc />
+                  {showing("sku") && <SortableHead label="SKU" sortKey="sku" startAsc />}
                   <SortableHead label="On hand" sortKey="onHand" numeric />
                   {/* Both of these are shop-wide, and they say so. Cover is
                       total sellable stock against the shop's run rate — a
@@ -218,21 +224,30 @@ export async function LocationView({
                       location holds, so the table reads the same everywhere. */}
                   {/* Cover starts ascending: the shortest cover is the line
                       about to run out, which is the reason to open this screen. */}
-                  <SortableHead label="Cover (shop)" sortKey="daysCover" numeric startAsc />
-                  <SortableHead label="En route (shop)" sortKey="onOrderUnits" numeric />
-                  <SortableHead label="Value" sortKey="valueKes" numeric />
+                  {showing("daysCover") && (
+                    <SortableHead label="Cover (shop)" sortKey="daysCover" numeric startAsc />
+                  )}
+                  {showing("onOrderUnits") && (
+                    <SortableHead label="En route (shop)" sortKey="onOrderUnits" numeric />
+                  )}
+                  {showing("valueKes") && <SortableHead label="Value" sortKey="valueKes" numeric />}
                 </TableHeader>
                 <TableBody>
                   {location.lines.map((line) => (
                     <TableRow key={line.productId}>
                       <TableCell className="font-medium text-ink">{line.title}</TableCell>
-                      <TableCell className="font-mono text-xs">{line.sku}</TableCell>
+                      {showing("sku") && (
+                        <TableCell className="font-mono text-xs">{line.sku}</TableCell>
+                      )}
                       <TableCell numeric className={cn(line.oversold && "text-negative")}>
                         {line.onHand}
                       </TableCell>
-                      <TableCell numeric>
-                        <CoverCell daysCover={line.daysCover} oversold={line.oversold} />
-                      </TableCell>
+                      {showing("daysCover") && (
+                        <TableCell numeric>
+                          <CoverCell daysCover={line.daysCover} oversold={line.oversold} />
+                        </TableCell>
+                      )}
+                      {showing("onOrderUnits") && (
                       <TableCell numeric className="text-ink-muted">
                         {line.onOrderUnits > 0 ? (
                           <span className="inline-flex flex-col items-end">
@@ -247,9 +262,12 @@ export async function LocationView({
                           "—"
                         )}
                       </TableCell>
-                      <TableCell numeric>
-                        <CostValue amount={line.valueKes} canViewCosts={canViewCosts} />
-                      </TableCell>
+                      )}
+                      {showing("valueKes") && (
+                        <TableCell numeric>
+                          <CostValue amount={line.valueKes} canViewCosts={canViewCosts} />
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -258,6 +276,53 @@ export async function LocationView({
           </div>
         </Card>
       ))}
+
+      {/* Which columns to keep. Hidden rather than shown in the URL, so a
+          column added later appears for everyone instead of being invisible to
+          every reader who has ever touched this control. Product and On hand
+          are not on offer: a stock table without the product or the quantity is
+          not a shorter table, it is a different one. */}
+      <div className="flex items-center justify-end px-1">
+        <details className="relative">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-sm border border-edge bg-surface px-2.5 py-1.5 text-2xs font-medium text-ink-muted hover:bg-surface-2 hover:text-ink">
+            Columns
+            {query.hidden.length > 0 && (
+              <span className="rounded-xs bg-surface-2/70 px-1.5 font-mono tabular-nums">
+                {LOCATION_OPTIONAL_COLUMNS.length - query.hidden.length + 2}
+              </span>
+            )}
+          </summary>
+          <div className="absolute right-0 z-10 mt-1 flex min-w-40 flex-col gap-0.5 rounded-md border border-edge bg-surface p-1.5 shadow-pop">
+            {LOCATION_OPTIONAL_COLUMNS.map((column) => {
+              const on = showing(column);
+              return (
+                <Link
+                  key={column}
+                  href={hrefFor({
+                    hidden: on
+                      ? [...query.hidden, column]
+                      : query.hidden.filter((c) => c !== column),
+                    page: 0,
+                  })}
+                  scroll={false}
+                  className="flex items-center gap-2 rounded-sm px-2 py-1 text-2xs text-ink-muted hover:bg-surface-2 hover:text-ink"
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "grid size-3.5 place-items-center rounded-xs border text-[9px]",
+                      on ? "border-accent bg-accent text-on-accent" : "border-edge",
+                    )}
+                  >
+                    {on ? "✓" : ""}
+                  </span>
+                  {LOCATION_COLUMN_LABELS[column]}
+                </Link>
+              );
+            })}
+          </div>
+        </details>
+      </div>
 
       {/* Offered whenever there is more than one page's worth: a branch with
           500 lines is a scroll, and hunting one product 50 at a time is paging

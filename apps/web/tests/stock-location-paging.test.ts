@@ -83,6 +83,7 @@ describe("By-location query <-> URL", () => {
       page: 2,
       sortKey: "onHand",
       pageSize: 50,
+      hidden: [],
       desc: true,
     });
     expect(parseLocationsQuery({})).toEqual({
@@ -90,6 +91,7 @@ describe("By-location query <-> URL", () => {
       page: 0,
       sortKey: "onHand",
       pageSize: 50,
+      hidden: [],
       desc: true,
     });
     expect(parseLocationsQuery({ page: "-4" }).page).toBe(0);
@@ -105,7 +107,7 @@ describe("By-location query <-> URL", () => {
   });
 
   it("spells its own URL without borrowing the catalogue's params", () => {
-    const base = { sortKey: "onHand" as const, desc: true, pageSize: 50 as const };
+    const base = { sortKey: "onHand" as const, desc: true, pageSize: 50 as const, hidden: [] };
     expect(locationsQueryToSearch({ ...base, search: "kokoa", page: 0 })).toBe("?q=kokoa");
     expect(locationsQueryToSearch({ ...base, search: "", page: 2 })).toBe("?page=3");
     expect(locationsQueryToSearch({ ...base, search: "", page: 0 })).toBe("");
@@ -179,7 +181,7 @@ describe.skipIf(!runnable)("paged By-location table (local db)", () => {
   it("pages the lines and says how many there are in total", async () => {
     const screen = await getLocationsScreen(tenantId, {
       canViewCosts: true,
-      query: { search: "", page: 0, sortKey: "onHand", desc: true, pageSize: 50 },
+      query: { search: "", page: 0, sortKey: "onHand", desc: true, pageSize: 50, hidden: [] },
     });
     expect(screen.total).toBe(TOTAL_LINES);
     expect(screen.matched).toBe(TOTAL_LINES);
@@ -226,7 +228,7 @@ describe.skipIf(!runnable)("paged By-location table (local db)", () => {
       canViewCosts: true,
       // Page 7 of a three-line answer: the screen clamps rather than showing an
       // empty table. The search box itself drops the page (see the URL suite).
-      query: { search: TERM, page: 6, sortKey: "onHand", desc: true, pageSize: 50 },
+      query: { search: TERM, page: 6, sortKey: "onHand", desc: true, pageSize: 50, hidden: [] },
     });
     expect(screen.matched).toBe(TERM_LINES);
     expect(screen.pageCount).toBe(1);
