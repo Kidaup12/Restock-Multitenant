@@ -599,7 +599,18 @@ export type LocationsQuery = {
   page: number;
   sortKey: LocationSortKey;
   desc: boolean;
+  /** Lines per page. A branch with 500 SKUs is a scroll, not a hunt, and 50 at
+   *  a time makes finding one product a paging exercise — but the page cost
+   *  grows with this number, so it stays the reader's choice rather than a
+   *  larger default for everyone. */
+  pageSize: LocationPageSize;
 };
+
+/** Offered page sizes. A closed set: the number reaches a slice() and a page
+ *  count, so an arbitrary one from the URL is a way to ask for the whole
+ *  catalogue in one response. */
+export const LOCATION_PAGE_SIZES = [50, 100, 200] as const;
+export type LocationPageSize = (typeof LOCATION_PAGE_SIZES)[number];
 
 /** Default order: most stock first. What the screen showed before sorting
  *  existed, so turning this on does not silently rearrange anyone's view. */
@@ -636,6 +647,8 @@ export function parseLocationsQuery(params: RawSearchParams): LocationsQuery {
   const sort = Array.isArray(raw) ? raw[0] : raw;
   const dirRaw = params["ldir"];
   const dir = Array.isArray(dirRaw) ? dirRaw[0] : dirRaw;
+  const sizeRaw = params["per"];
+  const size = Number(Array.isArray(sizeRaw) ? sizeRaw[0] : sizeRaw);
   return {
     search: q.search,
     page: q.page,
@@ -647,6 +660,9 @@ export function parseLocationsQuery(params: RawSearchParams): LocationsQuery {
       ? (sort as LocationSortKey)
       : DEFAULT_LOCATION_SORT,
     desc: dir === "asc" ? false : true,
+    pageSize: (LOCATION_PAGE_SIZES as readonly number[]).includes(size)
+      ? (size as LocationPageSize)
+      : PAGE_SIZE,
   };
 }
 
@@ -661,6 +677,7 @@ export function locationsQueryToSearch(q: LocationsQuery): string {
   // a shared link does not pin someone to an order they never chose.
   if (q.sortKey !== DEFAULT_LOCATION_SORT) out.set("lsort", q.sortKey);
   if (!q.desc) out.set("ldir", "asc");
+  if (q.pageSize !== PAGE_SIZE) out.set("per", String(q.pageSize));
   const s = out.toString();
   return s ? `?${s}` : "";
 }
@@ -738,8 +755,8 @@ export async function getLocationsScreen(
 
   const total = locations.reduce((sum, l) => sum + l.lines.length, 0);
   const matched = searched.reduce((sum, s) => sum + s.lines.length, 0);
-  const { pageCount, current, start } = pageBounds(matched, query.page);
-  const end = start + PAGE_SIZE;
+  const { pageCount, current, start } = pageBounds(matched, query.page, query.pageSize);
+  const end = start + query.pageSize;
 
   const page: LocationPageStock[] = [];
   let cursor = 0;

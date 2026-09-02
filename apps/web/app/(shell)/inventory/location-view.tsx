@@ -24,6 +24,7 @@ import {
   getLocationsScreen,
   locationsQueryFields,
   locationsQueryToSearch,
+  LOCATION_PAGE_SIZES,
   parseLocationsQuery,
   type LocationsQuery,
   type LocationSortKey,
@@ -257,6 +258,33 @@ export async function LocationView({
           </div>
         </Card>
       ))}
+
+      {/* Offered whenever there is more than one page's worth: a branch with
+          500 lines is a scroll, and hunting one product 50 at a time is paging
+          rather than reading. Kept a closed set of sizes — the number reaches a
+          slice, so an arbitrary one from the URL asks for the whole catalogue
+          in a single response. */}
+      {screen.matched > LOCATION_PAGE_SIZES[0] && (
+        <div className="flex items-center justify-end gap-1.5 px-1 text-2xs text-ink-muted">
+          <span>Per page</span>
+          {LOCATION_PAGE_SIZES.map((size) => (
+            <Link
+              key={size}
+              href={hrefFor({ pageSize: size, page: 0 })}
+              scroll={false}
+              aria-current={query.pageSize === size ? "true" : undefined}
+              className={cn(
+                "rounded-sm border px-2 py-1 font-mono transition-colors",
+                query.pageSize === size
+                  ? "border-accent-200 bg-accent-soft text-accent-ink"
+                  : "border-edge bg-surface hover:bg-surface-2 hover:text-ink",
+              )}
+            >
+              {size}
+            </Link>
+          ))}
+        </div>
+      )}
 
       {screen.pageCount > 1 && (
         <Card>
