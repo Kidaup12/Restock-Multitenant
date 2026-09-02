@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  LOCATION_OPTIONAL_COLUMNS,
   LOCATION_PAGE_SIZES,
   locationsQueryToSearch,
   parseLocationsQuery,
@@ -15,7 +16,7 @@ import { pageBounds } from "@/lib/catalogue";
  * to ask for the entire catalogue in one response.
  */
 
-const base = { search: "", page: 0, sortKey: "onHand" as const, desc: true };
+const base = { search: "", page: 0, sortKey: "onHand" as const, desc: true, hidden: [] };
 
 describe("inventory page size", () => {
   it("accepts only the sizes on offer", () => {
@@ -51,5 +52,46 @@ describe("inventory page size", () => {
   it("clamps a page past the end rather than showing nothing", () => {
     // Raising the size shrinks the page count under someone sitting on page 9.
     expect(pageBounds(500, 9, 200).current).toBe(2);
+  });
+});
+
+/**
+ * Hiding columns a particular shop does not use.
+ *
+ * The URL carries what is HIDDEN, not what is shown. A shown-list would freeze
+ * the table at the moment someone first touched the control: a column added
+ * later would be invisible to every one of them, and the bug reads as "the new
+ * column never shipped".
+ */
+describe("inventory column picker", () => {
+  it("carries what is hidden, so a new column appears for everyone", () => {
+    const q = parseLocationsQuery({ hide: ["sku", "valueKes"] });
+    expect(q.hidden).toEqual(["sku", "valueKes"]);
+    // A column that did not exist when this URL was made is not in the list,
+    // and therefore shows.
+    expect(q.hidden).not.toContain("onOrderUnits");
+  });
+
+  it("ignores a column name nobody offered", () => {
+    expect(parseLocationsQuery({ hide: ["sku", "title", "nonsense"] }).hidden).toEqual(["sku"]);
+  });
+
+  it("spells the same choice the same way", () => {
+    // Fixed order, so two links to the same view compare equal rather than
+    // depending on which order the reader clicked them off in.
+    const a = locationsQueryToSearch({ ...base, pageSize: 50, hidden: ["valueKes", "sku"] });
+    const b = locationsQueryToSearch({ ...base, pageSize: 50, hidden: ["sku", "valueKes"] });
+    expect(a).toBe(b);
+    expect(a).toBe("?hide=sku&hide=valueKes");
+  });
+
+  it("keeps a clean URL when every column is showing", () => {
+    expect(locationsQueryToSearch({ ...base, pageSize: 50, hidden: [] })).toBe("");
+  });
+
+  it("cannot hide the product or the quantity", () => {
+    // A stock table without either is not a shorter table, it is a useless one.
+    expect(LOCATION_OPTIONAL_COLUMNS).not.toContain("title");
+    expect(LOCATION_OPTIONAL_COLUMNS).not.toContain("onHand");
   });
 });

@@ -6,6 +6,7 @@ import {
   CalendarIcon,
   ChartIcon,
   ClipboardIcon,
+  HelpIcon,
   GearIcon,
   HomeIcon,
   InboxIcon,
@@ -100,6 +101,16 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     label: "Activity log",
     icon: <ClipboardIcon />,
     tourKey: "nav-activity",
+    section: "account",
+  },
+  {
+    // Below Settings deliberately: someone reaches for "how does this work?"
+    // after they have looked around, not before, and it is the one entry here
+    // a shop stops needing.
+    href: "/getting-started",
+    label: "How it works",
+    icon: <HelpIcon />,
+    tourKey: "nav-getting-started",
     section: "account",
   },
   { href: "/settings", label: "Settings", icon: <GearIcon />, tourKey: "nav-settings", section: "account" },

@@ -105,6 +105,16 @@ export function BulbIcon(props: IconProps) {
   );
 }
 
+export function HelpIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.6 9.2a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.9" />
+      <path d="M12 17.5h.01" />
+    </Icon>
+  );
+}
+
 export function GearIcon(props: IconProps) {
   return (
     <Icon {...props}>
