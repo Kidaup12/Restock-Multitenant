@@ -64,6 +64,7 @@ function render(connection: ConnectionView, appCredentialsConfigured: boolean): 
       justConnected={false}
       errorCode={null}
       syncRun={FAILED}
+      platformAppConfigured={false}
       appCredentialsConfigured={appCredentialsConfigured}
       appClientId={appCredentialsConfigured ? "client-abc" : null}
     />

@@ -4,15 +4,27 @@ import { decryptToken } from "@wezesha/shopify";
 /**
  * Per-workspace Shopify app credentials.
  *
- * Wezesha holds no Shopify app of its own. Each client registers its own app
- * and enters the client id and secret under Settings → Connections, and those
- * are the only credentials any Shopify flow uses. There is deliberately NO
- * environment fallback: a shared SHOPIFY_API_KEY / SHOPIFY_API_SECRET is what
- * previously made it impossible for a client to connect its own store, and a
- * fallback would quietly reintroduce it the moment a lookup missed.
+ * Each client may register its own app and enter the client id and secret under
+ * Settings → Connections. A workspace row always wins where it exists.
  *
- * A workspace with no row here cannot run an OAuth install and cannot have a
- * webhook verified. Both fail closed, with a message pointing at the form.
+ * There is ONE fallback, and only for the OAuth install: a Wezesha-owned app in
+ * SHOPIFY_API_KEY / SHOPIFY_API_SECRET. The earlier rule forbade any fallback,
+ * on the grounds that a shared key "made it impossible for a client to connect
+ * its own store". That was true of the flow it was written against — the
+ * CLIENT-CREDENTIALS grant, which Shopify only honours when the app and the
+ * store share an organisation, so a shared app can never reach a merchant's own
+ * shop. It is not true of the authorization-code install, where a single app
+ * the merchant approves is how every Shopify integration works, and is what the
+ * reference build does.
+ *
+ * So the split is deliberate: `credentialsForInstall` may fall back to the
+ * platform app; `credentialsForTenant`, which feeds client-credentials minting
+ * and webhook verification, still must not. Minting against a shared app would
+ * reintroduce exactly the failure the old rule was guarding against.
+ *
+ * A workspace with neither its own row nor a configured platform app cannot run
+ * an OAuth install and cannot have a webhook verified. Both fail closed, with a
+ * message pointing at the form.
  *
  * The client id is stored in the clear (it travels in the authorize URL the
  * merchant's own browser visits). The secret is AES-256-GCM ciphertext under
@@ -20,6 +32,33 @@ import { decryptToken } from "@wezesha/shopify";
  */
 
 export type ShopifyAppCredentials = { clientId: string; apiSecret: string };
+
+/**
+ * The Wezesha-owned app, if this deployment has one.
+ *
+ * Null rather than throwing: a deployment without it is a valid state — every
+ * workspace then brings its own app, exactly as before.
+ */
+export function platformAppCredentials(): ShopifyAppCredentials | null {
+  const clientId = process.env.SHOPIFY_API_KEY;
+  const apiSecret = process.env.SHOPIFY_API_SECRET;
+  if (!clientId || !apiSecret) return null;
+  return { clientId, apiSecret };
+}
+
+/**
+ * Credentials for the authorization-code install: the workspace's own app when
+ * it has one, otherwise the platform app.
+ *
+ * The workspace wins on purpose. A shop that registered its own app did so for
+ * a reason, and silently installing under ours would put its data behind a
+ * grant it never chose.
+ */
+export async function credentialsForInstall(
+  tenantId: string,
+): Promise<ShopifyAppCredentials | null> {
+  return (await credentialsForTenant(tenantId)) ?? platformAppCredentials();
+}
 
 /** Tenant-scoped read for the OAuth routes, where a session already resolved
  *  the workspace. Null = this workspace has not set its app up yet. */

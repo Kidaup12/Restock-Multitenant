@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { buildAuthorizeUrl, generateOAuthState, isValidShopDomain } from "@wezesha/shopify";
 import { STATE_COOKIE, STATE_COOKIE_PATH } from "@/lib/shopify/cookies";
-import { credentialsForTenant } from "@/lib/shopify/credentials";
+import { credentialsForInstall } from "@/lib/shopify/credentials";
 import { shopifyAppUrl } from "@/lib/shopify/env";
 import { canManageConnections, tenantActor } from "@/lib/shopify/membership";
 import { withCapture } from "@/lib/observability/wrap";
@@ -28,7 +28,9 @@ export const GET = withCapture(async (req: NextRequest) => {
   }
 
   // This workspace's own app — there is no platform app to fall back to.
-  const credentials = await credentialsForTenant(actor.tenantId);
+    // The platform app is the fallback here, and only here: the install is an
+  // authorization-code grant the merchant approves, which works on any store.
+  const credentials = await credentialsForInstall(actor.tenantId);
   if (!credentials) {
     return NextResponse.redirect(
       new URL("/settings/connections?error=no_app_credentials", appUrl)
