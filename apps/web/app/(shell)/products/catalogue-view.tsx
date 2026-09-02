@@ -252,6 +252,18 @@ export function CatalogueView({
           scopeHref={(key) => hrefFor({ scope: key as Scope, healthFilter: null })}
         />
 
+        {/* Class, promoted out of the facet dropdown onto the surface.
+            It was always filterable, but a buyer's first question of a
+            catalogue is "show me the ones that earn" and that should not need
+            two clicks and a menu to reach. */}
+        <ClassChips
+          options={aggregates.facetOptions.abc}
+          selected={query.selection.abc ?? []}
+          hrefFor={(abc) =>
+            hrefFor({ selection: { ...query.selection, ...(abc ? { abc } : { abc: undefined }) } })
+          }
+        />
+
         <FacetFilterBar
           options={aggregates.facetOptions}
           selection={query.selection}
@@ -352,6 +364,76 @@ export function CatalogueView({
           }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * The ABC classes, as one-click chips with their counts.
+ *
+ * Named by what they earn rather than by their letter. "Class A" is jargon a
+ * shop owner has to be taught; "best sellers" is the thing they already think
+ * about, and the letter stays beside it for anyone who has learnt it.
+ *
+ * These write the same `abc` facet the filter bar does — one filter, two ways
+ * in — so the chip and the dropdown can never disagree about what is selected.
+ */
+export function ClassChips({
+  options,
+  selected,
+  hrefFor,
+}: {
+  options: { value: string; label: string; count: number }[];
+  selected: string[];
+  hrefFor: (abc: string[] | undefined) => string;
+}) {
+  if (options.length === 0) return null;
+
+  const NAMES: Record<string, string> = {
+    A: "Best sellers",
+    B: "Steady sellers",
+    C: "Slow movers",
+  };
+  const total = options.reduce((n, o) => n + o.count, 0);
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 px-4 pb-3">
+      <Link
+        href={hrefFor(undefined)}
+        scroll={false}
+        aria-current={selected.length === 0 ? "true" : undefined}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
+          selected.length === 0
+            ? "border-accent-200 bg-accent-soft text-accent-ink"
+            : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink",
+        )}
+      >
+        All
+        <span className="rounded-xs bg-surface-2/70 px-1.5 font-mono tabular-nums">{total}</span>
+      </Link>
+      {options.map((opt) => {
+        const on = selected.includes(opt.value);
+        return (
+          <Link
+            key={opt.value}
+            href={hrefFor(on ? undefined : [opt.value])}
+            scroll={false}
+            aria-current={on ? "true" : undefined}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
+              on
+                ? "border-accent-200 bg-accent-soft text-accent-ink"
+                : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink",
+            )}
+          >
+            {NAMES[opt.value] ?? opt.label}
+            <span className="rounded-xs bg-surface-2/70 px-1.5 font-mono tabular-nums">
+              {opt.count}
+            </span>
+          </Link>
+        );
+      })}
     </div>
   );
 }
