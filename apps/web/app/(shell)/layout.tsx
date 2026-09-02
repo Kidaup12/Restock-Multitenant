@@ -7,7 +7,7 @@ import { getUnreadCount } from "@/lib/notifications/data";
 import { getConnectionStatus } from "@/lib/data/connection-status";
 import { isStale, staleDays } from "@/lib/sync/staleness";
 import { AppShell } from "@/components/shell/app-shell";
-import { readTermsAcceptance } from "@/lib/auth/terms";
+import { hasAcceptedCurrentTerms } from "@/lib/auth/terms";
 import { TERMS_VERSION } from "@/lib/legal";
 import { TermsGate } from "./terms-gate";
 
@@ -100,8 +100,13 @@ export default async function ShellLayout({
 
           Rendered alongside the children rather than instead of them so the
           page behind is already there when the gate clears — but it covers the
-          viewport and has no dismiss, so nothing behind it can be used. */}
-      {membership && !readTermsAcceptance(membership).current && (
+          viewport and has no dismiss, so nothing behind it can be used.
+
+          Asked across every membership, not just the active one. A browser with
+          no workspace cookie lands on the user's EARLIEST workspace, so keying
+          this on the active membership re-asked people who had already agreed
+          the moment they signed in somewhere new. */}
+      {membership && !hasAcceptedCurrentTerms(memberships) && (
         <TermsGate version={TERMS_VERSION} />
       )}
     </AppShell>
