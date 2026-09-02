@@ -86,6 +86,7 @@ export function ShopifyConnectionCard({
   errorCode,
   syncRun,
   appCredentialsConfigured,
+  platformAppConfigured,
   appClientId,
 }: {
   connection: ConnectionView | null;
@@ -97,6 +98,9 @@ export function ShopifyConnectionCard({
   /** Whether this workspace has stored its own app credentials. The secret
    *  itself is never sent to the client — only whether one exists. */
   appCredentialsConfigured: boolean;
+  /** This deployment has a Wezesha-owned app, so the install works without the
+   *  shop registering one of its own. */
+  platformAppConfigured: boolean;
   /** Safe to show: a client ID is not a secret and travels in the authorize URL. */
   appClientId: string | null;
 }) {
@@ -143,7 +147,7 @@ export function ShopifyConnectionCard({
    * Partner account and no distribution, and its token does not expire, so it
    * is the only route that works for the shops we are actually onboarding.
    */
-  const [route, setRoute] = useState<"install" | "credentials" | "token">("token");
+  const [route, setRoute] = useState<"install" | "credentials" | "token">("install");
 
   const { confirm, dialog } = useConfirm();
   const [notice, setNotice] = useState<{ tone: "positive" | "warning" | "negative"; text: string } | null>(
@@ -406,6 +410,10 @@ export function ShopifyConnectionCard({
   /** Connecting for the first time, so the route tabs are on screen and the
    *  credentials box belongs to its own tab rather than above them. */
   const choosingRoute = connection === null && canManage;
+  /** The install can run on the workspace's own app OR the platform one. Gating
+   *  it on the workspace's alone is what made this route a dead end: saving
+   *  credentials was a precondition of using it, and most shops have none. */
+  const installReady = appCredentialsConfigured || platformAppConfigured;
 
   const tokenConnectPanel = (
     <div id={TOKEN_PANEL_ID} className="scroll-mt-4 space-y-3 border-t border-edge pt-4">
@@ -563,9 +571,9 @@ export function ShopifyConnectionCard({
     <div role="tablist" aria-label="How to connect" className="flex flex-wrap gap-1 rounded-md bg-surface-2 p-1">
       {(
         [
+          ["install", "Connect with Shopify"],
           ["token", "Admin API token"],
-          ["install", "Install link"],
-          ["credentials", "Client ID & secret (dev stores)"],
+          ["credentials", "Client ID & secret"],
         ] as const
       ).map(([key, label]) => (
         <button
@@ -661,18 +669,20 @@ export function ShopifyConnectionCard({
                       Install it on your store
                     </h3>
                     <p className="mt-1 text-sm text-ink-muted">
-                      {appCredentialsConfigured
-                        ? "Enter your store address and we’ll send you to Shopify to approve the install."
-                        : "This route uses your app’s client ID and secret. Add them first and come back."}
+                      You&rsquo;ll be sent to Shopify to approve access, then
+                      brought back. Works on any store &mdash; including
+                      non-Plus.
                     </p>
                     <p className="mt-1 text-xs text-ink-faint">
                       {/* One expression on purpose: JSX drops the space at
                           every text/expression boundary here, which shipped
                           "read_ordersscopes" to the screen. */}
-                      {`Your app needs the ${REQUIRED_SCOPE_LABEL} scopes, and its distribution must be set up for this exact store — one app covers one store. If Shopify will not install it, or it installs and syncs still fail, use an Admin API token instead.`}
+                      {installReady
+                        ? `We ask for the ${REQUIRED_SCOPE_LABEL} scopes. Nothing is read until you approve it on Shopify.`
+                        : `This deployment has no Shopify app to install with. Add your own client ID and secret, or paste an Admin API token.`}
                     </p>
                   </div>
-                  {appCredentialsConfigured ? (
+                  {installReady ? (
                     <div className="flex flex-wrap items-center gap-2">
                       <Input
                         value={shop}

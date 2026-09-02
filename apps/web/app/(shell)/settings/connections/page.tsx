@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { prismaForTenant } from "@wezesha/db";
 import { PageHeader } from "@/components/ui/page-header";
 import { activeMembership, requireSession } from "@/lib/auth";
+import { platformAppCredentials } from "@/lib/shopify/credentials";
 import { canManageConnections } from "@/lib/shopify/membership";
 import { toSyncRunView } from "@/lib/shopify/sync-run";
 import { ShopifyConnectionCard } from "./shopify-connection-card";
@@ -119,6 +120,9 @@ export default async function ConnectionsPage({
         errorCode={params.error ?? null}
         syncRun={toSyncRunView(run, new Date())}
         appCredentialsConfigured={appCredential !== null}
+        // Whether this deployment has a Wezesha-owned app to install with. Only
+        // whether one EXISTS travels to the client; the secret stays server-side.
+        platformAppConfigured={platformAppCredentials() !== null}
         appClientId={appCredential?.clientId ?? null}
       />
       <QuickBooksConnectionCard
