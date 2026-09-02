@@ -8,7 +8,7 @@ import { seedDev, type SeedResult } from "../../../packages/db/scripts/seed-dev"
 import { hasPermission } from "../lib/auth/permissions";
 import { MoneyGate } from "../components/money-gate";
 import { formatCompact } from "../lib/money";
-import { getReorderNeeded, getTodayMetrics } from "../lib/data/today";
+import { getDashboardTable, getReorderNeeded, getTodayMetrics } from "../lib/data/today";
 import { getStockByLocation, getStockCatalogue } from "../lib/data/stock";
 import { getProductDetail } from "../lib/data/product-detail";
 import {
@@ -316,7 +316,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     // that no KES reaches them at all — not that something masks. (The trend
     // chart carries the revenue and is passed in separately; it is not a cost.)
     const member = renderToStaticMarkup(
-      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: false, trend: null })
+      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: false, currency: "KES", trend: null })
     );
     expect(kesDigits(member)).toHaveLength(0);
     // And not even a masked one. The data layer nulls the figure, so a card that
@@ -326,21 +326,23 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     expect(member).not.toContain(MASK);
 
     const owner = renderToStaticMarkup(
-      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: true, trend: null })
+      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: true, currency: "KES", trend: null })
     );
     // The owner sees what the dead stock is costing — the figure this shop
     // judges the product by.
     expect(kesDigits(owner).length).toBeGreaterThan(0);
   });
 
-  it("Today board: no order money for anyone, owner included", async () => {
-    // Stronger than masking. The dashboard names what needs attention; how much
-    // to buy and what it costs belong to the planner, where the budget and
-    // horizon that size an order live. So there is no order cost to mask — for
-    // the owner either — and the critical warning sends you to the planner.
+  it("Today board: no per-line order money, owner included", async () => {
+    // The dashboard names what needs attention and, for an owner, what the
+    // urgent slice costs in total — enough to know whether it can be paid for
+    // this week. What stays in the planner is the per-line arithmetic: the
+    // quantity for each product and the cost of each line, which need the
+    // budget and horizon that size an order. A member sees no cost figure at
+    // all; that is the assertion above, not this one.
     for (const canViewCosts of [false, true]) {
       const html = renderToStaticMarkup(
-        await ProductBoard({ tenantId: seeded.tenantId, canViewCosts, trend: null })
+        await ProductBoard({ tenantId: seeded.tenantId, canViewCosts, currency: "KES", trend: null })
       );
       expect(html).not.toContain("Order cost");
       expect(html).not.toContain("Reorder qty");
@@ -397,6 +399,24 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     // The owner path keeps real numbers — redaction must not blank everyone.
     const ownerReorder = await getReorderNeeded(seeded.tenantId, { canViewCosts: true });
     expect(costNumbers(ownerReorder).length).toBeGreaterThan(0);
+  });
+
+  it("the dashboard table carries no cost numbers for a member", async () => {
+    // It gained a second cost figure — what the urgent slice costs to restock —
+    // alongside the dead-stock cash it already carried. Both are summed from
+    // rows the member is allowed to see, which is exactly how a redacted screen
+    // leaks: the figure is derived, not fetched.
+    const member = await getDashboardTable(seeded.tenantId, { canViewCosts: false });
+    expect(member.deadCostKes).toBeNull();
+    expect(member.criticalCostKes, "a member was told what the urgent slice costs").toBeNull();
+    // Not a blanket sweep here: the dead-stock export deliberately carries
+    // value at RETAIL, which is price x on-hand — a sales figure every role can
+    // see. Asserting "no KES anywhere" would forbid it and be wrong.
+    for (const row of member.deadStockExport) expect(row.valueAtCostKes).toBeNull();
+
+    // And the owner still gets real numbers — redaction must not blank everyone.
+    const owner = await getDashboardTable(seeded.tenantId, { canViewCosts: true });
+    expect(owner.criticalCostKes).not.toBeNull();
   });
 
   it("stock payloads carry no cost numbers for a member", async () => {

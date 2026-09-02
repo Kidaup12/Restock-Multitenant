@@ -4,6 +4,7 @@ import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { GuideBox } from "@/components/ui/guide-box";
 import { SkeletonTableRows } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
 import { locationsQueryToSearch, parseLocationsQuery } from "@/lib/data/stock";
@@ -55,6 +56,12 @@ export default async function InventoryPage({
         title="Inventory"
         description="Where your stock is, and how long it lasts at each branch"
       />
+
+      <GuideBox id="inventory" scope={membership.tenantId} title="Where your stock actually sits">
+        One line per product per branch. Cover is how many days that branch
+        lasts at its own selling pace, so the same product can be fine in one
+        shop and nearly out in another. Click any column heading to sort by it.
+      </GuideBox>
       <Suspense
         key={locationsQueryToSearch(query)}
         fallback={

@@ -231,6 +231,11 @@ export type DashboardTable = {
   /** Buy-list lines that cannot wait. Counted over the whole list, not the
    *  capped rows, so the warning above the table matches the planner. */
   criticalCount: number;
+  /** What those critical lines cost to order. A count says how many fires
+   *  there are; the money says whether the shop can put them out this week —
+   *  and that is the decision the banner is actually for. Null for a
+   *  money-blind caller. */
+  criticalCostKes: number | null;
   /** True when a pile had more rows than the cap, so the screen can say so
    *  rather than quietly showing a prefix. */
   capped: Record<DashboardTab, boolean>;
@@ -342,6 +347,8 @@ export async function getDashboardTable(
         b.valueAtRetailKes - a.valueAtRetailKes
     );
 
+  const criticalRows = (buyList?.rows ?? []).filter((r) => r.urgency === "critical");
+
   return {
     counts,
     healthy,
@@ -351,7 +358,12 @@ export async function getDashboardTable(
     deadCostKes: canViewCosts
       ? dead.reduce((sum, r) => sum + (r.moneyAtRestKes ?? 0), 0)
       : null,
-    criticalCount: (buyList?.rows ?? []).filter((r) => r.urgency === "critical").length,
+    criticalCount: criticalRows.length,
+    // Summed from the same rows that produced the count, so the two can never
+    // describe different sets of lines.
+    criticalCostKes: canViewCosts
+      ? criticalRows.reduce((sum, r) => sum + (r.lineTotalKes ?? 0), 0)
+      : null,
     capped,
     deadStockExport,
   };

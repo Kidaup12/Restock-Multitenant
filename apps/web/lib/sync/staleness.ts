@@ -35,3 +35,26 @@ export function staleDays(at: Date | null, now: number = Date.now()): number | n
   if (!at) return null;
   return Math.floor((now - at.getTime()) / (24 * 60 * 60 * 1000));
 }
+
+/**
+ * "7h ago" — how long since anything arrived, for the always-on rail line.
+ *
+ * The banner only speaks once a store has gone quiet for a day, which answers
+ * "is this broken?" but never "is this current?". A shop deciding what to buy
+ * needs the second question answered on every screen, and the honest answer to
+ * it is usually "an hour ago" rather than silence.
+ *
+ * Same clock-as-a-parameter rule as the rest of this module: React's purity
+ * rule bans Date.now() during render, so the caller resolves it server-side.
+ */
+export function syncedAgo(at: Date | null, now: number = Date.now()): string | null {
+  if (!at) return null;
+  const ms = Math.max(0, now - at.getTime());
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}

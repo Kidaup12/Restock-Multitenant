@@ -4,6 +4,7 @@ import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { GuideBox } from "@/components/ui/guide-box";
 import { SkeletonTableRows } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
 import { catalogueQueryToSearch, parseCatalogueQuery, type RawSearchParams } from "@/lib/catalogue";
@@ -59,6 +60,12 @@ export default async function ProductsPage({
         title="Products"
         description="Every product you sell, and whether its numbers can be trusted"
       />
+      <GuideBox id="products" scope={tenantId} title="Every product, with the numbers that drive reorders">
+        Sells/day is how fast it moves; days of cover is how long your stock
+        lasts at that pace. Click <strong>Lead</strong> to correct how long a
+        supplier takes — it decides when an order has to go out. A product with
+        no cost stays off the buy list until you set one.
+      </GuideBox>
       <Suspense
         // Keyed on the whole query: the boundary has to remount for the new
         // query's rows to render, and it shows the skeleton while they load.
