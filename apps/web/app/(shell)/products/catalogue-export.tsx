@@ -14,6 +14,8 @@ import { formatMoney } from "@/lib/money";
 export type CatalogueExportRow = {
   title: string;
   sku: string;
+  supplierName: string | null;
+  leadDays: number;
   onHandUnits: number;
   warehouseUnits: number;
   daysCover: number | null;
@@ -30,6 +32,8 @@ export function catalogueExportColumns(
   return [
     { header: "Product", cell: (r) => r.title },
     { header: "SKU", cell: (r) => r.sku },
+    { header: "Supplier", cell: (r) => r.supplierName },
+    { header: "Lead (days)", cell: (r) => r.leadDays },
     { header: "On hand", cell: (r) => r.onHandUnits },
     { header: "In warehouse", cell: (r) => r.warehouseUnits },
     { header: "Days cover", cell: (r) => r.daysCover },

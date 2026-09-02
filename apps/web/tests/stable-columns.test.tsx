@@ -69,6 +69,8 @@ const catalogueRow = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   syncError: null,
   syncErrorAt: null,
   leadDays: 14,
+  leadSource: "supplier",
+  supplierName: null,
   verdict: "healthy",
   marginPct: 50,
   missingCost: false,

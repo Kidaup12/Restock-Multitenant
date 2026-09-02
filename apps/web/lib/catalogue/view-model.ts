@@ -43,11 +43,16 @@ export function inScope(row: CatalogueRow, scope: Scope): boolean {
 
 export const SORT_KEYS = [
   "title",
+  "supplierName",
+  "leadDays",
   "onHandUnits",
+  "warehouseUnits",
+  "onOrderUnits",
   "runRate",
   "daysCover",
   "revenue30dKes",
   "abc",
+  "costKes",
   "moneyAtRestKes",
   "marginPct",
 ] as const;
@@ -55,19 +60,44 @@ export type SortKey = (typeof SORT_KEYS)[number];
 
 const ABC_RANK: Record<string, number> = { A: 0, B: 1, C: 2 };
 
-export function compare(a: CatalogueRow, b: CatalogueRow, key: SortKey): number {
+/** The sort value for a row, or null when the row has no answer for that column. */
+function sortValue(row: CatalogueRow, key: SortKey): string | number | null {
   switch (key) {
     case "title":
-      return a.title.localeCompare(b.title);
+      return row.title;
+    case "supplierName":
+      return row.supplierName;
     case "abc":
-      return (ABC_RANK[a.abc ?? ""] ?? 9) - (ABC_RANK[b.abc ?? ""] ?? 9);
-    case "daysCover":
-      return (a.daysCover ?? Infinity) - (b.daysCover ?? Infinity);
-    case "marginPct":
-      return (a.marginPct ?? Infinity) - (b.marginPct ?? Infinity);
+      return row.abc == null ? null : (ABC_RANK[row.abc] ?? 9);
     default:
-      return (a[key] ?? 0) - (b[key] ?? 0);
+      return row[key];
   }
+}
+
+/**
+ * Order two rows on the chosen column.
+ *
+ * Direction is an argument rather than a reverse() over the result because a
+ * row with NO value is not the extreme of that column — it is unknown, and
+ * flipping the list floats every unknown to the top. Sorting by cover
+ * descending used to lead with every product that has never sold, which is the
+ * least informative row in the catalogue sitting where the most urgent belongs.
+ * Nulls sink in both directions; ties fall back to the title so paging through
+ * a column of equal values cannot reshuffle between pages.
+ */
+export function compare(a: CatalogueRow, b: CatalogueRow, key: SortKey, desc = false): number {
+  const av = sortValue(a, key);
+  const bv = sortValue(b, key);
+  if (av == null || bv == null) {
+    if (av == null && bv == null) return a.title.localeCompare(b.title);
+    return av == null ? 1 : -1;
+  }
+  const dir = desc ? -1 : 1;
+  const cmp =
+    typeof av === "string" && typeof bv === "string"
+      ? av.localeCompare(bv)
+      : (av as number) - (bv as number);
+  return cmp !== 0 ? cmp * dir : a.title.localeCompare(b.title);
 }
 
 export type ChipTone = "neutral" | "warning" | "negative" | "accent";
@@ -234,8 +264,7 @@ export function selectRows(rows: CatalogueRow[], q: CatalogueQuery): CatalogueRo
   if (q.healthFilter) filtered = filtered.filter((r) => rowHealthKeys(r).has(q.healthFilter!));
   if (q.moneyFilter) filtered = filtered.filter(moneyPredicate(q.moneyFilter));
   if (q.search) filtered = filtered.filter((r) => matchesSearch(r, q.search));
-  const sorted = [...filtered].sort((a, b) => compare(a, b, q.sortKey));
-  return q.desc ? sorted.reverse() : sorted;
+  return [...filtered].sort((a, b) => compare(a, b, q.sortKey, q.desc));
 }
 
 export function buildAggregates(

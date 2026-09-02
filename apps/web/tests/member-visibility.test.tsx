@@ -872,7 +872,18 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
 describe("export column gating", () => {
   it("cost columns exist only for cost viewers", () => {
     const memberHeaders = catalogueExportColumns(false, "KES").map((c) => c.header);
-    expect(memberHeaders).toEqual(["Product", "SKU", "On hand", "In warehouse", "Days cover", "Status"]);
+    // Supplier and lead time are not cost facts — a money-blind member buys from
+    // the same suppliers and waits the same days, so both stay in their export.
+    expect(memberHeaders).toEqual([
+      "Product",
+      "SKU",
+      "Supplier",
+      "Lead (days)",
+      "On hand",
+      "In warehouse",
+      "Days cover",
+      "Status",
+    ]);
     const ownerHeaders = catalogueExportColumns(true, "KES").map((c) => c.header);
     expect(ownerHeaders).toContain("Unit cost (KES)");
     expect(ownerHeaders).toContain("Stock value (KES)");
