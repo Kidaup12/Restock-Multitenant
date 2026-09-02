@@ -36,11 +36,11 @@ export default async function GettingStartedPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         {STAGES.map((stage) => (
           <Card key={stage.key}>
-            <CardHeader title={stage.title} subtitle={stage.aside} />
+            {/* The number leads the title rather than sitting in its own
+                element: as a separate badge it rendered under the heading and
+                read as an orphan rather than as "step one". */}
+            <CardHeader title={`${stage.step}. ${stage.title}`} subtitle={stage.aside} />
             <CardContent className="space-y-3 pt-3">
-              <span className="grid size-6 place-items-center rounded-full bg-accent-soft font-mono text-2xs font-semibold text-accent-ink">
-                {stage.step}
-              </span>
               <p className="text-sm text-ink-secondary">{stage.intro}</p>
               <ul className="space-y-2">
                 {stage.points.map((point) => (
