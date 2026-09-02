@@ -86,6 +86,8 @@ export async function exportCatalogueAction(query: CatalogueQuery): Promise<Cata
   return selectRows(rows, query).map((row) => ({
     title: row.title,
     sku: row.sku,
+    supplierName: row.supplierName,
+    leadDays: row.leadDays,
     onHandUnits: row.onHandUnits,
     warehouseUnits: row.warehouseUnits,
     // An empty shelf has no cover to report, matching the table.

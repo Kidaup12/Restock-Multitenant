@@ -15,8 +15,8 @@ import {
 import { Card, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonCard } from "@/components/ui/skeleton";
-import { activeMembership, requireSession } from "@/lib/auth";
-import { readTermsAcceptance } from "@/lib/auth/terms";
+import { activeMembership, listMemberships, requireSession } from "@/lib/auth";
+import { effectiveTermsAcceptance } from "@/lib/auth/terms";
 import { prismaForTenant } from "@wezesha/db";
 import { METHOD_DEFAULTS, parseOrderMethod } from "@wezesha/forecast";
 import { STRATEGY_GROUPS, optionFor } from "@/lib/ordering/strategy";
@@ -231,7 +231,10 @@ async function SettingsSections({
 
 export default async function SettingsPage() {
   const session = await requireSession();
-  const membership = await activeMembership(session.user.id);
+  const [membership, memberships] = await Promise.all([
+    activeMembership(session.user.id),
+    listMemberships(session.user.id),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -240,7 +243,7 @@ export default async function SettingsPage() {
         <Suspense fallback={<SkeletonCard />}>
           <SettingsSections
             tenantId={membership.tenantId}
-            acceptance={readTermsAcceptance(membership)}
+            acceptance={effectiveTermsAcceptance(membership, memberships)}
           />
         </Suspense>
       )}
