@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { LocationRole } from "@wezesha/db";
 import { BoxIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +26,7 @@ import {
   locationsQueryToSearch,
   parseLocationsQuery,
   type LocationsQuery,
+  type LocationSortKey,
 } from "@/lib/data/stock";
 
 const roleLabels: Record<LocationRole, string> = {
@@ -94,6 +96,48 @@ export async function LocationView({
     );
   }
 
+  /**
+   * A column heading that sorts.
+   *
+   * Clicking the column you are already on flips the direction; clicking a new
+   * one starts on the order that answers the question people actually ask of
+   * it. Nobody opens an inventory screen wanting the LEAST stock or the
+   * healthiest cover first — so numbers start high-to-low and cover starts
+   * low-to-high, where the trouble is.
+   */
+  const SortableHead = ({
+    label,
+    sortKey,
+    numeric,
+    startAsc,
+  }: {
+    label: string;
+    sortKey: LocationSortKey;
+    numeric?: boolean;
+    startAsc?: boolean;
+  }) => {
+    const active = query.sortKey === sortKey;
+    const nextDesc = active ? !query.desc : !startAsc;
+    return (
+      <TableHead numeric={numeric}>
+        <Link
+          href={hrefFor({ sortKey, desc: nextDesc, page: 0 })}
+          scroll={false}
+          aria-label={`Sort by ${label}${active && !query.desc ? ", descending" : ", ascending"}`}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-sm hover:text-ink",
+            active ? "text-ink" : "text-ink-muted",
+          )}
+        >
+          {label}
+          {/* Only the active column shows an arrow. A caret on every heading
+              says "sortable" and stops saying "sorted by this". */}
+          {active && <span aria-hidden>{query.desc ? "↓" : "↑"}</span>}
+        </Link>
+      </TableHead>
+    );
+  };
+
   const hrefFor = (patch: Partial<LocationsQuery>) =>
     `/inventory${locationsQueryToSearch({ ...query, ...patch })}`;
 
@@ -161,9 +205,9 @@ export async function LocationView({
             ) : (
               <Table dense>
                 <TableHeader>
-                  <TableHead>Product</TableHead>
-                  <TableHead>SKU</TableHead>
-                  <TableHead numeric>On hand</TableHead>
+                  <SortableHead label="Product" sortKey="title" startAsc />
+                  <SortableHead label="SKU" sortKey="sku" startAsc />
+                  <SortableHead label="On hand" sortKey="onHand" numeric />
                   {/* Both of these are shop-wide, and they say so. Cover is
                       total sellable stock against the shop's run rate — a
                       per-branch number needs sales attributed to the branch.
@@ -171,9 +215,11 @@ export async function LocationView({
                       moving plus what suppliers still owe the shop, and neither
                       names a destination. The columns stay put whatever the
                       location holds, so the table reads the same everywhere. */}
-                  <TableHead numeric>Cover (shop)</TableHead>
-                  <TableHead numeric>En route (shop)</TableHead>
-                  <TableHead numeric>Value</TableHead>
+                  {/* Cover starts ascending: the shortest cover is the line
+                      about to run out, which is the reason to open this screen. */}
+                  <SortableHead label="Cover (shop)" sortKey="daysCover" numeric startAsc />
+                  <SortableHead label="En route (shop)" sortKey="onOrderUnits" numeric />
+                  <SortableHead label="Value" sortKey="valueKes" numeric />
                 </TableHeader>
                 <TableBody>
                   {location.lines.map((line) => (

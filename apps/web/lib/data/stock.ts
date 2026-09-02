@@ -564,11 +564,79 @@ export async function getStockByLocation(
  *  catalogue tab uses: only one of the two tabs is on screen at a time, and the
  *  tab link carries neither, so nobody arrives on page 4 of a list they have not
  *  seen yet. */
-export type LocationsQuery = { search: string; page: number };
+/**
+ * Sortable columns on Inventory. Same `sort`/`dir` shape the catalogue uses, so
+ * a reader who has seen one URL can read the other.
+ *
+ * The reference build says "Click a column to sort" on this screen and ours had
+ * no sorting at all — on a 500-SKU catalogue the only way to find a line was to
+ * search for it by name, which assumes you already know what you are looking
+ * for. Sorting is how you find what you did NOT know to look for.
+ */
+export const LOCATION_SORT_KEYS = [
+  "title",
+  "sku",
+  "onHand",
+  "daysCover",
+  "onOrderUnits",
+  "valueKes",
+] as const;
+export type LocationSortKey = (typeof LOCATION_SORT_KEYS)[number];
+
+export type LocationsQuery = {
+  search: string;
+  page: number;
+  sortKey: LocationSortKey;
+  desc: boolean;
+};
+
+/** Default order: most stock first. What the screen showed before sorting
+ *  existed, so turning this on does not silently rearrange anyone's view. */
+const DEFAULT_LOCATION_SORT: LocationSortKey = "onHand";
+
+/**
+ * Order two lines by one column.
+ *
+ * Nulls always sink, in both directions. A line with no cover figure is not
+ * "the lowest cover" — it is unknown, and floating it to the top of an ascending
+ * sort would put the least informative rows where the most urgent belong.
+ */
+export function compareLocationLines(
+  a: LocationLine,
+  b: LocationLine,
+  key: LocationSortKey,
+  desc: boolean,
+): number {
+  const dir = desc ? -1 : 1;
+  if (key === "title" || key === "sku") {
+    return a[key].localeCompare(b[key]) * dir;
+  }
+  const av = a[key];
+  const bv = b[key];
+  if (av == null && bv == null) return 0;
+  if (av == null) return 1;
+  if (bv == null) return -1;
+  return (av - bv) * dir;
+}
 
 export function parseLocationsQuery(params: RawSearchParams): LocationsQuery {
   const q = parseCatalogueQuery(params);
-  return { search: q.search, page: q.page };
+  const raw = params["lsort"];
+  const sort = Array.isArray(raw) ? raw[0] : raw;
+  const dirRaw = params["ldir"];
+  const dir = Array.isArray(dirRaw) ? dirRaw[0] : dirRaw;
+  return {
+    search: q.search,
+    page: q.page,
+    // Its own param names: this screen's columns are not the catalogue's, and
+    // sharing `sort` would make a link copied between the two silently mean
+    // something else. Unknown values fall back rather than throw — a
+    // hand-edited URL should show the inventory, not an error.
+    sortKey: (LOCATION_SORT_KEYS as readonly string[]).includes(sort ?? "")
+      ? (sort as LocationSortKey)
+      : DEFAULT_LOCATION_SORT,
+    desc: dir === "asc" ? false : true,
+  };
 }
 
 /** This view's URL. Its own serializer now: Inventory carries a search and a
@@ -578,6 +646,10 @@ export function locationsQueryToSearch(q: LocationsQuery): string {
   const out = new URLSearchParams();
   if (q.search) out.set("q", q.search);
   if (q.page > 0) out.set("page", String(q.page + 1));
+  // Only when they differ from the default, so the common URL stays short and
+  // a shared link does not pin someone to an order they never chose.
+  if (q.sortKey !== DEFAULT_LOCATION_SORT) out.set("lsort", q.sortKey);
+  if (!q.desc) out.set("ldir", "asc");
   const s = out.toString();
   return s ? `?${s}` : "";
 }
@@ -647,9 +719,10 @@ export async function getLocationsScreen(
   const locations = await getStockByLocation(tenantId, { canViewCosts });
   const searched = locations.map((location) => ({
     location,
-    lines: query.search
+    lines: (query.search
       ? location.lines.filter((line) => matchesLocationLine(line, query.search))
-      : location.lines,
+      : [...location.lines]
+    ).sort((a, b) => compareLocationLines(a, b, query.sortKey, query.desc)),
   }));
 
   const total = locations.reduce((sum, l) => sum + l.lines.length, 0);
