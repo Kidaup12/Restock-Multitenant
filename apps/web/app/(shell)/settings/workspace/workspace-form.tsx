@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ORDER_METHODS, type OrderMethod } from "@wezesha/forecast";
@@ -234,40 +235,21 @@ export function WorkspaceForm({
         </CardContent>
       </Card>
 
+      {/* "Buying style" lived here, under the timezone picker and the
+          dead-stock window, where nobody looking for it would find it. It
+          decides how much cash sits on the shelf against how often the shop
+          runs out, so it now has its own page with the trade-offs on screen.
+          Left as a pointer rather than a duplicate: two controls writing the
+          same three columns is how a screen ends up disagreeing with itself. */}
       <Card>
         <CardHeader
           title="Buying style"
           subtitle="How hard the buy list works to keep each group in stock"
         />
-        <CardContent className="space-y-5 pt-4">
-          {errorFor("methods") && (
-            <p role="alert" className="text-xs text-negative">
-              {errorFor("methods")}
-            </p>
-          )}
-          {GROUPS.map((group) => {
-            const key = `method${group.key}` as const;
-            const value = values[key];
-            return (
-              <Field key={group.key} label={group.label} htmlFor={`workspace-${key}`}>
-                <Select
-                  id={`workspace-${key}`}
-                  value={value}
-                  disabled={!canManage || pending}
-                  onChange={(e) => set(key, e.target.value as OrderMethod)}
-                >
-                  {ORDER_METHODS.map((method) => (
-                    <option key={method} value={method}>
-                      {METHOD_LABEL[method]}
-                    </option>
-                  ))}
-                </Select>
-                <p className="text-xs text-ink-muted">
-                  {group.hint} {METHOD_HINT[value]}
-                </p>
-              </Field>
-            );
-          })}
+        <CardContent className="pt-4">
+          <Link href="/settings/ordering-strategy" className="text-sm text-accent underline">
+            Set your ordering strategy →
+          </Link>
         </CardContent>
       </Card>
 

@@ -17,6 +17,9 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { readTermsAcceptance } from "@/lib/auth/terms";
+import { prismaForTenant } from "@wezesha/db";
+import { METHOD_DEFAULTS, parseOrderMethod } from "@wezesha/forecast";
+import { STRATEGY_GROUPS, optionFor } from "@/lib/ordering/strategy";
 import { TERMS_VERSION } from "@/lib/legal";
 import { TermsAcceptance } from "./terms-acceptance";
 import { getConnectionStatus } from "@/lib/data/connection-status";
@@ -63,13 +66,37 @@ async function SettingsSections({
     getTenantPlan(tenantId),
   ]);
 
+  // Read here so the card can say what is set. One vocabulary with the strategy
+  // page (lib/ordering/strategy) — a summary that drifts from the page it
+  // summarises is worse than none.
+  const strategyConfig = await prismaForTenant(tenantId).tenantConfig.findUnique({
+    where: { tenantId },
+    select: { methodA: true, methodB: true, methodC: true },
+  });
+  const strategySummary = STRATEGY_GROUPS.map(
+    (g) =>
+      optionFor(
+        parseOrderMethod(strategyConfig?.[`method${g.key}` as const]) ?? METHOD_DEFAULTS[g.key],
+      ).label,
+  ).join(" · ");
+
   const sections = [
     {
       href: "/settings/workspace",
       icon: <GearIcon />,
       title: "Workspace",
-      description: "Name, trading day, alert email, dead stock, and how you buy.",
+      description: "Name, trading day, alert email, and dead stock.",
       status: null,
+    },
+    {
+      href: "/settings/ordering-strategy",
+      icon: <GearIcon />,
+      title: "Ordering strategy",
+      // The status line names what is actually set, so the hub answers "how do
+      // we buy?" without opening the page — and a strategy nobody revisited
+      // reads differently from one somebody chose.
+      description: "How hard the buy list works to keep each group in stock.",
+      status: strategySummary,
     },
     {
       href: "/settings/notifications",
