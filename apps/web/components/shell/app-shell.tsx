@@ -68,7 +68,13 @@ export function AppShell({
   isPlatformAdmin: boolean;
   /* Whether this shop's data is still moving, and whether this caller can fix
      it. Null when there is no active workspace to have a connection. */
-  connection: { state: ConnectionState; canFix: boolean; stale: Staleness | null } | null;
+  connection: {
+    state: ConnectionState;
+    canFix: boolean;
+    stale: Staleness | null;
+    /** "7h ago", or null when nothing has ever arrived. */
+    syncedAgo: string | null;
+  } | null;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -107,6 +113,7 @@ export function AppShell({
       permissionSource={permissionSource}
       unreadNotifications={unreadNotifications}
       isPlatformAdmin={isPlatformAdmin}
+      syncedAgo={connection?.syncedAgo ?? null}
     />
   );
 
@@ -175,6 +182,20 @@ export function AppShell({
         )}
         <main className="min-h-dvh px-5 py-7 sm:px-8">
           <div className="mx-auto w-full max-w-7xl">{children}</div>
+          {/* Says what this is and who stands behind it. The rail carries the
+              wordmark and nothing else; a shop owner three screens deep has no
+              other reminder of what they are looking at. */}
+          <footer className="mx-auto mt-10 w-full max-w-7xl border-t border-edge pt-4 text-2xs text-ink-faint">
+            Wezesha Restock OS · demand &amp; reorder intelligence for beauty retailers
+            <span className="px-1.5">·</span>
+            <Link href="/terms" className="hover:text-ink-muted">
+              Terms
+            </Link>
+            <span className="px-1.5">·</span>
+            <Link href="/privacy" className="hover:text-ink-muted">
+              Privacy
+            </Link>
+          </footer>
         </main>
       </div>
     </TourProvider>
@@ -213,6 +234,7 @@ function RailContent({
   permissionSource,
   unreadNotifications,
   isPlatformAdmin,
+  syncedAgo,
 }: {
   user: ShellUser;
   workspace: ShellWorkspace;
@@ -220,6 +242,7 @@ function RailContent({
   permissionSource: PermissionSource | null;
   unreadNotifications: number;
   isPlatformAdmin: boolean;
+  syncedAgo: string | null;
 }) {
   const { lead, sections } = navSectionsFor(permissionSource);
 
@@ -252,6 +275,18 @@ function RailContent({
       </nav>
 
       <div className="shrink-0 space-y-1.5 border-t border-edge px-3 py-2">
+        {/* Answers "is this current?" wherever the reader is, without a trip to
+            Connections. The banner above only speaks once a store has been
+            silent for a day; most of the time the useful answer is "an hour
+            ago". */}
+        {syncedAgo && (
+          <Link
+            href="/settings/connections"
+            className="block px-1 text-2xs text-ink-faint hover:text-ink-muted"
+          >
+            Synced {syncedAgo}
+          </Link>
+        )}
         {workspaces.length > 0 ? (
           <WorkspaceSwitcher workspaces={workspaces} activeId={workspace?.id ?? null} />
         ) : (

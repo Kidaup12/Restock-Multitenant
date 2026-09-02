@@ -21,6 +21,7 @@ const table: DashboardTable = {
   deadWindowDays: 60,
   deadCostKes: 1000,
   criticalCount: 4,
+  criticalCostKes: 0,
   capped: { stockout: false, reorder: false, onway: false, dead: false, all: false },
   deadStockExport: [],
 };

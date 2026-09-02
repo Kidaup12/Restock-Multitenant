@@ -82,6 +82,7 @@ export const COST_SURFACES: CostSurface[] = [
   { module: "lib/data/stock", getter: "getStockByLocation", provenBy: "tests/member-visibility.test.tsx" },
   { module: "lib/data/today", getter: "getTodayMetrics", provenBy: "tests/member-visibility.test.tsx" },
   { module: "lib/data/today", getter: "getReorderNeeded", provenBy: "tests/member-visibility.test.tsx" },
+  { module: "lib/data/today", getter: "getDashboardTable", provenBy: "tests/member-visibility.test.tsx" },
   { module: "lib/data/transfers", getter: "getDistributionProposal", provenBy: "tests/member-visibility.test.tsx" },
 ];
 

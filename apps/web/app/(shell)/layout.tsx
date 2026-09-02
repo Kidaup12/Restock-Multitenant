@@ -5,7 +5,7 @@ import { planAllows } from "@/lib/capabilities/plan-features";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getUnreadCount } from "@/lib/notifications/data";
 import { getConnectionStatus } from "@/lib/data/connection-status";
-import { isStale, staleDays } from "@/lib/sync/staleness";
+import { isStale, staleDays, syncedAgo } from "@/lib/sync/staleness";
 import { AppShell } from "@/components/shell/app-shell";
 import { hasAcceptedCurrentTerms } from "@/lib/auth/terms";
 import { TERMS_VERSION } from "@/lib/legal";
@@ -87,6 +87,10 @@ export default async function ShellLayout({
               stale: isStale(connectionStatus.lastSyncedAt)
                 ? { days: staleDays(connectionStatus.lastSyncedAt) }
                 : null,
+              // Always shown, not only once it has gone quiet: "is this
+              // current?" is a question every screen raises, and the banner
+              // only ever answers "is this broken?".
+              syncedAgo: syncedAgo(connectionStatus.lastSyncedAt),
             }
           : null
       }

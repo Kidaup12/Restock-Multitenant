@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getDashboardTable } from "@/lib/data/today";
+import { formatMoney } from "@/lib/money";
 import { ProductTabs } from "./product-tabs";
 
 /**
@@ -19,10 +20,12 @@ import { ProductTabs } from "./product-tabs";
 export async function ProductBoard({
   tenantId,
   canViewCosts,
+  currency,
   trend,
 }: {
   tenantId: string;
   canViewCosts: boolean;
+  currency: string;
   trend: React.ReactNode;
 }) {
   const data = await getDashboardTable(tenantId, { canViewCosts });
@@ -35,6 +38,12 @@ export async function ProductBoard({
             <span className="font-medium">
               {data.criticalCount} {data.criticalCount === 1 ? "item runs" : "items run"} out
               within a week
+              {/* The money is what makes this a decision rather than an alarm:
+                  a count says how many fires there are, the figure says whether
+                  the shop can put them out this week. */}
+              {data.criticalCostKes != null && data.criticalCostKes > 0 && (
+                <> · about {formatMoney(data.criticalCostKes, currency, { compact: true })} to restock</>
+              )}
             </span>{" "}
             — quantities account for cover, lead time and what is already on the way.
           </span>
