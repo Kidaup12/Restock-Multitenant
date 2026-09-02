@@ -8,7 +8,7 @@ import {
   verifyOAuthHmac,
 } from "@wezesha/shopify";
 import { STATE_COOKIE, STATE_COOKIE_PATH } from "@/lib/shopify/cookies";
-import { credentialsForTenant } from "@/lib/shopify/credentials";
+import { credentialsForInstall } from "@/lib/shopify/credentials";
 import { shopifyAppUrl } from "@/lib/shopify/env";
 import { canManageConnections, tenantActor } from "@/lib/shopify/membership";
 import { enqueueShopifySync } from "@/lib/shopify/queue";
@@ -65,7 +65,9 @@ export const GET = withCapture(async (req: NextRequest) => {
   // The same workspace credentials the install redirect was built from. If they
   // have been cleared mid-install there is nothing to verify the callback with,
   // and no platform app to fall back to.
-  const credentials = await credentialsForTenant(actor.tenantId);
+    // Must resolve the SAME app the install used, or the HMAC will not verify
+  // and the code will not exchange.
+  const credentials = await credentialsForInstall(actor.tenantId);
   if (!credentials) return done(origin, "error", "no_app_credentials");
 
   const { clientId, apiSecret } = credentials;

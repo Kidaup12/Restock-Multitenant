@@ -70,6 +70,7 @@ function render(
       errorCode={null}
       syncRun={syncRun}
       appCredentialsConfigured
+      platformAppConfigured={false}
       appClientId="client-abc"
     />
   );
@@ -199,7 +200,7 @@ describe("connections card — sync states", () => {
     expect(render(null)).toContain("Only works if the store is a development store");
   });
 
-  it("leads a new workspace with the route its own shop can actually use", () => {
+  it("leads a new workspace with the route that works on any store", () => {
     // The install link is the route merchants are asked for, so it is the tab a
     // new workspace opens on. The token route stays one click away rather than
     // buried: it needs no distribution, no review and no Partner account, so it
@@ -210,10 +211,10 @@ describe("connections card — sync states", () => {
     // app credentials silently beat a pasted token in the worker — see
     // shopify-connect-routes.test.tsx.
     const html = render(null, false, null);
-    expect(html).toContain('name="shopify-admin-token"');
+    expect(html).toContain("Connect with Shopify");
     // The other routes are offered, but as tabs the reader has to choose.
-    expect(html).toContain("Install link");
-    expect(html).not.toContain('name="shopify-install-shop"');
+    expect(html).toContain("Admin API token");
+    expect(html).not.toContain('name="shopify-admin-token"');
   });
 
   it("offers the token route to a store that is connected but cannot sync", () => {

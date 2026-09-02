@@ -35,6 +35,7 @@ const props: Props = {
   errorCode: null,
   syncRun: null,
   appCredentialsConfigured: false,
+  platformAppConfigured: false,
   appClientId: null,
 };
 
@@ -42,16 +43,20 @@ const render = (over: Partial<Props> = {}) =>
   renderToStaticMarkup(<ShopifyConnectionCard {...props} {...over} />);
 
 describe("connecting a store: one route at a time", () => {
-  it("opens on the token route, the only one a merchant's own shop can use", () => {
-    // Shopify's client-credentials grant works only when the app and the store
-    // share an organisation, and installing does not change that — so both the
-    // install link and the client ID/secret dead-end on a merchant's shop. A
-    // custom app made in the shop's own admin needs no Partner account.
+  it("opens on Connect with Shopify, the route that works on any store", () => {
+    // This asserted the TOKEN route until the platform app landed, because
+    // without one the install needed the shop to register its own Shopify app
+    // first — a precondition most shops never meet, which made it a dead end.
+    // With a Wezesha-owned app to install under, the authorization-code flow
+    // works on any store including non-Plus, so it leads.
+    //
+    // Client credentials still cannot: Shopify honours that grant only when the
+    // app and the store share an organisation, which a live shop never does.
     const html = render();
-    expect(html).toContain('name="shopify-admin-token"');
+    expect(html).toContain("Connect with Shopify");
     // The other two routes' fields stay off the first paint.
     expect(html).not.toContain('name="shopify-client-id"');
-    expect(html).not.toContain('name="shopify-install-shop"');
+    expect(html).not.toContain('name="shopify-admin-token"');
   });
 
 
@@ -70,29 +75,38 @@ describe("connecting a store: one route at a time", () => {
   it("offers three routes, named for what the shop owner has", () => {
     const html = render();
     expect(html).toContain('role="tablist"');
-    for (const label of ["Admin API token", "Install link", "Client ID &amp; secret"]) {
+    for (const label of ["Connect with Shopify", "Admin API token", "Client ID &amp; secret"]) {
       expect(html).toContain(label);
     }
   });
 
-  it("lists the working route first, then the two that need an app of ours", () => {
-    // Saving a client ID and secret is the step before installing with them, so
-    // it sits next to the install tab rather than at the end. Order is the whole
-    // point: a prerequisite listed last is one people look for and miss.
+  it("lists the routes in the order a shop should try them", () => {
+    // Connect first: it works on any store. Then the token, which needs no
+    // Partner account. Client ID and secret last — it is the advanced one, and
+    // only a development store in the app's own organisation can use it.
     const html = render();
-    const order = ["Admin API token", "Install link", "Client ID &amp; secret"].map((l) =>
+    const order = ["Connect with Shopify", "Admin API token", "Client ID &amp; secret"].map((l) =>
       html.indexOf(l),
     );
     expect(order.every((i) => i >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
-  it.skip("sends someone with no credentials saved to the tab that takes them", () => {
-    // The install route cannot work without them, and a disabled field with no
-    // way out was the dead end this replaced.
-    const html = render({ appCredentialsConfigured: false });
+  it("points somewhere useful when this deployment has no app at all", () => {
+    // Un-skipped when the platform app landed. With neither a Wezesha-owned app
+    // nor the shop's own, Connect genuinely cannot run — and a disabled field
+    // with no way out was the dead end this replaced. The fixture has both
+    // flags false, which is that state.
+    const html = render({ appCredentialsConfigured: false, platformAppConfigured: false });
     expect(html).toContain("Add client ID &amp; secret");
     expect(html).not.toContain('name="shopify-install-shop"');
+  });
+
+  it("offers the install itself once there IS an app to install under", () => {
+    // The platform app alone is enough: the shop registers nothing.
+    const html = render({ appCredentialsConfigured: false, platformAppConfigured: true });
+    expect(html).toContain('name="shopify-install-shop"');
+    expect(html).not.toContain("Add client ID &amp; secret");
   });
 
   it("keeps the credential box on the page once a store is connected", () => {
