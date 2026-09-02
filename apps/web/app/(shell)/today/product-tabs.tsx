@@ -55,11 +55,26 @@ function eta(date: Date | null): string {
   return new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" }).format(new Date(date));
 }
 
-function cover(row: CatalogueRow): string {
-  // An empty shelf has no cover to report, and a product with no run rate never
-  // runs out — neither is a number of days.
-  if (row.onHandUnits <= 0 || row.daysCover == null) return "—";
+function daysLeft(row: CatalogueRow): string {
+  // An empty shelf has NO days left, and saying so is the point of the column —
+  // a dash reads as "unknown" on exactly the rows where the answer is known and
+  // urgent. A product with no run rate still gets the dash: it never runs out,
+  // which is a different thing from running out today.
+  if (row.onHandUnits <= 0) return "0d";
+  if (row.daysCover == null) return "—";
   return `${row.daysCover}d`;
+}
+
+/** The row's standing, in one word, for the pile it is sitting in.
+ *
+ *  An empty shelf and a shelf about to empty are the same colour of problem but
+ *  not the same job — one is lost sales now, the other is a purchase order
+ *  today — and the ABC badge beside it says nothing about either. */
+function standing(row: CatalogueRow): { label: string; tone: "negative" | "warning" } | null {
+  if (row.onHandUnits <= 0) return { label: "out", tone: "negative" };
+  if (row.urgency === "critical") return { label: "critical", tone: "negative" };
+  if (row.urgency === "high") return { label: "low", tone: "warning" };
+  return null;
 }
 
 function KpiCard({
@@ -267,7 +282,7 @@ export function ProductTabs({
                   <>
                     <TableHead numeric>Stock</TableHead>
                     <TableHead numeric>Run/day</TableHead>
-                    <TableHead numeric>Cover</TableHead>
+                    <TableHead numeric>Days left</TableHead>
                     <TableHead numeric>En route</TableHead>
                   </>
                 )}
@@ -284,11 +299,23 @@ export function ProductTabs({
                       </Link>
                       <div className="mt-0.5 flex flex-wrap items-center gap-2 font-mono text-xs text-ink-muted">
                         {row.sku}
+                        {/* The brand is how a buyer recognises the product and
+                            groups an order; a SKU code alone is the one thing
+                            on the row nobody knows by heart. */}
+                        {row.vendor && <span className="font-sans">· {row.vendor}</span>}
                         {row.abc && (
                           <Badge tone="neutral" className="font-sans">
                             {row.abc}
                           </Badge>
                         )}
+                        {(() => {
+                          const s = standing(row);
+                          return s ? (
+                            <Badge tone={s.tone} className="font-sans">
+                              {s.label}
+                            </Badge>
+                          ) : null;
+                        })()}
                       </div>
                     </TableCell>
                     {tab === "onway" ? (
@@ -315,7 +342,7 @@ export function ProductTabs({
                               dash rather than 0.00 for something that is not moving. */}
                           {row.runRate > 0 ? row.runRate.toFixed(2) : "—"}
                         </TableCell>
-                        <TableCell numeric>{cover(row)}</TableCell>
+                        <TableCell numeric>{daysLeft(row)}</TableCell>
                         <TableCell numeric>
                           {row.onOrderUnits > 0 ? formatNumber(row.onOrderUnits) : "—"}
                         </TableCell>

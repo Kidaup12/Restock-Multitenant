@@ -13,6 +13,7 @@ import {
   SkeletonTableRows,
 } from "@/components/ui/skeleton";
 import { RealtimeRefresh } from "./realtime-refresh";
+import { GuideBox } from "@/components/ui/guide-box";
 import { RevenueTrend } from "./revenue-trend";
 import { RunForecastButton } from "./run-forecast-button";
 import { TodayLimitNotice } from "./today-limit-notice";
@@ -66,6 +67,13 @@ export default async function TodayPage() {
       />
       <RealtimeRefresh />
 
+      <GuideBox id="today" scope={tenantId} title="This is your daily home base">
+        The four figures at the top are what needs attention right now — what is
+        out of stock, what to reorder, what is on its way, and what is not
+        selling. Tap any of them to see that list. When you are ready to buy,
+        open the Restock planner.
+      </GuideBox>
+
       <Suspense
         fallback={
           <Card className="px-5 py-4">
@@ -118,6 +126,7 @@ export default async function TodayPage() {
           <ProductBoard
             tenantId={tenantId}
             canViewCosts={canViewCosts}
+            currency={membership.tenant.currency}
             trend={
               <RevenueTrend tenantId={tenantId} currency={membership.tenant.currency} />
             }

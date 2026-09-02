@@ -316,8 +316,14 @@ export function buildAggregates(
 
 /** Clamp to a real page. What survives a server refresh (an edit re-renders with
  *  fewer rows) landing the reader past the end. */
-export function pageBounds(matchedCount: number, page: number): { pageCount: number; current: number; start: number } {
-  const pageCount = Math.max(1, Math.ceil(matchedCount / PAGE_SIZE));
+export function pageBounds(
+  matchedCount: number,
+  page: number,
+  /** Defaults to the catalogue's own size; the inventory screen lets its reader
+   *  choose, and a page beyond the end clamps rather than showing nothing. */
+  size: number = PAGE_SIZE,
+): { pageCount: number; current: number; start: number } {
+  const pageCount = Math.max(1, Math.ceil(matchedCount / size));
   const current = Math.min(Math.max(0, page), pageCount - 1);
-  return { pageCount, current, start: current * PAGE_SIZE };
+  return { pageCount, current, start: current * size };
 }
