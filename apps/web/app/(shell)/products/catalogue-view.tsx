@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
@@ -39,7 +39,7 @@ import { HealthStrip } from "./health-strip";
 import { MoneyBand } from "./money-band";
 import { ManageCategories } from "./manage-categories";
 import { RowEditor } from "./row-editor";
-import { exportCatalogueAction } from "./actions";
+import { exportCatalogueAction, setLeadTimeForProductsAction } from "./actions";
 import type { OwnerFlags } from "./owner-flags";
 
 /**
@@ -62,12 +62,12 @@ import type { OwnerFlags } from "./owner-flags";
  */
 
 /** How many columns the table has, for the colSpan an expanded row must reach.
- *  The data columns are fixed — Product · ABC · Cost · Margin · On hand · In
- *  warehouse · En route · Sells/day · Cover · Cash tied up · Revenue · Verdict —
- *  and only the tick column an editor sees varies. Derived in one place so the
- *  count cannot drift from the header. */
+ *  The data columns are fixed — Product · ABC · Supplier · Lead · Cost · Margin ·
+ *  On hand · In warehouse · En route · Sells/day · Cover · Cash tied up ·
+ *  Revenue · Verdict — and only the tick column an editor sees varies. Derived
+ *  in one place so the count cannot drift from the header. */
 export function catalogueColCount(canManage: boolean): number {
-  return 12 + (canManage ? 1 : 0);
+  return 14 + (canManage ? 1 : 0);
 }
 
 export function CatalogueView({
@@ -151,6 +151,47 @@ export function CatalogueView({
   const hrefFor = (patch: Partial<CatalogueQuery>) =>
     `/products${catalogueQueryToSearch(withQuery(query, patch))}`;
 
+  /**
+   * A column heading that sorts, matching the inventory table.
+   *
+   * Clicking the column you are already on flips the direction; clicking a new
+   * one opens on the order people actually ask that column for. Nobody opens a
+   * catalogue wanting the least stock or the healthiest cover first — so
+   * quantities and money start high-to-low, and cover, margin and lead start
+   * low-to-high, where the trouble is.
+   */
+  const SortableHead = ({
+    label,
+    sortKey,
+    numeric,
+    startAsc,
+  }: {
+    label: string;
+    sortKey: SortKey;
+    numeric?: boolean;
+    startAsc?: boolean;
+  }) => {
+    const active = query.sortKey === sortKey;
+    return (
+      <TableHead numeric={numeric}>
+        <Link
+          href={hrefFor({ sortKey, desc: active ? !query.desc : !startAsc })}
+          scroll={false}
+          aria-label={`Sort by ${label}${active && !query.desc ? ", descending" : ", ascending"}`}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-sm hover:text-ink",
+            active ? "text-ink" : "text-ink-muted",
+          )}
+        >
+          {label}
+          {/* Only the active column shows an arrow. A caret on every heading
+              says "sortable" and stops saying "sorted by this". */}
+          {active && <span aria-hidden>{query.desc ? "↓" : "↑"}</span>}
+        </Link>
+      </TableHead>
+    );
+  };
+
   return (
     <div className="space-y-4">
       {canViewCosts && aggregates.band && (
@@ -217,8 +258,6 @@ export function CatalogueView({
           selectionHref={(selection: FacetSelection) => hrefFor({ selection })}
         />
 
-        <SortBar query={query} canViewCosts={canViewCosts} hrefFor={hrefFor} />
-
         <CardContent className="p-0 py-2">
           <Table dense>
             <TableHeader>
@@ -233,17 +272,19 @@ export function CatalogueView({
                   />
                 </TableHead>
               )}
-              <TableHead>Product</TableHead>
-              <TableHead>ABC</TableHead>
-              <TableHead numeric>Cost</TableHead>
-              <TableHead numeric>Margin</TableHead>
-              <TableHead numeric>On hand</TableHead>
-              <TableHead numeric>In warehouse</TableHead>
-              <TableHead numeric>En route</TableHead>
-              <TableHead numeric>Sells/day</TableHead>
-              <TableHead numeric>Cover</TableHead>
-              <TableHead numeric>Cash tied up</TableHead>
-              <TableHead numeric>Rev · 30d ({currency})</TableHead>
+              <SortableHead label="Product" sortKey="title" startAsc />
+              <SortableHead label="ABC" sortKey="abc" startAsc />
+              <SortableHead label="Supplier" sortKey="supplierName" startAsc />
+              <SortableHead label="Lead" sortKey="leadDays" numeric startAsc />
+              <SortableHead label="Cost" sortKey="costKes" numeric />
+              <SortableHead label="Margin" sortKey="marginPct" numeric startAsc />
+              <SortableHead label="On hand" sortKey="onHandUnits" numeric />
+              <SortableHead label="In warehouse" sortKey="warehouseUnits" numeric />
+              <SortableHead label="En route" sortKey="onOrderUnits" numeric />
+              <SortableHead label="Sells/day" sortKey="runRate" numeric />
+              <SortableHead label="Cover" sortKey="daysCover" numeric startAsc />
+              <SortableHead label="Cash tied up" sortKey="moneyAtRestKes" numeric />
+              <SortableHead label={`Rev · 30d (${currency})`} sortKey="revenue30dKes" numeric />
               <TableHead>Verdict</TableHead>
             </TableHeader>
             <TableBody>
@@ -311,68 +352,6 @@ export function CatalogueView({
           }}
         />
       )}
-    </div>
-  );
-}
-
-/** Sort control. A dropdown of links rather than a select, for the same reason
- *  the chips are links: the server does the sorting, so choosing one is a
- *  navigation. Mirrors the facet bar's details/summary so the two read alike. */
-function SortBar({
-  query,
-  canViewCosts,
-  hrefFor,
-}: {
-  query: CatalogueQuery;
-  canViewCosts: boolean;
-  hrefFor: (patch: Partial<CatalogueQuery>) => string;
-}) {
-  const options: { key: SortKey; label: string; costOnly?: boolean }[] = [
-    { key: "title", label: "Product" },
-    { key: "onHandUnits", label: "On hand" },
-    { key: "runRate", label: "Run rate" },
-    { key: "daysCover", label: "Days cover" },
-    { key: "revenue30dKes", label: "Revenue (30d)" },
-    { key: "abc", label: "ABC class" },
-    { key: "marginPct", label: "Margin %", costOnly: true },
-    { key: "moneyAtRestKes", label: "Cash tied up", costOnly: true },
-  ];
-  const shown = options.filter((o) => canViewCosts || !o.costOnly);
-  const current = shown.find((o) => o.key === query.sortKey) ?? shown[0]!;
-
-  return (
-    <div className="flex items-center gap-2 px-4 py-2 text-sm text-ink-muted">
-      <span>Sort</span>
-      <details className="relative">
-        <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-md border border-edge bg-surface px-2.5 py-1 font-medium text-ink">
-          {current.label}
-          <ChevronDownIcon className="size-3.5 text-ink-faint" />
-        </summary>
-        <div className="absolute z-10 mt-1 flex min-w-44 flex-col rounded-lg border border-edge bg-surface p-1 shadow-lg">
-          {shown.map((o) => (
-            <Link
-              key={o.key}
-              href={hrefFor({ sortKey: o.key })}
-              scroll={false}
-              aria-current={o.key === query.sortKey ? "true" : undefined}
-              className={cn(
-                "rounded-md px-2 py-1 text-left",
-                o.key === query.sortKey ? "bg-accent-soft text-accent-ink" : "text-ink-muted hover:bg-surface-2 hover:text-ink",
-              )}
-            >
-              {o.label}
-            </Link>
-          ))}
-        </div>
-      </details>
-      <Link
-        href={hrefFor({ desc: !query.desc })}
-        scroll={false}
-        aria-label={query.desc ? "Sort ascending" : "Sort descending"}
-        className="rounded-md border border-edge bg-surface px-2 py-1 text-ink hover:bg-surface-2"
-      >
-        {query.desc ? "Desc ↓" : "Asc ↑"}
-      </Link>
     </div>
   );
 }
@@ -445,6 +424,12 @@ export function RowGroup({
           </button>
         </TableCell>
         <TableCell className="text-ink-muted">{row.abc ?? "—"}</TableCell>
+        <TableCell className="max-w-[10rem] truncate text-ink-muted">
+          {row.supplierName ?? "—"}
+        </TableCell>
+        <TableCell numeric>
+          <LeadCell row={row} canManage={canManage} />
+        </TableCell>
         <TableCell numeric>
           <span className="inline-flex flex-col items-end">
             <CostValue amount={row.costKes} canViewCosts={canViewCosts} />
@@ -524,6 +509,103 @@ export function RowGroup({
         </tr>
       )}
     </>
+  );
+}
+
+/**
+ * The lead time this product's reorder maths runs on, editable in place.
+ *
+ * It shows where the number came from as well as what it is. Every row resolves
+ * to some figure — the product's own, else its supplier's, else a flat
+ * assumption — and a 14 nobody chose looks exactly like a 14 the shop measured.
+ * Only the first is worth trusting, and only the assumed one is a job, so the
+ * origin rides alongside the number rather than being flattened out of it.
+ *
+ * Editing writes through the same action the bulk bar uses, which until now was
+ * the only way to set a lead time from this screen: a control whose effect the
+ * table never showed.
+ */
+function LeadCell({ row, canManage }: { row: CatalogueRow; canManage: boolean }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(row.leadDays));
+  const [pending, start] = useTransition();
+
+  const inherited = row.leadSource !== "product";
+  const hint =
+    row.leadSource === "product"
+      ? "Set on this product"
+      : row.leadSource === "supplier"
+        ? `From ${row.supplierName ?? "the supplier"}`
+        : "Assumed — nobody has set this";
+
+  function save() {
+    setEditing(false);
+    const typed = value.trim();
+    const days = typed === "" ? null : Number(typed);
+    if (days != null && (!Number.isFinite(days) || days < 0 || days > 365)) {
+      setValue(String(row.leadDays));
+      return;
+    }
+    // Clearing it hands the row back to its supplier's lead time, so a blank is
+    // a real choice rather than a no-op — only an unchanged product override is.
+    if (days === row.leadDays && row.leadSource === "product") return;
+    start(async () => {
+      const result = await setLeadTimeForProductsAction({
+        leadTimeDays: days,
+        productIds: [row.productId],
+      });
+      if (result.ok) router.refresh();
+      else setValue(String(row.leadDays));
+    });
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        min={0}
+        max={365}
+        value={value}
+        aria-label={`Lead time for ${row.title}, in days`}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Escape") {
+            setValue(String(row.leadDays));
+            setEditing(false);
+          }
+        }}
+        className="w-16 rounded-sm border border-accent px-1.5 py-0.5 text-right text-sm tabular-nums"
+      />
+    );
+  }
+
+  const label = `${row.leadDays}d`;
+  if (!canManage) {
+    return (
+      <span title={hint} className={inherited ? "text-ink-faint" : "text-ink-muted"}>
+        {label}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        setValue(String(row.leadDays));
+        setEditing(true);
+      }}
+      title={`${hint} — click to change`}
+      className={cn(
+        "underline decoration-dotted underline-offset-2 hover:text-ink",
+        inherited ? "text-ink-faint" : "text-ink-muted",
+      )}
+    >
+      {pending ? "…" : label}
+    </button>
   );
 }
 

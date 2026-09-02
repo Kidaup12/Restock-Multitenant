@@ -133,6 +133,12 @@ export type CatalogueRow = {
   /** Resolved lead time (product override → supplier → ASSUMED_LEAD_DAYS) —
    *  feeds the cover verdict and the "below lead" revenue-at-risk tile. */
   leadDays: number;
+  /** Where that lead time came from. A resolved 14 days that nobody set reads
+   *  identically to one the shop measured, and the two are worth very different
+   *  amounts of trust — so the origin travels with the number. */
+  leadSource: "product" | "supplier" | "assumed";
+  /** The supplier this product is bought from; null when none is assigned. */
+  supplierName: string | null;
   /** Cover verdict pill; null for a not-for-sale row (no sellable judgement). */
   verdict: VerdictKind | null;
   /** Margin % of price (loud red when negative). Null when there's no price, or
@@ -277,7 +283,10 @@ export async function getStockCatalogue(
     // stock, so its cover verdict and cost/supplier health flags go quiet: there
     // is nothing to re-order, and the reason it is held reads instead.
     const cost = resolveCost({ costKes: p.costKes, costSource: p.costSource, priceKes: p.priceKes });
-    const leadDays = leadDaysFor(p, p.supplier) ?? ASSUMED_LEAD_DAYS;
+    const resolvedLead = leadDaysFor(p, p.supplier);
+    const leadDays = resolvedLead ?? ASSUMED_LEAD_DAYS;
+    const leadSource =
+      p.leadTimeDays != null ? "product" : resolvedLead != null ? "supplier" : "assumed";
     const buyable = isBuyable(p);
     const lifecycle = productLifecycle(p);
 
@@ -311,6 +320,8 @@ export async function getStockCatalogue(
       syncError: p.syncError,
       syncErrorAt: p.syncErrorAt,
       leadDays,
+      leadSource,
+      supplierName: p.supplier?.name ?? null,
       verdict: buyable ? coverVerdict(sellable, daysCover, leadDays) : null,
       marginPct: canViewCosts && cost.costKes > 0 ? marginPct(cost.costKes, p.priceKes) : null,
       missingCost: canViewCosts && buyable && cost.suspectReason === "missing",
