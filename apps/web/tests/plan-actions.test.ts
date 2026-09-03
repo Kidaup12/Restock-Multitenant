@@ -54,21 +54,24 @@ describe.skipIf(!runnable)("planBudget plan gate (local db)", () => {
     authState.membership = { tenantId, displayName: "Owner", role: "OWNER", permissions: null };
   }
 
-  it("refuses a Starter tenant before doing any planning work", async () => {
+  it("clears the plan gate on Starter now that budgeting is an entry-tier feature", async () => {
+    // Budgeting moved to Starter: planning against what you can spend is core to
+    // what the product does, not an upsell. A Starter tenant now falls through
+    // the plan lock to the next check rather than being refused at it.
     actAs(starterTenant);
-    expect(await planBudget({ budgetKes: 5000 })).toEqual({ ok: false, error: PLAN_LOCKED });
-  });
-
-  it("clears the plan gate for a Growth tenant (falls through to the forecast check)", async () => {
-    actAs(growthTenant);
     const res = await planBudget({ budgetKes: 5000 });
-    // Growth passes the plan gate; with no forecast seeded it stops at the next
-    // check, never at the plan lock.
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error).not.toBe(PLAN_LOCKED);
+      expect(res.error, "budgeting is still gated behind the plan tier").not.toBe(PLAN_LOCKED);
       expect(res.error).toBe("Run a forecast first — there's nothing to plan yet.");
     }
+  });
+
+  it("also clears it for a Growth tenant", async () => {
+    actAs(growthTenant);
+    const res = await planBudget({ budgetKes: 5000 });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).not.toBe(PLAN_LOCKED);
   });
 
   it("refuses without a workspace regardless of plan", async () => {

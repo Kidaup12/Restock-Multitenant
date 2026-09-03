@@ -72,7 +72,7 @@ export const PLAN_FEATURES: Record<PlanFeature, PlanTier> = {
   transfers: "growth",
   multi_location: "growth",
   insights: "growth",
-  budget_planner: "growth",
+  budget_planner: "starter",
   team_depth: "scale",
   priority_support: "scale",
 };
