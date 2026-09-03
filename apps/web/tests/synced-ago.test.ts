@@ -21,6 +21,17 @@ describe("synced ago", () => {
     expect(syncedAgo(at(3 * 86_400_000), NOW)).toBe("3d ago");
   });
 
+  it("rolls over at each unit boundary, not near it", () => {
+    // Samples in the middle of a unit cannot catch an off-by-one at the edge —
+    // a "< 24" that should be "<= 24", or minutes that never became an hour.
+    const M = 60_000, H = 3_600_000, D = 86_400_000;
+    expect(syncedAgo(at(59 * M), NOW), "59 minutes should still be minutes").toBe("59m ago");
+    expect(syncedAgo(at(60 * M), NOW), "60 minutes should read as an hour").toBe("1h ago");
+    expect(syncedAgo(at(23 * H), NOW), "23 hours should still be hours").toBe("23h ago");
+    expect(syncedAgo(at(24 * H), NOW), "24 hours should read as a day").toBe("1d ago");
+    expect(syncedAgo(at(D - 1), NOW), "just under a day is still hours").toBe("23h ago");
+  });
+
   it("says nothing when nothing has ever arrived", () => {
     // A store that has never synced is not "0m ago" — the setup card and the
     // banner both handle that state, and inventing a duration would paper over

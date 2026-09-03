@@ -7,7 +7,7 @@ import { getUnreadCount } from "@/lib/notifications/data";
 import { getConnectionStatus } from "@/lib/data/connection-status";
 import { isStale, staleDays, syncedAgo } from "@/lib/sync/staleness";
 import { AppShell } from "@/components/shell/app-shell";
-import { hasAcceptedCurrentTerms } from "@/lib/auth/terms";
+import { shouldShowTermsGate } from "@/lib/auth/terms";
 import { TERMS_VERSION } from "@/lib/legal";
 import { TermsGate } from "./terms-gate";
 
@@ -110,7 +110,7 @@ export default async function ShellLayout({
           no workspace cookie lands on the user's EARLIEST workspace, so keying
           this on the active membership re-asked people who had already agreed
           the moment they signed in somewhere new. */}
-      {membership && !hasAcceptedCurrentTerms(memberships) && (
+      {shouldShowTermsGate(membership, memberships) && (
         <TermsGate version={TERMS_VERSION} />
       )}
     </AppShell>

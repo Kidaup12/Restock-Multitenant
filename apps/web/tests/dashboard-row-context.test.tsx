@@ -104,7 +104,7 @@ describe("dashboard row context", () => {
 
   it("marks an empty shelf and a nearly-empty one differently", () => {
     const out = render([row({ productId: "a", onHandUnits: 0, urgency: "critical" })]);
-    expect(out).toContain("out");
+    expect(out).toContain(">out<");
 
     const critical = render([row({ productId: "b", onHandUnits: 3, urgency: "critical" })]);
     expect(critical, "a shelf about to empty is not marked at all").toContain("critical");
