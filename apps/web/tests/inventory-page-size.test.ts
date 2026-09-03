@@ -95,3 +95,54 @@ describe("inventory column picker", () => {
     expect(LOCATION_OPTIONAL_COLUMNS).not.toContain("onHand");
   });
 });
+
+/**
+ * A branch that holds nothing still has to appear somewhere.
+ *
+ * Empty locations take up no room in the page window, so they are pinned to the
+ * page their cursor falls on. When the lines before them exactly fill a page
+ * that cursor equals the window's end, and the page it would qualify for does
+ * not exist — so the branch appeared on no page at all and read as deleted.
+ */
+describe("empty branches in a paged inventory", () => {
+  /** Which page each location lands on, mirroring the placement rule in
+   *  getLocationsScreen. Kept in step with it by the control: removing the
+   *  last-page clause there is what this suite is here to catch. */
+  function placement(lineCounts: number[], size: number): (number | null)[] {
+    const matched = lineCounts.reduce((a, b) => a + b, 0);
+    const pages = pageBounds(matched, 0, size).pageCount;
+    return lineCounts.map((count, index) => {
+      for (let page = 0; page < pages; page++) {
+        const { start } = pageBounds(matched, page, size);
+        const end = start + size;
+        let cursor = 0;
+        for (let i = 0; i < index; i++) cursor += lineCounts[i]!;
+        const first = Math.max(start, cursor);
+        const last = Math.min(end, cursor + count);
+        if (last > first) return page;
+        if (count === 0 && cursor >= start && (cursor < end || end >= matched)) return page;
+      }
+      return null;
+    });
+  }
+
+  it("keeps a trailing empty branch when the ones before it fill the page exactly", () => {
+    // The reported shape: 50 lines then an empty branch, 50 to a page.
+    expect(placement([50, 0], 50), "an empty branch appeared on no page").toEqual([0, 0]);
+  });
+
+  it("still places empty branches in the ordinary cases", () => {
+    expect(placement([49, 0], 50)).toEqual([0, 0]);
+    // Its position IS the start of page 2 — 50 lines sit before it — so that
+    // is where it belongs, beside the branch that follows it.
+    expect(placement([50, 0, 10], 50)).toEqual([0, 1, 1]);
+    expect(placement([0, 55], 50)).toEqual([0, 0]);
+    expect(placement([0, 0], 50)).toEqual([0, 0]);
+  });
+
+  it("puts every branch with stock on a page", () => {
+    for (const counts of [[60, 12], [50, 10], [200, 1], [1, 199]]) {
+      expect(placement(counts, 50).every((p) => p !== null), `${counts} lost a branch`).toBe(true);
+    }
+  });
+});

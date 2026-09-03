@@ -25,6 +25,8 @@ import {
   type OrdersQuery,
 } from "@/lib/data/orders";
 import { PoStatusBadge } from "./po-status-badge";
+import { QbEvidenceBadge } from "./qb-evidence-badge";
+import { prismaForTenant } from "@wezesha/db";
 
 const day = (date: Date) =>
   date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
@@ -43,6 +45,16 @@ export async function PoList({
   // rows are fetched, or a bookmarked page 2 of a list since searched down comes
   // back empty. `total` is the unsearched list, so narrowing the table never
   // makes the rest of it look deleted.
+  // The evidence column shows only for a shop whose books we can actually read.
+  const qbConnected =
+    (await prismaForTenant(tenantId).quickBooksConnection.findFirst({ select: { id: true } })) !== null;
+  // Counted across the whole list, not the page: a shop with three phantom
+  // orders on page 4 needs to know on page 1.
+  const phantomCount = qbConnected
+    ? await prismaForTenant(tenantId).purchaseOrder.count({
+        where: { needsAttention: true, qbConfirmedAt: null, deletedAt: null, status: { not: "cancelled" } },
+      })
+    : 0;
   const total = await countPurchaseOrders(tenantId);
   const matched = query.search
     ? await countPurchaseOrders(tenantId, { search: query.search })
@@ -59,6 +71,18 @@ export async function PoList({
 
   return (
     <Card>
+      {/* The one piece of QuickBooks evidence worth interrupting for: stock is
+          committed to a supplier and the accounts have no record of it, which
+          is how an invoice gets paid twice or never. Counted across the whole
+          list, so it does not depend on which page someone is looking at. */}
+      {phantomCount > 0 && (
+        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-edge bg-warning-soft px-5 py-3 text-sm text-warning">
+          <span className="font-medium">
+            {phantomCount} sent {phantomCount === 1 ? "order is" : "orders are"} not in QuickBooks
+          </span>
+          <span>— check they were entered, or they will not be paid.</span>
+        </p>
+      )}
       <CardHeader
         title="Purchase orders"
         // The whole list, not the page and not the search: a reader who narrows
@@ -120,7 +144,14 @@ export async function PoList({
                   </TableCell>
                   <TableCell>{po.supplierName ?? "—"}</TableCell>
                   <TableCell>
-                    <PoStatusBadge status={po.status} />
+                    <span className="flex flex-wrap items-center gap-1">
+                      <PoStatusBadge status={po.status} />
+                      {/* Only once a QuickBooks connection exists. Without one
+                          the evidence is uniformly absent, and a column of
+                          "not in the books" on every row would be noise that
+                          reads as an outage. */}
+                      {qbConnected && <QbEvidenceBadge qb={po.qb} />}
+                    </span>
                   </TableCell>
                   <TableCell numeric>{po.lineCount}</TableCell>
                   <TableCell numeric>

@@ -9,9 +9,11 @@ import { TermsGate } from "@/app/(shell)/terms-gate";
 
 /**
  * The gate itself. Whether it is SHOWN is decided by
- * `readTermsAcceptance(...).current` in the shell layout, and that predicate has
- * its own tests (terms-acceptance.test.ts) covering never-accepted, an older
- * version not counting, and re-stamping after a bump.
+ * `hasAcceptedCurrentTerms(memberships)` in the shell layout — it asks across
+ * every workspace the person belongs to, because keying it on the ACTIVE one
+ * re-asked people who had already agreed the moment they signed in from a new
+ * browser (terms-asked-once.test.ts). `readTermsAcceptance` still decides what
+ * a single membership's stamp means (terms-acceptance.test.ts).
  *
  * What is asserted here is the part a gate can get quietly wrong: letting
  * someone through without the tickbox. A consent record produced by a gate with

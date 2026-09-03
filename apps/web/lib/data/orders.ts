@@ -384,7 +384,49 @@ export type PoListRow = {
   receivedAt: Date | null;
   /** Promised day passed with stock still outstanding (lib/po/po-model.ts). */
   isLate: boolean;
+  /** QuickBooks evidence, written by the nightly read-back and shown only when
+   *  a QuickBooks connection exists. It never gates anything — an order is real
+   *  because it was sent, not because the books have caught up. */
+  qb: QbEvidence;
 };
+
+/**
+ * What QuickBooks says about an order that was sent.
+ *
+ * `confirmed` — a matching Bill or PO was found, so the money is in the books.
+ * `missing` — sent, and after the grace period nothing matches. That is the one
+ *   worth acting on: stock is committed to a supplier and the accounts do not
+ *   know, which is how a shop pays an invoice twice or not at all.
+ * `suggested` — a lookalike was found but not close enough to prove it. Advisory
+ *   on purpose; a fuzzy match that auto-confirmed would be worse than silence.
+ * `pending` — sent recently, still inside the grace period.
+ * `not_sent` — a draft or cancelled order; there is nothing to look for yet.
+ */
+export type QbEvidence =
+  | { state: "confirmed"; at: Date; docRef: string | null }
+  | { state: "missing" }
+  | { state: "suggested"; label: string }
+  | { state: "pending" }
+  | { state: "not_sent" };
+
+export function qbEvidenceFor(po: {
+  status: string;
+  sentAt: Date | null;
+  qbConfirmedAt: Date | null;
+  qbDocRef: string | null;
+  qbSuggestion: string | null;
+  needsAttention: boolean;
+}): QbEvidence {
+  if (po.qbConfirmedAt) {
+    return { state: "confirmed", at: po.qbConfirmedAt, docRef: po.qbDocRef };
+  }
+  // Order matters: a cancelled order that was once sent should not read as a
+  // phantom, and a draft was never expected in the books at all.
+  if (po.status === "cancelled" || !po.sentAt) return { state: "not_sent" };
+  if (po.needsAttention) return { state: "missing" };
+  if (po.qbSuggestion) return { state: "suggested", label: po.qbSuggestion };
+  return { state: "pending" };
+}
 
 const PO_LIST_SELECT = {
   id: true,
@@ -397,6 +439,10 @@ const PO_LIST_SELECT = {
   receivedAt: true,
   supplier: { select: { name: true } },
   lines: { select: { quantity: true, receivedQty: true } },
+  qbConfirmedAt: true,
+  qbDocRef: true,
+  qbSuggestion: true,
+  needsAttention: true,
 } satisfies Prisma.PurchaseOrderSelect;
 
 type PoListSelected = Prisma.PurchaseOrderGetPayload<{ select: typeof PO_LIST_SELECT }>;
@@ -411,6 +457,7 @@ function toPoListRow(po: PoListSelected, now: Date): PoListRow {
     status: po.status,
     supplierName: po.supplier?.name ?? null,
     lineCount: po.lines.length,
+    qb: qbEvidenceFor(po),
     totalUnits: po.lines.reduce((s, l) => s + l.quantity, 0),
     receivedUnits: po.lines.reduce((s, l) => s + l.receivedQty, 0),
     subtotalKes: po.subtotalKes,

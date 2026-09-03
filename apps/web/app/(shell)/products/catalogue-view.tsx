@@ -135,13 +135,6 @@ export function CatalogueView({
     });
   }
 
-  /** Every control routes through here. `withQuery` resets to page 1 for
-   *  anything that changes WHICH rows match — filtering down to eight rows while
-   *  sitting on page 7 would otherwise show an empty table.
-   *
-   *  NOT wrapped in startTransition: a transition-wrapped push updates the URL
-   *  but leaves the server component showing the previous query's rows, so the
-   *  filter appears to do nothing. */
   /** Where a control points. Every control on this screen is a navigation to the
    *  same route with a different query, so each one is a real link: `router.push`
    *  changes the URL without re-rendering the server component, which showed the
@@ -574,6 +567,10 @@ function LeadCell({ row, canManage }: { row: CatalogueRow; canManage: boolean })
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(String(row.leadDays));
+  /** What the editor opened with. "Unchanged" has to mean "nobody typed
+   *  anything", not "the number matches" — an inherited 14 that matches is
+   *  still a write that pins it as this product's own. */
+  const [opened, setOpened] = useState(String(row.leadDays));
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -605,9 +602,11 @@ function LeadCell({ row, canManage }: { row: CatalogueRow; canManage: boolean })
     }
     setError(null);
     const days = typed === "" ? null : Number(typed);
-    // Clearing it hands the row back to its supplier's lead time, so a blank is
-    // a real choice rather than a no-op — only an unchanged product override is.
-    if (days === row.leadDays && row.leadSource === "product") return true;
+    // Nothing typed, nothing written. Keying this on the VALUE instead meant
+    // that opening an inherited lead time and clicking away saved it as a
+    // product override — so merely inspecting a cell destroyed the "assumed"
+    // signal and stopped the row tracking its supplier.
+    if (typed === opened) return true;
     start(async () => {
       const result = await setLeadTimeForProductsAction({
         leadTimeDays: days,
@@ -643,9 +642,11 @@ function LeadCell({ row, canManage }: { row: CatalogueRow; canManage: boolean })
           }}
           onBlur={() => {
             // Clicking away is giving up, so it reverts rather than holding
-            // focus hostage — but it says so, which is the half that was
-            // missing. Enter refuses instead, below.
-            if (validateLeadDays(value.trim())) {
+            // focus hostage. It still has to SAY it refused: the message is
+            // rendered beside the closed cell too, so it outlives the editor.
+            const problem = validateLeadDays(value.trim());
+            if (problem) {
+              setError(problem);
               setValue(String(row.leadDays));
               setEditing(false);
               return;
@@ -697,6 +698,7 @@ function LeadCell({ row, canManage }: { row: CatalogueRow; canManage: boolean })
         type="button"
         onClick={() => {
           setValue(String(row.leadDays));
+          setOpened(String(row.leadDays));
           setError(null);
           setEditing(true);
         }}

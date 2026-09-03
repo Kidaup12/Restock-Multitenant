@@ -78,12 +78,13 @@ describe.skipIf(!runnable)("shopify webhook route (real db + redis)", () => {
     await prismaService.shopifyAppCredential.create({
       data: { tenantId, clientId: "client-webhook-test", apiSecret: encryptToken(SECRET) },
     });
-    // Vitest's default 10s is not enough for this hook under a full-suite run:
-    // it imports the db package, opens a Redis connection and writes four rows,
-    // and it timed out twice on 1-2 Sep while passing 14/14 in isolation. A
-    // suite that fails only when run with its siblings reads as a regression in
-    // whatever was changed that day, and costs a whole battery to disprove.
-    // Same figure the other db-backed hooks here use.
+    // The figure every db-backed hook in this suite family uses: it imports the
+    // db package, opens a Redis connection and writes four rows.
+    //
+    // It was raised here to chase timeouts that were never slowness — REDIS_URL
+    // had been exported pointing at 6379 while the container listens on 6380,
+    // so the connection had nowhere to go and no timeout would have saved it.
+    // Kept for consistency with its siblings, not as a fix.
   }, 60_000);
 
   afterAll(async () => {
