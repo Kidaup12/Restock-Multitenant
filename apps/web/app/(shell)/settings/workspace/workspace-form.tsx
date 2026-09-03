@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { ORDER_METHODS, type OrderMethod } from "@wezesha/forecast";
+import { type OrderMethod } from "@wezesha/forecast";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -14,43 +14,6 @@ import {
   type WorkspaceField,
   type WorkspaceSettingsInput,
 } from "./actions";
-
-/**
- * The owner never sees a z-score or a cap multiple. The three ordering methods
- * the engine reads ARE a business choice (packages/forecast/src/config.ts), so
- * they show up as plain buying styles per product group; the statistical knobs
- * beside them in TenantConfig stay out of this screen entirely.
- */
-const METHOD_LABEL: Record<OrderMethod, string> = {
-  stay_in_stock: "Never run out",
-  balanced: "Balanced",
-  lean_cash: "Free up cash",
-};
-
-const METHOD_HINT: Record<OrderMethod, string> = {
-  stay_in_stock: "Order early and hold a bigger buffer.",
-  balanced: "A middle buffer — enough cover without overbuying.",
-  lean_cash: "Order the minimum and accept the occasional gap.",
-};
-
-const GROUPS = [
-  {
-    key: "A" as const,
-    label: "Best sellers",
-    hint: "The lines that bring in most of your money.",
-  },
-  {
-    key: "B" as const,
-    label: "Steady sellers",
-    hint: "Reliable middle of the catalogue.",
-  },
-  {
-    key: "C" as const,
-    label: "Slow movers",
-    hint: "The long tail — most of your SKUs, least of your sales.",
-  },
-];
-
 
 export type WorkspaceFormValues = {
   name: string;
