@@ -124,12 +124,32 @@ describe("catalogue sorting", () => {
   });
 
   it("orders every sort key the URL accepts", () => {
-    // A key parsed from the URL but unhandled by compare would silently return
-    // the catalogue in load order, which reads as "sorting is broken sometimes".
-    const a = row({ productId: "a", title: "Alpha" });
-    const b = row({ productId: "b", title: "Bravo" });
+    // The old assertion — isFinite(compare(...)) — was a tautology: compare
+    // returns a number on every path, INCLUDING the unhandled-key fall-through
+    // that hands back load order. Two rows that differ on EVERY sortable column
+    // let us assert what actually matters: the column separates them, and
+    // ascending is the exact opposite of descending. A key that falls through
+    // to "return 0" (the load-order bug) makes both fail.
+    const low = row({
+      productId: "low", title: "Alpha", supplierName: "Athi", leadDays: 1,
+      onHandUnits: 1, warehouseUnits: 1, onOrderUnits: 1, runRate: 0.1,
+      daysCover: 1, revenue30dKes: 1, abc: "A", costKes: 1, moneyAtRestKes: 1,
+      marginPct: 1,
+    });
+    const high = row({
+      productId: "high", title: "Bravo", supplierName: "Zanzibar", leadDays: 9,
+      onHandUnits: 9, warehouseUnits: 9, onOrderUnits: 9, runRate: 0.9,
+      daysCover: 9, revenue30dKes: 9, abc: "C", costKes: 9, moneyAtRestKes: 9,
+      marginPct: 9,
+    });
     for (const key of SORT_KEYS) {
-      expect(Number.isFinite(compare(a, b, key)), `${key} does not order two rows`).toBe(true);
+      expect(compare(low, high, key), `${key} does not order two different rows`).not.toBe(0);
+      // Antisymmetry: swapping the arguments flips the sign. A constant/zero
+      // fall-through cannot satisfy this for rows that genuinely differ.
+      expect(
+        Math.sign(compare(low, high, key)),
+        `${key} is not antisymmetric`,
+      ).toBe(-Math.sign(compare(high, low, key)));
     }
   });
 });

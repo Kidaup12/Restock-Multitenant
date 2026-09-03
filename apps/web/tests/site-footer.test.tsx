@@ -45,10 +45,26 @@ describe("site footer", () => {
     expect(offenders, `hand-written <footer> outside the shared one: ${offenders.join(", ")}`).toEqual([]);
   });
 
-  it("reaches Pricing and Contact from inside the app", () => {
-    // Both pages were orphaned — no link from anywhere, signed in or out.
+  it("turns the shell's footer links into real anchors", () => {
+    // The weak version grepped app-shell.tsx for the strings "pricing" and
+    // "contact" — which survive inside a COMMENT, so commenting the footer out
+    // (orphaning both pages again) still passed. Render the footer with the set
+    // the shell passes and assert the anchors actually exist.
+    const html = renderToStaticMarkup(
+      <SiteFooter links={["pricing", "contact", "terms", "privacy"]} />,
+    );
+    expect(html).toContain('href="/pricing"');
+    expect(html).toContain('href="/contact"');
+  });
+
+  it("wires that footer into the shell, not just a comment", () => {
+    // The one source fact left: the shell must RENDER <SiteFooter> with pricing
+    // and contact among its links. The regex needs the actual JSX element and
+    // its links prop, which a `//` comment cannot produce.
     const shell = readFileSync(join("components", "shell", "app-shell.tsx"), "utf8");
-    expect(shell).toContain('"pricing"');
-    expect(shell).toContain('"contact"');
+    expect(
+      /<SiteFooter[\s\S]{0,160}links=\{[\s\S]{0,120}"pricing"[\s\S]{0,120}"contact"/.test(shell),
+      "the shell no longer renders a SiteFooter carrying Pricing and Contact",
+    ).toBe(true);
   });
 });

@@ -76,6 +76,24 @@ export function hasAcceptedCurrentTerms(memberships: Stamp[]): boolean {
 }
 
 /**
+ * Whether the shell should raise the terms gate for this visit.
+ *
+ * The layout's own decision, pulled out so it can be tested. The bug this
+ * encodes was in the CALLER, not the predicate: the gate judged the ACTIVE
+ * membership while a cookie-less browser resolves to the earliest workspace, so
+ * someone in two workspaces was re-asked on a new machine. It has to ask across
+ * ALL of them (`memberships`), never the one that happened to be active — and a
+ * visitor with no workspace at all is never gated.
+ */
+export function shouldShowTermsGate(
+  membership: Stamp | null,
+  memberships: Stamp[],
+): boolean {
+  if (!membership) return false;
+  return !hasAcceptedCurrentTerms(memberships);
+}
+
+/**
  * The acceptance to SHOW this person, across their workspaces.
  *
  * Settings and the gate have to answer alike. Once the gate stopped asking a
