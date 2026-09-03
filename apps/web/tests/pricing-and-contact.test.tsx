@@ -5,7 +5,6 @@ import {
   PLAN_ORDER,
   PLAN_FEATURE_LABEL,
   PLAN_TIER_LABEL,
-  type PlanFeature,
 } from "@/lib/capabilities/plan-features";
 import { planCards, PLAN_PRICING } from "@/lib/pricing";
 import { LEGAL } from "@/lib/legal";
