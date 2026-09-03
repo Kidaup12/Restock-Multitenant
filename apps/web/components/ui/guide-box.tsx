@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useState, useSyncExternalStore, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { dismissGuide, isGuideDismissed } from "@/lib/guides";
 
@@ -34,19 +34,36 @@ export function GuideBox({
   className?: string;
   children: ReactNode;
 }) {
-  const [show, setShow] = useState(false);
+  /** Dismissal lives in localStorage, which is an external store — so it is
+   *  READ as one rather than copied into state by an effect. The effect version
+   *  worked and failed lint (`react-hooks/set-state-in-effect`); this is what
+   *  the rule is pointing at, not a way around it.
+   *
+   *  The server snapshot is "dismissed", so nothing renders until the client
+   *  has read the real answer. The alternative — assuming shown — flashes an
+   *  explainer on every page load for everyone who has already dismissed it. */
+  const subscribe = useCallback((onChange: () => void) => {
+    // Another tab dismissing it should quiet this one too.
+    window.addEventListener("storage", onChange);
+    return () => window.removeEventListener("storage", onChange);
+  }, []);
 
-  useEffect(() => {
-    try {
-      setShow(!isGuideDismissed(localStorage, scope, id, independent));
-    } catch {
-      // Site data blocked. Showing it is the safer failure: an explainer that
-      // appears once too often beats a page that throws.
-      setShow(true);
-    }
-  }, [scope, id, independent]);
+  const dismissed = useSyncExternalStore(
+    subscribe,
+    () => {
+      try {
+        return isGuideDismissed(localStorage, scope, id, independent);
+      } catch {
+        // Site data blocked. Showing it is the safer failure: an explainer that
+        // appears once too often beats a page that throws.
+        return false;
+      }
+    },
+    () => true,
+  );
 
-  if (!show) return null;
+  const [closed, setClosed] = useState(false);
+  if (dismissed || closed) return null;
 
   function dismiss() {
     try {
@@ -54,7 +71,9 @@ export function GuideBox({
     } catch {
       /* nothing to remember it with; closing for this visit is still right */
     }
-    setShow(false);
+    // Local too: the store read cannot see a write this component just made in
+    // the same tab, and the box has to close on the click that dismissed it.
+    setClosed(true);
   }
 
   return (

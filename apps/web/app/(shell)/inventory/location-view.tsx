@@ -12,7 +12,6 @@ import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   SortableHead,
   TableHeader,
   TableRow,
