@@ -267,6 +267,11 @@ export async function LocationView({
                     page: 0,
                   })}
                   scroll={false}
+                  // The tick is decorative, so without this the accessible
+                  // name is just "SKU" whether the column is showing or not —
+                  // and the only way to find out was to toggle it and re-read
+                  // the table. Naming the ACTION carries the state with it.
+                  aria-label={`${on ? "Hide" : "Show"} the ${LOCATION_COLUMN_LABELS[column]} column`}
                   className="flex items-center gap-2 rounded-sm px-2 py-1 text-2xs text-ink-muted hover:bg-surface-2 hover:text-ink"
                 >
                   <span

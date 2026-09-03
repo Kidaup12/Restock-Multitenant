@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
@@ -33,6 +33,7 @@ import {
 } from "@/lib/catalogue";
 import type { CatalogueRow, CatalogueScreen, CategoryUsage } from "@/lib/data/stock";
 import { TableSearch } from "@/components/ui/table-search";
+import { validateLeadDays, MAX_LEAD_DAYS } from "@/lib/catalogue/lead-time";
 import { BulkLeadTimeBar } from "./bulk-lead-time-bar";
 import { FacetFilterBar } from "./facet-filter-bar";
 import { CatalogueExportBar } from "./catalogue-export";
@@ -573,7 +574,10 @@ function LeadCell({ row, canManage }: { row: CatalogueRow; canManage: boolean })
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(String(row.leadDays));
+  const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const inherited = row.leadSource !== "product";
   const hint =
@@ -583,47 +587,98 @@ function LeadCell({ row, canManage }: { row: CatalogueRow; canManage: boolean })
         ? `From ${row.supplierName ?? "the supplier"}`
         : "Assumed — nobody has set this";
 
-  function save() {
+  /** Back to the cell that opened the editor. Without it focus lands on the
+   *  document body and the next Tab restarts from the top of the page — which
+   *  on a full catalogue is the rail, the search, the chips and every row
+   *  above this one before reaching the next lead time. */
+  function closeAndReturnFocus() {
     setEditing(false);
+    requestAnimationFrame(() => buttonRef.current?.focus());
+  }
+
+  function commit(): boolean {
     const typed = value.trim();
-    const days = typed === "" ? null : Number(typed);
-    if (days != null && (!Number.isFinite(days) || days < 0 || days > 365)) {
-      setValue(String(row.leadDays));
-      return;
+    const problem = validateLeadDays(typed);
+    if (problem) {
+      setError(problem);
+      return false;
     }
+    setError(null);
+    const days = typed === "" ? null : Number(typed);
     // Clearing it hands the row back to its supplier's lead time, so a blank is
     // a real choice rather than a no-op — only an unchanged product override is.
-    if (days === row.leadDays && row.leadSource === "product") return;
+    if (days === row.leadDays && row.leadSource === "product") return true;
     start(async () => {
       const result = await setLeadTimeForProductsAction({
         leadTimeDays: days,
         productIds: [row.productId],
       });
-      if (result.ok) router.refresh();
-      else setValue(String(row.leadDays));
+      if (result.ok) {
+        router.refresh();
+      } else {
+        // It used to revert with no explanation, so a refused save looked
+        // identical to one that never happened.
+        setValue(String(row.leadDays));
+        setError(result.error);
+      }
     });
+    return true;
   }
 
   if (editing) {
     return (
-      <input
-        autoFocus
-        type="number"
-        min={0}
-        max={365}
-        value={value}
-        aria-label={`Lead time for ${row.title}, in days`}
-        onChange={(e) => setValue(e.target.value)}
-        onBlur={save}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          if (e.key === "Escape") {
-            setValue(String(row.leadDays));
+      <span className="inline-flex flex-col items-end gap-1">
+        <input
+          ref={inputRef}
+          autoFocus
+          type="number"
+          min={0}
+          max={MAX_LEAD_DAYS}
+          value={value}
+          aria-label={`Lead time for ${row.title}, in days`}
+          aria-invalid={error != null}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+          }}
+          onBlur={() => {
+            // Clicking away is giving up, so it reverts rather than holding
+            // focus hostage — but it says so, which is the half that was
+            // missing. Enter refuses instead, below.
+            if (validateLeadDays(value.trim())) {
+              setValue(String(row.leadDays));
+              setEditing(false);
+              return;
+            }
+            commit();
             setEditing(false);
-          }
-        }}
-        className="w-16 rounded-sm border border-accent px-1.5 py-0.5 text-right text-sm tabular-nums"
-      />
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              // Enter means commit, so a bad value keeps the editor open and
+              // the cursor where the correction has to be typed.
+              if (commit()) closeAndReturnFocus();
+              else inputRef.current?.select();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setValue(String(row.leadDays));
+              setError(null);
+              closeAndReturnFocus();
+            }
+          }}
+          className={cn(
+            "w-16 rounded-sm border px-1.5 py-0.5 text-right text-sm tabular-nums",
+            error ? "border-negative" : "border-accent",
+          )}
+        />
+        {error && (
+          <span role="alert" className="max-w-40 text-right text-2xs text-negative">
+            {error}
+          </span>
+        )}
+      </span>
     );
   }
 
@@ -636,20 +691,31 @@ function LeadCell({ row, canManage }: { row: CatalogueRow; canManage: boolean })
     );
   }
   return (
-    <button
-      type="button"
-      onClick={() => {
-        setValue(String(row.leadDays));
-        setEditing(true);
-      }}
-      title={`${hint} — click to change`}
-      className={cn(
-        "underline decoration-dotted underline-offset-2 hover:text-ink",
-        inherited ? "text-ink-faint" : "text-ink-muted",
+    <span className="inline-flex flex-col items-end gap-1">
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => {
+          setValue(String(row.leadDays));
+          setError(null);
+          setEditing(true);
+        }}
+        title={`${hint} — click to change`}
+        className={cn(
+          "underline decoration-dotted underline-offset-2 hover:text-ink",
+          inherited ? "text-ink-faint" : "text-ink-muted",
+        )}
+      >
+        {pending ? "…" : label}
+      </button>
+      {/* A save the server refused closes the editor, so the message has to
+          outlive it or the number simply springs back unexplained. */}
+      {error && (
+        <span role="alert" className="max-w-40 text-right text-2xs text-negative">
+          {error}
+        </span>
       )}
-    >
-      {pending ? "…" : label}
-    </button>
+    </span>
   );
 }
 
