@@ -71,7 +71,7 @@ export const PLAN_FEATURES: Record<PlanFeature, PlanTier> = {
   supplier_po_email: "growth",
   transfers: "growth",
   multi_location: "growth",
-  insights: "growth",
+  insights: "starter",
   budget_planner: "starter",
   team_depth: "scale",
   priority_support: "scale",

@@ -33,9 +33,12 @@ describe("planAllows", () => {
     expect(planAllows("scale", "budget_planner")).toBe(true);
   });
 
-  it("locks insights on Starter and opens it at Growth+", () => {
-    expect(planAllows("starter", "insights")).toBe(false);
-    expect(planAllows(null, "insights")).toBe(false); // null = entry tier
+  it("includes insights (Reports) from the entry tier up", () => {
+    // Reports moved to Starter deliberately, the same call as the budget
+    // planner: a shop cannot judge whether the forecast is earning its keep
+    // without seeing where its money is stuck, so no tier is without it.
+    expect(planAllows("starter", "insights")).toBe(true);
+    expect(planAllows(null, "insights")).toBe(true); // null = entry tier
     expect(planAllows("growth", "insights")).toBe(true);
     expect(planAllows("scale", "insights")).toBe(true);
   });
@@ -76,7 +79,7 @@ describe("the feature-to-tier map", () => {
   it("keeps the spec's indicative tiers", () => {
     expect(PLAN_FEATURES.core_ordering).toBe("starter");
     expect(PLAN_FEATURES.multi_location).toBe("growth");
-    expect(PLAN_FEATURES.insights).toBe("growth");
+    expect(PLAN_FEATURES.insights).toBe("starter");
     expect(PLAN_FEATURES.priority_support).toBe("scale");
   });
 });
