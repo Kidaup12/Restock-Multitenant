@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/table";
 import { Pager } from "@/components/ui/pager";
 import { TableSearch } from "@/components/ui/table-search";
+import { InventoryExportBar } from "./inventory-export";
 import { coverTone } from "@/lib/locations/roles";
 import type { RawSearchParams } from "@/lib/catalogue";
 import {
@@ -244,7 +245,10 @@ export async function LocationView({
           every reader who has ever touched this control. Product and On hand
           are not on offer: a stock table without the product or the quantity is
           not a shorter table, it is a different one. */}
-      <div className="flex items-center justify-end px-1">
+      <div className="flex flex-wrap items-center justify-end gap-2 px-1">
+        {/* The screen someone takes to a stock count. It re-derives the whole
+            matched list server-side rather than exporting the page on screen. */}
+        <InventoryExportBar count={screen.matched} canViewCosts={canViewCosts} query={query} />
         <details className="relative">
           <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-sm border border-edge bg-surface px-2.5 py-1.5 text-2xs font-medium text-ink-muted hover:bg-surface-2 hover:text-ink">
             Columns
