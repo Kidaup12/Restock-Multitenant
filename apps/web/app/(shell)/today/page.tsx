@@ -14,8 +14,9 @@ import {
 } from "@/components/ui/skeleton";
 import { RealtimeRefresh } from "./realtime-refresh";
 import { GuideBox } from "@/components/ui/guide-box";
+import { BuyListFreshness } from "./buy-list-freshness";
 import { RevenueTrend } from "./revenue-trend";
-import { RunForecastButton } from "./run-forecast-button";
+import { AdvancedMenu } from "./advanced-menu";
 import { TodayLimitNotice } from "./today-limit-notice";
 import { TodaySetupStrip } from "./today-setup-strip";
 import { CostGapBar } from "./setup-gap-bars";
@@ -63,7 +64,14 @@ export default async function TodayPage() {
       <PageHeader
         eyebrow={membership.tenant.name}
         title="Today's replenishment view"
-        actions={<RunForecastButton />}
+        description={
+          // How old the numbers below are. Without it a stockout count from a
+          // run three days ago reads exactly like one from this morning.
+          <Suspense fallback={null}>
+            <BuyListFreshness tenantId={tenantId} />
+          </Suspense>
+        }
+        actions={<AdvancedMenu />}
       />
       <RealtimeRefresh />
 
