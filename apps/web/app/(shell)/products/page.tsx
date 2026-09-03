@@ -58,7 +58,10 @@ export default async function ProductsPage({
       <PageHeader
         eyebrow="Catalogue"
         title="Products"
-        description="Every product you sell, and whether its numbers can be trusted"
+        // Names the one thing on this screen that is editable in place. The
+        // dotted underline is the only other signal, and nobody hovers a cell
+        // they do not know is a control.
+        description="Every product you sell, and whether its numbers can be trusted. Click a lead time to correct how long that supplier takes — it decides when an order has to go out."
       />
       <GuideBox id="products" scope={tenantId} title="Every product, with the numbers that drive reorders">
         Sells/day is how fast it moves; days of cover is how long your stock

@@ -461,7 +461,17 @@ export function RowGroup({
             </span>
           </button>
         </TableCell>
-        <TableCell className="text-ink-muted">{row.abc ?? "—"}</TableCell>
+        <TableCell className="text-ink-muted">
+          {/* A bare dash on every row reads as a broken column. It is not: the
+              class comes from the nightly run, and a product with no sales
+              history has not earned one. Saying WHY keeps the honesty — the
+              reference labels everything "C", which is tidier and untrue. */}
+          {row.abc ?? (
+            <span className="text-ink-faint" title="Classified on the nightly run, once this product has sales to rank">
+              No sales yet
+            </span>
+          )}
+        </TableCell>
         <TableCell className="max-w-[10rem] truncate text-ink-muted">
           {row.supplierName ?? "—"}
         </TableCell>
