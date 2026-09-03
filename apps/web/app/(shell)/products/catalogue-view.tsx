@@ -17,6 +17,7 @@ import {
   TableBody,
   TableCell,
   TableHead,
+  SortableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -148,49 +149,10 @@ export function CatalogueView({
    *  `withQuery` resets to page 1 for anything that changes WHICH rows match —
    *  filtering down to eight rows while sitting on page 7 would otherwise show
    *  an empty table. */
+  const sortHref = (sortKey: SortKey, desc: boolean) => hrefFor({ sortKey, desc });
+
   const hrefFor = (patch: Partial<CatalogueQuery>) =>
     `/products${catalogueQueryToSearch(withQuery(query, patch))}`;
-
-  /**
-   * A column heading that sorts, matching the inventory table.
-   *
-   * Clicking the column you are already on flips the direction; clicking a new
-   * one opens on the order people actually ask that column for. Nobody opens a
-   * catalogue wanting the least stock or the healthiest cover first — so
-   * quantities and money start high-to-low, and cover, margin and lead start
-   * low-to-high, where the trouble is.
-   */
-  const SortableHead = ({
-    label,
-    sortKey,
-    numeric,
-    startAsc,
-  }: {
-    label: string;
-    sortKey: SortKey;
-    numeric?: boolean;
-    startAsc?: boolean;
-  }) => {
-    const active = query.sortKey === sortKey;
-    return (
-      <TableHead numeric={numeric}>
-        <Link
-          href={hrefFor({ sortKey, desc: active ? !query.desc : !startAsc })}
-          scroll={false}
-          aria-label={`Sort by ${label}${active && !query.desc ? ", descending" : ", ascending"}`}
-          className={cn(
-            "inline-flex items-center gap-1 rounded-sm hover:text-ink",
-            active ? "text-ink" : "text-ink-muted",
-          )}
-        >
-          {label}
-          {/* Only the active column shows an arrow. A caret on every heading
-              says "sortable" and stops saying "sorted by this". */}
-          {active && <span aria-hidden>{query.desc ? "↓" : "↑"}</span>}
-        </Link>
-      </TableHead>
-    );
-  };
 
   return (
     <div className="space-y-4">
@@ -284,19 +246,19 @@ export function CatalogueView({
                   />
                 </TableHead>
               )}
-              <SortableHead label="Product" sortKey="title" startAsc />
-              <SortableHead label="ABC" sortKey="abc" startAsc />
-              <SortableHead label="Supplier" sortKey="supplierName" startAsc />
-              <SortableHead label="Lead" sortKey="leadDays" numeric startAsc />
-              <SortableHead label="Cost" sortKey="costKes" numeric />
-              <SortableHead label="Margin" sortKey="marginPct" numeric startAsc />
-              <SortableHead label="On hand" sortKey="onHandUnits" numeric />
-              <SortableHead label="In warehouse" sortKey="warehouseUnits" numeric />
-              <SortableHead label="En route" sortKey="onOrderUnits" numeric />
-              <SortableHead label="Sells/day" sortKey="runRate" numeric />
-              <SortableHead label="Cover" sortKey="daysCover" numeric startAsc />
-              <SortableHead label="Cash tied up" sortKey="moneyAtRestKes" numeric />
-              <SortableHead label={`Rev · 30d (${currency})`} sortKey="revenue30dKes" numeric />
+              <SortableHead label="Product" sortKey="title" startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="ABC" sortKey="abc" startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="Supplier" sortKey="supplierName" startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="Lead" sortKey="leadDays" numeric startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="Cost" sortKey="costKes" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="Margin" sortKey="marginPct" numeric startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="On hand" sortKey="onHandUnits" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="In warehouse" sortKey="warehouseUnits" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="En route" sortKey="onOrderUnits" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="Sells/day" sortKey="runRate" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="Cover" sortKey="daysCover" numeric startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="Cash tied up" sortKey="moneyAtRestKes" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label={`Rev · 30d (${currency})`} sortKey="revenue30dKes" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
               <TableHead>Verdict</TableHead>
             </TableHeader>
             <TableBody>

@@ -718,11 +718,22 @@ export function locationsQueryToSearch(q: LocationsQuery): string {
   return s ? `?${s}` : "";
 }
 
-/** The hidden fields the search box carries — minus `q` and `page`, which the
- *  box supplies itself. Nothing else survives on this view, so this is empty
- *  today; it stays so the form cannot silently drop a param added later. */
-export function locationsQueryFields(): { name: string; value: string }[] {
-  return [];
+/**
+ * The hidden fields the search box carries — minus `q` and `page`, which the
+ * box supplies itself.
+ *
+ * A GET form submits only its own inputs and REPLACES the whole query string,
+ * so anything not repeated here is dropped the moment someone types. This
+ * returned an empty list while the screen had nothing else to carry, on the
+ * stated promise that it would carry a param added later — and then sort,
+ * direction, page size and hidden columns were added and it was not updated.
+ * Searching threw all four away and the column picker looked broken.
+ *
+ * Built from the same serializer the links use, so the two cannot drift again.
+ */
+export function locationsQueryFields(q: LocationsQuery): { name: string; value: string }[] {
+  const search = locationsQueryToSearch({ ...q, search: "", page: 0 });
+  return [...new URLSearchParams(search.replace(/^\?/, ""))].map(([name, value]) => ({ name, value }));
 }
 
 /** Product name and SKU: the only two things the per-location table prints as
