@@ -14,6 +14,7 @@ import { ForecastScorecard } from "./forecast-scorecard";
 import { ImpactCard } from "./impact-card";
 import { ShelfHealth } from "./shelf-health";
 import { StockoutTrend } from "./stockout-trend";
+import { TopEarners } from "./top-earners";
 
 export const metadata: Metadata = {
   title: "Reports",
@@ -115,7 +116,23 @@ export default async function InsightsPage({
             currency={membership.tenant.currency}
           />
         </Suspense>
-      ) : (
+      ) : null}
+
+      {view === "now" && (
+        <Suspense
+          fallback={
+            <div role="status" aria-label="Loading top earners">
+              <SkeletonTableRows rows={8} />
+            </div>
+          }
+        >
+          {/* The report's headline: which products actually bring the money in,
+              filterable by ABC class. */}
+          <TopEarners tenantId={membership.tenantId} currency={membership.tenant.currency} />
+        </Suspense>
+      )}
+
+      {view === "proof" && (
         <div className="space-y-6">
           <Suspense
             fallback={
