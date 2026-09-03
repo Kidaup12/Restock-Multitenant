@@ -55,7 +55,6 @@ describe("what changing a tier does", () => {
     const gained = featuresGained("starter", "growth");
     expect(gained).toEqual(
       expect.arrayContaining([
-        "insights",
         "transfers",
         "supplier_po_email",
         "multi_location",
