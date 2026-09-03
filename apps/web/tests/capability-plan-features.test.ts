@@ -24,9 +24,11 @@ describe("planAllows", () => {
     expect(planAllows("scale", "transfers")).toBe(true);
   });
 
-  it("locks the budget planner on Starter and opens it at Growth+", () => {
-    expect(planAllows("starter", "budget_planner")).toBe(false);
-    expect(planAllows(null, "budget_planner")).toBe(false); // null = entry tier
+  it("includes the budget planner from the entry tier up", () => {
+    // Moved to starter deliberately: planning against a budget is core to what
+    // the product does, not an upsell, so no tier is without it.
+    expect(planAllows("starter", "budget_planner")).toBe(true);
+    expect(planAllows(null, "budget_planner")).toBe(true); // null = entry tier
     expect(planAllows("growth", "budget_planner")).toBe(true);
     expect(planAllows("scale", "budget_planner")).toBe(true);
   });
@@ -61,7 +63,7 @@ describe("the feature-to-tier map", () => {
   it("names the tier a feature needs, for upgrade copy", () => {
     expect(planFeatureTier("run_forecast")).toBe("starter");
     expect(planFeatureTier("supplier_po_email")).toBe("growth");
-    expect(planFeatureTier("budget_planner")).toBe("growth");
+    expect(planFeatureTier("budget_planner")).toBe("starter");
     expect(planFeatureTier("team_depth")).toBe("scale");
   });
 

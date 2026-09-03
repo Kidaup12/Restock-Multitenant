@@ -56,7 +56,6 @@ describe("what changing a tier does", () => {
     expect(gained).toEqual(
       expect.arrayContaining([
         "insights",
-        "budget_planner",
         "transfers",
         "supplier_po_email",
         "multi_location",
