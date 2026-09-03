@@ -74,13 +74,30 @@ function utcDay(daysAgo: number): Date {
  * out of that window depending on the hour the seed ran. Recent days fix the
  * staleness, older days keep the day-alignment those windows assume.
  *
- * Today keeps midnight too: it is excluded from the gate anyway, and an evening
- * stamp would put sales in the future for anyone seeding before 20:00.
+ * Today is stamped an hour ago rather than at midnight. It used to keep
+ * midnight on the reasoning that the gate excludes today as partial — true on
+ * the day you seed, and false the next morning, when those midnight rows ARE
+ * the newest completed day. A database seeded at 16:30 read as 37h stale by the
+ * following afternoon and the Planner paused itself, so a fresh checkout met an
+ * empty buy list on the screen the product is named after.
+ *
+ * The clamp keeps it honest either way: an hour ago, or this evening, whichever
+ * is earlier, so nothing is stamped in the future for someone seeding at 09:00.
+ *
+ * A static seed still ages. This buys roughly a day and a half from the moment
+ * it runs; past that the honest fix is to seed again, not to widen the gate.
  */
 const EVENING_MS = 20 * 3_600_000;
+const AN_HOUR_MS = 3_600_000;
+/** Captured ONCE, not per call: `saleAt(0)` runs for every product, and reading
+ *  the clock inside it stamped each of today's sales a millisecond apart. The
+ *  series groups by timestamp, so 30 products became 30 buckets for one day and
+ *  the "30-day window" held 52 entries. One value keeps today a single bucket. */
+const TODAY_SALE_AT = Math.min(Date.now() - AN_HOUR_MS, utcDay(0).getTime() + EVENING_MS);
 function saleAt(daysAgo: number): Date {
   const day = utcDay(daysAgo);
-  const recentCompleted = daysAgo >= 1 && daysAgo <= 3;
+  if (daysAgo === 0) return new Date(TODAY_SALE_AT);
+  const recentCompleted = daysAgo <= 3;
   return recentCompleted ? new Date(day.getTime() + EVENING_MS) : day;
 }
 
