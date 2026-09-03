@@ -50,10 +50,20 @@ describe("class chips", () => {
   });
 
   it("marks the selected class and offers to clear it", () => {
+    // The weak version checked that SOME chip was current and SOME chip pointed
+    // at /products — both true of the always-present All chip, so a selected A
+    // chip that re-applied A (href=/products?f.abc=A) instead of clearing would
+    // pass. Pull out the A chip's own anchor and assert on IT.
     const html = render(["A"]);
-    // Clicking the class you are on takes it off, rather than re-applying it.
-    expect(html).toContain('href="/products"');
-    expect(html).toContain('aria-current="true"');
+    // Split on anchor opens and take the fragment that names the A chip — no
+    // fragile nested-tag regex.
+    const aAnchor = html.split("<a ").find((frag) => frag.includes("Best sellers")) ?? "";
+    expect(aAnchor, "no A chip rendered").not.toBe("");
+    // Clicking the class you are on clears it — its href drops the filter.
+    expect(aAnchor, "the selected A chip re-applies A instead of clearing").not.toContain("f.abc=A");
+    expect(aAnchor).toContain('href="/products"');
+    // …and it is the one marked current.
+    expect(aAnchor).toContain('aria-current="true"');
   });
 
   it("shows All as current when nothing is selected", () => {

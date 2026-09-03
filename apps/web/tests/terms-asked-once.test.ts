@@ -3,6 +3,7 @@ import {
   effectiveTermsAcceptance,
   hasAcceptedCurrentTerms,
   readTermsAcceptance,
+  shouldShowTermsGate,
 } from "@/lib/auth/terms";
 import { TERMS_VERSION } from "@/lib/legal";
 
@@ -67,5 +68,37 @@ describe("terms are asked once per person", () => {
     // Not a stale stamp borrowed from a workspace they are not looking at.
     const shown = effectiveTermsAcceptance(never, [never]);
     expect(shown).toEqual(readTermsAcceptance(never));
+  });
+});
+
+/**
+ * The CALLER, not just the predicate.
+ *
+ * The pure `hasAcceptedCurrentTerms` was always tested; the bug lived one level
+ * up, in what the shell layout PASSED it — the active membership instead of the
+ * whole list. Reinstating that mistake left every test above green, so this
+ * guards the decision the layout actually makes.
+ */
+describe("the gate decision the layout makes", () => {
+  it("does not raise the gate when another workspace has accepted", () => {
+    // The reported bug, at the layer it happened: the earliest (active) row is
+    // unstamped, a later one is current. Judging only the active row re-asks;
+    // judging all of them does not.
+    const active = never;
+    const all = [never, accepted("2026-08-30T10:00:00Z")];
+    expect(shouldShowTermsGate(active, all), "the layout re-asks someone who already agreed").toBe(false);
+  });
+
+  it("raises the gate when nobody has accepted the current version", () => {
+    expect(shouldShowTermsGate(never, [never, never])).toBe(true);
+  });
+
+  it("never gates a visitor with no workspace", () => {
+    expect(shouldShowTermsGate(null, [])).toBe(false);
+  });
+
+  it("re-raises after a version bump even with a prior acceptance", () => {
+    const stale = accepted("2026-08-30T10:00:00Z", "1900-01-01");
+    expect(shouldShowTermsGate(never, [stale])).toBe(true);
   });
 });

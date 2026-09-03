@@ -111,6 +111,85 @@ jobs:
       - name: Tests (apps/web — seeded db + redis)
         run: npm run -w web test
 
+  web-smoke:
+    name: web — HTTP smoke (every page renders over the wire)
+    runs-on: ubuntu-latest
+
+    # Catches the class of break unit tests cannot: an unserialisable prop
+    # passed from a server component to a client one builds clean, passes every
+    # renderToStaticMarkup test, and 500s the moment a real request hits the
+    # page (how /inventory shipped broken while 1423 tests were green). This job
+    # boots the built server on a seeded database and GETs the main routes.
+    services:
+      postgres:
+        image: postgres:16.4-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: wezesha
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d wezesha"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://wezesha_app:wezesha_app_dev@localhost:5434/wezesha
+      SERVICE_DATABASE_URL: postgresql://wezesha_service:wezesha_service_dev@localhost:5434/wezesha
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5434/wezesha
+      REDIS_URL: redis://localhost:6380
+      BETTER_AUTH_SECRET: ci-smoke-only-secret
+      # The server origin the smoke signs in against; better-auth trusts its own
+      # baseURL, so the two must match.
+      BETTER_AUTH_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run -w @wezesha/db db:generate
+
+      - name: Apply migrations (roles, tables, policies)
+        run: npm run -w @wezesha/db db:migrate:deploy
+
+      - name: Seed a workspace to sign in against
+        run: npm run seed
+
+      - name: Build (apps/web)
+        run: npm run -w web build
+
+      - name: Start the server
+        run: npm run -w web start &
+
+      - name: Wait for the server
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://localhost:3000/login; then echo "up"; exit 0; fi
+            sleep 2
+          done
+          echo "server never came up"; exit 1
+
+      - name: HTTP smoke — every page renders
+        run: BASE=http://localhost:3000 node apps/web/scripts/smoke.mjs
+
   worker-tests:
     name: worker — vitest suite (real db + redis)
     runs-on: ubuntu-latest
