@@ -817,7 +817,15 @@ export async function getLocationsScreen(
         matchedLines: lines.length,
         from: first - cursor + 1,
       });
-    } else if (lines.length === 0 && !query.search && cursor >= start && cursor < end) {
+    } else if (
+      lines.length === 0 &&
+      !query.search &&
+      cursor >= start &&
+      // `cursor < end` alone drops a trailing empty branch whenever the lines
+      // before it exactly fill the page: its cursor equals `end`, and the page
+      // it would qualify for does not exist. On the last page, take them.
+      (cursor < end || end >= matched)
+    ) {
       // A location holding nothing takes up no room in the window, so it is
       // pinned to the page its position falls on — "this branch is empty" is
       // worth reading once, and it used to be on screen every time.
