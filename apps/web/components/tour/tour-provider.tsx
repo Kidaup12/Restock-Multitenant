@@ -251,10 +251,14 @@ export function TourProvider({
       {children}
       {step &&
         createPortal(
-          <div className="fixed inset-0 z-50">
-            {/* Blocks the page while the tour runs; the spotlight box below
-                carries the actual dimming shadow. */}
-            <div className="absolute inset-0" />
+          <div className="pointer-events-none fixed inset-0 z-50">
+            {/* The tour points; it no longer traps. The layer used to carry a
+                full-page click-blocker so the page could not be used until the
+                tour was dismissed — which made the Restock planner's own cards
+                unclickable the moment a first-time owner landed on them. The
+                dim and the spotlight are decoration (pointer-events: none); only
+                the dialog below takes clicks, so the page underneath stays live
+                and someone can follow the tour or just get on with it. */}
             {rect ? (
               <div
                 aria-hidden="true"
@@ -276,7 +280,7 @@ export function TourProvider({
               aria-label={step.title}
               tabIndex={-1}
               className={cn(
-                "absolute w-[min(340px,calc(100vw-24px))] rounded-lg border border-edge bg-surface p-4 shadow-pop outline-none",
+                "pointer-events-auto absolute w-[min(340px,calc(100vw-24px))] rounded-lg border border-edge bg-surface p-4 shadow-pop outline-none",
                 "transition-[top,left] duration-300 ease-out",
                 cardStyle === null && "invisible",
               )}

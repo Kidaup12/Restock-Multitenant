@@ -34,8 +34,10 @@ async function PlanContent({
     getBuyList(tenantId, { canViewCosts }),
     getTenantPlan(tenantId),
   ]);
-  // Gate 2 (plan) for the budget allocator — a Growth feature. Starter sees the
-  // checklist mode only; the server action re-checks so the gate can't be spoofed.
+  // The budget allocator is an entry-tier feature now, so this is true for every
+  // plan — the locked card is unreachable. The gate stays wired (rather than
+  // hard-coded true) so moving budgeting back behind a tier is a one-line change,
+  // and the server action re-checks either way so it can't be spoofed.
   const canBudget = planAllows(plan, "budget_planner");
 
   if (!buyList) {

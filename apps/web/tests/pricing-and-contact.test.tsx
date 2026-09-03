@@ -64,7 +64,7 @@ describe("pricing", () => {
     const [starter, growth, scale] = planCards();
     expect(starter!.adds).toEqual(starter!.includes);
     expect(growth!.adds).not.toContain(PLAN_FEATURE_LABEL.core_ordering);
-    expect(growth!.adds).toContain(PLAN_FEATURE_LABEL.budget_planner);
+    expect(starter!.includes).toContain(PLAN_FEATURE_LABEL.budget_planner);
     expect(scale!.adds).toContain(PLAN_FEATURE_LABEL.team_depth);
     expect(scale!.adds, "Scale re-lists what Growth already gave").not.toContain(
       PLAN_FEATURE_LABEL.transfers,
