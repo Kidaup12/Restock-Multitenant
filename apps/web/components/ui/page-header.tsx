@@ -58,7 +58,9 @@ export function PageHeader({
    *  section, and carrying both prints it twice, one line apart. */
   eyebrow?: string;
   title: string;
-  description?: string;
+  /** A sentence, or a node when the line has to be computed — the dashboard
+   *  streams its buy-list age in here behind its own Suspense boundary. */
+  description?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
   return (
@@ -70,7 +72,7 @@ export function PageHeader({
         )}
         <h1 className="mt-0.5 text-xl font-semibold tracking-tight text-ink">{title}</h1>
         {description && (
-          <p className="mt-1 max-w-2xl text-sm text-ink-muted">{description}</p>
+          <div className="mt-1 max-w-2xl text-sm text-ink-muted">{description}</div>
         )}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
