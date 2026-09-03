@@ -135,13 +135,6 @@ export function CatalogueView({
     });
   }
 
-  /** Every control routes through here. `withQuery` resets to page 1 for
-   *  anything that changes WHICH rows match — filtering down to eight rows while
-   *  sitting on page 7 would otherwise show an empty table.
-   *
-   *  NOT wrapped in startTransition: a transition-wrapped push updates the URL
-   *  but leaves the server component showing the previous query's rows, so the
-   *  filter appears to do nothing. */
   /** Where a control points. Every control on this screen is a navigation to the
    *  same route with a different query, so each one is a real link: `router.push`
    *  changes the URL without re-rendering the server component, which showed the
