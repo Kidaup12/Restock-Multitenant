@@ -50,9 +50,11 @@ describe("lead time editor", () => {
   it("gives the trigger something to return focus to", () => {
     // Enter and Escape both used to unmount the focused input and leave focus
     // on <body>, so the next Tab restarted from the top of the page.
-    const html = render();
-    expect(html).toContain("14d");
-    expect(html, "the cell is not a focusable control").toContain("<button");
+    //
+    // Tied to the lead label, not to "a button somewhere": the row's expand
+    // toggle is also a button, so a bare <button check passes even with this
+    // cell rendered as an inert span.
+    expect(render()).toMatch(/<button[^>]*title="[^"]*click to change[^"]*"[^>]*>[^<]*14d/);
   });
 
   it("offers no editor to a reader who cannot manage the catalogue", () => {
