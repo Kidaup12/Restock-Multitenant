@@ -97,13 +97,34 @@ describe("By-location query <-> URL", () => {
     expect(parseLocationsQuery({ page: "-4" }).page).toBe(0);
   });
 
-  it("carries nothing the search box supplies itself", () => {
-    // Inventory is its own route now, so there is no tab to preserve — and the
-    // box posts the text itself, so a new search cannot land on page 7 of a
-    // list that is now three lines long.
-    const fields = locationsQueryFields();
-    expect(fields.map((f) => f.name)).not.toContain("q");
-    expect(fields.map((f) => f.name)).not.toContain("page");
+  it("carries the reader's view through a search, and nothing the box supplies", () => {
+    // A GET form REPLACES the query string, so anything not repeated as a
+    // hidden field is thrown away the moment someone types. This asserted only
+    // what was ABSENT, which an empty list satisfies — and an empty list is
+    // what it returned while sort, page size and hidden columns were added
+    // around it. Searching silently reset all three.
+    const fields = locationsQueryFields({
+      search: "kokoa",
+      page: 3,
+      sortKey: "daysCover",
+      desc: false,
+      pageSize: 200,
+      hidden: ["sku", "valueKes"],
+    });
+    const names = fields.map((f) => f.name);
+    expect(names, "the search box drops the reader's sort").toContain("lsort");
+    expect(names, "the search box drops the sort direction").toContain("ldir");
+    expect(names, "the search box drops the page size").toContain("per");
+    expect(names, "the search box drops the hidden columns").toContain("hide");
+    expect(fields.filter((f) => f.name === "hide").map((f) => f.value)).toEqual([
+      "sku",
+      "valueKes",
+    ]);
+
+    // The box supplies these two itself: carrying `page` would land a new
+    // search on page 4 of a list that is now three lines long.
+    expect(names).not.toContain("q");
+    expect(names).not.toContain("page");
   });
 
   it("spells its own URL without borrowing the catalogue's params", () => {

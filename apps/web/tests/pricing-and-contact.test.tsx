@@ -114,12 +114,14 @@ describe("contact", () => {
     expect(html).toContain("About your data");
   });
 
-  it("keeps the space JSX drops at an expression boundary", () => {
-    // Rendered, not read: `{LEGAL.product} · demand` collapses to
-    // "Wezesha Restock· demand", which no page-text check ever notices.
+  it("renders the shared footer rather than its own", () => {
+    // Both pages used to build the tagline inline as `{LEGAL.product} · demand`,
+    // which JSX collapses to "Wezesha Restock· demand" at the expression
+    // boundary. The tagline now lives as one constant in SiteFooter, where the
+    // boundary does not exist — tests/site-footer.test.tsx guards that there is
+    // exactly one footer, so the trap cannot come back page by page.
     for (const html of [pricing(), contact()]) {
-      expect(html).toContain(`${LEGAL.product} · demand`);
-      expect(html).not.toContain(`${LEGAL.product}· demand`);
+      expect(html).toContain("Wezesha Restock OS · demand");
     }
   });
 

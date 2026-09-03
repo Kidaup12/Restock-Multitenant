@@ -14,6 +14,7 @@ import {
 } from "@/components/icons";
 import { Card, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { ResetGuides } from "@/components/ui/reset-guides";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { activeMembership, listMemberships, requireSession } from "@/lib/auth";
 import { effectiveTermsAcceptance } from "@/lib/auth/terms";
@@ -199,6 +200,16 @@ async function SettingsSections({
             <ChevronRightIcon className="size-4 shrink-0 text-ink-faint" />
           </Link>
         ))}
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Help"
+          subtitle="The short explainers at the top of each screen"
+        />
+        <div className="px-5 pb-5">
+          <ResetGuides scope={tenantId} />
+        </div>
       </Card>
 
       <Card>
