@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LEGAL } from "@/lib/legal";
+import { SiteFooter } from "@/components/ui/site-footer";
 import { planCards } from "@/lib/pricing";
 import { formatNumber } from "@/lib/money";
 
@@ -120,19 +121,7 @@ export default function PricingPage() {
         </dl>
       </section>
 
-      <footer className="mt-10 border-t border-edge pt-6 text-2xs text-ink-faint">
-        {/* One expression: JSX drops the space at a text/expression boundary,
-            which shipped "Wezesha Restock· demand" to the page. */}
-        {`${LEGAL.product} · demand & reorder intelligence for beauty retailers`}
-        <span className="px-1.5">·</span>
-        <Link href="/terms" className="hover:text-ink-muted">
-          Terms
-        </Link>
-        <span className="px-1.5">·</span>
-        <Link href="/privacy" className="hover:text-ink-muted">
-          Privacy
-        </Link>
-      </footer>
+      <SiteFooter links={["contact", "terms", "privacy"]} className="mt-10" />
     </main>
   );
 }

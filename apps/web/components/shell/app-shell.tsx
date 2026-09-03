@@ -21,6 +21,7 @@ import { TourProvider } from "@/components/tour/tour-provider";
 import { CurrencyProvider } from "@/components/currency-provider";
 import { RealtimeConnectionProvider } from "@/components/realtime-connection";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { SiteFooter } from "@/components/ui/site-footer";
 
 export type ShellUser = {
   name: string;
@@ -184,18 +185,9 @@ export function AppShell({
           <div className="mx-auto w-full max-w-7xl">{children}</div>
           {/* Says what this is and who stands behind it. The rail carries the
               wordmark and nothing else; a shop owner three screens deep has no
-              other reminder of what they are looking at. */}
-          <footer className="mx-auto mt-10 w-full max-w-7xl border-t border-edge pt-4 text-2xs text-ink-faint">
-            Wezesha Restock OS · demand &amp; reorder intelligence for beauty retailers
-            <span className="px-1.5">·</span>
-            <Link href="/terms" className="hover:text-ink-muted">
-              Terms
-            </Link>
-            <span className="px-1.5">·</span>
-            <Link href="/privacy" className="hover:text-ink-muted">
-              Privacy
-            </Link>
-          </footer>
+              other reminder of what they are looking at — and Pricing and
+              Contact were reachable only by typing the URL. */}
+          <SiteFooter links={["pricing", "contact", "terms", "privacy"]} className="mx-auto mt-10 w-full max-w-7xl" />
         </main>
       </div>
     </TourProvider>
