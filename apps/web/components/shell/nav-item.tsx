@@ -53,7 +53,10 @@ export function NavItem({ href, label, icon, tourKey }: NavItemProps) {
       aria-current={active ? "page" : undefined}
       data-tour={tourKey}
       className={cn(
-        "relative flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors [&_svg]:size-4.5 [&_svg]:shrink-0",
+        // 16px icons, not 18. The label is 14px and the row is 36px tall in both
+        // builds; an icon larger than its label is what made the rail read as
+        // oversized beside the reference at the same measurements.
+        "relative flex items-center gap-2.5 rounded-sm px-3 py-2 text-sm transition-colors [&_svg]:size-4 [&_svg]:shrink-0",
         "outline-none focus-visible:ring-2 focus-visible:ring-accent-300",
         active
           ? "bg-surface-2 font-medium text-ink"
