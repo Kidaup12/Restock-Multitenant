@@ -20,7 +20,6 @@ import { seedDev, type SeedResult } from "../../../packages/db/scripts/seed-dev"
 const url = process.env.SERVICE_DATABASE_URL ?? "";
 const runnable = /localhost|127\.0\.0\.1/.test(url);
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 describe.skipIf(!runnable)("a stopped sales feed pauses the buy list (seeded local db)", () => {
   let seeded: SeedResult;
