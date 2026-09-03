@@ -24,7 +24,7 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow =>
     variantTitle: null, shopifyProductId: null, vendor: "Nice & Lovely",
     onHandUnits: 12, warehouseUnits: 0, daysCover: 20, urgency: "low",
     priceKes: 400, runRate: 0.6, revenue30dKes: 7200, costKes: 200,
-    stockValueKes: 2400, moneyAtRestKes: 2400, abc: "A", customCategory: null,
+    stockValueKes: 2400, moneyAtRestKes: 2400, abc: null, customCategory: null,
     costSource: "manual", notForSale: false, lifecycle: "active",
     lifecycleLabel: "Active", buyable: true, lifecycleReason: null,
     onOrderUnits: 0, expectedArrivalAt: null, syncError: null, syncErrorAt: null,
@@ -67,6 +67,29 @@ describe("lead time editor", () => {
 /* The validation the editor actually runs — imported, not restated. A copy of
    the rule in the test passes happily while the component's bounds change
    underneath it, which is the failure this whole file exists to prevent. */
+describe("an unclassified product", () => {
+  it("says why it has no class rather than showing a bare dash", () => {
+    // A dash on every row reads as a broken column. The class comes from the
+    // nightly run, and a product with no sales has not earned one — the
+    // reference labels everything "C", which is tidier and untrue.
+    const html = render();
+    expect(html, "the ABC column is a bare dash").toContain("No sales yet");
+  });
+
+  it("still shows a real class when there is one", () => {
+    const html = renderToStaticMarkup(
+      <table>
+        <tbody>
+          <RowGroup row={row({ abc: "A" })} open={false} onToggle={() => {}} canViewCosts canManage
+            categoryNames={[]} flags={{ active: true, activeOverride: false }} picked={false} />
+        </tbody>
+      </table>,
+    );
+    expect(html).toContain(">A<");
+    expect(html).not.toContain("No sales yet");
+  });
+});
+
 describe("lead time validation", () => {
   it("says why, rather than reverting", () => {
     expect(validateLeadDays("400")).toBe("That is over a year — enter 365 or fewer days.");
