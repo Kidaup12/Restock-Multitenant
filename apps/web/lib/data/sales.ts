@@ -1,5 +1,6 @@
 import { prismaForTenant } from "@wezesha/db";
 import { runRate, type SalesPoint } from "@/lib/metrics";
+import type { AbcCategory } from "@wezesha/forecast";
 import { trailingWindow } from "@/lib/data/trailing-window";
 
 /**
@@ -128,6 +129,10 @@ export type TopProduct = {
   /** Run rate — the ONE blended, all-channel engine rate (units/day), not a
    *  naive window average. Same number the forecast and stock screens show. */
   runRate: number;
+  /** ABC class from the last forecast run; null when the product has not been
+   *  classified yet (too new, or no run). Lets Reports show top earners per
+   *  class without a second query. */
+  abc: AbcCategory | null;
 };
 
 /** Best sellers by revenue over the trailing `days` days. */
@@ -154,7 +159,7 @@ export async function getTopProducts(
   const [products, history] = await Promise.all([
     db.product.findMany({
       where: { id: { in: productIds } },
-      select: { id: true, sku: true, title: true },
+      select: { id: true, sku: true, title: true, abcCategory: true },
     }),
     db.salesHistory.findMany({
       where: { productId: { in: productIds }, date: { gte: runRateSince } },
@@ -178,6 +183,7 @@ export async function getTopProducts(
       unitsSold: g._sum.quantity ?? 0,
       revenueKes: g._sum.revenueKes ?? 0,
       runRate: runRate(historyByProduct.get(g.productId) ?? [], now),
+      abc: (product?.abcCategory as AbcCategory | null) ?? null,
     };
   });
 }
