@@ -54,7 +54,10 @@ export default async function InventoryPage({
       <PageHeader
         eyebrow="Stock"
         title="Inventory"
-        description="Where your stock is, and how long it lasts at each branch"
+        // Says that the headings sort. The explainer says it too, but that is
+        // dismissed for anyone past their first week — and a column you do not
+        // know is clickable is a column that never gets clicked.
+        description="Where your stock is, and how long it lasts at each branch. Click any column heading to sort by it."
       />
 
       <GuideBox id="inventory" scope={membership.tenantId} title="Where your stock actually sits">
