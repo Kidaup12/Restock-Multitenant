@@ -104,7 +104,7 @@ function RangeRail({ range, view }: { range: RangeKey; view: "now" | "proof" }) 
       </div>
       <p className="text-xs text-ink-faint">
         {view === "proof"
-          ? "Sets the trend window. The impact card measures everything since your first order."
+          ? "Sets the trend and adherence windows. Accuracy grades whole elapsed horizons, and the impact card measures everything since your first order."
           : "Sets the top-earners window. Shelf health is what’s on the shelf right now."}
       </p>
     </div>
@@ -280,6 +280,7 @@ export default async function InsightsPage({
             <ForecastScorecard
               tenantId={membership.tenantId}
               canRunCheck={hasPermission(membership, "manage_settings")}
+              windowDays={rangeDays(range)}
             />
           </Suspense>
           <Suspense

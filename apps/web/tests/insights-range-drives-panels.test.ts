@@ -32,6 +32,13 @@ describe("the report period reaches the panels", () => {
     ).toBe(true);
   });
 
+  it("drives the adherence window", () => {
+    expect(
+      /<ForecastScorecard[\s\S]{0,240}windowDays=\{rangeDays\(range\)\}/.test(page),
+      "adherence is not reading the period"
+    ).toBe(true);
+  });
+
   it("reads the period from the URL rather than component state", () => {
     // Server-routed, so a period is shareable and survives a reload.
     expect(page).toContain("parseRangeKey(");
