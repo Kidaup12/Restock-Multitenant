@@ -30,6 +30,9 @@ import {
 } from "./cover";
 import { Stepper } from "@/components/ui/stepper";
 import { LeadFlooredNote } from "./lead-floored-note";
+import { useOrderPicker } from "./use-order-picker";
+import { ActionBar } from "@/components/ui/action-bar";
+import { cn } from "@/lib/cn";
 
 /**
  * Mode 2 — the budget allocator. Enter the cash available; the engine funds
@@ -78,8 +81,21 @@ export function BudgetPlanner({
   criticalsCashKes: number | null;
 }) {
   const currency = useCurrency();
+  // The same selection, order call and outcome wording as the checklist.
+  // Budget mode could plan a spend and then not act on it: the tick boxes lived
+  // only in list mode, so the screen that decides what to buy was the one screen
+  // that could not buy it.
+  const picker = useOrderPicker();
   const [budget, setBudget] = useState(String(openingBudget(criticalsCashKes)));
   const [split, setSplit] = useState<BudgetSplit | null>(null);
+  // Across BOTH tables: a deferred row ticked back in is part of what the owner
+  // is about to spend, so a total counting only funded rows would understate it.
+  const pickedTotalKes = split
+    ? [...split.funded, ...split.deferred].reduce(
+        (sum, r) => (picker.picked.has(r.predictionId) ? sum + (r.lineTotalKes ?? 0) : sum),
+        0
+      )
+    : 0;
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -352,7 +368,12 @@ export function BudgetPlanner({
                   )}
                 </CardContent>
               ) : (
-                <BudgetTable rows={split.funded} canViewCosts={canViewCosts} />
+                <BudgetTable
+                  rows={split.funded}
+                  canViewCosts={canViewCosts}
+                  picked={picker.picked}
+                  onToggle={picker.toggle}
+                />
               )}
             </div>
           </Card>
@@ -364,7 +385,12 @@ export function BudgetPlanner({
                 subtitle="What waiting costs: sales the forecast expects each item to miss while it sits stocked out over the next 30 days."
               />
               <div className="mt-2 pb-2">
-                <BudgetTable rows={split.deferred} canViewCosts={canViewCosts} />
+                <BudgetTable
+                  rows={split.deferred}
+                  canViewCosts={canViewCosts}
+                  picked={picker.picked}
+                  onToggle={picker.toggle}
+                />
               </div>
             </Card>
           )}
@@ -393,6 +419,39 @@ export function BudgetPlanner({
               </CardContent>
             </Card>
           )}
+
+          {/* Same bar, same words, same action as the checklist. A plan the
+              owner agrees with should not have to be rebuilt on another screen
+              to be acted on — and a deferred row can be ticked back in, which
+              is the whole point of showing what the budget left out. */}
+          <ActionBar>
+            {picker.picked.size > 0 && (
+              <span className="text-sm font-medium text-ink">
+                {picker.picked.size} ticked ·{" "}
+                <CostValue
+                  amount={pickedTotalKes}
+                  canViewCosts={canViewCosts}
+                  className="font-mono"
+                />
+              </span>
+            )}
+            {picker.notice && (
+              <span
+                className={cn(
+                  "text-sm",
+                  picker.notice.kind === "err" ? "text-negative" : "text-positive"
+                )}
+              >
+                {picker.notice.text}
+              </span>
+            )}
+            <span className="ml-auto" />
+            {picker.picked.size > 0 && (
+              <Button size="sm" loading={picker.pending} onClick={picker.submit}>
+                Add {picker.picked.size} to order
+              </Button>
+            )}
+          </ActionBar>
         </>
       )}
     </div>
@@ -402,14 +461,28 @@ export function BudgetPlanner({
 export function BudgetTable({
   rows,
   canViewCosts,
+  picked,
+  onToggle,
 }: {
   rows: BuyListRow[];
   canViewCosts: boolean;
+  /** Ticked rows, when this table is orderable. */
+  picked?: Set<string>;
+  /** Supplied only where a selection is offered. Its absence is what keeps the
+   *  column out — a table nobody can order from must not grow a dead checkbox,
+   *  and the column-stability guard renders this component without it. */
+  onToggle?: (predictionId: string) => void;
 }) {
   const currency = useCurrency();
+  const selectable = onToggle != null;
   return (
     <Table>
       <TableHeader>
+        {selectable && (
+          <TableHead>
+            <span className="sr-only">Order</span>
+          </TableHead>
+        )}
         <TableHead>Product</TableHead>
         <TableHead className="hidden md:table-cell">Supplier</TableHead>
         <TableHead numeric className="hidden md:table-cell">Run/day</TableHead>
@@ -425,6 +498,17 @@ export function BudgetTable({
           const overdue = row.daysLeftToOrder <= 0;
           return (
             <TableRow key={row.predictionId}>
+              {selectable && (
+                <TableCell>
+                  <input
+                    type="checkbox"
+                    checked={picked?.has(row.predictionId) ?? false}
+                    onChange={() => onToggle?.(row.predictionId)}
+                    aria-label={`Order ${row.title}`}
+                    className="size-4 accent-accent"
+                  />
+                </TableCell>
+              )}
               <TableCell>
                 <div className="flex items-center gap-2">
                   <Link

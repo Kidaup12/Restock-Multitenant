@@ -31,8 +31,8 @@ import {
 } from "./cover";
 import { Stepper } from "@/components/ui/stepper";
 import { LeadFlooredNote } from "./lead-floored-note";
+import { useOrderPicker } from "./use-order-picker";
 import {
-  addToOrder,
   clearPlanOverride,
   planCoverHorizon,
   planSalesTarget,
@@ -694,10 +694,10 @@ export function BuyChecklist({
   onWhatIfChange: (next: BuyList | null) => void;
 }) {
   const currency = useCurrency();
-  const [picked, setPicked] = useState<Set<string>>(new Set());
+  // Selection, the order call and the words for its outcome are shared with
+  // budget mode; see use-order-picker.
+  const { picked, toggle, replace, submit, notice, setNotice, pending } = useOrderPicker();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [notice, setNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
-  const [pending, startTransition] = useTransition();
 
   // What-if lenses: the re-sized list the server returns is handed UP, because
   // the decision header has to total the same rows this renders. Both lenses
@@ -780,24 +780,6 @@ export function BuyChecklist({
     if (next.has(id)) next.delete(id);
     else next.add(id);
     return next;
-  }
-
-  function submit() {
-    const predictionIds = [...picked];
-    startTransition(async () => {
-      const result = await addToOrder({ predictionIds });
-      if (!result.ok) {
-        setNotice({ kind: "err", text: result.error });
-        return;
-      }
-      const { created, updated } = result.data;
-      const lines = created + updated;
-      setNotice({
-        kind: "ok",
-        text: `${lines} ${lines === 1 ? "line" : "lines"} added to Orders as pending.`,
-      });
-      setPicked(new Set());
-    });
   }
 
   const exportColumns: ExportColumn<BuyListRow>[] = [
@@ -900,7 +882,7 @@ export function BuyChecklist({
             size="sm"
             variant="ghost"
             disabled={shownRows.length === 0}
-            onClick={() => setPicked(new Set(shownRows.map((r) => r.predictionId)))}
+            onClick={() => replace(shownRows.map((r) => r.predictionId))}
           >
             Select all
           </Button>
@@ -908,7 +890,7 @@ export function BuyChecklist({
             size="sm"
             variant="ghost"
             disabled={picked.size === 0}
-            onClick={() => setPicked(new Set())}
+            onClick={() => replace([])}
           >
             Deselect
           </Button>
@@ -1031,7 +1013,7 @@ export function BuyChecklist({
                               type="checkbox"
                               checked={isPicked}
                               onChange={() => {
-                                setPicked((p) => toggleSet(p, row.predictionId));
+                                toggle(row.predictionId);
                                 setNotice(null);
                               }}
                               aria-label={`Order ${row.title}`}
