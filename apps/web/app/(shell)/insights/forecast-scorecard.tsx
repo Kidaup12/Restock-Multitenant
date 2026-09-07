@@ -99,16 +99,22 @@ function AccuracyBars({ history }: { history: AccuracyCheck[] }) {
 export async function ForecastScorecard({
   tenantId,
   canRunCheck,
+  windowDays,
 }: {
   tenantId: string;
   /** Whether this reader may trigger the check. It writes a grade row, so it
    *  sits behind the same permission the route re-checks server-side. */
   canRunCheck: boolean;
+  /** The report's period, for the adherence panel. The two accuracy panels
+   *  above it are deliberately NOT windowed: one grades whole elapsed 30-day
+   *  horizons and the other replays fixed history, so a period control would
+   *  change nothing on either. */
+  windowDays: number;
 }) {
   const [scorecard, asShown, adherence] = await Promise.all([
     getAccuracyScorecard(tenantId),
     getAsShownScorecard(tenantId),
-    getPlanAdherence(tenantId),
+    getPlanAdherence(tenantId, { windowDays }),
   ]);
   const latest = scorecard.latest;
   const asShownLatest = asShown.latest;
