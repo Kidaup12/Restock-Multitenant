@@ -2,6 +2,7 @@
 
 import { Fragment, useMemo, useState, useTransition } from "react";
 import { ChevronDownIcon } from "@/components/icons";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
@@ -71,7 +72,7 @@ const TIERS: { tier: BuyTier; title: string; subtitle: string }[] = [
  * caller who may see costs. Sorting a money-blind member's list by line total
  * would hand back the cost ranking the data layer just spent a re-sort hiding.
  */
-type SortKey = "plan" | "urgent" | "fastest" | "revenue" | "alpha" | "costly";
+type SortKey = "plan" | "urgent" | "fastest" | "revenue" | "alpha" | "costly" | "earners";
 
 const SORTS: { key: SortKey; label: string; needsCosts?: true }[] = [
   { key: "plan", label: "Plan order (bestsellers first)" },
@@ -79,8 +80,16 @@ const SORTS: { key: SortKey; label: string; needsCosts?: true }[] = [
   { key: "fastest", label: "Fastest-selling" },
   { key: "revenue", label: "Highest 30d revenue" },
   { key: "costly", label: "Biggest line total", needsCosts: true },
+  { key: "earners", label: "Top earners (sales × margin)", needsCosts: true },
   { key: "alpha", label: "A → Z" },
 ];
+
+/** What one line earns per day: units sold times the margin on each. Negative
+ *  sentinel when the cost is withheld, so an unknown never outranks a known. */
+export function earnerScore(row: Pick<BuyListRow, "runRatePerDay" | "priceKes" | "unitCostKes">): number {
+  if (row.unitCostKes == null) return -1;
+  return row.runRatePerDay * (row.priceKes - row.unitCostKes);
+}
 
 /** Non-mutating; "plan" hands back the same array so the run's own order is
  *  passed through untouched rather than re-derived. */
@@ -96,6 +105,14 @@ function sortRows(rows: BuyListRow[], key: SortKey): BuyListRow[] {
       return copy.sort((a, b) => b.revenue30dKes - a.revenue30dKes);
     case "costly":
       return copy.sort((a, b) => (b.lineTotalKes ?? 0) - (a.lineTotalKes ?? 0));
+    case "earners":
+      // Velocity times margin per unit: what each line actually earns, rather
+      // than what it sells or what it costs. "Fastest-selling" ranks a busy
+      // product the shop barely makes anything on; "Highest 30d revenue" ranks
+      // turnover, which is the same trap with a bigger number. Gated on costs
+      // (needsCosts) because margin is unknowable without them — a hidden cost
+      // scores -1 and sinks rather than silently ranking as zero margin.
+      return copy.sort((a, b) => earnerScore(b) - earnerScore(a));
     case "alpha":
       return copy.sort((a, b) => a.title.localeCompare(b.title));
   }
@@ -588,7 +605,12 @@ export function ExcludedSection({
                       <tr key={row.predictionId} className="border-b border-edge">
                         <td className="px-5 py-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-medium text-ink">{row.title}</span>
+                            <Link
+                              href={`/products/${row.productId}`}
+                              className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                            >
+                              {row.title}
+                            </Link>
                             {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
                             <TrustChips row={row} />
                           </div>
@@ -1018,7 +1040,12 @@ export function BuyChecklist({
                           </td>
                           <td className="px-5 py-3">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="font-medium text-ink">{row.title}</span>
+                              <Link
+                                href={`/products/${row.productId}`}
+                                className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                              >
+                                {row.title}
+                              </Link>
                               {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
                               <TrustChips row={row} />
                             </div>
