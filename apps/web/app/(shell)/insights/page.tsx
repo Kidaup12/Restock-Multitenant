@@ -22,6 +22,29 @@ export const metadata: Metadata = {
 
 const DESCRIPTION = "Where your money is stuck, and whether the forecast is earning its keep";
 
+/**
+ * The whole-shop report — revenue, capital tied up, ABC mix, dead stock,
+ * stockouts and top movers on one page.
+ *
+ * It was built, routed and rendered, and nothing anywhere linked to it: the only
+ * mention of /api/reports/pdf in the tree was its own renderer's comment. A
+ * report nobody can reach is not a feature, and this is the fourth time in this
+ * codebase that something complete has sat unreachable.
+ *
+ * A plain link, not a client component: the route is a session-guarded GET with
+ * no parameters, and it drops cost figures for a money-blind member itself.
+ */
+function ShopReportLink() {
+  return (
+    <a
+      href="/api/reports/pdf"
+      className="inline-flex h-9 items-center rounded-md border border-edge px-3 text-sm font-medium text-ink hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+    >
+      Download shop report
+    </a>
+  );
+}
+
 function ViewTabs({ view }: { view: "now" | "proof" }) {
   return (
     <SegmentedNav
@@ -91,7 +114,12 @@ export default async function InsightsPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Account" title="Reports" description={DESCRIPTION} />
+      <PageHeader
+        eyebrow="Account"
+        title="Reports"
+        description={DESCRIPTION}
+        actions={<ShopReportLink />}
+      />
       <ViewTabs view={view} />
 
       {view === "now" ? (

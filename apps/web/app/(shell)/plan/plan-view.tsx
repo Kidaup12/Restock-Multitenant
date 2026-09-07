@@ -9,7 +9,7 @@ import type { PlanFreshness as Freshness } from "@/lib/data/forecast-freshness";
 import type { BuyList } from "@/lib/data/plan";
 import { BudgetPlanner } from "./budget-planner";
 import { BuyChecklist } from "./buy-checklist";
-import { PlanDecisionHeader } from "./decision-header";
+import { PlanDecisionHeader, planDecisionSummary } from "./decision-header";
 import { PlanFreshness } from "./plan-freshness";
 import { PreflightStrip } from "./preflight-strip";
 import { deleteScope, listScopes, saveScope, type SavedScope } from "./scope-actions";
@@ -320,7 +320,13 @@ export function PlanView({
     <div className="space-y-4">
       {backToOptions}
       {freshness}
-      <BudgetPlanner canViewCosts={canViewCosts} />
+      <BudgetPlanner
+        canViewCosts={canViewCosts}
+        /* The unscoped list on purpose: the budget allocator plans the whole
+           shop, so the opening figure has to price every critical line, not
+           only the ones the current filter happens to show. */
+        criticalsCashKes={planDecisionSummary(buyList.rows).criticalsCashKes}
+      />
     </div>
   );
 }
