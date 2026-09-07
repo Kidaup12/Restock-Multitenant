@@ -40,6 +40,10 @@ export type EmptyShelfRow = {
   /** runRate × price — a sales figure, visible to every role. */
   missedSalesKes: number;
   lastSoldAt: Date | null;
+  /** ABC class. Null until the nightly run has classified the product — shown
+   *  and filtered as "unrated" rather than quietly dropped, because a shop
+   *  whose run has never completed would otherwise see an empty report. */
+  abc: string | null;
 };
 
 export type CashAsleepRow = {
@@ -54,6 +58,8 @@ export type CashAsleepRow = {
   coverDays: number | null;
   /** Cost × on-hand. Null when the caller can't view costs. */
   cashKes: number | null;
+  /** ABC class; null until the nightly run has classified it. See EmptyShelfRow. */
+  abc: string | null;
   /** False when the product has no cost recorded, so the row shows "—" not zero. */
   costKnown: boolean;
 };
@@ -75,6 +81,10 @@ export type CashExportRow = {
   coverDays: number | null;
   /** cost × on-hand. Null for a money-blind caller. */
   cashKes: number | null;
+  /** ABC class; null until the nightly run has classified it. Carried so the
+   *  export can honour a class filter rather than exporting rows the screen is
+   *  not showing. */
+  abc: string | null;
   /** The risk pile in the table's own words. */
   risk: "Not selling" | "Way too much";
   /** What to do about this pile, in plain words. */
@@ -146,7 +156,7 @@ export async function getInsightsOverview(
     getCatalogueMetrics(tenantId),
     db.product.findMany({
       where: { ...BUYABLE_PRODUCT_WHERE },
-      select: { id: true, sku: true, title: true, vendor: true, priceKes: true, costKes: true, currentStock: true },
+      select: { id: true, sku: true, title: true, vendor: true, priceKes: true, costKes: true, currentStock: true, abcCategory: true },
     }),
     db.salesHistory.groupBy({ by: ["productId"], _max: { date: true } }),
   ]);
@@ -175,6 +185,7 @@ export async function getInsightsOverview(
         missedUnitsPerDay: rate,
         missedSalesKes: rate * p.priceKes,
         lastSoldAt: lastSale.get(p.id) ?? null,
+        abc: p.abcCategory,
       });
       continue; // an empty shelf is a stockout, never idle cash
     }
@@ -195,6 +206,7 @@ export async function getInsightsOverview(
       coverDays: rate > NO_RATE_EPSILON ? (m?.coverDays ?? null) : null,
       cashKes: cash,
       costKnown: p.costKes > 0,
+      abc: p.abcCategory,
     });
   }
 
@@ -215,6 +227,7 @@ export async function getInsightsOverview(
     vendor: vendorById.get(r.productId) ?? null,
     coverDays: r.coverDays == null ? null : Math.round(r.coverDays),
     cashKes: canViewCosts && r.costKnown ? r.cashKes : null,
+    abc: r.abc,
     risk: r.reason === "not_selling" ? "Not selling" : "Way too much",
     action: CASH_ACTION[r.reason],
   }));

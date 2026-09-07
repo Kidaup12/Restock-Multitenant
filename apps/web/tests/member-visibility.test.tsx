@@ -700,8 +700,8 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     // the test is that no OWNER-ONLY figure appears in the member's markup.
     const [ownerData, member, owner] = await Promise.all([
       getInsightsOverview(seeded.tenantId, { canViewCosts: true }),
-      ShelfHealth({ tenantId: seeded.tenantId, canViewCosts: false, currency: "KES" }).then(renderToStaticMarkup),
-      ShelfHealth({ tenantId: seeded.tenantId, canViewCosts: true, currency: "KES" }).then(renderToStaticMarkup),
+      ShelfHealth({ tenantId: seeded.tenantId, canViewCosts: false, currency: "KES", abc: "all" }).then(renderToStaticMarkup),
+      ShelfHealth({ tenantId: seeded.tenantId, canViewCosts: true, currency: "KES", abc: "all" }).then(renderToStaticMarkup),
     ]);
 
     const costFigures = [ownerData.cashTotalKes, ...ownerData.cashRows.map((r) => r.cashKes)]

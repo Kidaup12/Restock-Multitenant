@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { getInsightsOverview } from "@/lib/data/insights";
+import { matchesAbc, type AbcKey } from "@/lib/data/abc-lens";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -28,16 +29,24 @@ export async function ShelfHealth({
   tenantId,
   canViewCosts,
   currency,
+  abc,
 }: {
   tenantId: string;
   canViewCosts: boolean;
   currency: string;
+  /** The A/B/C lens from the URL. Filters both tables and both exports. */
+  abc: AbcKey;
 }) {
   const overview = await getInsightsOverview(tenantId, { canViewCosts });
-  const { stockouts, deadStock, shelfRows, cashRows, cashTotalKes } = overview;
+  const { stockouts, deadStock, cashTotalKes } = overview;
+  // Filtered before anything reads them, so the tables, the PDF matrices built
+  // below and the CSV all show the same rows. An export that ignored the lens
+  // would hand someone a file of products their screen was not showing.
+  const shelfRows = overview.shelfRows.filter((r) => matchesAbc(r, abc));
+  const cashRows = overview.cashRows.filter((r) => matchesAbc(r, abc));
   // Every idle row (the CSV is the whole list, not the paged table), aliased so
   // it doesn't collide with the PDF's on-screen `cashExport` matrix below.
-  const cashExportRows = overview.cashExport;
+  const cashExportRows = overview.cashExport.filter((r) => matchesAbc(r, abc));
 
   if (stockouts.trackedProducts === 0) {
     return (
@@ -140,6 +149,7 @@ export async function ShelfHealth({
             <Table>
               <TableHeader>
                 <TableHead>Product</TableHead>
+                <TableHead>Class</TableHead>
                 <TableHead numeric>Normally sells</TableHead>
                 <TableHead numeric>Missing per day</TableHead>
                 <TableHead numeric>Last sold</TableHead>
@@ -150,6 +160,13 @@ export async function ShelfHealth({
                     <TableCell>
                       <div className="font-medium text-ink">{row.title}</div>
                       <div className="text-xs text-ink-muted">{row.sku}</div>
+                    </TableCell>
+                    <TableCell>
+                      {row.abc ? (
+                        <Badge tone="neutral">{row.abc}</Badge>
+                      ) : (
+                        <span className="text-xs text-ink-faint">—</span>
+                      )}
                     </TableCell>
                     <TableCell numeric>{row.runRatePerDay.toFixed(1)}/day</TableCell>
                     <TableCell numeric>
@@ -205,6 +222,7 @@ export async function ShelfHealth({
             <Table>
               <TableHeader>
                 <TableHead>Product</TableHead>
+                <TableHead>Class</TableHead>
                 <TableHead>Why</TableHead>
                 <TableHead numeric>On hand</TableHead>
                 <TableHead numeric>Cover</TableHead>
@@ -216,6 +234,13 @@ export async function ShelfHealth({
                     <TableCell>
                       <div className="font-medium text-ink">{row.title}</div>
                       <div className="text-xs text-ink-muted">{row.sku}</div>
+                    </TableCell>
+                    <TableCell>
+                      {row.abc ? (
+                        <Badge tone="neutral">{row.abc}</Badge>
+                      ) : (
+                        <span className="text-xs text-ink-faint">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge tone={row.reason === "not_selling" ? "negative" : "warning"}>

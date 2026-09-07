@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SegmentedNav } from "@/components/ui/segmented-nav";
 import { PageHeader } from "@/components/ui/page-header";
+import { ABC_KEYS, abcLabel, parseAbcKey, type AbcKey } from "@/lib/data/abc-lens";
 import {
   RANGE_KEYS,
   parseRangeKey,
@@ -42,6 +43,42 @@ const DESCRIPTION = "Where your money is stuck, and whether the forecast is earn
  * changing numbers it cannot change. That is the "control far from its effect"
  * defect this codebase has already produced three times.
  */
+/**
+ * The A/B/C lens over shelf health.
+ *
+ * Rendered here rather than inside ShelfHealth because this is where the URL is
+ * known, and it keeps what crosses into the panel a plain string. Passing an
+ * href-builder down would work today and break the moment that panel became a
+ * client component — the closure-across-the-boundary fault that took a whole
+ * page down once already.
+ */
+function ClassRail({ abc, range }: { abc: AbcKey; range: RangeKey }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-xs font-medium text-ink-muted">Class</span>
+      <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Filter by ABC class">
+        {ABC_KEYS.map((key) => {
+          const current = key === abc;
+          return (
+            <a
+              key={key}
+              href={`/insights?range=${range}&class=${key}`}
+              aria-current={current ? "true" : undefined}
+              className={
+                current
+                  ? "rounded-full bg-accent px-3 py-1 text-xs font-medium text-on-accent"
+                  : "rounded-full border border-edge px-3 py-1 text-xs font-medium text-ink-muted hover:bg-surface-muted"
+              }
+            >
+              {abcLabel(key)}
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function RangeRail({ range, view }: { range: RangeKey; view: "now" | "proof" }) {
   const base = view === "proof" ? "/insights?view=proof" : "/insights?";
   return (
@@ -133,13 +170,14 @@ function InsightsLocked() {
 export default async function InsightsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; range?: string }>;
+  searchParams: Promise<{ view?: string; range?: string; class?: string }>;
 }) {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
   const params = await searchParams;
   const view = params.view === "proof" ? "proof" : "now";
   const range = parseRangeKey(typeof params.range === "string" ? params.range : null);
+  const abc = parseAbcKey(typeof params.class === "string" ? params.class : null);
 
   if (!membership) {
     return (
@@ -176,6 +214,7 @@ export default async function InsightsPage({
       />
       <ViewTabs view={view} />
       <RangeRail range={range} view={view} />
+      {view === "now" && <ClassRail abc={abc} range={range} />}
 
       {view === "now" ? (
         <Suspense
@@ -197,6 +236,7 @@ export default async function InsightsPage({
             tenantId={membership.tenantId}
             canViewCosts={canViewCosts}
             currency={membership.tenant.currency}
+            abc={abc}
           />
         </Suspense>
       ) : null}
