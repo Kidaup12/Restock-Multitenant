@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -37,6 +38,27 @@ import { LeadFlooredNote } from "./lead-floored-note";
 
 const PRESETS = [400_000, 800_000, 1_500_000, 3_000_000];
 
+const FALLBACK_BUDGET = 800_000;
+
+/**
+ * What the budget box opens on: the cash it takes to clear the critical lines,
+ * rounded up to a round figure.
+ *
+ * It used to open on a hardcoded 800,000 — a number about nobody's shop, which
+ * made the first plan a guess the owner had to correct before it said anything.
+ * The figure is the same one the decision header already prints as "cash for
+ * criticals", taken from the same function so the two cannot drift apart.
+ *
+ * Rounded UP deliberately. The point of the number is that it covers the
+ * criticals; rounding down would open the screen already short of them. Falls
+ * back when nothing is critical, and when the viewer is money-blind and the sum
+ * is withheld as null rather than reported as zero.
+ */
+export function openingBudget(criticalsCashKes: number | null): number {
+  if (criticalsCashKes == null || criticalsCashKes <= 0) return FALLBACK_BUDGET;
+  return Math.ceil(criticalsCashKes / 10_000) * 10_000;
+}
+
 const PLANNABLE_LABELS: Record<string, string> = {
   "missing-cost": "missing cost",
   "missing-price": "missing price",
@@ -46,9 +68,17 @@ const PLANNABLE_LABELS: Record<string, string> = {
 const dayLabel = (date: Date) =>
   new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
-export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
+export function BudgetPlanner({
+  canViewCosts,
+  criticalsCashKes,
+}: {
+  canViewCosts: boolean;
+  /** Cash to clear the critical lines, from planDecisionSummary. Null when the
+   *  viewer cannot see costs, or when a critical row's cost is hidden. */
+  criticalsCashKes: number | null;
+}) {
   const currency = useCurrency();
-  const [budget, setBudget] = useState("800000");
+  const [budget, setBudget] = useState(String(openingBudget(criticalsCashKes)));
   const [split, setSplit] = useState<BudgetSplit | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -349,7 +379,12 @@ export function BudgetPlanner({ canViewCosts }: { canViewCosts: boolean }) {
                 <ul className="space-y-2 text-sm">
                   {split.checkCost.map((row) => (
                     <li key={row.predictionId} className="flex flex-wrap items-center gap-2">
-                      <span className="font-medium text-ink">{row.title}</span>
+                      <Link
+                        href={`/products/${row.productId}`}
+                        className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                      >
+                        {row.title}
+                      </Link>
                       <span className="font-mono text-xs text-ink-muted">{row.sku}</span>
                       <Badge tone="warning">{PLANNABLE_LABELS[row.plannable] ?? row.plannable}</Badge>
                     </li>
@@ -392,7 +427,12 @@ export function BudgetTable({
             <TableRow key={row.predictionId}>
               <TableCell>
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-ink">{row.title}</span>
+                  <Link
+                    href={`/products/${row.productId}`}
+                    className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  >
+                    {row.title}
+                  </Link>
                   {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
                 </div>
                 <div className="mt-0.5 font-mono text-xs text-ink-muted">{row.sku}</div>

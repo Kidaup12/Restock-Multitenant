@@ -29,10 +29,10 @@ vi.mock("next/navigation", () => ({
 
 const { BudgetPlanner } = await import("../app/(shell)/plan/budget-planner");
 
-const markup = () =>
+const markup = (criticalsCashKes: number | null = null) =>
   renderToStaticMarkup(
     <CurrencyProvider currency="KES">
-      <BudgetPlanner canViewCosts />
+      <BudgetPlanner canViewCosts criticalsCashKes={criticalsCashKes} />
     </CurrencyProvider>
   );
 
