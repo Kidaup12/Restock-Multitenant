@@ -13,8 +13,15 @@ const dateLabel = (d: Date): string =>
 /** Weeks of history before a trend line says anything a shop owner should act on. */
 const WEEKS_BEFORE_A_TREND = 4;
 
-export async function StockoutTrend({ tenantId }: { tenantId: string }) {
-  const { weeks, trackingSince } = await getStockoutTrend(tenantId);
+export async function StockoutTrend({
+  tenantId,
+  weeks: weeksRequested,
+}: {
+  tenantId: string;
+  /** Weeks to chart, from the report's period. Was fixed at the loader's 8. */
+  weeks: number;
+}) {
+  const { weeks, trackingSince } = await getStockoutTrend(tenantId, { weeks: weeksRequested });
 
   if (weeks.length < 2) {
     const readyOn =

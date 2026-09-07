@@ -9,6 +9,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SegmentedNav } from "@/components/ui/segmented-nav";
 import { PageHeader } from "@/components/ui/page-header";
+import {
+  RANGE_KEYS,
+  parseRangeKey,
+  rangeDays,
+  rangeShortLabel,
+  rangeWeeks,
+  type RangeKey,
+} from "@/lib/data/report-range";
 import { SkeletonCard, SkeletonStatTile, SkeletonTableRows } from "@/components/ui/skeleton";
 import { ForecastScorecard } from "./forecast-scorecard";
 import { ImpactCard } from "./impact-card";
@@ -21,6 +29,50 @@ export const metadata: Metadata = {
 };
 
 const DESCRIPTION = "Where your money is stuck, and whether the forecast is earning its keep";
+
+/**
+ * The period the report covers.
+ *
+ * Server-rendered links, not client state: a period is then shareable, survives
+ * a reload and works with Back, the same way the view tabs already do.
+ *
+ * It says what it does NOT drive, deliberately. Shelf health and the impact
+ * card are snapshots — what is empty right now, and everything since the first
+ * order — so a period control silently sitting above them would be read as
+ * changing numbers it cannot change. That is the "control far from its effect"
+ * defect this codebase has already produced three times.
+ */
+function RangeRail({ range, view }: { range: RangeKey; view: "now" | "proof" }) {
+  const base = view === "proof" ? "/insights?view=proof" : "/insights?";
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Report period">
+        {RANGE_KEYS.map((key) => {
+          const current = key === range;
+          return (
+            <a
+              key={key}
+              href={`${base}${view === "proof" ? "&" : ""}range=${key}`}
+              aria-current={current ? "true" : undefined}
+              className={
+                current
+                  ? "rounded-full bg-accent px-3 py-1 text-xs font-medium text-on-accent"
+                  : "rounded-full border border-edge px-3 py-1 text-xs font-medium text-ink-muted hover:bg-surface-muted"
+              }
+            >
+              {rangeShortLabel(key)}
+            </a>
+          );
+        })}
+      </div>
+      <p className="text-xs text-ink-faint">
+        {view === "proof"
+          ? "Sets the trend window. The impact card measures everything since your first order."
+          : "Sets the top-earners window. Shelf health is what’s on the shelf right now."}
+      </p>
+    </div>
+  );
+}
 
 /**
  * The whole-shop report — revenue, capital tied up, ABC mix, dead stock,
@@ -81,11 +133,13 @@ function InsightsLocked() {
 export default async function InsightsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string }>;
+  searchParams: Promise<{ view?: string; range?: string }>;
 }) {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
-  const view = (await searchParams).view === "proof" ? "proof" : "now";
+  const params = await searchParams;
+  const view = params.view === "proof" ? "proof" : "now";
+  const range = parseRangeKey(typeof params.range === "string" ? params.range : null);
 
   if (!membership) {
     return (
@@ -121,6 +175,7 @@ export default async function InsightsPage({
         actions={<ShopReportLink />}
       />
       <ViewTabs view={view} />
+      <RangeRail range={range} view={view} />
 
       {view === "now" ? (
         <Suspense
@@ -156,7 +211,11 @@ export default async function InsightsPage({
         >
           {/* The report's headline: which products actually bring the money in,
               filterable by ABC class. */}
-          <TopEarners tenantId={membership.tenantId} currency={membership.tenant.currency} />
+          <TopEarners
+            tenantId={membership.tenantId}
+            currency={membership.tenant.currency}
+            days={rangeDays(range)}
+          />
         </Suspense>
       )}
 
@@ -190,7 +249,7 @@ export default async function InsightsPage({
               </div>
             }
           >
-            <StockoutTrend tenantId={membership.tenantId} />
+            <StockoutTrend tenantId={membership.tenantId} weeks={rangeWeeks(range)} />
           </Suspense>
         </div>
       )}

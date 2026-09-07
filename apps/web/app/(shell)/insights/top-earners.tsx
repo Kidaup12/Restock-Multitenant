@@ -14,12 +14,15 @@ import { TopEarnersView } from "./top-earners-view";
 export async function TopEarners({
   tenantId,
   currency,
+  days,
 }: {
   tenantId: string;
   currency: string;
+  /** The period the report is set to. Was fixed at 30 with nothing saying so. */
+  days: number;
 }) {
   // A few more than the ten shown, so filtering to one class still fills the
   // list rather than leaving three rows under an A-class chip.
-  const rows = await getTopProducts(tenantId, { days: 30, limit: 24 });
+  const rows = await getTopProducts(tenantId, { days, limit: 24 });
   return <TopEarnersView rows={rows} currency={currency} />;
 }
