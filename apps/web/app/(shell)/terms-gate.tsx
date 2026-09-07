@@ -31,12 +31,20 @@ export function TermsGate({ version }: { version: string }) {
   function accept() {
     setError(null);
     start(async () => {
-      const result = await acceptTermsAction();
-      if (result.ok) {
-        // The layout re-reads acceptance on the server; refresh drops the gate.
-        router.refresh();
-      } else {
-        setError(result.error);
+      try {
+        const result = await acceptTermsAction();
+        if (result.ok) {
+          // The layout re-reads acceptance on the server; refresh drops the gate.
+          router.refresh();
+        } else {
+          setError(result.error);
+        }
+      } catch {
+        // A server action can still reject before it returns anything: a dropped
+        // connection, a deploy landing mid-click. Without this the rejection was
+        // swallowed by the transition — setError never ran, the button went back
+        // to idle, and the gate stayed up saying nothing at all.
+        setError("That didn't save — check your connection and try again.");
       }
     });
   }
