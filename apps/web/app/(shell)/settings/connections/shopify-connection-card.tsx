@@ -75,7 +75,10 @@ const OAUTH_ERRORS: Record<string, string> = {
   invalid_hmac: "Shopify's signature on the callback did not verify.",
   missing_code: "Shopify did not return an authorization code.",
   exchange_failed: "Could not exchange the authorization code for a token.",
-  shop_taken: "That store is already connected to a different workspace.",
+  // Names the constraint and the way out. Which workspace holds it is
+  // deliberately not said — that is another tenant's business.
+  shop_taken:
+    "That store already belongs to another workspace. A store can only be connected to one workspace at a time, because Shopify's updates arrive carrying nothing but the store's name — two workspaces sharing it and neither would know whose figures to move. Disconnect it there first, then connect it here.",
 };
 
 export function ShopifyConnectionCard({

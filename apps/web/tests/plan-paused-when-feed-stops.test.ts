@@ -57,4 +57,20 @@ describe.skipIf(!runnable)("a stopped sales feed pauses the buy list (seeded loc
     expect(run.created).toBe(0);
     expect((run as { skipped?: string }).skipped).toBe("ingest_stale");
   });
+
+  it("still runs the FIRST forecast for a workspace that has none, however old the sales", async () => {
+    // The state a newly connected store lands in: a real sales history that
+    // ends weeks ago, and no forecast ever written. The gate exists to protect a
+    // last-good forecast; with none there is nothing to protect, and holding the
+    // run leaves the workspace with no buy list at all — permanently, since the
+    // gate never clears on its own.
+    await prismaService.prediction.deleteMany({ where: { tenantId: seeded.tenantId } });
+
+    const verdict = await tenantIngestVerdict(seeded.tenantId);
+    expect(verdict.stop, "the fixture is no longer stale — this proves nothing").toBe(true);
+
+    const run = await runForecast(seeded.tenantId);
+    expect((run as { skipped?: string }).skipped, "a new workspace was refused its first forecast").toBeUndefined();
+    expect(run.created).toBe(seeded.productCount);
+  });
 });
