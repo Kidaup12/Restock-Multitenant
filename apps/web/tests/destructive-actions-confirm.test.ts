@@ -38,6 +38,7 @@ const DESTRUCTIVE = [
   "removeClosureDay",
   "removeFromQueueAction",
   "removeMember",
+  "removePoLineAction",
   "removeShopifyStore",
   "unreceivePoAction",
   "removePromo",
