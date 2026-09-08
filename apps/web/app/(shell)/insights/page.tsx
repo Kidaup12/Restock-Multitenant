@@ -215,7 +215,6 @@ export default async function InsightsPage({
       />
       <ViewTabs view={view} />
       <RangeRail range={range} view={view} />
-      {view === "now" && <ClassRail abc={abc} range={range} />}
 
       {view === "now" ? (
         <Suspense
@@ -238,6 +237,7 @@ export default async function InsightsPage({
             canViewCosts={canViewCosts}
             currency={membership.tenant.currency}
             abc={abc}
+            classRail={<ClassRail abc={abc} range={range} />}
           />
         </Suspense>
       ) : null}

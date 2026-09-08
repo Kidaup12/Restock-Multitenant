@@ -30,12 +30,21 @@ export async function ShelfHealth({
   canViewCosts,
   currency,
   abc,
+  classRail,
 }: {
   tenantId: string;
   canViewCosts: boolean;
   currency: string;
   /** The A/B/C lens from the URL. Filters both tables and both exports. */
   abc: AbcKey;
+  /** The class chips, built by the page (which owns the URL) and rendered here.
+   *  An element, not a callback — nothing that has to be invoked crosses the
+   *  boundary. It sits BELOW the tiles on purpose: the tiles are shop-wide
+   *  aggregates the lens does not touch, so a control floating above them read
+   *  as filtering figures it cannot change. Seen live: filtering to class A
+   *  showed "3 of 30 products empty" directly above a table saying nothing was
+   *  out of stock. */
+  classRail?: React.ReactNode;
 }) {
   const overview = await getInsightsOverview(tenantId, { canViewCosts });
   const { stockouts, deadStock, cashTotalKes } = overview;
@@ -115,6 +124,18 @@ export async function ShelfHealth({
           }}
         />
       </div>
+
+      {classRail && (
+        <div className="space-y-1">
+          {classRail}
+          {abc !== "all" && (
+            <p className="text-xs text-ink-faint">
+              The three figures above cover the whole shop. The tables below show class{" "}
+              {abc === "unrated" ? "unrated" : abc} only.
+            </p>
+          )}
+        </div>
+      )}
 
       <Card data-tour="insights-shelves">
         <CardHeader
