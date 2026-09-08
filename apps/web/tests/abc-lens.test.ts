@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ABC_KEYS, DEFAULT_ABC, abcLabel, matchesAbc, parseAbcKey } from "../lib/data/abc-lens";
 
@@ -48,5 +49,21 @@ describe("the A/B/C lens", () => {
       expect(parseAbcKey(junk)).toBe(DEFAULT_ABC);
     }
     for (const key of ABC_KEYS) expect(parseAbcKey(key)).toBe(key);
+  });
+
+  it("does not let the lens be read as filtering the shop-wide tiles", () => {
+    // Found by clicking, not by a test: filtering to class A showed
+    // "3 of 30 products empty" directly above a table saying nothing was out of
+    // stock. The tiles are shop-wide aggregates the lens does not touch, so the
+    // panel has to say so whenever a class is chosen.
+    const source = readFileSync(
+      new URL("../app/(shell)/insights/shelf-health.tsx", import.meta.url),
+      "utf8"
+    );
+    expect(source).toContain("classRail");
+    expect(
+      /abc !== "all"[\s\S]{0,400}cover the whole shop/.test(source),
+      "a chosen class no longer says the tiles above it are shop-wide"
+    ).toBe(true);
   });
 });
