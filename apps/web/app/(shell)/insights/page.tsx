@@ -22,6 +22,7 @@ import { SkeletonCard, SkeletonStatTile, SkeletonTableRows } from "@/components/
 import { ForecastScorecard } from "./forecast-scorecard";
 import { ImpactCard } from "./impact-card";
 import { ShelfHealth } from "./shelf-health";
+import { PeriodTable } from "./period-table";
 import { StockoutTrend } from "./stockout-trend";
 import { TopEarners } from "./top-earners";
 
@@ -291,6 +292,17 @@ export default async function InsightsPage({
             }
           >
             <StockoutTrend tenantId={membership.tenantId} weeks={rangeWeeks(range)} />
+          </Suspense>
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading week-by-week metrics">
+                <SkeletonTableRows rows={6} />
+              </div>
+            }
+          >
+            {/* The chart says which weeks were bad; this says which products
+                made them so. */}
+            <PeriodTable tenantId={membership.tenantId} weeks={rangeWeeks(range)} />
           </Suspense>
         </div>
       )}
