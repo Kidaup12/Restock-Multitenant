@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
+import { cn } from "@/lib/cn";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BanknoteIcon, CalendarIcon, ClipboardIcon } from "@/components/icons";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -38,23 +39,41 @@ function ModeCard({
   title,
   description,
   onClick,
+  busy = false,
+  disabled = false,
 }: {
   icon: React.ReactNode;
   title: string;
   description: string;
   onClick: () => void;
+  /** This card is the one being opened. */
+  busy?: boolean;
+  /** Another card is being opened. */
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="rounded-lg border border-edge bg-surface p-5 text-left shadow-card transition-colors hover:border-edge-strong hover:bg-surface-2/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      disabled={busy || disabled}
+      aria-busy={busy || undefined}
+      className={cn(
+        "rounded-lg border border-edge bg-surface p-5 text-left shadow-card transition-colors hover:border-edge-strong hover:bg-surface-2/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        (busy || disabled) && "cursor-wait opacity-60"
+      )}
     >
       <div className="grid size-9 place-items-center rounded-md bg-accent-soft text-accent-ink [&_svg]:size-4.5">
         {icon}
       </div>
       <h2 className="mt-3 text-base font-semibold text-ink">{title}</h2>
       <p className="mt-1 text-sm text-ink-muted">{description}</p>
+      {busy && (
+        // Building the list is a server round-trip over the whole catalogue.
+        // Without this the press changed nothing on screen and the page looked
+        // broken — reported from a shop with 511 forecast products, where people
+        // clicked repeatedly and concluded the cards were dead.
+        <p className="mt-3 text-sm font-medium text-accent-ink">Building your list…</p>
+      )}
     </button>
   );
 }
@@ -113,16 +132,29 @@ export function PlanView({
       ? requested
       : "choose";
 
+  // Opening a mode is a server round-trip, not a local state flip: the buy list
+  // is rebuilt for the whole catalogue. Pushed inside a transition so the press
+  // has something to show for itself while that happens.
+  const [switching, startSwitching] = useTransition();
+  const [opening, setOpening] = useState<Mode | null>(null);
+
   const setMode = useCallback(
     (next: Mode) => {
       const params = new URLSearchParams(searchParams.toString());
       if (next === "choose") params.delete("mode");
       else params.set("mode", next);
       const query = params.toString();
-      router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      setOpening(next);
+      startSwitching(() => {
+        router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
+      });
     },
     [pathname, router, searchParams]
   );
+
+  // Derived, not synced: `opening` only means anything while the transition is
+  // in flight, so there is nothing to clear and no effect to write.
+  const openingNow = switching ? opening : null;
 
   const [scope, setScope] = useState<ScopeSelection>(EMPTY_SCOPE);
   /**
@@ -206,12 +238,16 @@ export function PlanView({
             title="Show me what to order, and why"
             description="Every product that needs restocking, tiered by its last safe day to order. Each quantity comes with its arithmetic. You tick, we total."
             onClick={() => setMode("list")}
+            busy={openingNow === "list"}
+            disabled={openingNow !== null && openingNow !== "list"}
           />
           <ModeCard
             icon={<CalendarIcon />}
             title="See my ordering calendar"
             description="The next three months of order-by dates, grouped by supplier, with the cash each month needs — your upcoming ordering commitments at a glance."
             onClick={() => setMode("calendar")}
+            busy={openingNow === "calendar"}
+            disabled={openingNow !== null && openingNow !== "calendar"}
           />
           {canBudget ? (
             <ModeCard
@@ -219,6 +255,8 @@ export function PlanView({
               title="I have a budget to keep"
               description="Tell us the cash you can spend. We put it where it earns most, and show you, in money and days, what the items you defer will cost."
               onClick={() => setMode("budget")}
+              busy={openingNow === "budget"}
+              disabled={openingNow !== null && openingNow !== "budget"}
             />
           ) : (
             <LockedModeCard

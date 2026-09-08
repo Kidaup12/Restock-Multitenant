@@ -122,6 +122,7 @@ export function AdminsCard({ admins }: { admins: PlatformAdminRow[] }) {
                         size="sm"
                         variant="ghost"
                         onClick={() => revoke(a.userId, a.email)}
+                        loading={pending}
                         disabled={pending}
                       >
                         Revoke
