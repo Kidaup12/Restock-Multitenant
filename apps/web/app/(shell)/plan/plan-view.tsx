@@ -326,6 +326,7 @@ export function PlanView({
            shop, so the opening figure has to price every critical line, not
            only the ones the current filter happens to show. */
         criticalsCashKes={planDecisionSummary(buyList.rows).criticalsCashKes}
+        orderTodayCashKes={planDecisionSummary(buyList.rows).tiers.order_today.cashKes}
       />
     </div>
   );

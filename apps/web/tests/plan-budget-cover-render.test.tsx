@@ -32,7 +32,7 @@ const { BudgetPlanner } = await import("../app/(shell)/plan/budget-planner");
 const markup = (criticalsCashKes: number | null = null) =>
   renderToStaticMarkup(
     <CurrencyProvider currency="KES">
-      <BudgetPlanner canViewCosts criticalsCashKes={criticalsCashKes} />
+      <BudgetPlanner canViewCosts criticalsCashKes={criticalsCashKes} orderTodayCashKes={null} />
     </CurrencyProvider>
   );
 
