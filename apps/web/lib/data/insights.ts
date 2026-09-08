@@ -727,3 +727,144 @@ async function deadStockByWeek(
   }
   return out;
 }
+
+/** One product's share of a bad week. */
+export type PeriodCulprit = {
+  productId: string;
+  sku: string;
+  title: string;
+  /** Days that week the shelf was empty, from the nightly snapshot. */
+  emptyDays: number;
+};
+
+export type PeriodWeek = {
+  weekStart: Date;
+  daysCovered: number;
+  observedProductDays: number;
+  emptyProductDays: number;
+  /** Same figure the trend chart plots — taken from the same producer, not
+   *  recomputed here. Two sources for one number is how this codebase has
+   *  reported two different answers to the same question before. */
+  emptyRatePct: number;
+  /** Null where that week has no snapshot to judge from — absent, never zero. */
+  deadStockSkus: number | null;
+  unitsSold: number;
+  /** Which products drove the empty days, worst first. The point of the table:
+   *  "which weeks were bad" is only useful beside "and what caused it". */
+  culprits: PeriodCulprit[];
+};
+
+export type PeriodMetrics = {
+  weeks: PeriodWeek[];
+  trackingSince: Date | null;
+  deadStockWindowDays: number;
+};
+
+/** How many culprits a week names before the list stops being readable. */
+const CULPRITS_PER_WEEK = 5;
+
+/**
+ * Week-by-week: how often shelves were empty, how much was sitting dead, how
+ * much sold — and which products were behind it.
+ *
+ * Built on getStockoutTrend rather than beside it, so the rate here and the rate
+ * on the chart cannot disagree, and it inherits that loader's honesty rule: a
+ * week with too few snapshot days is dropped, because missing data is not a week
+ * with no stockouts.
+ *
+ * Deliberately NOT carrying the reference's "overstock" and "over-ordered"
+ * columns. Both need a cover figure as it stood on a past date, which we do not
+ * store, so either would be a number invented to fill a column — and a
+ * fabricated metric on a report someone buys stock from is worse than an absent
+ * one. Add them when the snapshot carries what they need.
+ */
+export async function getPeriodMetrics(
+  tenantId: string,
+  { weeks = 8 }: { weeks?: number } = {}
+): Promise<PeriodMetrics> {
+  const db = prismaForTenant(tenantId);
+  const trend = await getStockoutTrend(tenantId, { weeks });
+  const config = await db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } });
+  const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
+
+  if (trend.weeks.length === 0) {
+    return { weeks: [], trackingSince: trend.trackingSince, deadStockWindowDays: windowDays };
+  }
+
+  const weekStarts = trend.weeks.map((w) => w.weekStart);
+  const earliest = new Date(Math.min(...weekStarts.map((w) => w.getTime())));
+  const kept = new Set(weekStarts.map((w) => w.getTime()));
+
+  const [deadCounts, snapshots, sales] = await Promise.all([
+    deadStockByWeek(tenantId, weekStarts, windowDays),
+    db.inventorySnapshot.findMany({
+      where: { date: { gte: earliest } },
+      select: { date: true, productId: true, onHand: true },
+    }),
+    db.salesHistory.findMany({
+      where: { date: { gte: earliest } },
+      select: { date: true, quantity: true },
+    }),
+  ]);
+
+  // Empty days per product per week, and units sold per week.
+  const emptyByWeek = new Map<number, Map<string, number>>();
+  for (const row of snapshots) {
+    if (row.onHand > 0) continue;
+    const key = weekStartOf(row.date).getTime();
+    if (!kept.has(key)) continue;
+    let bucket = emptyByWeek.get(key);
+    if (!bucket) emptyByWeek.set(key, (bucket = new Map()));
+    bucket.set(row.productId, (bucket.get(row.productId) ?? 0) + 1);
+  }
+
+  const soldByWeek = new Map<number, number>();
+  for (const s of sales) {
+    const key = weekStartOf(s.date).getTime();
+    if (!kept.has(key)) continue;
+    soldByWeek.set(key, (soldByWeek.get(key) ?? 0) + s.quantity);
+  }
+
+  // Name only the products a week actually needs, rather than the catalogue.
+  const named = new Set<string>();
+  for (const bucket of emptyByWeek.values()) {
+    for (const id of [...bucket.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, CULPRITS_PER_WEEK)) {
+      named.add(id[0]);
+    }
+  }
+  const products = named.size
+    ? await db.product.findMany({
+        where: { id: { in: [...named] } },
+        select: { id: true, sku: true, title: true },
+      })
+    : [];
+  const byId = new Map(products.map((p) => [p.id, p]));
+
+  const out: PeriodWeek[] = trend.weeks.map((w) => {
+    const key = w.weekStart.getTime();
+    const bucket = emptyByWeek.get(key);
+    const culprits: PeriodCulprit[] = bucket
+      ? [...bucket.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, CULPRITS_PER_WEEK)
+          .flatMap(([productId, emptyDays]) => {
+            const p = byId.get(productId);
+            return p ? [{ productId, sku: p.sku, title: p.title, emptyDays }] : [];
+          })
+      : [];
+    return {
+      weekStart: w.weekStart,
+      daysCovered: w.daysCovered,
+      observedProductDays: w.observedProductDays,
+      emptyProductDays: w.emptyProductDays,
+      emptyRatePct: w.ratePct,
+      deadStockSkus: deadCounts.get(key) ?? null,
+      unitsSold: soldByWeek.get(key) ?? 0,
+      culprits,
+    };
+  });
+
+  return { weeks: out, trackingSince: trend.trackingSince, deadStockWindowDays: windowDays };
+}
