@@ -167,6 +167,7 @@ export function SignalsView({
                           <Button
                             variant="ghost"
                             size="sm"
+                            loading={pending}
                             disabled={pending}
                             aria-label={`Remove the promotion on ${promo.rangeLabel}`}
                             onClick={async () => {
@@ -235,6 +236,7 @@ export function SignalsView({
                         <Button
                           variant="ghost"
                           size="sm"
+                          loading={pending}
                           disabled={pending}
                           aria-label={`Remove the closed day on ${closure.dayLabel}`}
                           onClick={async () => {

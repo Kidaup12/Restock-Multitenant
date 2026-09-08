@@ -76,7 +76,7 @@ export function SpikeSuggestions({
               </span>
               {canManage && (
                 <span className="flex shrink-0 items-center gap-2">
-                  <Button size="sm" disabled={pending} onClick={() => answer(s, true)}>
+                  <Button size="sm" loading={pending} disabled={pending} onClick={() => answer(s, true)}>
                     Yes, it was an offer
                   </Button>
                   <Button

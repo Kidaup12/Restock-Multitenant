@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
@@ -105,6 +105,12 @@ export function ShopifyConnectionCard({
   appClientId: string | null;
 }) {
   const router = useRouter();
+  // Re-reading the sync status is a server round-trip, and when the answer is
+  // "no changes since the last sync" the screen is identical afterwards — so
+  // without a pending state the button reads as broken. Reported as exactly
+  // that: "when I click refresh, nothing seems to be happening".
+  const [refreshing, startRefreshing] = useTransition();
+  const refresh = () => startRefreshing(() => router.refresh());
   const [shop, setShop] = useState("");
   const [tokenShop, setTokenShop] = useState("");
   const [token, setToken] = useState("");
@@ -810,8 +816,9 @@ export function ShopifyConnectionCard({
               {live && (
                 <Button
                   variant="ghost"
-                  onClick={() => router.refresh()}
-                  disabled={busy !== null}
+                  onClick={refresh}
+                  loading={refreshing}
+                  disabled={busy !== null || refreshing}
                 >
                   Refresh
                 </Button>
