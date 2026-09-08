@@ -124,6 +124,7 @@ export { applyAbcRateFloor, ABC_RATE_FLOORS } from "./rate-floor";
 // Ingest-health gate ("no data ≠ no demand")
 export {
   assessIngestHealth,
+  describeAge,
   DEFAULT_INGEST_HEALTH,
   type DailyPoint,
   type IngestHealthConfig,
