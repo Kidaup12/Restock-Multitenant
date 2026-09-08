@@ -32,10 +32,12 @@ type DraftLine = {
  * afterwards would leave our record disagreeing with the document the supplier
  * is picking from.
  *
- * The quantity commits on blur or Enter rather than on every keystroke: each
- * save re-prices the whole order, and firing that per character would write a
- * string of totals nobody asked for. A quantity that has not been committed is
- * shown as pending so the field never looks saved when it is not.
+ * The quantity commits on Enter, on an explicit Save, or on leaving the field —
+ * never on every keystroke, because each save re-prices the whole order and
+ * firing that per character would write a string of totals nobody asked for.
+ * An edited field grows a Save button rather than relying on blur alone: a
+ * value that only persists as a side effect of clicking away gives the reader
+ * no sign that it saved, and nothing to press if they want it to.
  */
 export function DraftLinesEditor({
   poId,
@@ -135,7 +137,10 @@ export function DraftLinesEditor({
                     onChange={(e) => setDrafts((d) => ({ ...d, [line.id]: e.target.value }))}
                     onBlur={() => commit(line)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        commit(line);
+                      }
                       if (e.key === "Escape") {
                         clearDraft(line.id);
                       }
@@ -144,7 +149,18 @@ export function DraftLinesEditor({
                     className="h-9 w-20 rounded-md border border-edge bg-surface px-2 text-right text-sm text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   />
                   {uncommitted && (
-                    <div className="text-xs text-ink-muted">press Enter to save</div>
+                    // An explicit control, not only Enter-or-click-away. A
+                    // quantity that saves solely as a side effect of leaving the
+                    // field gives no signal that it did, and no way to ask it to.
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="mt-1"
+                      onClick={() => commit(line)}
+                      loading={pending && busyLine === line.id}
+                    >
+                      Save
+                    </Button>
                   )}
                 </TableCell>
                 <TableCell numeric>
