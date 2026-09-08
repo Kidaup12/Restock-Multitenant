@@ -576,6 +576,10 @@ export type PoDetailLine = {
   sku: string;
   title: string;
   quantity: number;
+  /** What the model asked for before anyone intervened. Null on a hand-built
+   *  line. Shown on a draft so a changed quantity does not hide the
+   *  disagreement it represents. */
+  recommendedQty: number | null;
   /** Null when the caller can't view costs. */
   unitCostKes: number | null;
   lineTotalKes: number | null;
@@ -692,6 +696,7 @@ export async function getPoDetail(
             quantity: true,
             unitCostKes: true,
             lineTotalKes: true,
+            recommendedQty: true,
             receivedQty: true,
             receivedAt: true,
           },
