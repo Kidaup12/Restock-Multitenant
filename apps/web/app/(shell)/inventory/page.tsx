@@ -57,13 +57,15 @@ export default async function InventoryPage({
         // Says that the headings sort. The explainer says it too, but that is
         // dismissed for anyone past their first week — and a column you do not
         // know is clickable is a column that never gets clicked.
-        description="Where your stock is, and how long it lasts at each branch. Click any column heading to sort by it."
+        description="Where your stock sits, branch by branch. Click any column heading to sort by it."
       />
 
       <GuideBox id="inventory" scope={membership.tenantId} title="Where your stock actually sits">
-        One line per product per branch. Cover is how many days that branch
-        lasts at its own selling pace, so the same product can be fine in one
-        shop and nearly out in another. Click any column heading to sort by it.
+        One line per product per branch. Units, value and en-route stock are that
+        branch&rsquo;s own. Cover is not: it is the whole shop&rsquo;s, because sales are
+        not yet attributed to the branch that made them &mdash; the column and the
+        export both say &ldquo;shop&rdquo; for that reason. Click any column heading to sort
+        by it.
       </GuideBox>
       <Suspense
         key={locationsQueryToSearch(query)}

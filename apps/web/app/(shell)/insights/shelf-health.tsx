@@ -129,7 +129,7 @@ export async function ShelfHealth({
         <div className="space-y-1">
           {classRail}
           {abc !== "all" && (
-            <p className="text-xs text-ink-faint">
+            <p className="text-xs text-ink-muted">
               The three figures above cover the whole shop. The tables below show class{" "}
               {abc === "unrated" ? "unrated" : abc} only.
             </p>
