@@ -39,6 +39,13 @@ describe("the report period reaches the panels", () => {
     ).toBe(true);
   });
 
+  it("drives the week-by-week table", () => {
+    expect(
+      /<PeriodTable[\s\S]{0,200}weeks=\{rangeWeeks\(range\)\}/.test(page),
+      "the week-by-week table is not reading the period"
+    ).toBe(true);
+  });
+
   it("reads the period from the URL rather than component state", () => {
     // Server-routed, so a period is shareable and survives a reload.
     expect(page).toContain("parseRangeKey(");
