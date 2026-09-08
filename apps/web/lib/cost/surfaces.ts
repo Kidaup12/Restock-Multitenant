@@ -70,6 +70,7 @@ export const COST_SURFACES: CostSurface[] = [
   { module: "lib/data/costs", getter: "getCostCoverage", provenBy: "tests/member-visibility.test.tsx" },
   { module: "lib/data/costs", getter: "getCostMovedAlerts", provenBy: "tests/member-visibility.test.tsx" },
   { module: "lib/data/insights", getter: "getInsightsOverview", provenBy: "tests/member-visibility.test.tsx" },
+  { module: "lib/data/insights", getter: "getDeadStockByMonth", provenBy: "tests/dead-stock-by-month.test.ts" },
   { module: "lib/data/orders", getter: "getOrderQueue", provenBy: "tests/orders-money-blind.test.ts" },
   { module: "lib/data/orders", getter: "getPurchaseOrders", provenBy: "tests/orders-money-blind.test.ts" },
   { module: "lib/data/orders", getter: "getPoDetail", provenBy: "tests/orders-money-blind.test.ts" },

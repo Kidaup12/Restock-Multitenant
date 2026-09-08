@@ -23,6 +23,7 @@ import { ForecastScorecard } from "./forecast-scorecard";
 import { ImpactCard } from "./impact-card";
 import { ShelfHealth } from "./shelf-health";
 import { PeriodTable } from "./period-table";
+import { DeadStockMonths } from "./dead-stock-months";
 import { StockoutTrend } from "./stockout-trend";
 import { TopEarners } from "./top-earners";
 
@@ -53,7 +54,15 @@ const DESCRIPTION = "Where your money is stuck, and whether the forecast is earn
  * client component — the closure-across-the-boundary fault that took a whole
  * page down once already.
  */
-function ClassRail({ abc, range }: { abc: AbcKey; range: RangeKey }) {
+function ClassRail({
+  abc,
+  range,
+  view,
+}: {
+  abc: AbcKey;
+  range: RangeKey;
+  view: "now" | "proof";
+}) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs font-medium text-ink-muted">Class</span>
@@ -63,7 +72,7 @@ function ClassRail({ abc, range }: { abc: AbcKey; range: RangeKey }) {
           return (
             <a
               key={key}
-              href={`/insights?range=${range}&class=${key}`}
+              href={`/insights?${view === "proof" ? "view=proof&" : ""}range=${range}&class=${key}`}
               aria-current={current ? "true" : undefined}
               className={
                 current
@@ -237,7 +246,7 @@ export default async function InsightsPage({
             canViewCosts={canViewCosts}
             currency={membership.tenant.currency}
             abc={abc}
-            classRail={<ClassRail abc={abc} range={range} />}
+            classRail={<ClassRail abc={abc} range={range} view="now" />}
           />
         </Suspense>
       ) : null}
@@ -295,6 +304,19 @@ export default async function InsightsPage({
           </Suspense>
           <Suspense
             fallback={
+              <div role="status" aria-label="Loading dead stock by month">
+                <SkeletonCard lines={3} />
+              </div>
+            }
+          >
+            {/* Dead stock lives here rather than in the weekly table: it is a
+                window measure, and a weekly figure mostly shows the window
+                filling rather than anything the shop did. */}
+            <DeadStockMonths tenantId={membership.tenantId} canViewCosts={canViewCosts} />
+          </Suspense>
+          <ClassRail abc={abc} range={range} view="proof" />
+          <Suspense
+            fallback={
               <div role="status" aria-label="Loading week-by-week metrics">
                 <SkeletonTableRows rows={6} />
               </div>
@@ -302,7 +324,11 @@ export default async function InsightsPage({
           >
             {/* The chart says which weeks were bad; this says which products
                 made them so. */}
-            <PeriodTable tenantId={membership.tenantId} weeks={rangeWeeks(range)} />
+            <PeriodTable
+              tenantId={membership.tenantId}
+              weeks={rangeWeeks(range)}
+              abc={abc}
+            />
           </Suspense>
         </div>
       )}

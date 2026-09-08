@@ -1,5 +1,6 @@
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { AS_SHOWN_TAG } from "@wezesha/forecast-run";
+import { matchesAbc, type AbcKey } from "@/lib/data/abc-lens";
 import { getCatalogueMetrics } from "@/lib/metrics";
 import { DEFAULT_DEAD_STOCK_DAYS, getTodayMetrics } from "./today";
 
@@ -539,21 +540,30 @@ function weekStartOf(d: Date): Date {
  */
 export async function getStockoutTrend(
   tenantId: string,
-  { weeks = 8 }: { weeks?: number } = {}
+  { weeks = 8, abc = "all" }: { weeks?: number; abc?: AbcKey } = {}
 ): Promise<StockoutTrend> {
   const db = prismaForTenant(tenantId);
   const since = weekStartOf(new Date(Date.now() - weeks * 7 * 86_400_000));
 
-  const [rows, earliest] = await Promise.all([
+  // The class lens belongs HERE, not in each caller. The week-by-week table
+  // reads this rate rather than computing its own, so filtering downstream
+  // would produce two answers to one question — which is the defect this
+  // codebase has shipped more than once.
+  const [rows, earliest, classified] = await Promise.all([
     db.inventorySnapshot.findMany({
       where: { date: { gte: since } },
-      select: { date: true, onHand: true },
+      select: { date: true, onHand: true, productId: true },
     }),
     db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
+    abc === "all"
+      ? Promise.resolve([])
+      : db.product.findMany({ select: { id: true, abcCategory: true } }),
   ]);
+  const abcById = new Map(classified.map((p) => [p.id, p.abcCategory]));
 
   const byWeek = new Map<number, { observed: number; empty: number; days: Set<number> }>();
   for (const row of rows) {
+    if (abc !== "all" && !matchesAbc({ abc: abcById.get(row.productId) ?? null }, abc)) continue;
     const key = weekStartOf(row.date).getTime();
     let bucket = byWeek.get(key);
     if (!bucket) byWeek.set(key, (bucket = { observed: 0, empty: 0, days: new Set() }));
@@ -746,8 +756,6 @@ export type PeriodWeek = {
    *  recomputed here. Two sources for one number is how this codebase has
    *  reported two different answers to the same question before. */
   emptyRatePct: number;
-  /** Null where that week has no snapshot to judge from — absent, never zero. */
-  deadStockSkus: number | null;
   unitsSold: number;
   /** Which products drove the empty days, worst first. The point of the table:
    *  "which weeks were bad" is only useful beside "and what caused it". */
@@ -780,10 +788,12 @@ const CULPRITS_PER_WEEK = 5;
  */
 export async function getPeriodMetrics(
   tenantId: string,
-  { weeks = 8 }: { weeks?: number } = {}
+  { weeks = 8, abc = "all" }: { weeks?: number; abc?: AbcKey } = {}
 ): Promise<PeriodMetrics> {
   const db = prismaForTenant(tenantId);
-  const trend = await getStockoutTrend(tenantId, { weeks });
+  // The rate comes from the trend loader with the SAME lens applied, so the
+  // table and the chart cannot disagree about a filtered week either.
+  const trend = await getStockoutTrend(tenantId, { weeks, abc });
   const config = await db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } });
   const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
 
@@ -795,22 +805,29 @@ export async function getPeriodMetrics(
   const earliest = new Date(Math.min(...weekStarts.map((w) => w.getTime())));
   const kept = new Set(weekStarts.map((w) => w.getTime()));
 
-  const [deadCounts, snapshots, sales] = await Promise.all([
-    deadStockByWeek(tenantId, weekStarts, windowDays),
+  const [snapshots, salesRows, classified] = await Promise.all([
     db.inventorySnapshot.findMany({
       where: { date: { gte: earliest } },
       select: { date: true, productId: true, onHand: true },
     }),
     db.salesHistory.findMany({
       where: { date: { gte: earliest } },
-      select: { date: true, quantity: true },
+      select: { date: true, quantity: true, productId: true },
     }),
+    abc === "all"
+      ? Promise.resolve([])
+      : db.product.findMany({ select: { id: true, abcCategory: true } }),
   ]);
+  const abcById = new Map(classified.map((p) => [p.id, p.abcCategory]));
+  const inLens = (productId: string) =>
+    abc === "all" || matchesAbc({ abc: abcById.get(productId) ?? null }, abc);
+  const sales = salesRows.filter((s) => inLens(s.productId));
 
   // Empty days per product per week, and units sold per week.
   const emptyByWeek = new Map<number, Map<string, number>>();
   for (const row of snapshots) {
     if (row.onHand > 0) continue;
+    if (!inLens(row.productId)) continue;
     const key = weekStartOf(row.date).getTime();
     if (!kept.has(key)) continue;
     let bucket = emptyByWeek.get(key);
@@ -860,11 +877,121 @@ export async function getPeriodMetrics(
       observedProductDays: w.observedProductDays,
       emptyProductDays: w.emptyProductDays,
       emptyRatePct: w.ratePct,
-      deadStockSkus: deadCounts.get(key) ?? null,
       unitsSold: soldByWeek.get(key) ?? 0,
       culprits,
     };
   });
 
   return { weeks: out, trackingSince: trend.trackingSince, deadStockWindowDays: windowDays };
+}
+
+/** Dead stock as it stood at the end of one month. */
+export type DeadStockMonth = {
+  /** First day (UTC) of the month. */
+  monthStart: Date;
+  /** Products held with no sale inside the window. */
+  skus: number;
+  /** What that stock cost to buy. Null for a money-blind caller. */
+  costKes: number | null;
+  /** The same count split by class, so "dead A-class" is visible at a glance. */
+  byClass: { a: number; b: number; c: number; unrated: number };
+};
+
+export type DeadStockByMonth = {
+  months: DeadStockMonth[];
+  windowDays: number;
+  trackingSince: Date | null;
+};
+
+/** First day (UTC) of the month a date falls in. */
+function monthStartOf(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+}
+
+/**
+ * Dead stock month by month, with what it cost and which classes it sits in.
+ *
+ * MONTHLY on purpose. Dead stock is a window measure — held with no sale in the
+ * last `windowDays` — so sampling it weekly shows a line that moves mostly with
+ * the window filling rather than with anything the shop did. A month is longer
+ * than the noise; the week-by-week table says so beside its own column.
+ *
+ * Each month is judged at its LAST nightly snapshot, the same way the weekly
+ * figure judges a week, so the two cannot disagree about a month they share.
+ * A month with no snapshot is absent rather than zero.
+ */
+export async function getDeadStockByMonth(
+  tenantId: string,
+  { months = 6, canViewCosts }: { months?: number; canViewCosts: boolean }
+): Promise<DeadStockByMonth> {
+  const db = prismaForTenant(tenantId);
+  const config = await db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } });
+  const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
+
+  const now = new Date();
+  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1), 1));
+
+  const [snapshots, sales, products, earliest] = await Promise.all([
+    db.inventorySnapshot.findMany({
+      where: { date: { gte: from } },
+      select: { date: true, productId: true, onHand: true },
+    }),
+    db.salesHistory.findMany({
+      where: { date: { gte: new Date(from.getTime() - windowDays * DAY_MS) }, quantity: { gt: 0 } },
+      select: { date: true, productId: true },
+    }),
+    db.product.findMany({ select: { id: true, costKes: true, abcCategory: true } }),
+    db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
+  ]);
+
+  const soldDates = new Map<string, number[]>();
+  for (const s of sales) {
+    const list = soldDates.get(s.productId);
+    if (list) list.push(s.date.getTime());
+    else soldDates.set(s.productId, [s.date.getTime()]);
+  }
+  const productById = new Map(products.map((p) => [p.id, p]));
+
+  // The last snapshot date in each month is that month's shelf.
+  const lastDayOfMonth = new Map<number, number>();
+  for (const row of snapshots) {
+    const key = monthStartOf(row.date).getTime();
+    const t = row.date.getTime();
+    if (t > (lastDayOfMonth.get(key) ?? 0)) lastDayOfMonth.set(key, t);
+  }
+
+  const out: DeadStockMonth[] = [];
+  for (const [monthKey, asOf] of [...lastDayOfMonth.entries()].sort((a, b) => a[0] - b[0])) {
+    const cutoff = asOf - windowDays * DAY_MS;
+    let skus = 0;
+    let costKes = 0;
+    const byClass = { a: 0, b: 0, c: 0, unrated: 0 };
+
+    for (const row of snapshots) {
+      if (row.date.getTime() !== asOf || row.onHand <= 0) continue;
+      const dates = soldDates.get(row.productId);
+      const lastSold = dates
+        ? Math.max(...dates.filter((d) => d <= asOf))
+        : Number.NEGATIVE_INFINITY;
+      if (Number.isFinite(lastSold) && lastSold >= cutoff) continue;
+
+      skus += 1;
+      const product = productById.get(row.productId);
+      costKes += (product?.costKes ?? 0) * row.onHand;
+      const abc = product?.abcCategory;
+      if (abc === "A") byClass.a += 1;
+      else if (abc === "B") byClass.b += 1;
+      else if (abc === "C") byClass.c += 1;
+      else byClass.unrated += 1;
+    }
+
+    out.push({
+      monthStart: new Date(monthKey),
+      skus,
+      costKes: canViewCosts ? costKes : null,
+      byClass,
+    });
+  }
+
+  return { months: out, windowDays, trackingSince: earliest?.date ?? null };
 }
