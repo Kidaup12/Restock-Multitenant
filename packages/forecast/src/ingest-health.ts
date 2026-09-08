@@ -6,7 +6,9 @@
  * shop to order nothing for a month. So BEFORE re-forecasting a tenant we sanity-
  * check the most recent ingest against the shop's OWN recent norm:
  *
- *   - STALE : the newest sale is older than `maxStaleHours` → the feed stopped.
+ *   - STALE : the newest sale is older than `maxStaleHours`. Note this says the
+ *             DATA is old, not that the feed broke — a quiet shop and a dead
+ *             integration are indistinguishable from here.
  *   - GAP   : one or more of the most-recent completed days came in far below the
  *             shop's trailing norm → likely feed-gap days, not zero demand.
  *
@@ -58,7 +60,20 @@ export type IngestVerdict = {
   reasons: string[];
   stale: boolean;
   trailingNorm: number;
+  /** Newest sale on record, so a surface can name the date rather than repeat
+   *  the reason string. Null = nothing has ever arrived. */
+  latestSaleAt: Date | null;
 };
+
+/** Hours as the unit a person would use. "810h" reads as an outage; "34 days"
+ *  reads as what it is — a shop that has not sold since last month. */
+export function describeAge(hours: number): string {
+  if (hours < 48) return `${Math.round(hours)} hours`;
+  const days = Math.round(hours / 24);
+  if (days < 14) return `${days} days`;
+  const weeks = Math.round(days / 7);
+  return weeks < 9 ? `${weeks} weeks` : `${Math.round(days / 30)} months`;
+}
 
 /** Value at quantile `f` (0..1) of the set; 0 when empty. */
 function quantile(xs: number[], f: number): number {
@@ -86,10 +101,15 @@ export function assessIngestHealth(
     latestSaleAt == null ? Infinity : (now.getTime() - latestSaleAt.getTime()) / 3_600_000;
   const stale = staleHours > cfg.maxStaleHours;
   if (stale) {
+    // States the fact and stops there. A stopped feed and a shop that simply has
+    // not sold produce an identical number here, and this function cannot see
+    // the connection — so it must not name a cause. Callers that DO know whether
+    // the store is still syncing add the reading; one that told a healthy dev
+    // store "the feed looks stopped" sent someone hunting a broken integration.
     reasons.push(
       latestSaleAt == null
-        ? "No sales data at all — the feed may never have connected."
-        : `No new sales for about ${Math.round(staleHours)}h — the feed looks stopped.`
+        ? "No sales have ever come through for this shop."
+        : `The newest sale on record is about ${describeAge(staleHours)} old.`
     );
   }
 
@@ -129,5 +149,5 @@ export function assessIngestHealth(
     );
   }
 
-  return { ok: !stop, stop, impute, gapDayKeys, reasons, stale, trailingNorm: norm };
+  return { ok: !stop, stop, impute, gapDayKeys, reasons, stale, trailingNorm: norm, latestSaleAt };
 }

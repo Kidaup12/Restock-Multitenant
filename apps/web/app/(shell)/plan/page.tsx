@@ -9,6 +9,7 @@ import { SkeletonCard } from "@/components/ui/skeleton";
 import { planFreshnessLabel } from "@/lib/data/forecast-freshness";
 import { getBuyList } from "@/lib/data/plan";
 import { tenantIngestVerdict } from "@wezesha/forecast-run";
+import { getConnectionStatus, type ConnectionStatus } from "@/lib/data/connection-status";
 import { getTenantPlan, planAllows } from "@/lib/capabilities";
 import { RunForecastButton } from "../today/run-forecast-button";
 import { PlanView } from "./plan-view";
@@ -16,6 +17,33 @@ import { PlanView } from "./plan-view";
 export const metadata: Metadata = {
   title: "Restock Planner",
 };
+
+const onDate = (d: Date): string =>
+  d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
+/**
+ * Why the sales data is old — stated from the connection, not guessed.
+ *
+ * The old copy here asserted "your sales feed looks stopped" off nothing but the
+ * age of the newest sale. On a store that was connected and syncing perfectly it
+ * sent someone looking for a broken integration that did not exist. Staleness is
+ * a fact about the DATA; only the connection says whether it is a fault.
+ */
+function staleSalesNote(connection: ConnectionStatus, latestSaleAt: Date | null): string {
+  const since =
+    latestSaleAt == null
+      ? "No sales have come through yet."
+      : `No sales have been recorded since ${onDate(latestSaleAt)}.`;
+  const thin = "You can still run a forecast, but it will be thin until sales come through again.";
+
+  if (connection.state === "none") {
+    return `${since} No store is connected to this workspace yet — connect one in Settings and its sales history comes with it.`;
+  }
+  if (connection.state === "uninstalled" || connection.state === "paused") {
+    return `${since} This workspace's store connection has stopped, so nothing new can arrive — reconnect it in Settings.`;
+  }
+  return `${since} The store is connected and still syncing, so this is what it has: the shop itself has recorded no sales in that time. ${thin}`;
+}
 
 /** The buy list streams behind its own skeleton; the header paints immediately. */
 async function PlanContent({
@@ -41,27 +69,25 @@ async function PlanContent({
   const canBudget = planAllows(plan, "budget_planner");
 
   if (!buyList) {
-    // "No forecast yet" is only true when nothing is stopping one. The run
-    // refuses outright while the sales feed looks stopped — it keeps the
-    // last-good predictions rather than telling a shop to order nothing off a
-    // gap — so offering Run forecast there is a button that silently does
-    // nothing, and the shop concludes the product is broken. Same verdict the
-    // run gates on, so this cannot disagree with it.
-    const ingest = await tenantIngestVerdict(tenantId);
-    if (ingest.stop) {
-      return (
-        <EmptyState
-          icon={<CalendarIcon />}
-          title="Forecast paused — your sales feed looks stopped"
-          description={`${ingest.reasons.join(" ")} We hold the buy list rather than build one off a gap. It picks up on its own once sales come through again.`}
-        />
-      );
-    }
+    // The staleness gate holds a run back only to protect a last-good forecast,
+    // and there is none here — so the run will proceed and the button is real.
+    // What it cannot fix is old sales data, and the shop deserves to know which
+    // of the two reasons applies BEFORE it runs one, because the answers are
+    // opposite: a store that stopped syncing needs reconnecting, a shop that has
+    // simply been quiet needs nothing at all.
+    const [ingest, connection] = await Promise.all([
+      tenantIngestVerdict(tenantId),
+      getConnectionStatus(tenantId),
+    ]);
     return (
       <EmptyState
         icon={<CalendarIcon />}
         title="No forecast yet"
-        description="Run the forecast to build this week's buy list — every product that needs restocking, with quantities and the reasoning behind them."
+        description={
+          ingest.stale
+            ? staleSalesNote(connection, ingest.latestSaleAt)
+            : "Run the forecast to build this week's buy list — every product that needs restocking, with quantities and the reasoning behind them."
+        }
         action={<RunForecastButton />}
       />
     );

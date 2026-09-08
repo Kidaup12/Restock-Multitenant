@@ -162,13 +162,22 @@ export function assessTenantIngest(
   // gate never blocks a new shop's very first forecast.
   const MIN_DAYS_TO_JUDGE = 14;
   if (daily.filter((d) => d.units > 0).length < MIN_DAYS_TO_JUDGE) {
-    return { ok: true, stop: false, impute: false, gapDayKeys: [], reasons: [], stale: false, trailingNorm: 0 };
+    return {
+      ok: true,
+      stop: false,
+      impute: false,
+      gapDayKeys: [],
+      reasons: [],
+      stale: false,
+      trailingNorm: 0,
+      latestSaleAt,
+    };
   }
   return assessIngestHealth(daily, latestSaleAt, now);
 }
 
 /**
- * Tell the owner the feed looks stopped and the forecast was held. One bell
+ * Tell the owner no recent sales arrived and the forecast was held. One bell
  * notification per rolling window so a multi-day outage doesn't spam. Best-
  * effort: the stall protection (keeping the last-good forecast) already
  * happened; a failed notification write must not turn a safe skip into an error.
@@ -186,10 +195,12 @@ async function raiseIngestStall(tenantId: string, verdict: IngestVerdict, now: D
       data: {
         tenantId,
         kind: "forecast_held_stale_feed",
-        title: "Forecast paused — your sales feed looks stopped",
+        title: "Forecast paused — no recent sales",
         body:
           `${verdict.reasons.join(" ")} We kept your last buy list rather than ` +
-          `telling you to order nothing off a gap. Reconnect the feed and it will refresh.`,
+          `telling you to order nothing off a gap. If the shop has genuinely been ` +
+          `quiet, nothing is wrong and it picks up on its own; if it has been ` +
+          `selling, check the store connection in Settings.`,
       },
     });
   } catch {
@@ -237,6 +248,7 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
     priorRows,
     emptyShelfDays,
     firstSnapshot,
+    lastGood,
   } = await prismaForTenantTx(
     tenantId,
     async (tx) => ({
@@ -320,6 +332,9 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
         orderBy: { date: "asc" },
         select: { date: true },
       }),
+      // Whether there is a last-good forecast at all. The stale gate below
+      // exists to protect one; with none, "protecting" it withholds everything.
+      lastGood: await tx.prediction.findFirst({ select: { id: true } }),
     }),
     { maxWait: 30_000, timeout: 120_000 }
   );
@@ -367,8 +382,15 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
   // against the shop's own recent norm: if the feed is STALE (or too many recent
   // days came in far below normal), keep the last-good predictions and alert the
   // owner rather than overwrite them with a zero-demand run.
+  //
+  // Only when there IS a last-good forecast. A workspace that has never run one
+  // has nothing to protect, and holding the run there gives the shop no buy list
+  // at all — permanently, since the gate never clears on its own. A store whose
+  // recorded sales end a month ago is exactly that case: connected, syncing, and
+  // refused its first forecast for ever. An old-but-real history is a thin
+  // forecast; no forecast is an empty product.
   const ingest = assessTenantIngest(sales, now);
-  if (ingest.stop) {
+  if (ingest.stop && lastGood) {
     await raiseIngestStall(tenantId, ingest, now);
     // Keep the last-good forecast: return without touching Prediction rows.
     return { created: 0, forecastRunId: "", skipped: "ingest_stale" };

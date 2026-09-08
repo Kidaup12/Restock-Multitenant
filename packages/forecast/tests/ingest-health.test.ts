@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   assessIngestHealth,
+  describeAge,
   DEFAULT_INGEST_HEALTH,
   type DailyPoint,
 } from "../src/ingest-health";
@@ -34,13 +35,31 @@ describe("assessIngestHealth", () => {
     expect(v.stale).toBe(true);
     expect(v.stop).toBe(true);
     expect(v.ok).toBe(false);
-    expect(v.reasons.join(" ")).toMatch(/feed looks stopped/i);
+    // States the age of the data and stops there. It must NOT claim the feed
+    // broke: this function cannot see the connection, and a quiet shop with a
+    // healthy sync lands on exactly this branch.
+    expect(v.reasons.join(" ")).toMatch(/newest sale on record/i);
+    expect(v.reasons.join(" "), "named a cause it cannot know").not.toMatch(
+      /feed (looks |has )?stopped|not connected|broken/i
+    );
+    expect(v.latestSaleAt, "the surface has no date to name").toEqual(old);
+  });
+
+  it("says the age in a unit a shopkeeper uses", () => {
+    // "810h" reads as an outage. The same gap said as "a month" reads as what it
+    // is, and that difference is the whole point of the message.
+    expect(describeAge(12)).toBe("12 hours");
+    expect(describeAge(24 * 5)).toBe("5 days");
+    expect(describeAge(24 * 21)).toBe("3 weeks");
+    expect(describeAge(810)).toBe("5 weeks"); // the dev store's gap, in plain words
+    expect(describeAge(24 * 90)).toBe("3 months");
   });
 
   it("STOPS when the feed never connected (no latest sale)", () => {
     const v = assessIngestHealth([], null, now);
     expect(v.stop).toBe(true);
-    expect(v.reasons.join(" ")).toMatch(/never have connected/i);
+    expect(v.reasons.join(" ")).toMatch(/ever come through/i);
+    expect(v.latestSaleAt).toBeNull();
   });
 
   it("IMPUTES a short recoverable gap (1-2 low days), does not stop", () => {

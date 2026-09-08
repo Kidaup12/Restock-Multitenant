@@ -9,7 +9,7 @@ import { panelPlacementClass } from "@/components/shell/notification-bell";
  * viewport and top:649 in a 649px one — off screen on both axes. It still
  * opened, still fetched, and still marked everything read, so pressing it only
  * cleared the unread badge. Worse than an inert button: it consumed the
- * "Forecast paused — your sales feed looks stopped" notice, the one that
+ * "Forecast paused — no recent sales" notice, the one that
  * explains an empty buy list.
  *
  * Tested as a pure mapping because the bug WAS the coordinate. A test that
