@@ -1,5 +1,6 @@
 "use server";
 
+import { captureError } from "@wezesha/observability";
 import { prismaForTenant, prismaService } from "@wezesha/db";
 import {
   listMemberships,
@@ -45,17 +46,34 @@ export async function switchWorkspace(
  * boundary. A user belongs to a handful of workspaces, not a page of them.
  */
 export async function markWelcomed(): Promise<void> {
+  // Outside the try: requireSession signals its redirect by throwing, and
+  // catching that would swallow the trip to /login.
   const session = await requireSession();
-  const memberships = await listMemberships(session.user.id);
-  const now = new Date();
-  await Promise.all(
-    memberships
-      .filter((m) => m.welcomedAt === null)
-      .map((m) =>
-        prismaForTenant(m.tenantId).membership.updateMany({
-          where: { id: m.id, userId: session.user.id },
-          data: { welcomedAt: now },
-        })
-      )
-  );
+
+  // Reported rather than thrown. The caller fires this and forgets — there is
+  // nothing to tell the reader, since the stamp is bookkeeping and not their
+  // action. But it must not vanish: if this write keeps failing, welcomedAt
+  // stays null and the tour auto-starts on EVERY visit, for ever, with no trace
+  // of why. That is the shape of the terms-gate defect reported from
+  // production, where a silent "mark this done" write left someone stuck in a
+  // loop nobody could diagnose.
+  try {
+    const memberships = await listMemberships(session.user.id);
+    const now = new Date();
+    await Promise.all(
+      memberships
+        .filter((m) => m.welcomedAt === null)
+        .map((m) =>
+          prismaForTenant(m.tenantId).membership.updateMany({
+            where: { id: m.id, userId: session.user.id },
+            data: { welcomedAt: now },
+          })
+        )
+    );
+  } catch (err) {
+    // console as well as Sentry: captureError no-ops without a DSN, and this is
+    // the only record that the tour is repeating for a reason.
+    console.error("markWelcomed: could not stamp the welcome tour", err);
+    captureError(err, { route: "markWelcomed" });
+  }
 }
