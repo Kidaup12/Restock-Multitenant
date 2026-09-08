@@ -41,7 +41,6 @@ export type PeriodRowView = {
   emptyProductDays: number;
   observedProductDays: number;
   daysCovered: number;
-  deadStockSkus: number | null;
   unitsSold: number;
   culprits: PeriodCulpritView[];
 };
@@ -62,7 +61,7 @@ export function PeriodTableView({ rows }: { rows: PeriodRowView[] }) {
     <Card>
       <CardHeader
         title="Week by week"
-        subtitle="How often shelves were empty, what was sitting dead, and what sold. Open a week to see which products were behind it."
+        subtitle="How often shelves were empty and what sold. Open a week to see which products were behind it. Dead stock is a window measure — see the monthly card above for its real pace."
       />
       <CardContent className="pt-3">
         <div className="overflow-x-auto">
@@ -70,7 +69,6 @@ export function PeriodTableView({ rows }: { rows: PeriodRowView[] }) {
             <TableHeader>
               <TableHead>Week of</TableHead>
               <TableHead numeric>Empty shelves</TableHead>
-              <TableHead numeric>Dead stock</TableHead>
               <TableHead numeric>Units sold</TableHead>
               <TableHead>
                 <span className="sr-only">Show products</span>
@@ -97,15 +95,6 @@ export function PeriodTableView({ rows }: { rows: PeriodRowView[] }) {
                         </span>
                       </TableCell>
                       <TableCell numeric>
-                        {/* Absent, never zero: a week with no snapshot cannot be
-                            reported as a week with nothing sitting dead. */}
-                        {row.deadStockSkus == null ? (
-                          <span className="text-xs text-ink-faint">—</span>
-                        ) : (
-                          <span className="font-mono">{row.deadStockSkus}</span>
-                        )}
-                      </TableCell>
-                      <TableCell numeric>
                         <span className="font-mono">{row.unitsSold}</span>
                       </TableCell>
                       <TableCell>
@@ -128,7 +117,7 @@ export function PeriodTableView({ rows }: { rows: PeriodRowView[] }) {
                       <TableRow>
                         {/* A raw cell: TableCell takes no colSpan, and the
                             checklist's expand row spans the same way. */}
-                        <td colSpan={5} className="px-5 pt-0 pb-3">
+                        <td colSpan={4} className="px-5 pt-0 pb-3">
                           <ul className="space-y-1 py-1">
                             {row.culprits.map((c) => (
                               <li key={c.productId} className="flex flex-wrap items-center gap-2 text-sm">

@@ -46,6 +46,15 @@ describe("the report period reaches the panels", () => {
     ).toBe(true);
   });
 
+  it("gives the week-by-week table the same class lens as everything else", () => {
+    // Its rate comes from getStockoutTrend, so the lens has to reach that too —
+    // filtering only downstream would make the table and the chart disagree.
+    expect(
+      /<PeriodTable[\s\S]{0,240}abc=\{abc\}/.test(page),
+      "the week-by-week table ignores the class switcher"
+    ).toBe(true);
+  });
+
   it("reads the period from the URL rather than component state", () => {
     // Server-routed, so a period is shareable and survives a reload.
     expect(page).toContain("parseRangeKey(");

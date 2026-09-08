@@ -1,5 +1,6 @@
 import { EmptyState } from "@/components/ui/empty-state";
 import { getPeriodMetrics } from "@/lib/data/insights";
+import type { AbcKey } from "@/lib/data/abc-lens";
 import { PeriodTableView, type PeriodRowView } from "./period-table-view";
 
 /**
@@ -16,8 +17,17 @@ import { PeriodTableView, type PeriodRowView } from "./period-table-view";
 const weekLabel = (d: Date): string =>
   d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
-export async function PeriodTable({ tenantId, weeks }: { tenantId: string; weeks: number }) {
-  const metrics = await getPeriodMetrics(tenantId, { weeks });
+export async function PeriodTable({
+  tenantId,
+  weeks,
+  abc,
+}: {
+  tenantId: string;
+  weeks: number;
+  /** The class lens, applied to every column so they cannot disagree. */
+  abc: AbcKey;
+}) {
+  const metrics = await getPeriodMetrics(tenantId, { weeks, abc });
 
   if (metrics.weeks.length === 0) {
     return (
@@ -40,7 +50,6 @@ export async function PeriodTable({ tenantId, weeks }: { tenantId: string; weeks
       emptyProductDays: w.emptyProductDays,
       observedProductDays: w.observedProductDays,
       daysCovered: w.daysCovered,
-      deadStockSkus: w.deadStockSkus,
       unitsSold: w.unitsSold,
       culprits: w.culprits,
     }))
