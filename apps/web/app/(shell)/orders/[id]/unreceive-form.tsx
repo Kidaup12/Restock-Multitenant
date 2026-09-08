@@ -142,6 +142,7 @@ export function UnreceiveForm({
           {locations.map((l) => (
             <option key={l.id} value={l.id}>
               {l.name}
+              {l.isPrimary ? " (primary)" : ""}
             </option>
           ))}
         </Select>

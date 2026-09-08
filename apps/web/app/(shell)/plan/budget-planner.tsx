@@ -57,9 +57,18 @@ const FALLBACK_BUDGET = 800_000;
  * back when nothing is critical, and when the viewer is money-blind and the sum
  * is withheld as null rather than reported as zero.
  */
-export function openingBudget(criticalsCashKes: number | null): number {
-  if (criticalsCashKes == null || criticalsCashKes <= 0) return FALLBACK_BUDGET;
-  return Math.ceil(criticalsCashKes / 10_000) * 10_000;
+export function openingBudget(
+  criticalsCashKes: number | null,
+  orderTodayCashKes: number | null
+): number {
+  // Criticals first, then everything due today. On real data the critical count
+  // is often zero while a substantial pile is already past its last safe order
+  // day — this shop showed "cash for criticals KES 0" beside "order today
+  // KES 733K", so keying on criticals alone put the box straight back on the
+  // hardcoded figure and the prefill did nothing at all.
+  const basis = [criticalsCashKes, orderTodayCashKes].find((v) => v != null && v > 0);
+  if (basis == null) return FALLBACK_BUDGET;
+  return Math.ceil(basis / 10_000) * 10_000;
 }
 
 const PLANNABLE_LABELS: Record<string, string> = {
@@ -74,11 +83,15 @@ const dayLabel = (date: Date) =>
 export function BudgetPlanner({
   canViewCosts,
   criticalsCashKes,
+  orderTodayCashKes,
 }: {
   canViewCosts: boolean;
   /** Cash to clear the critical lines, from planDecisionSummary. Null when the
    *  viewer cannot see costs, or when a critical row's cost is hidden. */
   criticalsCashKes: number | null;
+  /** Cash for everything already past its safe order day — the fallback basis
+   *  when nothing is flagged critical, which is the common case. */
+  orderTodayCashKes: number | null;
 }) {
   const currency = useCurrency();
   // The same selection, order call and outcome wording as the checklist.
@@ -86,7 +99,7 @@ export function BudgetPlanner({
   // only in list mode, so the screen that decides what to buy was the one screen
   // that could not buy it.
   const picker = useOrderPicker();
-  const [budget, setBudget] = useState(String(openingBudget(criticalsCashKes)));
+  const [budget, setBudget] = useState(String(openingBudget(criticalsCashKes, orderTodayCashKes)));
   const [split, setSplit] = useState<BudgetSplit | null>(null);
   // Across BOTH tables: a deferred row ticked back in is part of what the owner
   // is about to spend, so a total counting only funded rows would understate it.
