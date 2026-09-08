@@ -39,6 +39,7 @@ const DESTRUCTIVE = [
   "removeFromQueueAction",
   "removeMember",
   "removeShopifyStore",
+  "unreceivePoAction",
   "removePromo",
   "revokePlatformAdminAction",
   "/api/shopify/disconnect",

@@ -20,6 +20,7 @@ import { getPoDetail, type PoDetail } from "@/lib/data/orders";
 import { PoStatusBadge } from "../po-status-badge";
 import { PoActions } from "./po-actions";
 import { ReceiveForm } from "./receive-form";
+import { UnreceiveForm } from "./unreceive-form";
 
 export const metadata: Metadata = {
   title: "Purchase order",
@@ -91,6 +92,9 @@ export default async function PoDetailPage({
   if (!po) notFound();
 
   const receivable = po.status === "sent" || po.status === "partially_received";
+  // Anything with units booked in can have them taken back out. A partially
+  // received order is both: more can arrive, and what arrived may be wrong.
+  const reversible = po.status === "received" || po.status === "partially_received";
 
   const timeline: {
     label: string;
@@ -252,6 +256,26 @@ export default async function PoDetailPage({
                 ))}
               </TableBody>
             </Table>
+          )}
+
+          {reversible && (
+            <div className="mt-6 border-t border-edge pt-4">
+              <h3 className="text-sm font-medium text-ink">Booked in the wrong amount?</h3>
+              <p className="mt-0.5 mb-3 text-xs text-ink-muted">
+                Take the units back out. Stock and the order both go back to where they were.
+              </p>
+              <UnreceiveForm
+                poId={po.id}
+                lines={po.lines.map((l) => ({
+                  id: l.id,
+                  sku: l.sku,
+                  title: l.title,
+                  quantity: l.quantity,
+                  receivedQty: l.receivedQty,
+                }))}
+                locations={po.locations}
+              />
+            </div>
           )}
         </div>
       </Card>
