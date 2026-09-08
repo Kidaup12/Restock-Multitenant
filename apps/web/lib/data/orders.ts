@@ -1,4 +1,10 @@
-import { Prisma, prismaForTenant, prismaForTenantTx, prismaService } from "@wezesha/db";
+import {
+  BUYABLE_PRODUCT_WHERE,
+  Prisma,
+  prismaForTenant,
+  prismaForTenantTx,
+  prismaService,
+} from "@wezesha/db";
 import { buildPoDocument, isPoLate, type PoDocumentData } from "@/lib/po/po-model";
 import { computeSupplierScore, type SupplierScore } from "@/lib/po/supplier-stats";
 
@@ -786,4 +792,58 @@ export async function getPoDocument(
   ]);
   if (!po || !tenant) return null;
   return buildPoDocument(po, tenant.name, { canViewCosts });
+}
+
+/** A supplier and the products assigned to it, for building an order by hand. */
+export type ManualPoSupplier = {
+  id: string;
+  name: string;
+  moq: number;
+  /** Null for a money-blind member — the picker shows a dash, and the order is
+   *  still priced server-side from the real figure. */
+  products: { id: string; sku: string; title: string; costKes: number | null; currentStock: number }[];
+};
+
+/**
+ * Suppliers and their products, for the hand-built order form.
+ *
+ * Only products with a cost are offered: a line priced at nothing is refused by
+ * createManualPo, and a picker that lists something the server will reject is a
+ * worse experience than one that does not show it. Suppliers with nothing
+ * orderable are dropped for the same reason.
+ */
+export async function getManualPoOptions(
+  tenantId: string,
+  { canViewCosts }: { canViewCosts: boolean }
+): Promise<ManualPoSupplier[]> {
+  const db = prismaForTenant(tenantId);
+  const suppliers = await db.supplier.findMany({
+    where: { deletedAt: null },
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, moq: true },
+  });
+  if (suppliers.length === 0) return [];
+
+  const products = await db.product.findMany({
+    where: { ...BUYABLE_PRODUCT_WHERE, supplierId: { not: null }, costKes: { gt: 0 } },
+    orderBy: { title: "asc" },
+    select: { id: true, sku: true, title: true, costKes: true, currentStock: true, supplierId: true },
+  });
+
+  const bySupplier = new Map<string, ManualPoSupplier["products"]>();
+  for (const p of products) {
+    const list = bySupplier.get(p.supplierId!) ?? [];
+    list.push({
+      id: p.id,
+      sku: p.sku,
+      title: p.title,
+      costKes: canViewCosts ? p.costKes : null,
+      currentStock: p.currentStock,
+    });
+    bySupplier.set(p.supplierId!, list);
+  }
+
+  return suppliers
+    .map((s) => ({ ...s, products: bySupplier.get(s.id) ?? [] }))
+    .filter((s) => s.products.length > 0);
 }

@@ -5,6 +5,7 @@ import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { removeQueuedOrder } from "@/lib/data/orders";
 import { cancelPo } from "@/lib/po/cancel-po";
+import { createManualPo, type ManualPoItem } from "@/lib/po/create-manual-po";
 import { createPoFromOrders } from "@/lib/po/create-po";
 import { removePoLine, setPoLineQuantity } from "@/lib/po/edit-po-lines";
 import { receivePoLines, type ReceiveEntry } from "@/lib/po/receive-po";
@@ -168,6 +169,43 @@ export async function unreceivePoAction(input: {
     message: result.stockFollowsStore
       ? `${undone} Stock stays as your store reports it — correct it there too if the shelf figure is wrong.`
       : undone,
+  };
+}
+
+/**
+ * A purchase order the forecast never proposed.
+ *
+ * Same ordering permission as every other PO action — someone who may place an
+ * order the app suggested may place one it did not.
+ */
+export async function createManualPoAction(input: {
+  supplierId: string;
+  items: ManualPoItem[];
+}): Promise<PoActionResult> {
+  const ctx = await actorContext();
+  if (!ctx) return err("You don't have ordering access in this workspace.");
+
+  const result = await createManualPo(ctx.tenantId, input.supplierId, input.items, ctx.actor);
+  if (!result.ok) {
+    const messages = {
+      no_items: "Add at least one product.",
+      bad_qty: "Enter a whole number of units, at least one.",
+      no_supplier: "Pick a supplier to order from.",
+      wrong_supplier:
+        "One of those products is assigned to a different supplier. Change it on the product first.",
+      no_product: "One of those products no longer exists.",
+      no_cost: "One of those products has no unit cost, so the order can't be priced.",
+    } as const;
+    return err(messages[result.reason]);
+  }
+
+  // The plan as well: these products now count as on the way, so they come off
+  // the buy list rather than being asked for again on the next run.
+  revalidatePath("/orders");
+  revalidatePath("/plan");
+  return {
+    ok: true,
+    message: `${result.poNumber} created as a draft — check it over, then send it.`,
   };
 }
 

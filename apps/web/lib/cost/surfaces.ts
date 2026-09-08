@@ -74,6 +74,7 @@ export const COST_SURFACES: CostSurface[] = [
   { module: "lib/data/orders", getter: "getPurchaseOrders", provenBy: "tests/orders-money-blind.test.ts" },
   { module: "lib/data/orders", getter: "getPoDetail", provenBy: "tests/orders-money-blind.test.ts" },
   { module: "lib/data/orders", getter: "getPoDocument", provenBy: "tests/orders-money-blind.test.ts" },
+  { module: "lib/data/orders", getter: "getManualPoOptions", provenBy: "tests/orders-money-blind.test.ts" },
   { module: "lib/data/plan-calendar", getter: "getSupplyCalendar", provenBy: "tests/plan-calendar.test.ts" },
   { module: "lib/data/plan", getter: "getBuyList", provenBy: "tests/member-visibility.test.tsx" },
   { module: "lib/data/plan", getter: "splitByBudget", provenBy: "tests/member-visibility.test.tsx" },

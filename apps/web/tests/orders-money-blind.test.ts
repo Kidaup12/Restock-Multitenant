@@ -5,6 +5,7 @@ import {
   getOrderQueue,
   getPoDetail,
   getPoDocument,
+  getManualPoOptions,
   getPurchaseOrders,
 } from "../lib/data/orders";
 import { createPoFromOrders } from "../lib/po/create-po";
@@ -201,5 +202,29 @@ describe.skipIf(!runnable)("orders money-blindness (seeded local db)", () => {
     expect(subtotalStr).not.toBe("•••");
     expect(message.html).toContain(subtotalStr);
     expect(message.text).toContain(subtotalStr);
+  });
+
+  it("hand-built order picker: no unit costs for a member; the list itself is unchanged", async () => {
+    const member = await getManualPoOptions(seeded.tenantId, { canViewCosts: false });
+    expect(member.length, "no suppliers to order from — nothing was proven").toBeGreaterThan(0);
+    for (const supplier of member) {
+      expect(supplier.products.length).toBeGreaterThan(0);
+      for (const product of supplier.products) {
+        expect(product.costKes, `cost leaked for ${product.sku}`).toBeNull();
+        // What is NOT money stays: a member can still build the order.
+        expect(product.title).toBeTruthy();
+        expect(typeof product.currentStock).toBe("number");
+      }
+    }
+
+    const owner = await getManualPoOptions(seeded.tenantId, { canViewCosts: true });
+    expect(
+      owner.some((s) => s.products.some((p) => (p.costKes ?? 0) > 0)),
+      "the owner lost the costs too — this proves nothing about redaction"
+    ).toBe(true);
+    // Redaction changes only the money: same suppliers, same products, same order.
+    expect(member.map((s) => [s.id, s.products.map((p) => p.id)])).toEqual(
+      owner.map((s) => [s.id, s.products.map((p) => p.id)])
+    );
   });
 });
