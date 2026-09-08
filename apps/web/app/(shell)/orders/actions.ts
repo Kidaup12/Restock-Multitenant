@@ -7,6 +7,7 @@ import { removeQueuedOrder } from "@/lib/data/orders";
 import { cancelPo } from "@/lib/po/cancel-po";
 import { createPoFromOrders } from "@/lib/po/create-po";
 import { receivePoLines, type ReceiveEntry } from "@/lib/po/receive-po";
+import { unreceivePoLines, type UnreceiveEntry } from "@/lib/po/unreceive-po";
 import { sendPoToSupplier } from "@/lib/po/send-po";
 
 /**
@@ -117,6 +118,55 @@ export async function receivePoAction(input: {
     message: result.stockFollowsStore
       ? `${booked} Stock stays as your store reports it — add the delivery there and it shows here after the next sync.`
       : booked,
+  };
+}
+
+/**
+ * Correcting a receipt that booked in the wrong quantity.
+ *
+ * Same gate as receiving: whoever can book a delivery in can take it back out.
+ * A separate permission would leave the person who made the mistake unable to
+ * fix it, which is how wrong stock survives.
+ */
+export async function unreceivePoAction(input: {
+  poId: string;
+  locationId: string;
+  entries: UnreceiveEntry[];
+}): Promise<PoActionResult> {
+  const ctx = await actorContext();
+  if (!ctx) return err("You don't have ordering access in this workspace.");
+
+  const result = await unreceivePoLines(
+    ctx.tenantId,
+    input.poId,
+    input.entries,
+    input.locationId,
+    ctx.actor
+  );
+  if (!result.ok) {
+    const messages = {
+      not_found: "That purchase order no longer exists.",
+      not_reversible: "Nothing has been received against this order yet.",
+      bad_location: "Pick the location the delivery was booked into.",
+      bad_line: "One of those lines doesn't belong to this purchase order.",
+      bad_qty: "You can't take back more than was booked in.",
+      empty: "Enter at least one quantity to take back.",
+    } as const;
+    return err(messages[result.reason]);
+  }
+
+  // The plan as well: units taken back out are no longer on the way, so the
+  // product belongs on the buy list again.
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${input.poId}`);
+  revalidatePath("/receiving");
+  revalidatePath("/plan");
+  const undone = `Took back ${result.reversedUnits} ${result.reversedUnits === 1 ? "unit" : "units"}.`;
+  return {
+    ok: true,
+    message: result.stockFollowsStore
+      ? `${undone} Stock stays as your store reports it — correct it there too if the shelf figure is wrong.`
+      : undone,
   };
 }
 
