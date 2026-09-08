@@ -6,6 +6,7 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { removeQueuedOrder } from "@/lib/data/orders";
 import { cancelPo } from "@/lib/po/cancel-po";
 import { createPoFromOrders } from "@/lib/po/create-po";
+import { removePoLine, setPoLineQuantity } from "@/lib/po/edit-po-lines";
 import { receivePoLines, type ReceiveEntry } from "@/lib/po/receive-po";
 import { unreceivePoLines, type UnreceiveEntry } from "@/lib/po/unreceive-po";
 import { sendPoToSupplier } from "@/lib/po/send-po";
@@ -168,6 +169,56 @@ export async function unreceivePoAction(input: {
       ? `${undone} Stock stays as your store reports it — correct it there too if the shelf figure is wrong.`
       : undone,
   };
+}
+
+const EDIT_LINE_ERRORS = {
+  not_found: "That purchase order no longer exists.",
+  not_editable: "This order has already been sent — cancel it, or talk to the supplier.",
+  bad_line: "That line doesn't belong to this purchase order.",
+  bad_qty: "Enter a whole number of units, at least one.",
+  last_line: "An order needs at least one line. Cancel it instead.",
+} as const;
+
+/** Change a draft line's quantity. Drafts only — see lib/po/edit-po-lines. */
+export async function setPoLineQtyAction(input: {
+  poId: string;
+  lineId: string;
+  quantity: number;
+}): Promise<PoActionResult> {
+  const ctx = await actorContext();
+  if (!ctx) return err("You don't have ordering access in this workspace.");
+
+  const result = await setPoLineQuantity(
+    ctx.tenantId,
+    input.poId,
+    input.lineId,
+    input.quantity,
+    ctx.actor
+  );
+  if (!result.ok) return err(EDIT_LINE_ERRORS[result.reason]);
+
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${input.poId}`);
+  return { ok: true, message: "Quantity updated." };
+}
+
+/** Drop a draft line, putting its items back on the buy list. */
+export async function removePoLineAction(input: {
+  poId: string;
+  lineId: string;
+}): Promise<PoActionResult> {
+  const ctx = await actorContext();
+  if (!ctx) return err("You don't have ordering access in this workspace.");
+
+  const result = await removePoLine(ctx.tenantId, input.poId, input.lineId, ctx.actor);
+  if (!result.ok) return err(EDIT_LINE_ERRORS[result.reason]);
+
+  // The plan too: the item is no longer on its way, so it belongs on the buy
+  // list again — the same reason cancelling revalidates it.
+  revalidatePath("/orders");
+  revalidatePath(`/orders/${input.poId}`);
+  revalidatePath("/plan");
+  return { ok: true, message: "Line removed — it's back on the buy list." };
 }
 
 export async function removeFromQueueAction(input: { orderId: string }): Promise<PoActionResult> {

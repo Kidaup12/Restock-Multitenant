@@ -21,6 +21,7 @@ import { PoStatusBadge } from "../po-status-badge";
 import { PoActions } from "./po-actions";
 import { ReceiveForm } from "./receive-form";
 import { UnreceiveForm } from "./unreceive-form";
+import { DraftLinesEditor } from "./draft-lines-editor";
 
 export const metadata: Metadata = {
   title: "Purchase order",
@@ -95,6 +96,8 @@ export default async function PoDetailPage({
   // Anything with units booked in can have them taken back out. A partially
   // received order is both: more can arrive, and what arrived may be wrong.
   const reversible = po.status === "received" || po.status === "partially_received";
+  // Still ours to change: the supplier has not been sent these numbers yet.
+  const editable = po.status === "draft";
 
   const timeline: {
     label: string;
@@ -215,7 +218,21 @@ export default async function PoDetailPage({
           }
         />
         <div className="mt-2 pb-2">
-          {receivable ? (
+          {editable ? (
+            <DraftLinesEditor
+              poId={po.id}
+              canViewCosts={canViewCosts}
+              lines={po.lines.map((l) => ({
+                id: l.id,
+                sku: l.sku,
+                title: l.title,
+                quantity: l.quantity,
+                recommendedQty: l.recommendedQty,
+                unitCostKes: l.unitCostKes,
+                lineTotalKes: l.lineTotalKes,
+              }))}
+            />
+          ) : receivable ? (
             <ReceiveForm
               poId={po.id}
               lines={po.lines.map((l) => ({
