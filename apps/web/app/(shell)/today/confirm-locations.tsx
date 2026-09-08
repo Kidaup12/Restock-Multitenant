@@ -70,6 +70,7 @@ export function ConfirmLocations({ locations }: { locations: PendingLocation[] }
                   variant={location.guessedType === "warehouse" ? "ghost" : "primary"}
                   disabled={pending}
                   onClick={() => confirm(location.id, "branch")}
+                  loading={pending}
                 >
                   Shop
                 </Button>

@@ -148,7 +148,7 @@ export function StepUpPrompt({
             <Button size="sm" onClick={submitCode} loading={pending} disabled={code.length === 0}>
               Confirm
             </Button>
-            <Button variant="ghost" size="sm" onClick={sendCode} disabled={pending}>
+            <Button variant="ghost" size="sm" onClick={sendCode} loading={pending} disabled={pending}>
               Resend
             </Button>
           </>

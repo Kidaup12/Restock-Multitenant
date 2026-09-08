@@ -9,6 +9,7 @@ import { SkeletonTableRows } from "@/components/ui/skeleton";
 import { ordersQueryToSearch, parseOrdersQuery, type RawSearchParams } from "@/lib/data/orders";
 import { OrderQueue } from "./order-queue";
 import { PoList } from "./po-list";
+import { ManualPoOptions } from "./manual-po-options";
 
 export const metadata: Metadata = {
   title: "Orders",
@@ -60,6 +61,12 @@ export default async function OrdersPage({
         }
       >
         <OrderQueue tenantId={tenantId} query={query} canViewCosts={canViewCosts} />
+      </Suspense>
+
+      {/* Below the queue on purpose: buying from the buy list is the ordinary
+          path, and a hand-built order is the exception. */}
+      <Suspense fallback={null}>
+        <ManualPoOptions tenantId={tenantId} canViewCosts={canViewCosts} />
       </Suspense>
 
       <Suspense

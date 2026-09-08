@@ -174,6 +174,7 @@ export function DraftLinesEditor({
                     size="sm"
                     variant="ghost"
                     onClick={() => remove(line)}
+                    loading={pending && busyLine === line.id}
                     disabled={pending || lines.length === 1}
                     // An order with no lines is not an order; cancelling is the
                     // action that says what actually happened.
