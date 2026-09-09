@@ -52,18 +52,28 @@ export function ExportBar<T>({
 }) {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
 
   const headers = columns.map((c) => c.header);
   const resolve = async (): Promise<readonly T[]> => (loadRows ? await loadRows() : (rows ?? []));
   const matrixOf = (list: readonly T[]) => list.map((row) => columns.map((c) => c.cell(row)));
 
   /** Serialises the click so a slow fetch can't start a second one, and so the
-   *  buttons read as busy rather than dead. */
+   *  buttons read as busy rather than dead.
+   *
+   *  A failure has to be SAID. Copying goes through the clipboard API, which
+   *  rejects on a page the browser does not consider focused, on any non-HTTPS
+   *  origin, and whenever permission is refused — and this had no catch, so the
+   *  rejection went nowhere, the label stayed "Copy", and the person had an
+   *  empty clipboard and no idea. */
   async function run(job: (list: readonly T[]) => void | Promise<void>) {
     if (busy) return;
     setBusy(true);
+    setFailed(null);
     try {
       await job(await resolve());
+    } catch {
+      setFailed("Couldn't do that — try again, or use Export CSV.");
     } finally {
       setBusy(false);
     }
@@ -115,6 +125,11 @@ export function ExportBar<T>({
         <Button variant="ghost" size={size} disabled={disabled} onClick={savePdf}>
           Save PDF
         </Button>
+      )}
+      {failed && (
+        <span role="alert" className="text-xs font-medium text-negative">
+          {failed}
+        </span>
       )}
     </div>
   );
