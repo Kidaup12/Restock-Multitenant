@@ -4,6 +4,7 @@ import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { RefreshButton } from "./refresh-button";
 import { GuideBox } from "@/components/ui/guide-box";
 import { SkeletonTableRows } from "@/components/ui/skeleton";
 import { Card } from "@/components/ui/card";
@@ -58,6 +59,7 @@ export default async function InventoryPage({
         // dismissed for anyone past their first week — and a column you do not
         // know is clickable is a column that never gets clicked.
         description="Where your stock sits, branch by branch. Click any column heading to sort by it."
+        actions={<RefreshButton />}
       />
 
       <GuideBox id="inventory" scope={membership.tenantId} title="Where your stock actually sits">
