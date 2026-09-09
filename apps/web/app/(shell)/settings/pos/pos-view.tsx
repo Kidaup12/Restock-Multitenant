@@ -205,11 +205,22 @@ function Detail({ label, value }: { label: string; value: string }) {
  */
 function SecretOnce({ secret, onDismiss }: { secret: string; onDismiss: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
+  /** The clipboard rejects more often than it looks: an unfocused page, a
+   *  non-HTTPS origin, a refused permission. This is the only time the secret is
+   *  shown, so a silent failure here ends with someone pressing "I've saved it"
+   *  over an empty clipboard and needing a new secret — which breaks whatever
+   *  was already using the old one. */
   async function copy() {
-    await navigator.clipboard.writeText(secret);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(secret);
+      setCopyFailed(false);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopyFailed(true);
+    }
   }
 
   return (
@@ -229,6 +240,12 @@ function SecretOnce({ secret, onDismiss }: { secret: string; onDismiss: () => vo
           <Button variant="ghost" size="sm" onClick={onDismiss}>
             I&apos;ve saved it
           </Button>
+          {copyFailed && (
+            <span role="alert" className="text-xs font-medium text-negative">
+              Your browser wouldn&apos;t let us copy it — select the secret above and copy it
+              yourself before dismissing this.
+            </span>
+          )}
         </div>
         <p className="text-xs text-ink-muted">
           We store only a fingerprint of it, so we cannot show it again or recover it for you. If
