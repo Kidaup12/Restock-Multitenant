@@ -14,14 +14,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { requireAdmin } from "@/lib/admin/gate";
+import { isPlatformAdmin, requireAdmin } from "@/lib/admin/gate";
+import { getSession } from "@/lib/auth";
 import { listAuditActions, listAuditEvents } from "@/lib/admin/audit";
 import { listTenants } from "@/lib/admin/fleet";
 import { relativeTime } from "@/lib/notifications/format";
 
-export const metadata: Metadata = {
-  title: "Audit log",
-};
+/** Named only for someone who may see it — see the fleet page for why. */
+export async function generateMetadata(): Promise<Metadata> {
+  const known = await isPlatformAdmin(await getSession());
+  return known ? { title: "Audit log" } : {};
+}
 
 /** Admin-surface actions get an accent so sessions stand out in the ledger. */
 const ADMIN_ACTIONS = new Set(["impersonation_start", "impersonation_end", "admin_sync_trigger"]);
