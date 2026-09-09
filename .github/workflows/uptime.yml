@@ -1,0 +1,101 @@
+name: uptime
+
+# Is the live system answering?
+#
+# The contract's line is that the app going down triggers an alert within
+# minutes, and nothing was watching any endpoint — error tracking reports what
+# broke while something is running, not that nothing is running at all.
+#
+# This runs outside the stack it watches. A checker living on the same Railway
+# project, or in the worker, goes down with the thing it is meant to report.
+# GitHub is the one piece of infrastructure already in play that is independent
+# of Vercel, Railway and Supabase, and on a public repository its minutes are
+# free — so this costs nothing and needs no new account.
+#
+# A failed run emails everyone watching the repository. That is the alert.
+#
+# Two honest limits, so nobody reads more into a green run than it carries:
+#   * GitHub's scheduler is best-effort. Five minutes is the ask, not a promise;
+#     under load a run can be late or skipped. Treat it as "within minutes,
+#     usually", and if the shop's tolerance is tighter than that, a dedicated
+#     pinger (RUNBOOK section "Uptime monitoring") checks on a firmer cadence.
+#   * A scheduled workflow is disabled after 60 days without repository
+#     activity. Active repositories never hit it; a parked one does, silently.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# One at a time. A slow probe must not stack up behind itself and turn a single
+# outage into a queue of identical failures.
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    name: live system answers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the web app, its database and the worker
+        env:
+          # Set as repository variables, not committed: the tracked docs keep
+          # deployment hostnames out of the repo on purpose, and this is a
+          # public repository.
+          HEALTH_URL: ${{ vars.HEALTH_URL }}
+          GATEWAY_HEALTH_URL: ${{ vars.GATEWAY_HEALTH_URL }}
+        run: |
+          set -u
+          if [ -z "${HEALTH_URL}" ]; then
+            echo "::error::HEALTH_URL repository variable is not set — this workflow is watching nothing."
+            echo "Set it to the deployed web app's /api/health URL (Settings → Secrets and variables → Actions → Variables)."
+            exit 1
+          fi
+
+          # One retry, twenty seconds apart, before calling it an outage. A
+          # single failed probe is as likely to be a cold start or a deploy
+          # swapping over as a real one, and an alert that cries wolf is an
+          # alert people mute.
+          probe() {
+            url="$1"; name="$2"; keyword="$3"
+            for attempt in 1 2; do
+              body=$(curl --silent --show-error --max-time 15 --write-out "\n%{http_code}" "$url" 2>&1) && rc=0 || rc=$?
+              code=$(printf '%s' "$body" | tail -n1)
+              payload=$(printf '%s' "$body" | sed '$d')
+
+              if [ "$rc" -eq 0 ] && [ "$code" = "200" ] && { [ -z "$keyword" ] || printf '%s' "$payload" | grep -q "$keyword"; }; then
+                echo "ok  $name (HTTP $code)"
+                return 0
+              fi
+
+              if [ "$attempt" -eq 1 ]; then
+                echo "$name did not answer as expected (HTTP ${code:-none}) — retrying in 20s"
+                sleep 20
+                continue
+              fi
+
+              # The body is the diagnosis: 503 with "db":false is a database
+              # problem, 200 with "worker":false is a dead worker behind a
+              # healthy web app. Both reach a human as the failure text.
+              echo "::error::$name is unhealthy — HTTP ${code:-no response}${keyword:+, expected }${keyword}"
+              echo "response: ${payload:-<none>}"
+              return 1
+            done
+          }
+
+          failed=0
+
+          # Covers three services in one request: the web app answered, the
+          # database answered it, and the worker's heartbeat is still being
+          # written. See apps/web/app/api/health/route.ts.
+          probe "$HEALTH_URL" "web + database" '"db":true' || failed=1
+          probe "$HEALTH_URL" "worker" '"worker":true' || failed=1
+
+          if [ -n "${GATEWAY_HEALTH_URL}" ]; then
+            probe "$GATEWAY_HEALTH_URL" "ws-gateway" "" || failed=1
+          else
+            echo "note: GATEWAY_HEALTH_URL is not set — the realtime gateway is not being watched."
+          fi
+
+          exit "$failed"
