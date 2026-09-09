@@ -262,10 +262,15 @@ Two known to be **out of date** as of 12 August: the guided tour's locked-screen
 setup strip both had work done on them. Treat both as testable rather than excused. Sync progress
 was on this list and has been removed — the Connections screen now reports a running sync live.
 
-**No store but ours can install the app.** The Shopify app has no distribution method selected, so
-any store outside our Partner organisation gets "This app can't be installed yet." That blocks the
-your-own-store test, and it blocks real customers too — it needs a change in the Partner dashboard,
-not in the code.
+**One entry removed on 9 September**, having been disproved against the live system rather than
+argued about: it claimed no store but ours could install the app. Five shops are connected on
+production. What is true is narrower and is stated below.
+
+**A shop cannot install us in one click from the Shopify App Store.** Public distribution was never
+set up, and that part does need a change in the Partner dashboard rather than in the code. It is
+**not** true that only our own store can connect: a merchant connects today either by approving the
+app their own workspace has registered, or by pasting an Admin API token, and both routes work on
+live shops. Test connecting a store; do not accept "it can't be installed" as a known gap.
 
 **Plan tier locks out a new workspace.** A newly created workspace has no plan, which counts as
 *starter*, and there is **no upgrade path in the app**. So Reports, Transfers, the budget
