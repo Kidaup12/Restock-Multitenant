@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { notFound } from "next/navigation";
 import { prismaForTenant } from "@wezesha/db";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { OffboardCard } from "./offboard-card";
@@ -77,7 +77,7 @@ export default async function AdminTenantPage({
           action={
             <form action={enterWorkspace}>
               <input type="hidden" name="tenantId" value={id} />
-              <Button type="submit">Enter workspace</Button>
+              <SubmitButton>Enter workspace</SubmitButton>
             </form>
           }
         />
@@ -103,9 +103,7 @@ export default async function AdminTenantPage({
         description={`${detail.tenant.slug} · read-only workspace view`}
         actions={
           <form action={exitWorkspace}>
-            <Button variant="ghost" type="submit">
-              Exit workspace
-            </Button>
+            <SubmitButton variant="ghost">Exit workspace</SubmitButton>
           </form>
         }
       />

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -266,9 +266,7 @@ export default async function AdminFleetPage({
                       {isConnected(row.connection.state) && <SyncButton tenantId={row.tenantId} />}
                       <form action={enterWorkspace}>
                         <input type="hidden" name="tenantId" value={row.tenantId} />
-                        <Button size="sm" type="submit">
-                          Enter
-                        </Button>
+                        <SubmitButton size="sm">Enter</SubmitButton>
                       </form>
                     </div>
                   </TableCell>
