@@ -36,7 +36,10 @@ export const ROUTES = [
   ["/settings/plan", "what each plan includes"],
   ["/settings/pos", "Send what you sell over the counter"],
   ["/settings/signals", "normal trading"],
-  ["/settings/team", "people have access"],
+  // Not the member count: production runs a single-member workspace and says
+  // "1 person has access", so the plural was a marker that only held on seeded
+  // data. The invite heading is there whatever the team looks like.
+  ["/settings/team", "Invite a teammate"],
   ["/settings/workspace", "the clock every sales day is measured against"],
   ["/workspaces/new", "One workspace per shop"],
 ];
@@ -126,10 +129,13 @@ export const ADMIN = [
 ];
 
 /**
- * Refused even for a bootstrap admin, by design: a step-up grant is held on the
- * PlatformAdmin row, and an admin with no row has nowhere to keep a failure
- * count — which would leave the one password check in the system unthrottled.
- * A 404 rather than a 403 throughout, so the surface does not advertise itself.
+ * Refused when addressed bare.
+ *
+ * The step-up prompt exists to confirm entering a named workspace, so it wants
+ * `?enter=<tenantId>` and 404s without one — it is not a page you can visit.
+ * The per-tenant view is the same: an id that names no customer workspace is a
+ * 404, not an error. A 404 rather than a 403 throughout, so the surface does
+ * not advertise itself to anyone probing paths.
  */
 export const GUARDED = [
   ["/admin/step-up", 404],
