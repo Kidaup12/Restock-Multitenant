@@ -598,6 +598,18 @@ export interface ShopifySyncOptions {
   /** Injectable token cache for tests; defaults to a process-local one shared
    *  by every job this processor handles. */
   tokenCache?: ReturnType<typeof createTokenCache>;
+  /**
+   * Called after a successful sync for a workspace that still has no forecast.
+   *
+   * The forecast is a half-hourly cron, so connecting a store left the planner
+   * empty until the next tick — up to thirty minutes of a new shop looking at
+   * nothing, right at the moment it is deciding whether the product works. The
+   * sync is what makes a forecast possible, so it is the sync that says go.
+   *
+   * A callback rather than a queue handle: this module writes shop data and
+   * knows nothing about how work is scheduled, and the caller already owns that.
+   */
+  onCatalogueReady?: (tenantId: string) => Promise<void>;
 }
 
 const PHASES = ["products", "inventory", "orders"] as const;
@@ -798,6 +810,26 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       await run.phaseEnd("orders", { salesDays });
 
       await run.ok();
+      // A workspace with no forecast has an empty planner until the next cron
+      // tick. Now that its catalogue and sales are in, ask for one. Scoped to
+      // "has none": once a forecast exists the half-hourly run owns it, and
+      // re-asking on every sync would be a second schedule nobody configured.
+      if (options.onCatalogueReady) {
+        const forecast = await prismaService.prediction.findFirst({
+          where: { tenantId },
+          select: { id: true },
+        });
+        if (!forecast) {
+          // Best-effort. The sync itself succeeded and its data is written; a
+          // queue that refuses the job must not fail the run and re-pull the
+          // whole catalogue on retry. The cron still picks the workspace up.
+          try {
+            await options.onCatalogueReady(tenantId);
+          } catch (err) {
+            console.error(`worker: first forecast enqueue failed for tenant ${tenantId}`, err);
+          }
+        }
+      }
       // Recovery re-arms the reconnect alert (see incident.ts)...
       await clearIncident(options.publisher, tenantId, "shopify");
       // ...and lets the scheduler pick this store back up.

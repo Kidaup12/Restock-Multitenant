@@ -4,6 +4,14 @@ import { SYNC_QUEUE, syncBackoffDelay, type SyncJobData } from "@wezesha/queue";
 import { createDemoSyncProcessor } from "./demo-sync";
 import { createPosSyncProcessor, handlePosSyncFailure, type PosFeedLoader } from "./pos-sync";
 import { createShopifySyncProcessor, handleSyncFailure } from "./shopify-sync";
+import {
+  createForecastCronQueue,
+  dayKey,
+  forecastJobId,
+  FORECAST_JOB_OPTIONS,
+  FORECAST_TENANT_JOB,
+  type ForecastCronQueue,
+} from "./forecast-cron";
 
 /**
  * The one sync worker. Jobs are dispatched on `data.source`: "shopify" runs the
@@ -43,11 +51,37 @@ export interface SyncWorkerOptions {
   phaseDelayMs?: number;
   /** Injectable POS feed fetch for tests; defaults to the real HTTP fetch. */
   loadPosFeed?: PosFeedLoader;
+  /** Injectable forecast producer for tests. Defaults to a handle on the
+   *  forecast queue when the forecast cron is enabled, and to none when it is
+   *  not — without that worker nothing would ever consume the job. */
+  forecastQueue?: ForecastCronQueue | null;
 }
 
 export function createSyncWorker(options: SyncWorkerOptions): Worker<SyncJobData> {
   const demo = createDemoSyncProcessor(options.publisher, options.phaseDelayMs);
-  const shopify = createShopifySyncProcessor({ publisher: options.publisher });
+  // A producer handle, not a second consumer: the forecast worker started
+  // elsewhere in the process is what runs the job. Gated on the same flag,
+  // because a job queued with nothing consuming it waits for ever.
+  const forecastQueue =
+    options.forecastQueue !== undefined
+      ? options.forecastQueue
+      : process.env.FORECAST_CRON === "1"
+        ? createForecastCronQueue(options.connection)
+        : null;
+  const shopify = createShopifySyncProcessor({
+    publisher: options.publisher,
+    onCatalogueReady: forecastQueue
+      ? async (tenantId) => {
+          // The cron's own day-keyed id, so a store connected an hour before the
+          // nightly dispatch cannot be forecast twice over.
+          await forecastQueue.add(
+            FORECAST_TENANT_JOB,
+            { tenantId },
+            { ...FORECAST_JOB_OPTIONS, jobId: forecastJobId(tenantId, dayKey(new Date())) }
+          );
+        }
+      : undefined,
+  });
   const pos = createPosSyncProcessor({ publisher: options.publisher, loadFeed: options.loadPosFeed });
 
   const worker = new Worker<SyncJobData>(

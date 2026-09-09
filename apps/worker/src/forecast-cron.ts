@@ -105,7 +105,7 @@ export function backtestJobId(tenantId: string, runKey: string): string {
 }
 
 /** YYYY-MM-DD (nightly) / YYYY-MM (monthly) run keys, UTC. */
-const dayKey = (d: Date): string => d.toISOString().slice(0, 10);
+export const dayKey = (d: Date): string => d.toISOString().slice(0, 10);
 const monthKey = (d: Date): string => d.toISOString().slice(0, 7);
 
 async function enqueuePerTenant(
