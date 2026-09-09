@@ -6,7 +6,11 @@ import { AdminSignOutButton } from "./sign-out-button";
 
 export const metadata: Metadata = {
   title: {
-    default: "Admin",
+    // What a 404 inside this segment inherits, so it names nothing: a stranger
+    // probing /admin should not have the tab title confirm there is a console
+    // here. Pages a real operator may see set their own title and get the
+    // template below.
+    default: "Not found",
     template: "%s · Admin · Wezesha Restock",
   },
 };

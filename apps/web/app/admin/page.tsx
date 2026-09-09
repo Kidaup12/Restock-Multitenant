@@ -17,7 +17,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { relativeTime } from "@/lib/notifications/format";
-import { requireAdmin } from "@/lib/admin/gate";
+import { isPlatformAdmin, requireAdmin } from "@/lib/admin/gate";
+import { getSession } from "@/lib/auth";
 import {
   filterFleet,
   getFleet,
@@ -32,9 +33,19 @@ import { TableSearch } from "@/components/ui/table-search";
 import { enterWorkspace } from "./actions";
 import { SyncButton } from "./sync-button";
 
-export const metadata: Metadata = {
-  title: "Fleet",
-};
+/**
+ * Named only for someone who may see it.
+ *
+ * A static `title: "Fleet"` is resolved before the page runs, so it reached the
+ * 404 too — a stranger probing /admin got "That page isn't here" under a tab
+ * reading "Fleet · Wezesha Restock", which is the console announcing itself.
+ * The gate answers 404 rather than 403 precisely so the surface stays quiet;
+ * the title was undoing that one line below it.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const known = await isPlatformAdmin(await getSession());
+  return known ? { title: "Fleet" } : {};
+}
 
 const SORTS: { key: FleetSort; label: string }[] = [
   { key: "staleness", label: "Staleness" },
