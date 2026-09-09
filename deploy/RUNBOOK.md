@@ -371,7 +371,31 @@ problem the same probe surfaces).
    `https://<gateway-domain>/healthz` → interval 5 min.
 5. Send a test alert; confirm it reaches a human.
 
-**Upptime alternative** (GitHub-native, no third-party account): create a repo
+**What is running now:** `.github/workflows/uptime.yml`, a scheduled probe in this
+repository. It checks the web app, the database and the worker in one request
+against `/api/health`, retries once twenty seconds later before calling anything an
+outage, and fails the run — which emails everyone watching the repository. It needs
+two repository variables (Settings → Secrets and variables → Actions → Variables),
+kept there rather than committed because the tracked docs keep deployment hostnames
+out of a public repo:
+
+| variable | value |
+|---|---|
+| `HEALTH_URL` | the deployed web app's `/api/health` |
+| `GATEWAY_HEALTH_URL` | the gateway's `/healthz` — optional; unset means the gateway is not watched, and the run says so |
+
+It is deliberately loud when `HEALTH_URL` is missing: a monitor watching nothing
+should not report success. Set the variable before enabling the schedule.
+
+Its limits, which are the reason the paid option below still exists: GitHub's cron
+is best-effort, so five minutes is the ask rather than a promise, and a scheduled
+workflow stops after 60 days of repository inactivity. If the shop's tolerance is
+tighter than "usually within minutes", move to a dedicated pinger and delete this
+workflow — one alerting system, not two.
+
+**UptimeRobot alternative** (third-party, firmer cadence): follow the steps above.
+
+**Upptime alternative** (GitHub-native, separate repo): create a repo
 from the `upptime/upptime` template and list the three URLs in `.upptimerc.yml`
 (`sites:` entries; for the worker signal use the same `/api/health` URL with
 `__dangerous__body_down_if_text_missing: '"worker":true'`). GitHub Actions pings
