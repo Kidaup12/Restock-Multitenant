@@ -210,6 +210,10 @@ model TenantConfig {
   // Dead-stock lookback window (days with no sale = dead). null = code default.
   deadStockWindowDays Int?
 
+  // How far back the ABC ranking counts a product's earnings, in days.
+  // 30/60/90; null = code default.
+  abcWindowDays Int?
+
   // Per-ABC-class ordering method (null = recommended default):
   // "stay_in_stock" | "balanced" | "lean_cash".
   methodA String?

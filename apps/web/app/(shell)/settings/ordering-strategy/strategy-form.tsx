@@ -2,15 +2,18 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { OrderMethod } from "@wezesha/forecast";
+import type { AbcWindowDays, OrderMethod } from "@wezesha/forecast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 import {
+  RECOMMENDED_WINDOW_DAYS,
   STRATEGY_GROUPS,
   STRATEGY_OPTIONS,
+  WINDOW_OPTIONS,
   recommendedFor,
+  strategyChanged,
   type StrategyClass,
 } from "@/lib/ordering/strategy";
 import { saveOrderingStrategy } from "./actions";
@@ -25,21 +28,31 @@ import { saveOrderingStrategy } from "./actions";
  *
  * The engine's default is marked Recommended rather than pre-applied silently,
  * so a deliberate choice is distinguishable from one nobody has revisited.
+ *
+ * The window comes first because it decides WHICH products each style then
+ * applies to. Choosing carefully how to buy your best sellers is worth nothing
+ * if the wrong lines are counted as best sellers.
  */
 export function StrategyForm({
   initial,
+  initialWindowDays,
   canManage,
 }: {
   initial: Record<StrategyClass, OrderMethod>;
+  initialWindowDays: AbcWindowDays;
   canManage: boolean;
 }) {
   const router = useRouter();
   const [values, setValues] = useState(initial);
+  const [windowDays, setWindowDays] = useState<AbcWindowDays>(initialWindowDays);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [pending, start] = useTransition();
 
-  const dirty = (["A", "B", "C"] as const).some((k) => values[k] !== initial[k]);
+  const dirty = strategyChanged(
+    { methods: initial, windowDays: initialWindowDays },
+    { methods: values, windowDays },
+  );
 
   function submit() {
     setError(null);
@@ -49,6 +62,7 @@ export function StrategyForm({
         methodA: values.A,
         methodB: values.B,
         methodC: values.C,
+        abcWindowDays: windowDays,
       });
       if (res.ok) {
         setSaved(true);
@@ -61,6 +75,41 @@ export function StrategyForm({
 
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader
+          title="Which products count as your best sellers"
+          subtitle="We look at what each product earned over this period to sort them into the three groups below."
+        />
+        <CardContent className="grid gap-3 pt-4 md:grid-cols-3">
+          {WINDOW_OPTIONS.map((option) => {
+            const active = windowDays === option.days;
+            return (
+              <button
+                key={option.days}
+                type="button"
+                aria-pressed={active}
+                disabled={!canManage || pending}
+                onClick={() => setWindowDays(option.days)}
+                className={cn(
+                  "rounded-lg border p-3 text-left transition-colors disabled:opacity-60",
+                  active
+                    ? "border-accent bg-accent-soft"
+                    : "border-edge bg-surface hover:bg-surface-2",
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-medium text-ink">{option.label}</span>
+                  {option.days === RECOMMENDED_WINDOW_DAYS && (
+                    <Badge tone="neutral">Recommended</Badge>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-ink-muted">{option.hint}</p>
+              </button>
+            );
+          })}
+        </CardContent>
+      </Card>
+
       {STRATEGY_GROUPS.map((group) => {
         const recommended = recommendedFor(group.key);
         return (

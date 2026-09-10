@@ -3,6 +3,7 @@
  * reads the TenantConfig row (or passes nothing) — this module only maps plain
  * fields onto defaults. Null/absent always means "code default".
  */
+import { resolveAbcWindowDays, type AbcWindowDays } from "./abc";
 import { SERVICE_Z_DEFAULTS } from "./baseline";
 import { CHAMPION_DEFAULT, DEFAULT_CAP_MULTIPLE, type DemandMethod } from "./layered";
 
@@ -46,12 +47,15 @@ export type TenantForecastOverrides = {
   methodA?: string | null;
   methodB?: string | null;
   methodC?: string | null;
+  abcWindowDays?: number | null;
 };
 
 export type ResolvedForecastKnobs = {
   serviceZ: { A: number; B: number; C: number };
   capMultiple: number;
   methods: Record<"A" | "B" | "C", OrderMethod>;
+  /** How far back the ABC ranking counts a product's earnings. */
+  abcWindowDays: AbcWindowDays;
 };
 
 /** Overlay a tenant's stored overrides on the code defaults. */
@@ -97,6 +101,7 @@ export function resolveForecastKnobs(cfg?: TenantForecastOverrides | null): Reso
       B: parseOrderMethod(cfg?.methodB) ?? METHOD_DEFAULTS.B,
       C: parseOrderMethod(cfg?.methodC) ?? METHOD_DEFAULTS.C,
     },
+    abcWindowDays: resolveAbcWindowDays(cfg?.abcWindowDays),
   };
 }
 
