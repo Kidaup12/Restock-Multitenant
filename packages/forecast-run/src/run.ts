@@ -11,7 +11,8 @@ import {
 } from "@wezesha/db";
 import {
   assignAbc,
-  dailySalesValue,
+  trailingRevenue,
+  runRateDaily,
   forecastProduct,
   historySpanDays,
   anchorToday,
@@ -404,11 +405,21 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
   // it writes is what every screen reads. `now` is passed explicitly rather than
   // left to default: a run replayed with a fixed clock must rank against the
   // run's own date, not against whenever it happens to be executed.
+  //
+  // Ranked on what each line ACTUALLY earned over the shop's window, never on
+  // run rate x price tag — a price tag only says what a product would earn if it
+  // sold. The run rate rides along for the velocity floor, and is the same
+  // stockout-censored rate the catalogue prints as sells/day, so a product's
+  // class can never contradict the number shown beside it.
   const abcByProduct = assignAbc(
-    products.map((p) => ({
-      id: p.id,
-      revenue: dailySalesValue(historyByProduct.get(p.id) ?? [], p.priceKes, now),
-    }))
+    products.map((p) => {
+      const history = historyByProduct.get(p.id) ?? [];
+      return {
+        id: p.id,
+        revenue: trailingRevenue(history, p.priceKes, knobs.abcWindowDays, now),
+        runRate: runRateDaily(history, now, stockoutsByProduct.get(p.id), undefined, snapshotsSince),
+      };
+    })
   );
   const activePromos: ActivePromo[] = promos;
   // Stated seasonality, bounded here so a slipped decimal in the database can

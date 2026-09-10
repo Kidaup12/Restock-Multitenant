@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { assignAbc, dailySalesValue } from "../src/abc";
-import { weightedDailyRate, type SalesPoint } from "../src/baseline";
+import {
+  assignAbc,
+  trailingRevenue,
+  resolveAbcWindowDays,
+  DEFAULT_ABC_WINDOW_DAYS,
+  MIN_RUN_RATE_FOR_A,
+  MIN_RUN_RATE_FOR_B,
+} from "../src/abc";
+import type { SalesPoint } from "../src/baseline";
 
 /**
  * Boundary semantics: for each product in revenue-desc order, the cut is made
@@ -104,30 +111,157 @@ describe("assignAbc", () => {
   });
 });
 
-describe("dailySalesValue", () => {
+/**
+ * The velocity floor. Ranking by value alone lets a rarely-sold premium item
+ * carry a big number on a handful of sales, so a product that does not actually
+ * move cannot be A however much it earned. The floors are the same two numbers
+ * rate-floor.ts guarantees a class-A product, which is the point: one file
+ * decides who qualifies, the other what qualifying is worth.
+ */
+describe("assignAbc — velocity floor", () => {
+  it("demotes a value-A product below the A floor to B", () => {
+    // 'slow' tops the value cut (share above = 0 -> A) but sells 0.1/day, under
+    // the A floor. It drops one tier, not to the tail: it still earns.
+    const out = assignAbc([
+      { id: "slow", revenue: 60, runRate: 0.1 },
+      { id: "fast", revenue: 50, runRate: 2 },
+      { id: "mid", revenue: 40, runRate: 1 },
+    ]);
+    expect(out.slow).toBe("B");
+    expect(out.fast).toBe("A");
+  });
+
+  it("demotes all the way to C when it is under the B floor too", () => {
+    const out = assignAbc([
+      { id: "slow", revenue: 60, runRate: 0.05 },
+      { id: "fast", revenue: 50, runRate: 2 },
+      { id: "mid", revenue: 40, runRate: 1 },
+    ]);
+    expect(out.slow).toBe("C");
+  });
+
+  it("keeps a product that sells exactly at a floor in its class", () => {
+    // The floors are minimums to clear, not thresholds to beat.
+    const out = assignAbc([
+      { id: "atA", revenue: 60, runRate: MIN_RUN_RATE_FOR_A },
+      { id: "other", revenue: 40, runRate: 3 },
+    ]);
+    expect(out.atA).toBe("A");
+
+    const tail = assignAbc([
+      { id: "hero", revenue: 950, runRate: 5 },
+      { id: "atB", revenue: 30, runRate: MIN_RUN_RATE_FOR_B },
+      { id: "small", revenue: 20, runRate: 1 },
+    ]);
+    // 'atB' falls in the C value-band here, so the B floor is what it is tested
+    // against only once it has been demoted into B — a floor never promotes.
+    expect(tail.atB).toBe("C");
+  });
+
+  it("leaves the classification untouched when no run rate is supplied", () => {
+    const withRate = assignAbc([
+      { id: "a", revenue: 100, runRate: 5 },
+      { id: "b", revenue: 20, runRate: 4 },
+    ]);
+    const without = assignAbc([
+      { id: "a", revenue: 100 },
+      { id: "b", revenue: 20 },
+    ]);
+    expect(without).toEqual(withRate);
+  });
+
+  it("the two cases the shop reported: 0.10/day is B, 0.09/day is C", () => {
+    // Both earn enough to top the value cut; neither sells enough to be a
+    // bestseller. 0.10 clears the B floor, 0.09 does not.
+    const out = assignAbc([
+      { id: "tenth", revenue: 100, runRate: 0.1 },
+      { id: "ninth", revenue: 100, runRate: 0.09 },
+      { id: "other", revenue: 10, runRate: 1 },
+    ]);
+    expect(out.tenth).toBe("B");
+    expect(out.ninth).toBe("C");
+  });
+
+  it("a line that used to sell and has stopped is demoted by the floor, not hidden by the ranking", () => {
+    // Ranking on real receipts keeps a big earlier earner high in the value cut.
+    // The floor is what takes it out of A — which is why both changes ship
+    // together: revenue says what it earned, run rate says whether it still does.
+    const out = assignAbc([
+      { id: "wasHot", revenue: 500, runRate: 0.02 },
+      { id: "steady", revenue: 300, runRate: 3 },
+    ]);
+    expect(out.wasHot).toBe("C");
+    expect(out.steady).toBe("A");
+  });
+});
+
+describe("trailingRevenue", () => {
   const TODAY = new Date("2026-07-21T00:00:00Z");
   const day = (daysAgo: number) => new Date(+TODAY - daysAgo * 864e5);
 
-  it("weights a pricey earner above a cheap fast-mover", () => {
-    const fastCheap = Array.from({ length: 30 }, (_, i) => ({ date: day(i + 1), quantity: 4 }));
-    const slowPricey = Array.from({ length: 30 }, (_, i) => ({ date: day(i + 1), quantity: 1 }));
-    expect(dailySalesValue(slowPricey, 4000, TODAY)).toBeGreaterThan(dailySalesValue(fastCheap, 200, TODAY));
-  });
-
-  it("a product with no sales has zero value", () => {
-    expect(dailySalesValue([], 5000, TODAY)).toBe(0);
-  });
-
-  it("ranks a strong seller on its in-stock rate, not its stockout-diluted rate", () => {
-    // Sells 2/day for a stretch, then a long out-of-stock gap, then sells again.
-    // The gap days come out of the denominator, so the ABC value reflects demand
-    // while in stock — otherwise a chronic-stockout earner is under-ranked.
-    const gappy: SalesPoint[] = [
-      ...Array.from({ length: 5 }, (_, i) => ({ date: day(30 - i), quantity: 2 })),
-      ...Array.from({ length: 10 }, (_, i) => ({ date: day(10 - i), quantity: 2 })),
+  it("sums the money on the receipts inside the window", () => {
+    const history: SalesPoint[] = [
+      { date: day(1), quantity: 2, revenueKes: 500 },
+      { date: day(10), quantity: 1, revenueKes: 250 },
     ];
-    expect(dailySalesValue(gappy, 1000, TODAY)).toBeGreaterThan(
-      weightedDailyRate(gappy, TODAY) * 1000
-    );
+    expect(trailingRevenue(history, 999, 90, TODAY)).toBe(750);
+  });
+
+  it("ignores sales older than the window", () => {
+    const history: SalesPoint[] = [
+      { date: day(10), quantity: 1, revenueKes: 100 },
+      { date: day(100), quantity: 50, revenueKes: 99_000 },
+    ];
+    expect(trailingRevenue(history, 999, 90, TODAY)).toBe(100);
+  });
+
+  it("ranks a discounted line on what it took, not on its price tag", () => {
+    // Always sold at half price: the shelf price says 1000 a unit, the till says
+    // 500. Ranking on the price tag would put it twice as high as it earned.
+    const history: SalesPoint[] = Array.from({ length: 10 }, (_, i) => ({
+      date: day(i + 1),
+      quantity: 1,
+      revenueKes: 500,
+    }));
+    expect(trailingRevenue(history, 1000, 90, TODAY)).toBe(5000);
+  });
+
+  it("falls back to the catalogue price for a row with units and no money", () => {
+    // A till line with no price signal, or a Shopify line with no unit price.
+    // Without the fallback a POS-fed shop ranks its real sellers at zero and the
+    // whole catalogue files under C.
+    const history: SalesPoint[] = [
+      { date: day(2), quantity: 3, revenueKes: 0 },
+      { date: day(3), quantity: 1, revenueKes: 400 },
+    ];
+    expect(trailingRevenue(history, 200, 90, TODAY)).toBe(1000);
+  });
+
+  it("keeps a refund negative rather than treating it as a missing price", () => {
+    const history: SalesPoint[] = [
+      { date: day(1), quantity: 2, revenueKes: 500 },
+      { date: day(2), quantity: -1, revenueKes: -250 },
+    ];
+    expect(trailingRevenue(history, 999, 90, TODAY)).toBe(250);
+  });
+
+  it("a product with no sales earns nothing", () => {
+    expect(trailingRevenue([], 5000, 90, TODAY)).toBe(0);
+  });
+});
+
+describe("resolveAbcWindowDays", () => {
+  it("takes an offered choice as given", () => {
+    expect(resolveAbcWindowDays(30)).toBe(30);
+    expect(resolveAbcWindowDays(60)).toBe(60);
+    expect(resolveAbcWindowDays(90)).toBe(90);
+  });
+
+  it("falls back to the default for an unset column or a value nobody offered", () => {
+    expect(resolveAbcWindowDays(null)).toBe(DEFAULT_ABC_WINDOW_DAYS);
+    expect(resolveAbcWindowDays(undefined)).toBe(DEFAULT_ABC_WINDOW_DAYS);
+    expect(resolveAbcWindowDays(0)).toBe(DEFAULT_ABC_WINDOW_DAYS);
+    expect(resolveAbcWindowDays(-45)).toBe(DEFAULT_ABC_WINDOW_DAYS);
+    expect(resolveAbcWindowDays(100_000)).toBe(DEFAULT_ABC_WINDOW_DAYS);
   });
 });
