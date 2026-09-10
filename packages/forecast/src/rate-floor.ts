@@ -12,18 +12,27 @@
  * rate so it is served at a real speed instead of vanishing off the buy list.
  * Class C gets no floor — a slow mover reading as slow is correct.
  *
- * Crucially the floor only ever LIFTS a product that is genuinely a seller: it
- * requires proof of real recent demand (`hadRecentSales`). It must never raise
- * a dead listing's rate above zero — layeredForecast treats a zero history rate
- * as "dead, never recommend", and a floor that resurrected it would put dead
- * stock back on the buy list. So a product with no sales in the window is left
- * exactly at its computed rate.
+ * **It only speaks when the shelf was actually empty.** The floor compensates
+ * for a measurement the stockout ruined; where there was no stockout there is
+ * nothing to compensate for, and lifting the rate then invents demand the shelf
+ * has never seen. Until 2026-09-10 the only gate was "sold at least one unit in
+ * the last 30 days", so a product that sat fully stocked all year and genuinely
+ * sells 0.09/day was served at 0.4/day — four times its real demand, ordered
+ * against a lead time. A shop reported it as "Run/day looks wrong"; three
+ * fully-stocked lines in one reproduction were each lifted to exactly 0.4.
  *
- * Pure: the caller passes the computed rate, the class, and whether the product
- * sold at all recently.
+ * "Most of a window" is the trigger this file already described, so that is what
+ * it now requires: the shelf empty on a majority of the days we have snapshot
+ * proof for. No proof at all means no floor — a tenant without snapshots is
+ * already served by the rate's own gap inference (baseline.ts), which is the
+ * mechanism for exactly that case.
+ *
+ * Pure: the caller passes the computed rate, the class, whether the product sold
+ * at all recently, and whether the shelf was mostly empty while it was measured.
  */
 
 import type { AbcCategory } from "./abc";
+import { dayKeyOf } from "./baseline";
 
 /**
  * Minimum daily units per ABC class. A ≈ one unit every ~2.5 days; B ≈ one unit
@@ -37,24 +46,67 @@ export const ABC_RATE_FLOORS: Record<AbcCategory, number> = {
 };
 
 /**
+ * Was the shelf empty for most of the days we can prove anything about?
+ *
+ * Proof comes from the nightly inventory snapshot. `snapshotsSince` bounds how
+ * far back it reaches, so a tenant three days into snapshotting is judged on
+ * three days rather than credited with a month it has no record of. Days before
+ * that, and tenants with no snapshots at all, are not proof of a full shelf —
+ * they are the absence of evidence, and the floor stays quiet for them.
+ *
+ * @param stockoutDates  days the snapshot recorded zero on hand
+ * @param snapshotsSince first day the tenant has snapshots for
+ * @param windowStart    start of the rate window being judged (inclusive)
+ * @param today          end of that window (exclusive — today is still trading)
+ */
+export function shelfWasMostlyEmpty(
+  stockoutDates: Date[] | undefined,
+  snapshotsSince: Date | undefined,
+  windowStart: Date,
+  today: Date
+): boolean {
+  if (!snapshotsSince) return false;
+
+  const from = Math.max(dayKeyOf(windowStart), dayKeyOf(snapshotsSince));
+  const to = dayKeyOf(today);
+  const DAY_MS = 86_400_000;
+  const provenDays = Math.round((to - from) / DAY_MS);
+  if (provenDays <= 0) return false;
+
+  const empty = new Set<number>();
+  for (const d of stockoutDates ?? []) {
+    const key = dayKeyOf(d);
+    if (key >= from && key < to) empty.add(key);
+  }
+  // Strict majority: "most of a window", the trigger this floor was written for.
+  return empty.size * 2 > provenDays;
+}
+
+/**
  * Lift a computed daily rate up to its ABC-class floor, but only for a product
- * with proven recent demand. Returns the rate unchanged when:
+ * with proven recent demand whose shelf was proven mostly empty. Returns the
+ * rate unchanged when:
  *   - the class has no floor (C, or an unknown/unclassified class), or
  *   - the product had no recent sales (`hadRecentSales` false) — flooring here
  *     would resurrect a dead listing, and layeredForecast's dead-stock guard
  *     keys off a zero rate, or
+ *   - the shelf was NOT mostly empty — the rate is then a measurement of demand
+ *     rather than of an outage, and it stands, or
  *   - the rate already meets or exceeds the floor.
  *
  * @param rate            the computed (censored) daily rate
  * @param abc             the product's ABC class
  * @param hadRecentSales  true if the product sold at least once in the rate window
+ * @param shelfMostlyEmpty true if the shelf was proven empty for most of that window
  */
 export function applyAbcRateFloor(
   rate: number,
   abc: AbcCategory | null | undefined,
-  hadRecentSales: boolean
+  hadRecentSales: boolean,
+  shelfMostlyEmpty: boolean
 ): number {
   if (!hadRecentSales) return rate;
+  if (!shelfMostlyEmpty) return rate;
   const floor = abc === "A" || abc === "B" ? ABC_RATE_FLOORS[abc] : 0;
   return rate > floor ? rate : floor;
 }
