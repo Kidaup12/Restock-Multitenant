@@ -2,7 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { prismaForTenant, prismaService } from "@wezesha/db";
-import { parseOrderMethod, type OrderMethod } from "@wezesha/forecast";
+import {
+  ABC_WINDOW_CHOICES,
+  parseOrderMethod,
+  type AbcWindowDays,
+  type OrderMethod,
+} from "@wezesha/forecast";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 
@@ -21,6 +26,8 @@ export type OrderingStrategyInput = {
   methodA: string;
   methodB: string;
   methodC: string;
+  /** How far back earnings are counted when sorting products into the groups. */
+  abcWindowDays: number;
 };
 
 export type OrderingStrategyResult = { ok: true } | { ok: false; error: string };
@@ -44,13 +51,26 @@ export async function saveOrderingStrategy(
     return { ok: false, error: "Pick a buying style for each group." };
   }
 
+  // Checked against the engine's own list rather than a copy: a window it does
+  // not accept would be stored, silently ignored on the next run, and read back
+  // into the form as a choice that is in force when it is not.
+  if (!(ABC_WINDOW_CHOICES as readonly number[]).includes(input.abcWindowDays)) {
+    return { ok: false, error: "Pick one of the offered periods." };
+  }
+  const abcWindowDays = input.abcWindowDays as AbcWindowDays;
+
   const db = prismaForTenant(membership.tenantId);
   const before = await db.tenantConfig.findUnique({
     where: { tenantId: membership.tenantId },
-    select: { methodA: true, methodB: true, methodC: true },
+    select: { methodA: true, methodB: true, methodC: true, abcWindowDays: true },
   });
 
-  const config = { methodA: methods.A, methodB: methods.B, methodC: methods.C };
+  const config = {
+    methodA: methods.A,
+    methodB: methods.B,
+    methodC: methods.C,
+    abcWindowDays,
+  };
   await db.tenantConfig.upsert({
     where: { tenantId: membership.tenantId },
     create: { tenantId: membership.tenantId, ...config },
@@ -60,12 +80,16 @@ export async function saveOrderingStrategy(
   // Same shape as the workspace audit: a strategy change moves every reorder
   // quantity on the next run, so "who changed the buying style, and from what"
   // is a question someone will ask after a surprising buy list.
-  const changed: Record<string, { from: string | null; to: string }> = {};
+  const changed: Record<string, { from: string | number | null; to: string | number }> = {};
   for (const key of ["A", "B", "C"] as const) {
     const from = before?.[`method${key}` as const] ?? null;
     // Narrowed above: all three are non-null past the validation guard.
     const to = methods[key] as OrderMethod;
     if (from !== to) changed[`method${key}`] = { from, to };
+  }
+  // The window moves every group's membership, so it belongs in the same trail.
+  if ((before?.abcWindowDays ?? null) !== abcWindowDays) {
+    changed.abcWindowDays = { from: before?.abcWindowDays ?? null, to: abcWindowDays };
   }
 
   if (Object.keys(changed).length > 0) {
