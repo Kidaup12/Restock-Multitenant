@@ -436,11 +436,17 @@ export function RowGroup({
           </TableCell>
         )}
         <TableCell className="max-w-[22rem]">
-          <button type="button" onClick={onToggle} className="flex items-center gap-2 text-left">
+          {/* w-full and min-w-0 all the way down, or the truncate below never
+              engages: a flex item will not shrink under its content width
+              without min-width:0, and the button sizes to its content unless
+              told to take the cell. The cell's own max-width bounds the cell
+              and not what is painted inside it, so a long product name ran
+              145px past its column and over the class beside it. */}
+          <button type="button" onClick={onToggle} className="flex w-full min-w-0 items-center gap-2 text-left">
             <span className="text-ink-faint">{open ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}</span>
             <span className="min-w-0">
-              <span className="flex items-center gap-1.5">
-                <span className="truncate font-medium text-ink">{row.title}</span>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="min-w-0 truncate font-medium text-ink">{row.title}</span>
                 <RowDots row={row} />
               </span>
               <span className="block truncate font-mono text-xs text-ink-faint">
