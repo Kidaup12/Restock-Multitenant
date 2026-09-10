@@ -1,9 +1,7 @@
 import { prismaForTenant, prismaForTenantTx } from "@wezesha/db";
 import {
   assignAbc,
-  trailingRevenue,
-  runRateDaily,
-  resolveAbcWindowDays,
+  dailySalesValue,
   walkForwardBacktest,
   walkForwardCutoffs,
   championsByClass,
@@ -93,7 +91,7 @@ export async function runBacktest(
 
   // One connection for both reads — see the note in packages/db on why a batch
   // through the per-operation client asks the pool for one connection per query.
-  const { products, sales, config } = await prismaForTenantTx(
+  const { products, sales } = await prismaForTenantTx(
     tenantId,
     async (tx) => ({
       products: await tx.product.findMany({
@@ -102,11 +100,7 @@ export async function runBacktest(
       }),
       sales: await tx.salesHistory.findMany({
         where: { date: { gte: historySince } },
-        select: { productId: true, date: true, quantity: true, revenueKes: true },
-      }),
-      config: await tx.tenantConfig.findUnique({
-        where: { tenantId },
-        select: { abcWindowDays: true },
+        select: { productId: true, date: true, quantity: true },
       }),
     }),
     { maxWait: 30_000, timeout: 120_000 }
@@ -123,21 +117,12 @@ export async function runBacktest(
   // and needs the classes as they stood over the history it replays, which is
   // why it ranks its own slice rather than reading Product.abcCategory (today's
   // letter, written by the nightly run). Nothing user-facing reads these — they
-  // only bucket accuracy scores inside BacktestRun. It ranks the same WAY the
-  // run does — real earnings over the shop's window, velocity floor applied — so
-  // a class means the same thing in both. Its rate is uncensored: the backtest
-  // does not load the shelf snapshots, so a chronically stocked-out line reads
-  // slower here than in a live run.
-  const abcWindowDays = resolveAbcWindowDays(config?.abcWindowDays);
+  // only bucket accuracy scores inside BacktestRun.
   const abcByProduct = assignAbc(
-    products.map((p) => {
-      const history = historyByProduct.get(p.id) ?? [];
-      return {
-        id: p.id,
-        revenue: trailingRevenue(history, p.priceKes, abcWindowDays, now),
-        runRate: runRateDaily(history, now),
-      };
-    })
+    products.map((p) => ({
+      id: p.id,
+      revenue: dailySalesValue(historyByProduct.get(p.id) ?? [], p.priceKes),
+    }))
   );
 
   const backtestProducts: BacktestProduct[] = products.map((p) => ({

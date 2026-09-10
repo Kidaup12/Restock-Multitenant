@@ -1,11 +1,6 @@
 import type { Metadata } from "next";
 import { prismaForTenant } from "@wezesha/db";
-import {
-  METHOD_DEFAULTS,
-  parseOrderMethod,
-  resolveAbcWindowDays,
-  type OrderMethod,
-} from "@wezesha/forecast";
+import { METHOD_DEFAULTS, parseOrderMethod, type OrderMethod } from "@wezesha/forecast";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -52,7 +47,7 @@ export default async function OrderingStrategyPage() {
 
   const config = await prismaForTenant(membership.tenantId).tenantConfig.findUnique({
     where: { tenantId: membership.tenantId },
-    select: { methodA: true, methodB: true, methodC: true, abcWindowDays: true },
+    select: { methodA: true, methodB: true, methodC: true },
   });
 
   // An unset column means the engine's default is in force, so the form opens on
@@ -72,7 +67,6 @@ export default async function OrderingStrategyPage() {
       />
       <StrategyForm
         initial={initial}
-        initialWindowDays={resolveAbcWindowDays(config?.abcWindowDays)}
         canManage={hasPermission(membership, "manage_settings")}
       />
     </div>
