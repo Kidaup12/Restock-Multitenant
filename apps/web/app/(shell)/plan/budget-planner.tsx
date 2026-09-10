@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
+import { DaysLeft } from "@/components/ui/days-left";
 import { formatCompact, formatMoney, formatNumber } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
 import { Input } from "@/components/ui/input";
@@ -537,9 +538,7 @@ export function BudgetTable({
               <TableCell className="hidden md:table-cell">{row.supplierName ?? "—"}</TableCell>
               <TableCell numeric className="hidden md:table-cell">{row.runRatePerDay}</TableCell>
               <TableCell numeric>
-                {row.onHandUnits <= 0 || row.daysUntilStockout == null
-                  ? "—"
-                  : `${row.daysUntilStockout}d`}
+                <DaysLeft days={row.daysUntilStockout} onHandUnits={row.onHandUnits} />
               </TableCell>
               <TableCell className="hidden md:table-cell">
                 {overdue ? (
