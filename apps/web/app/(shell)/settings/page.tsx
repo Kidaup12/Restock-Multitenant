@@ -96,8 +96,7 @@ async function SettingsSections({
       // The status line names what is actually set, so the hub answers "how do
       // we buy?" without opening the page — and a strategy nobody revisited
       // reads differently from one somebody chose.
-      description:
-        "Which products count as your best sellers, and how hard the buy list works to keep each group in stock.",
+      description: "How hard the buy list works to keep each group in stock.",
       status: strategySummary,
     },
     {

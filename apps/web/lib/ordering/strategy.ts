@@ -1,11 +1,4 @@
-import {
-  ABC_WINDOW_CHOICES,
-  DEFAULT_ABC_WINDOW_DAYS,
-  METHOD_DEFAULTS,
-  ORDER_METHODS,
-  type AbcWindowDays,
-  type OrderMethod,
-} from "@wezesha/forecast";
+import { METHOD_DEFAULTS, ORDER_METHODS, type OrderMethod } from "@wezesha/forecast";
 
 /**
  * How the three buying styles are described to a shop owner.
@@ -120,62 +113,4 @@ export function optionFor(method: OrderMethod): StrategyOption {
  *  An undescribed option would render as a blank card. */
 export function everyMethodDescribed(): boolean {
   return ORDER_METHODS.every((m) => STRATEGY_OPTIONS.some((o) => o.method === m));
-}
-
-/**
- * How far back the shop's earnings are counted when deciding which products are
- * its best sellers.
- *
- * Same rule as the buying styles: describe the effect, never the method. An
- * owner picking a window is choosing how quickly the groups follow a change in
- * what sells, not configuring a lookback.
- */
-export type WindowOption = {
-  days: AbcWindowDays;
-  label: string;
-  hint: string;
-};
-
-export const WINDOW_OPTIONS: readonly WindowOption[] = [
-  {
-    days: 30,
-    label: "Last 30 days",
-    hint: "Follows what is selling now. Groups move around more.",
-  },
-  {
-    days: 60,
-    label: "Last 60 days",
-    hint: "A middle ground: recent enough to notice a change, long enough to ride out a slow week.",
-  },
-  {
-    days: 90,
-    label: "Last 90 days",
-    hint: "Steadier. A quiet month will not move a line out of your best sellers.",
-  },
-] as const;
-
-/** The engine's own default window, shown as Recommended. */
-export const RECOMMENDED_WINDOW_DAYS = DEFAULT_ABC_WINDOW_DAYS;
-
-/** Guards the vocabulary against the engine offering a window nobody described,
- *  which would render as a missing choice rather than an error. */
-export function everyWindowDescribed(): boolean {
-  return ABC_WINDOW_CHOICES.every((d) => WINDOW_OPTIONS.some((o) => o.days === d));
-}
-
-/** Everything the strategy page lets an owner choose. */
-export type StrategySelection = {
-  methods: Record<StrategyClass, OrderMethod>;
-  windowDays: AbcWindowDays;
-};
-
-/** Whether a selection differs from what is stored. Save is gated on this, so
- *  anything this function forgets is a choice the owner cannot save — and the
- *  page would look like it simply ignored them. The window is exactly that
- *  risk: it sits outside the three per-group values the check began as. */
-export function strategyChanged(stored: StrategySelection, chosen: StrategySelection): boolean {
-  return (
-    STRATEGY_GROUPS.some((g) => stored.methods[g.key] !== chosen.methods[g.key]) ||
-    stored.windowDays !== chosen.windowDays
-  );
 }
