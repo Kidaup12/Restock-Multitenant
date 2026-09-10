@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
+import { DaysLeft } from "@/components/ui/days-left";
 import { formatMoney, formatNumber } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
 import { cn } from "@/lib/cn";
@@ -640,9 +641,7 @@ export function ExcludedSection({
                         <td className={cn(TD, "hidden md:table-cell")}>{row.supplierName ?? "—"}</td>
                         <td className={TD_NUM}>{row.onHandUnits}</td>
                         <td className={TD_NUM}>
-                          {row.onHandUnits <= 0 || row.daysUntilStockout == null
-                            ? "—"
-                            : `${row.daysUntilStockout}d`}
+                          <DaysLeft days={row.daysUntilStockout} onHandUnits={row.onHandUnits} />
                         </td>
                         {showsQty && (
                           <>
@@ -1055,9 +1054,7 @@ export function BuyChecklist({
                           <td className={cn(TD_NUM, "hidden lg:table-cell")}>{row.leadDays}d</td>
                           <td className={cn(TD_NUM, "hidden md:table-cell")}>{row.runRatePerDay}</td>
                           <td className={TD_NUM}>
-                            {row.onHandUnits <= 0 || row.daysUntilStockout == null
-                              ? "—"
-                              : `${row.daysUntilStockout}d`}
+                            <DaysLeft days={row.daysUntilStockout} onHandUnits={row.onHandUnits} />
                           </td>
                           <td className={cn(TD, "hidden md:table-cell")}>
                             {overdue ? (
