@@ -5,7 +5,7 @@
  * one shape and never re-derive the math.
  *
  * Cross-product steps stay with the caller: ABC assignment needs the whole
- * catalog (dailySalesValue + assignAbc), promo windows need the tenant's promo
+ * catalog (trailingRevenue + assignAbc), promo windows need the tenant's promo
  * table, and the stockout mask comes from inventory snapshots.
  */
 import type { SalesPoint, Urgency } from "./baseline";

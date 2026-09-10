@@ -7,6 +7,7 @@ import {
   METHOD_DEFAULTS,
   ORDER_METHODS,
 } from "../src/config";
+import { DEFAULT_ABC_WINDOW_DAYS } from "../src/abc";
 import { SERVICE_Z_DEFAULTS } from "../src/baseline";
 import { DEFAULT_CAP_MULTIPLE } from "../src/layered";
 
@@ -58,6 +59,7 @@ describe("resolveForecastKnobs", () => {
     expect(knobs.serviceZ).toEqual(SERVICE_Z_DEFAULTS);
     expect(knobs.capMultiple).toBe(DEFAULT_CAP_MULTIPLE);
     expect(knobs.methods).toEqual(METHOD_DEFAULTS);
+    expect(knobs.abcWindowDays).toBe(DEFAULT_ABC_WINDOW_DAYS);
   });
 
   it("tenant overrides win field by field; nulls mean default", () => {
@@ -68,6 +70,7 @@ describe("resolveForecastKnobs", () => {
       methodA: "lean_cash",
       methodB: "not-a-method",
       methodC: null,
+      abcWindowDays: 30,
     });
     expect(knobs.serviceZ.A).toBe(3.0);
     expect(knobs.serviceZ.B).toBe(SERVICE_Z_DEFAULTS.B);
@@ -76,6 +79,15 @@ describe("resolveForecastKnobs", () => {
     expect(knobs.methods.A).toBe("lean_cash");
     expect(knobs.methods.B).toBe(METHOD_DEFAULTS.B); // invalid string → default
     expect(knobs.methods.C).toBe(METHOD_DEFAULTS.C);
+    expect(knobs.abcWindowDays).toBe(30);
+  });
+
+  it("an ABC window nobody offered reads as the default rather than reaching the engine", () => {
+    // The column has no database constraint, so a value can arrive from the
+    // operator console or a support fix. A window of 0 would rank every product
+    // at zero earnings and file the whole catalogue under C.
+    expect(resolveForecastKnobs({ abcWindowDays: 0 }).abcWindowDays).toBe(DEFAULT_ABC_WINDOW_DAYS);
+    expect(resolveForecastKnobs({ abcWindowDays: 45 }).abcWindowDays).toBe(DEFAULT_ABC_WINDOW_DAYS);
   });
 });
 

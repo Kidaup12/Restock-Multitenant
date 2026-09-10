@@ -116,7 +116,18 @@ export {
 } from "./lead-time";
 
 // ABC classification
-export { assignAbc, dailySalesValue, type AbcInput, type AbcCategory } from "./abc";
+export {
+  assignAbc,
+  trailingRevenue,
+  resolveAbcWindowDays,
+  MIN_RUN_RATE_FOR_A,
+  MIN_RUN_RATE_FOR_B,
+  ABC_WINDOW_CHOICES,
+  DEFAULT_ABC_WINDOW_DAYS,
+  type AbcInput,
+  type AbcCategory,
+  type AbcWindowDays,
+} from "./abc";
 
 // ABC-class minimum serving rate
 export { applyAbcRateFloor, ABC_RATE_FLOORS } from "./rate-floor";
