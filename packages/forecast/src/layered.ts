@@ -40,7 +40,7 @@ import {
   seasonalLabel,
   type MonthlyExpectation,
 } from "./seasonality";
-import { applyAbcRateFloor } from "./rate-floor";
+import { applyAbcRateFloor, shelfWasMostlyEmpty } from "./rate-floor";
 import type { AbcCategory } from "./abc";
 
 export type ActivePromo = {
@@ -330,11 +330,26 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   const floorWindowStart = new Date(today);
   floorWindowStart.setUTCDate(floorWindowStart.getUTCDate() - 30);
   const hadRecentSales = input.history.some((p) => p.quantity > 0 && p.date >= floorWindowStart);
+  // ...and only when the shelf really was empty. Without this the floor fired on
+  // any product that had sold once in a month, so a fully-stocked line selling
+  // 0.09/day was served at 0.4 — demand it has never shown, ordered over a lead
+  // time. The snapshots the run already loads are the proof.
+  const shelfMostlyEmpty = shelfWasMostlyEmpty(
+    input.stockoutDates,
+    input.snapshotsSince,
+    floorWindowStart,
+    today
+  );
   const abcForFloor: AbcCategory | null =
     input.abcCategory === "A" || input.abcCategory === "B" || input.abcCategory === "C"
       ? input.abcCategory
       : null;
-  const historyDailyRate = applyAbcRateFloor(rawHistoryDailyRate, abcForFloor, hadRecentSales);
+  const historyDailyRate = applyAbcRateFloor(
+    rawHistoryDailyRate,
+    abcForFloor,
+    hadRecentSales,
+    shelfMostlyEmpty
+  );
   // The rate the inventory + sizing math runs on: the override when present
   // (cold-start borrow / owner expectation), else the history run rate.
   const dailyRate = override ? override.forecast30d / 30 : historyDailyRate;
