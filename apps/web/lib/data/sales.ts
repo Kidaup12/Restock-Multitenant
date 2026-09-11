@@ -5,8 +5,14 @@ import { trailingWindow } from "@/lib/data/trailing-window";
 
 /**
  * Sales-screen queries. Server-only; explicit tenantId; RLS-enforced tenant
- * client throughout. Seeded/synced SalesHistory dates are UTC midnights, so
- * grouping by the raw date column IS per-day grouping.
+ * client throughout.
+ *
+ * `SalesHistory.date` is a day marker, and every window here is a day window —
+ * but the column is a timestamp and not every writer stamps midnight, so
+ * grouping by the raw column is NOT per-day grouping. Two rows a few hours
+ * apart on the same day come back as two groups that then format to the same
+ * key: one day rendered twice on the chart, counted twice in `tradingDays`.
+ * Group by the key, not by the column.
  */
 
 const DAY_MS = 86_400_000;
@@ -22,20 +28,33 @@ export type SalesDay = {
 
 /** Per-day totals (all channels) for the trailing `days` days, oldest first.
  *  Days with no sales have no entry — charts should render from the dates given. */
-export async function getSalesSeries(tenantId: string, days = 30): Promise<SalesDay[]> {
+export async function getSalesSeries(
+  tenantId: string,
+  days = 30,
+  /** Injectable for tests; defaults to the wall clock. */
+  now: Date = new Date(),
+): Promise<SalesDay[]> {
   const db = prismaForTenant(tenantId);
-  const since = new Date(Date.now() - days * DAY_MS);
+  // The shared window, not `now - days`: an instant boundary keeps or drops its
+  // own day depending on the hour the page loaded, and covers a day more than
+  // the tile beside it.
+  const { start } = trailingWindow(days, now);
   const grouped = await db.salesHistory.groupBy({
     by: ["date"],
-    where: { date: { gte: since } },
+    where: { date: { gte: start } },
     _sum: { quantity: true, revenueKes: true },
     orderBy: { date: "asc" },
   });
-  return grouped.map((g) => ({
-    date: g.date.toISOString().slice(0, 10),
-    unitsSold: g._sum.quantity ?? 0,
-    revenueKes: g._sum.revenueKes ?? 0,
-  }));
+
+  const byDay = new Map<string, SalesDay>();
+  for (const g of grouped) {
+    const date = g.date.toISOString().slice(0, 10);
+    const day = byDay.get(date) ?? { date, unitsSold: 0, revenueKes: 0 };
+    day.unitsSold += g._sum.quantity ?? 0;
+    day.revenueKes += g._sum.revenueKes ?? 0;
+    byDay.set(date, day);
+  }
+  return [...byDay.values()];
 }
 
 export type SalesComparison = {
@@ -56,10 +75,16 @@ export type SalesComparison = {
 
 /** The trailing window plus the window before it, split once here so screen
  *  components stay pure (no clock reads in render). */
-export async function getSalesComparison(tenantId: string, days = 30): Promise<SalesComparison> {
-  const doubled = await getSalesSeries(tenantId, days * 2);
+export async function getSalesComparison(
+  tenantId: string,
+  days = 30,
+  /** Injectable for tests; defaults to the wall clock. One instant for both
+   *  halves, so the boundary cannot move between them. */
+  now: Date = new Date(),
+): Promise<SalesComparison> {
+  const doubled = await getSalesSeries(tenantId, days * 2, now);
   // The shared boundary, as a day key — `doubled` is already grouped by day.
-  const { startKey: cutoff } = trailingWindow(days);
+  const { startKey: cutoff } = trailingWindow(days, now);
   const series = doubled.filter((s) => s.date >= cutoff);
   return {
     series,
@@ -142,7 +167,9 @@ export async function getTopProducts(
 ): Promise<TopProduct[]> {
   const db = prismaForTenant(tenantId);
   const now = new Date();
-  const since = new Date(now.getTime() - days * DAY_MS);
+  // Same window as the chart and the tile: "best sellers over the last 30 days"
+  // has to mean the same 30 days as everything else the page labels that way.
+  const { start: since } = trailingWindow(days, now);
   const grouped = await db.salesHistory.groupBy({
     by: ["productId"],
     where: { date: { gte: since } },

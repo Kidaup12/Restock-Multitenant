@@ -81,8 +81,11 @@ function utcDay(daysAgo: number): Date {
  * following afternoon and the Planner paused itself, so a fresh checkout met an
  * empty buy list on the screen the product is named after.
  *
- * The clamp keeps it honest either way: an hour ago, or this evening, whichever
- * is earlier, so nothing is stamped in the future for someone seeding at 09:00.
+ * The clamp keeps it honest at both ends: an hour ago, or this evening,
+ * whichever is earlier, so nothing is stamped in the future for someone seeding
+ * at 09:00 — and never earlier than midnight, so a seed run between 00:00 and
+ * 01:00 UTC does not stamp "today" into yesterday, where it lands in the same
+ * day as the day-1 rows and today gets no sales at all.
  *
  * A static seed still ages. This buys roughly a day and a half from the moment
  * it runs; past that the honest fix is to seed again, not to widen the gate.
@@ -93,7 +96,15 @@ const AN_HOUR_MS = 3_600_000;
  *  the clock inside it stamped each of today's sales a millisecond apart. The
  *  series groups by timestamp, so 30 products became 30 buckets for one day and
  *  the "30-day window" held 52 entries. One value keeps today a single bucket. */
-const TODAY_SALE_AT = Math.min(Date.now() - AN_HOUR_MS, utcDay(0).getTime() + EVENING_MS);
+export function todaySaleAt(nowMs: number): number {
+  const midnight = Date.UTC(
+    new Date(nowMs).getUTCFullYear(),
+    new Date(nowMs).getUTCMonth(),
+    new Date(nowMs).getUTCDate(),
+  );
+  return Math.max(midnight, Math.min(nowMs - AN_HOUR_MS, midnight + EVENING_MS));
+}
+const TODAY_SALE_AT = todaySaleAt(Date.now());
 function saleAt(daysAgo: number): Date {
   const day = utcDay(daysAgo);
   if (daysAgo === 0) return new Date(TODAY_SALE_AT);
