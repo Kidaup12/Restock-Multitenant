@@ -186,9 +186,9 @@ describe("recommendedQty", () => {
     });
 
     it("min_max policy forces par top-up even for an A-class SKU", () => {
-      // par = ceil(2/day * 14 + 10) = 38; gap = 38 - 0 - 0
+      // par = ceil(2/day * (14 lead + 7 review) + 10) = 52; gap = 52 - 0 - 0
       const qty = recommendedQty({ ...base, abcCategory: "A", policy: { serviceLevel: null, rule: "min_max" } });
-      expect(qty).toBe(38);
+      expect(qty).toBe(52);
     });
 
     it("stay_in_stock (0.95) orders more than balanced (0.90) for the same SKU", () => {
@@ -204,8 +204,26 @@ describe("recommendedQty", () => {
     });
 
     it("C without a policy uses the min/max par rule", () => {
-      // par = ceil(2*14 + 10) = 38
-      expect(recommendedQty({ ...base, abcCategory: "C" })).toBe(38);
+      // par = ceil(2 * (14 + 7) + 10) = 52
+      expect(recommendedQty({ ...base, abcCategory: "C" })).toBe(52);
+    });
+
+    it("the par reaches the next delivery — a slower supplier buys more", () => {
+      // The defect this replaced: a flat two weeks whatever the lead time, so a
+      // 60-day import was bought 14 days of cover and sat empty for the rest of
+      // every cycle.
+      const near = recommendedQty({ ...base, abcCategory: "C", leadTimeAvg: 7 });
+      const far = recommendedQty({ ...base, abcCategory: "C", leadTimeAvg: 60 });
+      expect(far).toBeGreaterThan(near);
+      // 2/day over 67 days + 10 safety
+      expect(far).toBe(144);
+    });
+
+    it("keeps the two-week par when the supplier has no stated lead time", () => {
+      // A floor, not a replacement: without this the review cycle alone (7 days)
+      // would HALVE the order for every product whose supplier lead is unset.
+      const noLead = recommendedQty({ ...base, abcCategory: "C", leadTimeAvg: undefined });
+      expect(noLead).toBe(38); // ceil(2 * 14 + 10)
     });
   });
 });
