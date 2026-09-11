@@ -97,8 +97,9 @@ export type InsightsOverview = {
     /** Canonical count — the same number Today shows. */
     skus: number;
     trackedProducts: number;
-    /** skus / trackedProducts, one decimal. */
-    ratePct: number;
+    /** skus / trackedProducts, one decimal. null when nothing is tracked:
+     *  no denominator, so no rate. */
+    ratePct: number | null;
     /** Subset already counted in `skus` whose on-hand is negative, which the
      *  stock screen reports separately as "oversold". */
     oversoldSkus: number;
@@ -237,9 +238,11 @@ export async function getInsightsOverview(
     stockouts: {
       skus: today.stockedOutProducts,
       trackedProducts: today.trackedProducts,
+      // null = nothing tracked, so nothing measured. A zero here reads as a
+      // shelf with nothing empty on it, which is the opposite of not knowing.
       ratePct: today.trackedProducts
         ? Math.round((today.stockedOutProducts / today.trackedProducts) * 1000) / 10
-        : 0,
+        : null,
       oversoldSkus: oversold,
     },
     deadStock: today.deadStock,
