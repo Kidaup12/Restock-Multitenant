@@ -30,7 +30,7 @@ describe("assessIngestHealth", () => {
 
   it("STOPS when the newest sale is older than maxStaleHours", () => {
     const daily = steady(30, 20, lastCompletedKey);
-    const old = new Date(now.getTime() - 48 * 3_600_000); // 48h ago > 36h default
+    const old = new Date(now.getTime() - 72 * 3_600_000); // 72h ago > 60h default
     const v = assessIngestHealth(daily, old, now);
     expect(v.stale).toBe(true);
     expect(v.stop).toBe(true);

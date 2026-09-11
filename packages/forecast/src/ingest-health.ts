@@ -26,7 +26,12 @@
 export type DailyPoint = { dayKey: number; units: number };
 
 export type IngestHealthConfig = {
-  /** Feed considered stopped past this many hours with no new sale. */
+  /** Feed considered stopped past this many hours with no new sale.
+   *  Read it in days: sales carry a UTC-midnight day marker, not a timestamp, so
+   *  the age of the newest sale is always a whole number of days plus however
+   *  long today has been running. 60 means "two days have gone by with nothing",
+   *  which a closed Sunday does not trip and a stopped feed does. At 36 a shop
+   *  that simply shut for a day was called broken every afternoon. */
   maxStaleHours: number;
   /** A day below this fraction of the trailing norm is a feed-gap day. */
   lowFrac: number;
@@ -40,7 +45,7 @@ export type IngestHealthConfig = {
 };
 
 export const DEFAULT_INGEST_HEALTH: IngestHealthConfig = {
-  maxStaleHours: 36,
+  maxStaleHours: 60,
   lowFrac: 0.2,
   minNorm: 10,
   imputeLookback: 7,
