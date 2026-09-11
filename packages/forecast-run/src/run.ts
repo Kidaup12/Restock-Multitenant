@@ -28,6 +28,7 @@ import {
   expandPromoWindowsToDays,
   boundedMultiplier,
   assessIngestHealth,
+  DEFAULT_INGEST_HEALTH,
   type IngestVerdict,
   type ActivePromo,
   type MonthlyExpectation,
@@ -161,24 +162,41 @@ export function assessTenantIngest(
   const daily = [...byDay.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([dayKey, units]) => ({ dayKey, units }));
-  // A shop that has barely ever sold has no established feed to call "stopped" —
-  // an empty history is a young tenant, not a broken feed. Only judge staleness
-  // once there is a real trading history to compare the silence against, so the
-  // gate never blocks a new shop's very first forecast.
-  const MIN_DAYS_TO_JUDGE = 14;
-  if (daily.filter((d) => d.units > 0).length < MIN_DAYS_TO_JUDGE) {
+  // A shop that has never sold has nothing to call stale: there is no data to be
+  // old. Say that rather than returning silence, and let the run proceed — the
+  // gate must never block a new shop's very first forecast.
+  if (latestSaleAt == null) {
     return {
       ok: true,
       stop: false,
       impute: false,
       gapDayKeys: [],
-      reasons: [],
+      reasons: ["No sales have ever come through for this shop."],
       stale: false,
       trailingNorm: 0,
       latestSaleAt,
     };
   }
-  return assessIngestHealth(daily, latestSaleAt, now);
+
+  // Leniency belongs on the check that needs a norm, not on the one that needs a
+  // timestamp. A short history cannot say whether a day came in below normal —
+  // there is no normal — but it says nothing at all about how old the newest
+  // sale is, and that is measurable from a single row.
+  //
+  // These were one rule, and it read the wrong way round: a shop with one
+  // selling day was recorded as "not stale" rather than "not enough history to
+  // say", so the shops with the least data were the only ones never judged. Two
+  // production shops forecast every half hour off sales 38 and 45 days old, with
+  // no notice to anyone, while shops 24 days stale were correctly held.
+  const sellingDays = daily.filter((d) => d.units > 0).length;
+  const MIN_DAYS_TO_JUDGE_GAPS = 14;
+  const cfg =
+    sellingDays < MIN_DAYS_TO_JUDGE_GAPS
+      ? // Disable gap detection through its own knob rather than a second branch:
+        // no norm can clear an unreachable threshold.
+        { ...DEFAULT_INGEST_HEALTH, minNorm: Number.POSITIVE_INFINITY }
+      : DEFAULT_INGEST_HEALTH;
+  return assessIngestHealth(daily, latestSaleAt, now, cfg);
 }
 
 /**
