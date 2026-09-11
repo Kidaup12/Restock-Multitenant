@@ -149,9 +149,14 @@ export function assessTenantIngest(
   let latestSaleAt: Date | null = null;
   for (const row of sales) {
     const key = dayKeyMs(row.date);
-    if (key >= todayKey) continue; // today is partial — judge completed days only
-    byDay.set(key, (byDay.get(key) ?? 0) + row.quantity);
+    // Today counts for "when did data last arrive" but not for "was that a
+    // normal day's volume" — a part-traded day cannot be compared against a
+    // whole one. Keeping it out of BOTH made the freshest a feed could ever look
+    // be yesterday-midnight, which passes the staleness threshold at noon: every
+    // real shop was called stopped for the back half of every day.
     if (latestSaleAt == null || row.date > latestSaleAt) latestSaleAt = row.date;
+    if (key >= todayKey) continue;
+    byDay.set(key, (byDay.get(key) ?? 0) + row.quantity);
   }
   const daily = [...byDay.entries()]
     .sort((a, b) => a[0] - b[0])
