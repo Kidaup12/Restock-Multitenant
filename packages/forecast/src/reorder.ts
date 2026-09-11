@@ -54,6 +54,9 @@ function tauForClass(abc: string | null | undefined): number {
  *  the protection interval, NOT the cover window (which under-covered
  *  long-lead items: lead 28 > cover 21 meant running out before arrival). */
 const REVIEW_DAYS = ORDER_REVIEW_DAYS;
+/** The shortest par window, kept from when this rule was a flat two weeks. It is
+ *  a floor so the change can only ever raise an order, never cut one. */
+const MIN_PAR_DAYS = 14;
 
 export type ReorderMethod = "mean_cover" | "calibrated" | "min_max";
 
@@ -116,13 +119,25 @@ export function reorderBreakdown(input: ReorderInput): ReorderBreakdown {
   }
 
   if (useMinMax) {
-    // Min/max rule: maintain a par level of 2 weeks of demand + safety stock.
-    // Never order a full month's worth for a SKU that might sell 3 units a month.
-    const parLevel = Math.max(1, Math.ceil(dailyForecast * 14 + safetyStock));
+    // Min/max rule: a par level of demand + safety stock, over a window that has
+    // to reach the next delivery.
+    //
+    // It was a flat 14 days, to stop a SKU selling three a month being bought a
+    // month at a time. But a shelf cannot be refilled faster than the supplier
+    // ships: on a 60-day lead, two weeks of cover is not lean, it is a line that
+    // runs out 40 days before the next box lands, every cycle. Leanness belongs
+    // in the service level this branch already forgoes, not in a horizon shorter
+    // than the resupply.
+    //
+    // MIN_PAR_DAYS is a floor, never a replacement: a product whose supplier has
+    // no stated lead time keeps the two weeks it has today rather than dropping
+    // to the review cycle alone. So no product is ever ordered LESS than before.
+    const parDays = Math.max(MIN_PAR_DAYS, (input.leadTimeAvg ?? 0) + REVIEW_DAYS);
+    const parLevel = Math.max(1, Math.ceil(dailyForecast * parDays + safetyStock));
     return {
       method: "min_max", targetUnits: parLevel, qty: net(parLevel),
       dailyForecast, safetyStock, currentStock, onOrder,
-      windowDays: 14, serviceLevel: null, demandOverCover: dailyForecast * 14,
+      windowDays: parDays, serviceLevel: null, demandOverCover: dailyForecast * parDays,
     };
   }
 
