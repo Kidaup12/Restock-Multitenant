@@ -13,8 +13,11 @@ import type { OwnerReport, TrendRow, AttentionLine } from "./owner-report";
 
 const DEFAULT_BRAND = "Wezesha Restock";
 
-/** Short money: the tenant's currency code + a k/M-abbreviated amount. */
-function money(cur: string, n: number): string {
+/** Short money: the tenant's currency code + a k/M-abbreviated amount. A null
+ *  is a number the report never had the inputs to compute, and renders as a
+ *  dash — never as a confident zero. */
+function money(cur: string, n: number | null): string {
+  if (n == null) return "—";
   const a = Math.abs(n);
   const short =
     a >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
@@ -35,7 +38,9 @@ const abcChip = (abc: AttentionLine["abc"]) => {
  *  numbers, no "improving/worsening" verdict (owner reads the trend themselves). */
 function improvementLine(trend: TrendRow[], unit: string): string {
   const withData = trend.filter((t) => t.stockoutPct != null);
-  if (withData.length < 2) return `Bestseller stockout rate this ${unit}: ${withData[0]?.stockoutPct ?? "—"}%.`;
+  // `${null}%` prints "—%", which reads as a measured zero-point-something. The
+  // dash has to stand alone: this is the email's first line.
+  if (withData.length < 2) return `Bestseller stockout rate this ${unit}: ${pct(withData[0]?.stockoutPct ?? null)}.`;
   const now = withData[0]!.stockoutPct!;
   const prev = withData[1]!.stockoutPct!;
   const colour = now > prev ? "#c0392b" : now < prev ? "#2f8a4c" : "#666";

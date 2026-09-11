@@ -33,7 +33,11 @@ export type TrendRow = {
   overstockCount: number | null;
   deadCount: number;
   deadValueKes: number;   // capital frozen in dead stock
-  missedRevenueKes: number;
+  /** null = never measured, which is not the same as nothing was lost. Paired
+   *  with stockoutPct: the two come out of one calculation, so one of them
+   *  printing a confident zero beside the other's dash is the report claiming
+   *  to know something it does not. */
+  missedRevenueKes: number | null;
   partial: boolean;
   inferred: boolean;
 };
@@ -217,15 +221,15 @@ async function latestForecastRunId(tenantId: string): Promise<string | null> {
 
 // ── Trend engine (inlined + trimmed from stockHealthByPeriod) ─────────────────
 
-type SnapRow = { period: string; pid: string; minOh: number; endOh: number; daysOut: number };
-type SaleRow = { period: string; pid: string; qty: number };
-type ProductMeta = { abc: string | null; costKes: number; priceKes: number };
+export type SnapRow = { period: string; pid: string; minOh: number; endOh: number; daysOut: number };
+export type SaleRow = { period: string; pid: string; qty: number };
+export type ProductMeta = { abc: string | null; costKes: number; priceKes: number };
 
 /** Per-period roll-up: A/B stockout split + rate, dead count/value, overstock
  *  count, missed revenue. Mirrors the reference stockHealthByPeriod, keeping the
  *  same stockout / dead-stock / inferred-pre-snapshot rules but only computing
  *  the numbers this report renders. Pure. */
-type PeriodHealth = {
+export type PeriodHealth = {
   period: string;
   stockoutA: number;
   stockoutB: number;
@@ -233,13 +237,15 @@ type PeriodHealth = {
   overstockCount: number | null;
   deadStockCount: number;
   deadStockValueKes: number;
-  missedRevenueKes: number;
+  missedRevenueKes: number | null;
   stockoutInferred: boolean;
 };
 
 const OVERSTOCK_THRESHOLD_DAYS = 90;
 
-function stockHealthByPeriod(input: {
+/** Exported for its own test: the pairing between the stockout rate and the
+ *  missed revenue beside it is only checkable on the numbers themselves. */
+export function stockHealthByPeriod(input: {
   periods: string[];
   granularity: ReportGranularity;
   snaps: SnapRow[];
@@ -357,7 +363,12 @@ function stockHealthByPeriod(input: {
       overstockCount: psnaps ? overstockCount : null,
       deadStockCount: deadCount,
       deadStockValueKes: Math.round(deadValue),
-      missedRevenueKes: missedRevenue,
+      // Missed revenue only exists where a stockout was OBSERVED: it is summed
+      // inside the snapshot loop, so with no snapshots, or no A/B products to
+      // look at, the accumulator stays at zero for want of anything to add
+      // rather than because nothing was lost. An inferred rate is a censoring
+      // signal, not a measurement, and cannot price what it did not see.
+      missedRevenueKes: psnaps && abSkuCount > 0 ? missedRevenue : null,
       stockoutInferred,
     };
   });
