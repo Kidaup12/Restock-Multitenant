@@ -162,7 +162,9 @@ describe.skipIf(!runnable)("insights (seeded local db)", () => {
       ]);
 
       expect(overview.stockouts.trackedProducts).toBe(0);
-      expect(overview.stockouts.ratePct).toBe(0); // not NaN
+      // Not NaN, and not zero either: with nothing tracked there is no
+      // denominator, and a rate of 0% reads as a shelf with nothing empty.
+      expect(overview.stockouts.ratePct).toBeNull();
       expect(overview.shelfRows).toEqual([]);
       expect(scorecard.latest).toBeNull();
       expect(scorecard.firstSaleAt).toBeNull();

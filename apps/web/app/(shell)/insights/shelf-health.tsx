@@ -101,7 +101,7 @@ export async function ShelfHealth({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatTile
           label="Empty right now"
-          value={`${stockouts.ratePct}%`}
+          value={stockouts.ratePct == null ? "—" : `${stockouts.ratePct}%`}
           valueTone={stockouts.skus > 0 ? "negative" : "positive"}
           delta={{
             label: `${formatNumber(stockouts.skus)} of ${formatNumber(stockouts.trackedProducts)} products`,
