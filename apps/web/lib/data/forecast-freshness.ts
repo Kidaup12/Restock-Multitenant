@@ -52,27 +52,36 @@ function nightsAgo(runDate: Date | string, now: number): number {
 }
 
 /** Coarse and deliberately so: nobody acts differently on 4h against 5h, and a
- *  minute-accurate reading invites re-reading it. */
-function relativeAge(ageMs: number): string {
+ *  minute-accurate reading invites re-reading it.
+ *
+ *  Past a day it reports the SAME calendar nights the sentence does, rather than
+ *  flooring elapsed hours. The two disagree whenever the gap is not a whole
+ *  number of days: a run at 19:07 read four calendar days later is 90 elapsed
+ *  hours, which floors to three. The banner said "computed 8 Sept — 4 nights
+ *  ago" and "(3d ago)" in one sentence, on a live shop. */
+function relativeAge(ageMs: number, nights: number): string {
   const minutes = Math.floor(ageMs / (60 * 1000));
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+  return `${nights}d ago`;
 }
 
 export function planFreshnessLabel(runDate: Date | string, now: number = Date.now()): PlanFreshness {
   const day = new Date(runDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-  const relative = relativeAge(planAgeMs(runDate, now));
+  const nights = nightsAgo(runDate, now);
+  const relative = relativeAge(planAgeMs(runDate, now), nights);
   if (!isPlanStale(runDate, now)) {
     return { tone: "neutral", text: `Plan computed ${day}`, short: `run ${day}`, relative };
   }
-  const nights = nightsAgo(runDate, now);
+  // A gap over the 36h threshold can still be one calendar night — a run at
+  // 01:00 read at 14:00 the next day is 37 hours and one night.
+  const nightWord = nights === 1 ? "night" : "nights";
   return {
     tone: "warning",
-    text: `This plan was computed ${day} — ${nights} nights ago. The overnight run has not finished since, so these numbers are behind your stock.`,
-    short: `${nights} nights out of date`,
+    text: `This plan was computed ${day} — ${nights} ${nightWord} ago. The overnight run has not finished since, so these numbers are behind your stock.`,
+    short: `${nights} ${nightWord} out of date`,
     relative,
   };
 }

@@ -73,4 +73,33 @@ describe("plan freshness", () => {
     expect(verdict.tone).toBe("warning");
     expect(verdict.relative).toBe("5d ago");
   });
+
+  it("prints ONE age when the gap is not a whole number of days", () => {
+    // The live defect, 12 September: a run at 19:07 read four calendar days
+    // later is 90 elapsed hours. Flooring that gives three; the calendar gives
+    // four. The banner carried both — "computed 8 Sept — 4 nights ago (3d ago)"
+    // — in one sentence, with no way for a reader to know which to believe.
+    //
+    // Every other case in this file offsets by whole 24-hour multiples from
+    // 02:00, where the two methods cannot disagree. That is why the test named
+    // "agrees with the sentence beside it" passed while the screen did not.
+    const run = new Date("2026-09-08T19:07:00Z");
+    const verdict = planFreshnessLabel(run, new Date("2026-09-12T13:00:00Z").getTime());
+
+    expect(verdict.text).toContain("4 nights ago");
+    expect(verdict.relative).toBe("4d ago");
+    expect(verdict.short).toBe("4 nights out of date");
+  });
+
+  it("does not say 1 nights", () => {
+    // Reachable: past the 36h threshold but inside one calendar night — a run
+    // at 01:00 read at 14:00 the next day is 37 hours and one night.
+    const run = new Date("2026-08-04T01:00:00Z");
+    const verdict = planFreshnessLabel(run, new Date("2026-08-05T14:00:00Z").getTime());
+
+    expect(verdict.tone).toBe("warning");
+    expect(verdict.text).toContain("1 night ago");
+    expect(verdict.text).not.toContain("1 nights");
+    expect(verdict.short).toBe("1 night out of date");
+  });
 });
