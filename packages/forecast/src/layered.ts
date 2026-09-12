@@ -40,7 +40,12 @@ import {
   seasonalLabel,
   type MonthlyExpectation,
 } from "./seasonality";
-import { applyAbcRateFloor, abcFloorFor, shelfWasMostlyEmpty } from "./rate-floor";
+import {
+  applyAbcRateFloor,
+  abcFloorFor,
+  demonstratedDailyRate,
+  shelfWasMostlyEmpty,
+} from "./rate-floor";
 import type { AbcCategory } from "./abc";
 
 export type ActivePromo = {
@@ -345,15 +350,21 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
       ? input.abcCategory
       : null;
   const abcFloor = abcFloorFor(abcForFloor, hadRecentSales, shelfMostlyEmpty);
+  const demonstrated = demonstratedDailyRate(input.history);
   const historyDailyRate = applyAbcRateFloor(
     rawHistoryDailyRate,
     abcForFloor,
     hadRecentSales,
-    shelfMostlyEmpty
+    shelfMostlyEmpty,
+    demonstrated
   );
   // Whether the number below is a measurement or a policy minimum — the buy list
   // has to say which, and only this comparison knows.
-  const rateHeldAtFloor = abcFloor > rawHistoryDailyRate;
+  const rateHeldAtFloor = historyDailyRate > rawHistoryDailyRate;
+  // ...and whether the lift stopped short of the class minimum because the shelf
+  // has never shown that much. The two cases need different words: one is the
+  // class policy, the other is this product's own best.
+  const heldAtDemonstrated = rateHeldAtFloor && historyDailyRate < abcFloor - 1e-9;
   // The rate the inventory + sizing math runs on: the override when present
   // (cold-start borrow / owner expectation), else the history run rate.
   const dailyRate = override ? override.forecast30d / 30 : historyDailyRate;
@@ -540,13 +551,18 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
           ]
         : [
             rateHeldAtFloor
-              ? // Name the floor, not the window: the window rate was computed and
-                // then discarded, so crediting it describes arithmetic that did
-                // not happen.
-                `Forecast ${finalForecast30d.toFixed(0)} units over 30 days at the ` +
-                `${abcForFloor}-class minimum of ${abcFloor}/day. The shelf has been ` +
-                `empty for most of the window, so what it sold is not what it would have sold — ` +
-                `this is a floor, not a measured rate.`
+              ? // Name what actually set the number, not the window: the window
+                // rate was computed and then replaced, so crediting it describes
+                // arithmetic that did not happen.
+                heldAtDemonstrated
+                ? `Forecast ${finalForecast30d.toFixed(0)} units over 30 days at ` +
+                  `${historyDailyRate.toFixed(2)}/day — the fastest this has sold while it was in ` +
+                  `stock. The shelf has been empty for most of the window, so its recent rate ` +
+                  `reads lower than it sells.`
+                : `Forecast ${finalForecast30d.toFixed(0)} units over 30 days at the ` +
+                  `${abcForFloor}-class minimum of ${abcFloor}/day. The shelf has been ` +
+                  `empty for most of the window, so what it sold is not what it would have sold — ` +
+                  `this is a floor, not a measured rate.`
               : `Forecast ${finalForecast30d.toFixed(0)} units over 30 days from the ${
                   isNew ? `last-${Math.max(1, Math.round(span))}-day rate (new product)` : "recency-weighted run rate (30/90/365-day blend)"
                 }.`,
