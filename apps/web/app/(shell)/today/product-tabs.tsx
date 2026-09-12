@@ -281,7 +281,7 @@ export function ProductTabs({
                 ) : (
                   <>
                     <TableHead numeric>Stock</TableHead>
-                    <TableHead numeric>Run/day</TableHead>
+                    <TableHead numeric>Sells/day</TableHead>
                     <TableHead numeric>Days left</TableHead>
                     <TableHead numeric>En route</TableHead>
                   </>

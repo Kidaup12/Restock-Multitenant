@@ -157,7 +157,7 @@ export function BudgetPlanner({
     { header: "Supplier", cell: (r) => r.supplierName ?? "" },
     { header: "MOQ", cell: (r) => r.moq },
     { header: "Lead days", cell: (r) => r.leadDays },
-    { header: "Run/day", cell: (r) => r.runRatePerDay },
+    { header: "Buying at/day", cell: (r) => r.runRatePerDay },
     { header: "Days left", cell: (r) => r.daysUntilStockout },
     { header: "Order by", cell: (r) => dayLabel(r.orderByDate) },
     { header: "Order qty", cell: (r) => r.recommendedQty },
@@ -499,7 +499,7 @@ export function BudgetTable({
         )}
         <TableHead>Product</TableHead>
         <TableHead className="hidden md:table-cell">Supplier</TableHead>
-        <TableHead numeric className="hidden md:table-cell">Run/day</TableHead>
+        <TableHead numeric className="hidden md:table-cell">Buying at/day</TableHead>
         <TableHead numeric>Days left</TableHead>
         <TableHead className="hidden md:table-cell">Order by</TableHead>
         <TableHead numeric>Qty</TableHead>
