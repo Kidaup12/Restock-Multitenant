@@ -40,7 +40,7 @@ import {
   seasonalLabel,
   type MonthlyExpectation,
 } from "./seasonality";
-import { applyAbcRateFloor, shelfWasMostlyEmpty } from "./rate-floor";
+import { applyAbcRateFloor, abcFloorFor, shelfWasMostlyEmpty } from "./rate-floor";
 import type { AbcCategory } from "./abc";
 
 export type ActivePromo = {
@@ -344,12 +344,16 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
     input.abcCategory === "A" || input.abcCategory === "B" || input.abcCategory === "C"
       ? input.abcCategory
       : null;
+  const abcFloor = abcFloorFor(abcForFloor, hadRecentSales, shelfMostlyEmpty);
   const historyDailyRate = applyAbcRateFloor(
     rawHistoryDailyRate,
     abcForFloor,
     hadRecentSales,
     shelfMostlyEmpty
   );
+  // Whether the number below is a measurement or a policy minimum — the buy list
+  // has to say which, and only this comparison knows.
+  const rateHeldAtFloor = abcFloor > rawHistoryDailyRate;
   // The rate the inventory + sizing math runs on: the override when present
   // (cold-start borrow / owner expectation), else the history run rate.
   const dailyRate = override ? override.forecast30d / 30 : historyDailyRate;
@@ -535,9 +539,17 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
             stockAtRun,
           ]
         : [
-            `Forecast ${finalForecast30d.toFixed(0)} units over 30 days from the ${
-              isNew ? `last-${Math.max(1, Math.round(span))}-day rate (new product)` : "recency-weighted run rate (30/90/365-day blend)"
-            }.`,
+            rateHeldAtFloor
+              ? // Name the floor, not the window: the window rate was computed and
+                // then discarded, so crediting it describes arithmetic that did
+                // not happen.
+                `Forecast ${finalForecast30d.toFixed(0)} units over 30 days at the ` +
+                `${abcForFloor}-class minimum of ${abcFloor}/day. The shelf has been ` +
+                `empty for most of the window, so what it sold is not what it would have sold — ` +
+                `this is a floor, not a measured rate.`
+              : `Forecast ${finalForecast30d.toFixed(0)} units over 30 days from the ${
+                  isNew ? `last-${Math.max(1, Math.round(span))}-day rate (new product)` : "recency-weighted run rate (30/90/365-day blend)"
+                }.`,
             wasCapped ? `Capped at ${capMultiple}× the best month (${best.toFixed(0)}) to block runaway numbers.` : "",
             `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, ${leadClause}); reorder point ${rop.toFixed(0)}.`,
             stockAtRun,
