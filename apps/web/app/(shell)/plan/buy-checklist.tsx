@@ -791,7 +791,7 @@ export function BuyChecklist({
     { header: "Lead days", cell: (r) => r.leadDays },
     { header: "In stock", cell: (r) => r.onHandUnits },
     { header: "En route", cell: (r) => r.onOrderUnits },
-    { header: "Run/day", cell: (r) => r.runRatePerDay },
+    { header: "Buying at/day", cell: (r) => r.runRatePerDay },
     { header: "Days left", cell: (r) => r.daysUntilStockout },
     { header: "Order by", cell: (r) => dayLabel(r.orderByDate) },
     { header: "Order qty", cell: (r) => r.recommendedQty },
@@ -982,7 +982,11 @@ export function BuyChecklist({
                     <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>En route</th>
                     <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>MOQ</th>
                     <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>Lead</th>
-                    <th scope="col" className={cn(TH_NUM, "hidden md:table-cell")}>Run/day</th>
+                    {/* NOT "Sells/day": this is the rate the order was sized from, which the
+                        class floor can set on a line whose shelf has been empty. The
+                        catalogue's "Sells/day" is what the shelf actually did. One name
+                        each, or the two get read as the same number. */}
+                    <th scope="col" className={cn(TH_NUM, "hidden md:table-cell")}>Buying at/day</th>
                     <th scope="col" className={TH_NUM}>Days left</th>
                     <th scope="col" className={cn(TH, "hidden md:table-cell")}>Order by</th>
                     <th scope="col" className={TH_NUM}>Qty</th>
