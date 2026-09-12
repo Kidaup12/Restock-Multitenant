@@ -105,8 +105,25 @@ export function applyAbcRateFloor(
   hadRecentSales: boolean,
   shelfMostlyEmpty: boolean
 ): number {
-  if (!hadRecentSales) return rate;
-  if (!shelfMostlyEmpty) return rate;
-  const floor = abc === "A" || abc === "B" ? ABC_RATE_FLOORS[abc] : 0;
+  const floor = abcFloorFor(abc, hadRecentSales, shelfMostlyEmpty);
   return rate > floor ? rate : floor;
+}
+
+/**
+ * The floor that applies to this product right now — 0 when none does.
+ *
+ * Separate from applying it because the buy list has to say out loud when the
+ * number it shows is a floor rather than a measurement, and it can only know
+ * that by comparing the two. Derived here rather than re-derived at the call
+ * site so the two answers cannot drift: `applyAbcRateFloor` is written in terms
+ * of this one.
+ */
+export function abcFloorFor(
+  abc: AbcCategory | null | undefined,
+  hadRecentSales: boolean,
+  shelfMostlyEmpty: boolean
+): number {
+  if (!hadRecentSales) return 0;
+  if (!shelfMostlyEmpty) return 0;
+  return abc === "A" || abc === "B" ? ABC_RATE_FLOORS[abc] : 0;
 }
