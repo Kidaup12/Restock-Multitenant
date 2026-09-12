@@ -12,38 +12,42 @@ function emptyDays(n: number): Date[] {
   return Array.from({ length: n }, (_, i) => new Date(+TODAY - (i + 1) * 86_400_000));
 }
 
+/** A genuine bestseller's demonstrated speed — above either floor, so the cases
+ *  below keep testing the floor rather than the ceiling on it. */
+const FAST = 2;
+
 describe("applyAbcRateFloor", () => {
   it("lifts a starved Class-A seller to the A floor", () => {
-    expect(applyAbcRateFloor(0.05, "A", true, true)).toBe(ABC_RATE_FLOORS.A);
+    expect(applyAbcRateFloor(0.05, "A", true, true, FAST)).toBe(ABC_RATE_FLOORS.A);
   });
 
   it("lifts a starved Class-B seller to the B floor", () => {
-    expect(applyAbcRateFloor(0.01, "B", true, true)).toBe(ABC_RATE_FLOORS.B);
+    expect(applyAbcRateFloor(0.01, "B", true, true, FAST)).toBe(ABC_RATE_FLOORS.B);
   });
 
   it("leaves a rate already above the floor untouched", () => {
-    expect(applyAbcRateFloor(1.5, "A", true, true)).toBe(1.5);
+    expect(applyAbcRateFloor(1.5, "A", true, true, FAST)).toBe(1.5);
   });
 
   it("does not floor Class C", () => {
-    expect(applyAbcRateFloor(0.02, "C", true, true)).toBe(0.02);
+    expect(applyAbcRateFloor(0.02, "C", true, true, FAST)).toBe(0.02);
   });
 
   it("does not floor an unclassified product", () => {
-    expect(applyAbcRateFloor(0.02, null, true, true)).toBe(0.02);
+    expect(applyAbcRateFloor(0.02, null, true, true, FAST)).toBe(0.02);
   });
 
   it("never resurrects a dead listing (no recent sales)", () => {
     // A product with no recent sales keeps its computed rate even if class A,
     // so layeredForecast's dead-stock guard (zero rate) still fires.
-    expect(applyAbcRateFloor(0, "A", false, true)).toBe(0);
+    expect(applyAbcRateFloor(0, "A", false, true, null)).toBe(0);
   });
 
   it("leaves a product alone when its shelf was NOT mostly empty", () => {
     // The reported defect: a fully-stocked line selling 0.09/day was served at
     // 0.4 — four times its real demand, ordered over a lead time. A low rate
     // measured on a full shelf is demand, not an outage.
-    expect(applyAbcRateFloor(0.09, "A", true, false)).toBe(0.09);
+    expect(applyAbcRateFloor(0.09, "A", true, false, FAST)).toBe(0.09);
   });
 });
 

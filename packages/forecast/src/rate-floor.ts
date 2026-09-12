@@ -103,10 +103,56 @@ export function applyAbcRateFloor(
   rate: number,
   abc: AbcCategory | null | undefined,
   hadRecentSales: boolean,
-  shelfMostlyEmpty: boolean
+  shelfMostlyEmpty: boolean,
+  /** Ceiling: the fastest this product has actually been seen to sell. Required
+   *  rather than optional — omitting it silently restores the over-ordering the
+   *  ceiling exists to stop. Null only when nothing has ever sold, in which case
+   *  `hadRecentSales` is false and no floor applies anyway. */
+  demonstratedRate: number | null
 ): number {
   const floor = abcFloorFor(abc, hadRecentSales, shelfMostlyEmpty);
-  return rate > floor ? rate : floor;
+  if (floor <= rate) return rate;
+  // The floor lifts a starved bestseller back to a real serving speed. It must
+  // not invent one: a line that sold four units in ninety days was served at
+  // 0.4/day — twelve a month — because the constant never asked whether this
+  // product had ever been fast. Lift toward the floor, never past what the shelf
+  // has shown, and never below the computed rate.
+  const ceiling = demonstratedRate == null ? floor : demonstratedRate;
+  return Math.max(rate, Math.min(floor, ceiling));
+}
+
+/**
+ * The fastest this product has actually been seen to sell: units over the span
+ * from its first sale to its last.
+ *
+ * The span ENDS at the last sale, so the silence after a stockout does not drag
+ * it down — a line that sold well and then ran out keeps a high figure and the
+ * floor still rescues it. Measured over the history the run loads (one year),
+ * so for anything listed inside that window it is the product's whole life.
+ *
+ * Two other definitions were measured against production and rejected. A raw
+ * 30-day window counts empty-shelf days as no-demand days, which is exactly what
+ * the rate calculation censors — it flagged a third of class C, a class with no
+ * floor at all. Proven in-stock days is the right answer eventually, but
+ * snapshot history is far shorter than the rate window, so it cannot yet
+ * describe a 90-day history.
+ */
+export function demonstratedDailyRate(
+  history: ReadonlyArray<{ date: Date; quantity: number }>
+): number | null {
+  let units = 0;
+  let first = Infinity;
+  let last = -Infinity;
+  for (const point of history) {
+    if (point.quantity <= 0) continue;
+    units += point.quantity;
+    const at = point.date.getTime();
+    if (at < first) first = at;
+    if (at > last) last = at;
+  }
+  if (units <= 0) return null;
+  const spanDays = Math.max(1, Math.round((last - first) / 86_400_000));
+  return units / spanDays;
 }
 
 /**

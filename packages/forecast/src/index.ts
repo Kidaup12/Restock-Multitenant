@@ -119,7 +119,13 @@ export {
 export { assignAbc, dailySalesValue, type AbcInput, type AbcCategory } from "./abc";
 
 // ABC-class minimum serving rate
-export { applyAbcRateFloor, abcFloorFor, shelfWasMostlyEmpty, ABC_RATE_FLOORS } from "./rate-floor";
+export {
+  applyAbcRateFloor,
+  abcFloorFor,
+  demonstratedDailyRate,
+  shelfWasMostlyEmpty,
+  ABC_RATE_FLOORS,
+} from "./rate-floor";
 
 // Ingest-health gate ("no data ≠ no demand")
 export {

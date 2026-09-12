@@ -31,8 +31,14 @@ const dayAgo = (n: number) => new Date(+TODAY - n * DAY);
  */
 const SNAPSHOTS_SINCE = dayAgo(10);
 function starved(): { history: SalesPoint[]; stockoutDates: Date[] } {
+  // A real bestseller that ran out: it moved 20 a day at its peak, so its own
+  // demonstrated speed is far above either class floor and the floor is what
+  // caps the lift. These tests are about which of the two the sentence names,
+  // so the product has to be one the floor genuinely applies to in full — the
+  // clamped case has its own file.
   const history: SalesPoint[] = [
-    { date: dayAgo(55), quantity: 1, revenueKes: 100, channel: "shopify" },
+    { date: dayAgo(55), quantity: 20, revenueKes: 2000, channel: "shopify" },
+    { date: dayAgo(45), quantity: 20, revenueKes: 2000, channel: "shopify" },
     { date: dayAgo(20), quantity: 1, revenueKes: 100, channel: "shopify" },
   ];
   const stockoutDates = Array.from({ length: 9 }, (_, i) => dayAgo(i + 1));
@@ -74,7 +80,7 @@ describe("abcFloorFor — one source of truth for whether a floor applies", () =
     for (const abc of ["A", "B", "C", null] as const) {
       for (const rate of [0, 0.05, 0.1, 0.4, 1.5]) {
         const floor = abcFloorFor(abc, true, true);
-        const applied = applyAbcRateFloor(rate, abc, true, true);
+        const applied = applyAbcRateFloor(rate, abc, true, true, 2);
         expect(applied).toBe(Math.max(rate, floor));
       }
     }
