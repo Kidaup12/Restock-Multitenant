@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { cn } from "@/lib/cn";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { BanknoteIcon, CalendarIcon, ClipboardIcon } from "@/components/icons";
+import { BanknoteIcon, ClipboardIcon } from "@/components/icons";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-features";
 import type { PlanFreshness as Freshness } from "@/lib/data/forecast-freshness";
@@ -41,6 +41,7 @@ function ModeCard({
   onClick,
   busy = false,
   disabled = false,
+  highlighted = false,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -50,6 +51,9 @@ function ModeCard({
   busy?: boolean;
   /** Another card is being opened. */
   disabled?: boolean;
+  /** The recommended default — tinted and accent-bordered so the eye lands here
+   *  first. Only one card should carry it. */
+  highlighted?: boolean;
 }) {
   return (
     <button
@@ -58,7 +62,10 @@ function ModeCard({
       disabled={busy || disabled}
       aria-busy={busy || undefined}
       className={cn(
-        "rounded-lg border border-edge bg-surface p-5 text-left shadow-card transition-colors hover:border-edge-strong hover:bg-surface-2/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        "rounded-lg border p-5 text-left shadow-card transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        highlighted
+          ? "border-accent bg-accent-soft/40 hover:bg-accent-soft/60"
+          : "border-edge bg-surface hover:border-edge-strong hover:bg-surface-2/60",
         (busy || disabled) && "cursor-wait opacity-60"
       )}
     >
@@ -241,6 +248,7 @@ export function PlanView({
               onClick={() => setMode("budget")}
               busy={openingNow === "budget"}
               disabled={openingNow !== null && openingNow !== "budget"}
+              highlighted
             />
           ) : (
             <LockedModeCard
@@ -259,17 +267,6 @@ export function PlanView({
             disabled={openingNow !== null && openingNow !== "list"}
           />
         </div>
-        {/* The ordering calendar is a quieter, forward-looking view — kept as a
-            secondary link so the two headline choices stay "budget vs list". */}
-        <button
-          type="button"
-          onClick={() => setMode("calendar")}
-          disabled={openingNow !== null}
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-accent-ink hover:underline disabled:opacity-50"
-        >
-          <CalendarIcon />
-          {openingNow === "calendar" ? "Opening…" : "See my ordering calendar"}
-        </button>
       </div>
     );
   }
