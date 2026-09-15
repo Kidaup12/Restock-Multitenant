@@ -1,8 +1,10 @@
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { AS_SHOWN_TAG } from "@wezesha/forecast-run";
+import { overstockExcess } from "@wezesha/forecast";
 import { matchesAbc, type AbcKey } from "@/lib/data/abc-lens";
 import { getCatalogueMetrics } from "@/lib/metrics";
 import { DEFAULT_DEAD_STOCK_DAYS, getTodayMetrics } from "./today";
+import { getStockCatalogue } from "./stock";
 
 /**
  * Insights-screen queries. Server-only: every function takes an explicit tenantId
@@ -997,4 +999,199 @@ export async function getDeadStockByMonth(
   }
 
   return { months: out, windowDays, trackingSince: earliest?.date ?? null };
+}
+
+// ── Overstock section (report #7) ─────────────────────────────────────────────
+// The "cash asleep" table shows total capital at rest; this report isolates the
+// EXCESS above a healthy cover — units and cash you could have kept liquid. Uses
+// the shared overstockExcess primitive so the definition matches the engine.
+
+export type OverstockRow = {
+  productId: string;
+  sku: string;
+  title: string;
+  abc: string | null;
+  onHandUnits: number;
+  coverDays: number | null;
+  /** Units over the healthy-cover threshold. */
+  excessUnits: number;
+  /** Excess × cost — capital that could be liquid. Null for money-blind. */
+  excessValueKes: number | null;
+};
+
+export type OverstockReport = {
+  rows: OverstockRow[];
+  /** Total excess value across ALL overstocked rows (not just the shown page). */
+  totalExcessKes: number | null;
+  thresholdDays: number;
+};
+
+export async function getOverstock(
+  tenantId: string,
+  { canViewCosts, abc = "all", limit = 50 }: { canViewCosts: boolean; abc?: AbcKey; limit?: number }
+): Promise<OverstockReport> {
+  const db = prismaForTenant(tenantId);
+  const [metrics, products] = await Promise.all([
+    getCatalogueMetrics(tenantId),
+    db.product.findMany({
+      where: { ...BUYABLE_PRODUCT_WHERE },
+      select: { id: true, sku: true, title: true, costKes: true, currentStock: true, abcCategory: true },
+    }),
+  ]);
+
+  const rows: OverstockRow[] = [];
+  let totalExcess = 0;
+  for (const p of products) {
+    const m = metrics.get(p.id);
+    const rate = m?.runRate ?? 0;
+    if (rate <= NO_RATE_EPSILON) continue; // zero-rate is dead stock, not overstock
+    const ex = overstockExcess({
+      currentStock: p.currentStock,
+      dailyRate: rate,
+      costKes: p.costKes,
+      thresholdDays: OVERSTOCK_COVER_DAYS,
+    });
+    if (!ex.isOverstock) continue;
+    const cls = p.abcCategory ?? null;
+    if (!matchesAbc({ abc: cls }, abc)) continue;
+    totalExcess += ex.excessValueKes;
+    rows.push({
+      productId: p.id,
+      sku: p.sku,
+      title: p.title,
+      abc: cls,
+      onHandUnits: p.currentStock,
+      coverDays: ex.coverDays,
+      excessUnits: Math.round(ex.excessUnits),
+      excessValueKes: canViewCosts ? Math.round(ex.excessValueKes) : null,
+    });
+  }
+
+  // Rank by excess value when costs are visible; otherwise by excess units, so a
+  // money-blind ordering never leaks a cost signal (same rule as cash-asleep).
+  rows.sort((a, b) =>
+    canViewCosts
+      ? (b.excessValueKes ?? 0) - (a.excessValueKes ?? 0)
+      : b.excessUnits - a.excessUnits
+  );
+
+  return {
+    rows: rows.slice(0, limit),
+    totalExcessKes: canViewCosts ? Math.round(totalExcess) : null,
+    thresholdDays: OVERSTOCK_COVER_DAYS,
+  };
+}
+
+// ── Revenue by category & brand (report #5) ───────────────────────────────────
+// Two ranked rollups of real revenue over the window — where the money actually
+// comes from. Revenue is a sales figure (price already earned), visible to every
+// role; no cost redaction here.
+
+export type RevenueGroup = { name: string; revenueKes: number; skuCount: number };
+export type RevenueBreakdown = { byCategory: RevenueGroup[]; byBrand: RevenueGroup[]; windowDays: number };
+
+export async function getRevenueBreakdown(
+  tenantId: string,
+  { days = 30, limit = 8 }: { days?: number; limit?: number } = {}
+): Promise<RevenueBreakdown> {
+  const db = prismaForTenant(tenantId);
+  const since = new Date(Date.now() - days * 86_400_000);
+  const [rev, products] = await Promise.all([
+    db.salesHistory.groupBy({
+      by: ["productId"],
+      where: { date: { gte: since } },
+      _sum: { revenueKes: true },
+    }),
+    db.product.findMany({
+      where: { ...BUYABLE_PRODUCT_WHERE },
+      select: { id: true, customCategory: true, productType: true, vendor: true },
+    }),
+  ]);
+
+  const revById = new Map(rev.map((r) => [r.productId, r._sum.revenueKes ?? 0]));
+  const catAgg = new Map<string, { revenueKes: number; skuCount: number }>();
+  const brandAgg = new Map<string, { revenueKes: number; skuCount: number }>();
+  const bump = (agg: Map<string, { revenueKes: number; skuCount: number }>, key: string, rev: number) => {
+    const cur = agg.get(key) ?? { revenueKes: 0, skuCount: 0 };
+    cur.revenueKes += rev;
+    cur.skuCount += 1;
+    agg.set(key, cur);
+  };
+
+  for (const p of products) {
+    const r = revById.get(p.id) ?? 0;
+    if (r <= 0) continue; // only products that actually sold in the window
+    bump(catAgg, p.customCategory ?? p.productType ?? "Uncategorised", r);
+    bump(brandAgg, p.vendor ?? "Unbranded", r);
+  }
+
+  const rank = (agg: Map<string, { revenueKes: number; skuCount: number }>): RevenueGroup[] =>
+    [...agg.entries()]
+      .map(([name, v]) => ({ name, revenueKes: Math.round(v.revenueKes), skuCount: v.skuCount }))
+      .sort((a, b) => b.revenueKes - a.revenueKes || a.name.localeCompare(b.name))
+      .slice(0, limit);
+
+  return { byCategory: rank(catAgg), byBrand: rank(brandAgg), windowDays: days };
+}
+
+// ── On order & in transit (report #6) ─────────────────────────────────────────
+// What's already on the way, so an owner doesn't double-order. Reuses the stock
+// catalogue, which applies the canonical inbound rules (effectiveOnOrder / earliest
+// ETA) — this is a read of that, never a second on-order calculation.
+
+export type OnOrderRow = {
+  productId: string;
+  sku: string;
+  title: string;
+  abc: string | null;
+  onOrderUnits: number;
+  expectedArrivalAt: Date | null;
+  leadDays: number;
+  supplierName: string | null;
+  /** Units × cost — capital in transit. Null for money-blind. */
+  valueKes: number | null;
+};
+
+export type OnOrderReport = {
+  rows: OnOrderRow[];
+  totalUnits: number;
+  totalValueKes: number | null;
+};
+
+export async function getOnOrder(
+  tenantId: string,
+  { canViewCosts }: { canViewCosts: boolean }
+): Promise<OnOrderReport> {
+  const catalogue = await getStockCatalogue(tenantId, { canViewCosts });
+  const rows: OnOrderRow[] = [];
+  let totalUnits = 0;
+  let totalValue = 0;
+  for (const c of catalogue) {
+    if (c.onOrderUnits <= 0) continue;
+    const value = c.costKes != null ? c.onOrderUnits * c.costKes : null;
+    totalUnits += c.onOrderUnits;
+    if (value != null) totalValue += value;
+    rows.push({
+      productId: c.productId,
+      sku: c.sku,
+      title: c.title,
+      abc: c.abc,
+      onOrderUnits: c.onOrderUnits,
+      expectedArrivalAt: c.expectedArrivalAt,
+      leadDays: c.leadDays,
+      supplierName: c.supplierName,
+      valueKes: canViewCosts ? Math.round(value ?? 0) : null,
+    });
+  }
+  // Soonest arrivals first; unknown ETAs sink to the bottom.
+  rows.sort((a, b) => {
+    const at = a.expectedArrivalAt?.getTime() ?? Infinity;
+    const bt = b.expectedArrivalAt?.getTime() ?? Infinity;
+    return at - bt;
+  });
+  return {
+    rows,
+    totalUnits,
+    totalValueKes: canViewCosts ? Math.round(totalValue) : null,
+  };
 }

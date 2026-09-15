@@ -19,7 +19,7 @@ import {
   type BuyList,
   type BuyListRow,
 } from "../lib/data/plan";
-import { getInsightsOverview } from "../lib/data/insights";
+import { getInsightsOverview, getOverstock, getOnOrder } from "../lib/data/insights";
 import { getCostCoverage, getCostMovedAlerts } from "../lib/data/costs";
 import { getUnreadCount, listNotifications } from "../lib/notifications/data";
 import {
@@ -417,6 +417,28 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     // And the owner still gets real numbers — redaction must not blank everyone.
     const owner = await getDashboardTable(seeded.tenantId, { canViewCosts: true });
     expect(owner.criticalCostKes).not.toBeNull();
+  });
+
+  it("the overstock report carries no cost numbers for a member", async () => {
+    const member = await getOverstock(seeded.tenantId, { canViewCosts: false });
+    expect(member.totalExcessKes).toBeNull();
+    for (const row of member.rows) expect(row.excessValueKes).toBeNull();
+    // Excess UNITS is not money — it stays, so the report still says something.
+    // (No assertion that rows exist: a healthy shop may have none.)
+
+    // Owner keeps real excess-cash figures — redaction must not blank everyone.
+    const owner = await getOverstock(seeded.tenantId, { canViewCosts: true });
+    for (const row of owner.rows) expect(row.excessValueKes).not.toBeNull();
+  });
+
+  it("the on-order report carries no cost numbers for a member", async () => {
+    const member = await getOnOrder(seeded.tenantId, { canViewCosts: false });
+    expect(member.totalValueKes).toBeNull();
+    for (const row of member.rows) expect(row.valueKes).toBeNull();
+    // Units on the way is not money — it stays.
+
+    const owner = await getOnOrder(seeded.tenantId, { canViewCosts: true });
+    for (const row of owner.rows) expect(row.valueKes).not.toBeNull();
   });
 
   it("stock payloads carry no cost numbers for a member", async () => {
