@@ -232,28 +232,12 @@ export function PlanView({
             </>
           )}
         </p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <ModeCard
-            icon={<ClipboardIcon />}
-            title="Show me what to order, and why"
-            description="Every product that needs restocking, tiered by its last safe day to order. Each quantity comes with its arithmetic. You tick, we total."
-            onClick={() => setMode("list")}
-            busy={openingNow === "list"}
-            disabled={openingNow !== null && openingNow !== "list"}
-          />
-          <ModeCard
-            icon={<CalendarIcon />}
-            title="See my ordering calendar"
-            description="The next three months of order-by dates, grouped by supplier, with the cash each month needs — your upcoming ordering commitments at a glance."
-            onClick={() => setMode("calendar")}
-            busy={openingNow === "calendar"}
-            disabled={openingNow !== null && openingNow !== "calendar"}
-          />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {canBudget ? (
             <ModeCard
               icon={<BanknoteIcon />}
-              title="I have a budget to keep"
-              description="Tell us the cash you can spend. We put it where it earns most, and show you, in money and days, what the items you defer will cost."
+              title="Start with a budget"
+              description="Set what you can spend and get the best list that fits — criticals first, a suggested figure pre-filled."
               onClick={() => setMode("budget")}
               busy={openingNow === "budget"}
               disabled={openingNow !== null && openingNow !== "budget"}
@@ -261,12 +245,31 @@ export function PlanView({
           ) : (
             <LockedModeCard
               icon={<BanknoteIcon />}
-              title="I have a budget to keep"
-              description="Tell us the cash you can spend. We put it where it earns most, and show you, in money and days, what the items you defer will cost."
+              title="Start with a budget"
+              description="Set what you can spend and get the best list that fits — criticals first, a suggested figure pre-filled."
               upsell={`Budget planner is on the ${budgetTier} plan.`}
             />
           )}
+          <ModeCard
+            icon={<ClipboardIcon />}
+            title="See recommended purchase"
+            description="Everything the model says to reorder this week — ranked by urgency, each line with its order-by date, no cap."
+            onClick={() => setMode("list")}
+            busy={openingNow === "list"}
+            disabled={openingNow !== null && openingNow !== "list"}
+          />
         </div>
+        {/* The ordering calendar is a quieter, forward-looking view — kept as a
+            secondary link so the two headline choices stay "budget vs list". */}
+        <button
+          type="button"
+          onClick={() => setMode("calendar")}
+          disabled={openingNow !== null}
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-accent-ink hover:underline disabled:opacity-50"
+        >
+          <CalendarIcon />
+          {openingNow === "calendar" ? "Opening…" : "See my ordering calendar"}
+        </button>
       </div>
     );
   }
