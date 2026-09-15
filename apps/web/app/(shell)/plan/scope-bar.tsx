@@ -59,9 +59,86 @@ export const EMPTY_SCOPE: ScopeSelection = {
   leadBand: [],
 };
 
+/** The scope's four dimensions, in a fixed order — drives both the URL codec
+ *  and the derived facets, so the two never fall out of step. */
+type ScopeDimensionKey = keyof ScopeSelection;
+const SCOPE_DIMENSIONS: readonly ScopeDimensionKey[] = ["abc", "category", "supplier", "leadBand"];
+
 export function isScopeActive(sel: ScopeSelection): boolean {
   return sel.abc.length + sel.category.length + sel.supplier.length + sel.leadBand.length > 0;
 }
+
+/**
+ * URL <-> scope, one param per dimension with comma-joined values:
+ *   ?class=A,B&category=Serums&supplier=Orbit%20Imports&lead=fast,medium
+ *
+ * `class` names the abc dimension (consistent with the insights page's ?class);
+ * `lead` names leadBand. This keeps the scope in the address bar, so a filtered
+ * plan survives refresh, is deep-linkable, and Back/forward move between scopes.
+ *
+ * The same values the saved-scope encoding holds (see scope-actions'
+ * parseSelection) travel here — abc/category/supplier verbatim (including the
+ * NONE_VALUE sentinel), leadBand validated against LEAD_BANDS — so a URL scope
+ * and a saved scope reconstruct the same ScopeSelection.
+ */
+
+/** Minimal reader the parser needs — satisfied by both URLSearchParams and
+ *  Next's ReadonlyURLSearchParams (from useSearchParams). */
+type ParamReader = { get(name: string): string | null };
+
+const SCOPE_PARAMS = {
+  abc: "class",
+  category: "category",
+  supplier: "supplier",
+  leadBand: "lead",
+} as const satisfies Record<ScopeDimensionKey, string>;
+
+/** Split one comma-joined param into clean values: trimmed, empties dropped,
+ *  order and duplicates preserved as typed. */
+function splitParam(raw: string | null): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
+
+/**
+ * Rebuild a ScopeSelection from the URL. Defensive like parseAbcKey /
+ * parseRangeKey: a missing param is an empty dimension, and an unknown LeadBand
+ * is dropped so the applied selection is always one the scope bar can render.
+ * abc/category/supplier are free-form (category and supplier names, or the
+ * NONE_VALUE sentinel) so they pass through as given.
+ */
+export function parseScopeFromParams(params: ParamReader): ScopeSelection {
+  const leadBand = splitParam(params.get(SCOPE_PARAMS.leadBand)).filter((v): v is LeadBand =>
+    (LEAD_BANDS as readonly string[]).includes(v)
+  );
+  return {
+    abc: splitParam(params.get(SCOPE_PARAMS.abc)),
+    category: splitParam(params.get(SCOPE_PARAMS.category)),
+    supplier: splitParam(params.get(SCOPE_PARAMS.supplier)),
+    leadBand,
+  };
+}
+
+/**
+ * The scope's params as name -> comma-joined value, empty dimensions omitted.
+ * The caller merges these onto the existing query (deleting the four names it
+ * doesn't set), so ?mode / ?urgent and anything else are preserved.
+ */
+export function scopeToParams(scope: ScopeSelection): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const dim of SCOPE_DIMENSIONS) {
+    const values = scope[dim];
+    if (values.length > 0) out[SCOPE_PARAMS[dim]] = values.join(",");
+  }
+  return out;
+}
+
+/** The URL param names this module owns — the writer deletes these before
+ *  re-setting the active ones, so a cleared dimension leaves the URL. */
+export const SCOPE_PARAM_NAMES: readonly string[] = Object.values(SCOPE_PARAMS);
 
 /**
  * Does a row satisfy the selection? AND across the four dimensions, OR within

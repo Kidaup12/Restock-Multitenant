@@ -29,6 +29,7 @@ export function onOrderExportColumns(
     { header: "Product", cell: (r) => r.title },
     { header: "SKU", cell: (r) => r.sku },
     { header: "Class", cell: (r) => r.abc ?? "" },
+    { header: "Stock now", cell: (r) => r.onHandUnits },
     { header: "On the way", cell: (r) => r.onOrderUnits },
     { header: "ETA", cell: (r) => etaCell(r.expectedArrivalAt) },
     { header: "Lead days", cell: (r) => r.leadDays },

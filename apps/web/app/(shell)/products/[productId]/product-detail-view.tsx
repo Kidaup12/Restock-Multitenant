@@ -1,6 +1,8 @@
 import { Badge } from "@/components/ui/badge";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
+import { formatRunRate } from "@/lib/money";
 import type { ProductDetail } from "@/lib/data/product-detail";
 import { TrustChips } from "@/app/(shell)/plan/buy-checklist";
 
@@ -44,7 +46,7 @@ export function ProductDetailView({
             .join(" · ")}
           action={
             <span className="flex items-center gap-2">
-              {detail.abc && <Badge tone="neutral">Class {detail.abc}</Badge>}
+              <AbcBadge value={detail.abc} />
               <Badge tone={detail.lifecycle === "active" ? "positive" : "neutral"}>
                 {detail.lifecycleLabel}
               </Badge>
@@ -66,7 +68,7 @@ export function ProductDetailView({
               value={detail.onOrderUnits > 0 ? `${detail.onOrderUnits}` : "—"}
               note={detail.onOrderUnits > 0 ? (detail.expectedArrivalLabel ?? "no ETA") : undefined}
             />
-            <Figure label="Sells/day" value={`${detail.runRatePerDay}`} />
+            <Figure label="Sells/day" value={formatRunRate(detail.runRatePerDay)} />
             <Figure
               label="Days cover"
               value={detail.daysCover != null ? `${detail.daysCover}d` : "—"}

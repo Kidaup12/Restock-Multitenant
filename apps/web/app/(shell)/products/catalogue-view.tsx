@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { Pager } from "@/components/ui/pager";
-import { formatNumber } from "@/lib/money";
+import { formatNumber, formatRunRate } from "@/lib/money";
 import { formatEta } from "@/lib/dates";
 import { useCurrency } from "@/components/currency-provider";
 import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
@@ -468,11 +469,14 @@ export function RowGroup({
           </button>
         </TableCell>
         <TableCell className="text-ink-muted">
-          {/* A bare dash on every row reads as a broken column. It is not: the
-              class comes from the nightly run, and a product with no sales
-              history has not earned one. Saying WHY keeps the honesty — the
-              reference labels everything "C", which is tidier and untrue. */}
-          {row.abc ?? (
+          {/* The shared class chip, so an A here looks and means the same as an A
+              on Today or the plan. A bare dash on every unrated row reads as a
+              broken column, though — the class comes from the nightly run, and a
+              product with no sales history has not earned one — so a null keeps
+              the honest "No sales yet" hint instead of the badge's plain dash. */}
+          {row.abc ? (
+            <AbcBadge value={row.abc} />
+          ) : (
             <span className="text-ink-faint" title="Classified on the nightly run, once this product has sales to rank">
               No sales yet
             </span>
@@ -512,8 +516,9 @@ export function RowGroup({
           )}
         </TableCell>
         <TableCell numeric className="text-ink-muted">
-          {/* Two decimals: a slow mover at 0.03/day must not read as zero. */}
-          {row.runRate > 0 ? row.runRate.toFixed(2) : "—"}
+          {/* One shared run-rate format across every table; it floors a slow
+              mover to "<0.1/day" rather than letting it round to zero. */}
+          {formatRunRate(row.runRate)}
         </TableCell>
         <TableCell numeric className="text-ink-muted">
           {row.daysCover != null ? `${row.daysCover}d` : "—"}

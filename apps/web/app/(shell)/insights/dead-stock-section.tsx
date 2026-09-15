@@ -1,7 +1,7 @@
 import { getInsightsOverview } from "@/lib/data/insights";
 import { matchesAbc, type AbcKey } from "@/lib/data/abc-lens";
 
-import { Badge } from "@/components/ui/badge";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -87,12 +87,6 @@ export async function DeadStockSection({
       tally[key].costKnown = true;
     }
   }
-  // A and B carrying dead stock is the alarming case — money frozen in what
-  // should be your best-selling classes — so those chips warn; C and unrated
-  // sit neutral.
-  const chipTone = (key: ClassKey, count: number): "warning" | "neutral" =>
-    count > 0 && (key === "A" || key === "B") ? "warning" : "neutral";
-
   // The PDF mirrors the on-screen columns and honours the same cost redaction —
   // a money-blind caller's rows never carry a capital figure. Rebuilt from the
   // same rows the table renders, so the PDF can't drift from the screen.
@@ -152,17 +146,23 @@ export async function DeadStockSection({
           />
         ) : (
           <>
-            {/* Count and capital per class, worst classes first. */}
+            {/* Count and capital per class, worst classes first. The class glyph
+                is the shared AbcBadge, so an A here reads the same as an A in the
+                table; the count and capital sit beside it. */}
             <div className="flex flex-wrap items-center gap-2">
               {CLASS_ORDER.filter((key) => key !== "unrated" || tally[key].count > 0).map((key) => (
-                <Badge key={key} tone={chipTone(key, tally[key].count)}>
-                  {key === "unrated" ? "Unrated" : key} · {formatNumber(tally[key].count)} ·{" "}
+                <div
+                  key={key}
+                  className="inline-flex items-center gap-1.5 rounded-sm border border-edge bg-surface px-2 py-1 text-xs text-ink-muted"
+                >
+                  <AbcBadge value={key === "unrated" ? null : key} unratedLabel="Unrated" />
+                  <span>· {formatNumber(tally[key].count)} ·</span>
                   <CostValue
                     amount={tally[key].costKnown ? tally[key].cashKes : null}
                     canViewCosts={canViewCosts}
                     compact
                   />
-                </Badge>
+                </div>
               ))}
             </div>
 
@@ -181,11 +181,7 @@ export async function DeadStockSection({
                       <div className="text-xs text-ink-muted">{row.sku}</div>
                     </TableCell>
                     <TableCell>
-                      {row.abc ? (
-                        <Badge tone="neutral">{row.abc}</Badge>
-                      ) : (
-                        <span className="text-xs text-ink-faint">—</span>
-                      )}
+                      <AbcBadge value={row.abc} />
                     </TableCell>
                     <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
                     <TableCell numeric>

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
@@ -157,6 +158,7 @@ export function BudgetPlanner({
     { header: "Supplier", cell: (r) => r.supplierName ?? "" },
     { header: "MOQ", cell: (r) => r.moq },
     { header: "Lead days", cell: (r) => r.leadDays },
+    { header: "In stock", cell: (r) => r.onHandUnits },
     { header: "Buying at/day", cell: (r) => r.runRatePerDay },
     { header: "Days left", cell: (r) => r.daysUntilStockout },
     { header: "Order by", cell: (r) => dayLabel(r.orderByDate) },
@@ -500,6 +502,7 @@ export function BudgetTable({
         <TableHead>Product</TableHead>
         <TableHead className="hidden md:table-cell">Supplier</TableHead>
         <TableHead numeric className="hidden md:table-cell">Buying at/day</TableHead>
+        <TableHead numeric>Stock</TableHead>
         <TableHead numeric>Days left</TableHead>
         <TableHead className="hidden md:table-cell">Order by</TableHead>
         <TableHead numeric>Qty</TableHead>
@@ -531,12 +534,13 @@ export function BudgetTable({
                   >
                     {row.title}
                   </Link>
-                  {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
+                  <AbcBadge value={row.abc} />
                 </div>
                 <div className="mt-0.5 font-mono text-xs text-ink-muted">{row.sku}</div>
               </TableCell>
               <TableCell className="hidden md:table-cell">{row.supplierName ?? "—"}</TableCell>
               <TableCell numeric className="hidden md:table-cell">{row.runRatePerDay}</TableCell>
+              <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
               <TableCell numeric>
                 <DaysLeft days={row.daysUntilStockout} onHandUnits={row.onHandUnits} />
               </TableCell>

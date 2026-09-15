@@ -1,7 +1,7 @@
 import { getMissedRevenue } from "@/lib/data/insights";
 import type { AbcKey } from "@/lib/data/abc-lens";
 
-import { Badge } from "@/components/ui/badge";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -36,10 +36,6 @@ const weekLabel = (d: Date): string =>
 
 const dateLabel = (d: Date): string =>
   d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-
-/** ABC badge tone — A is what the shop leans on, so an empty A-shelf reads worst. */
-const classTone = (cls: string): "critical" | "warning" | "neutral" =>
-  cls === "A" ? "critical" : cls === "B" ? "warning" : "neutral";
 
 export async function MissedRevenueSection({
   tenantId,
@@ -176,7 +172,7 @@ export async function MissedRevenueSection({
                 {byClass.map((row) => (
                   <TableRow key={row.cls}>
                     <TableCell>
-                      <Badge tone={classTone(row.cls)}>{row.cls}</Badge>
+                      <AbcBadge value={row.cls} unratedLabel="Unrated" />
                     </TableCell>
                     <TableCell numeric>{formatNumber(row.skuCount)}</TableCell>
                     <TableCell numeric>{formatNumber(row.emptyDays)}</TableCell>
@@ -210,11 +206,7 @@ export async function MissedRevenueSection({
                     <div className="text-xs text-ink-muted">{row.sku}</div>
                   </TableCell>
                   <TableCell>
-                    {row.abc ? (
-                      <Badge tone={classTone(row.abc)}>{row.abc}</Badge>
-                    ) : (
-                      <span className="text-xs text-ink-faint">—</span>
-                    )}
+                    <AbcBadge value={row.abc} />
                   </TableCell>
                   <TableCell numeric>{formatNumber(row.emptyDays)}</TableCell>
                   <TableCell numeric>{formatNumber(row.unitsMissed)}</TableCell>

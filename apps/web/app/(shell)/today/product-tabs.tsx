@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
 import { BoxIcon } from "@/components/icons";
@@ -16,7 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/cn";
-import { formatNumber } from "@/lib/money";
+import { formatNumber, formatRunRate } from "@/lib/money";
 import type { CatalogueRow } from "@/lib/data/stock";
 import type { DashboardTab, DashboardTable } from "@/lib/data/today";
 import { DeadStockExportBar } from "./dead-stock-export";
@@ -271,10 +272,12 @@ export function ProductTabs({
                     <TableHead numeric>Incoming</TableHead>
                     <TableHead>Arrives</TableHead>
                     <TableHead numeric>Stock now</TableHead>
+                    <TableHead numeric>Sells/day</TableHead>
                   </>
                 ) : tab === "dead" ? (
                   <>
                     <TableHead numeric>Stock</TableHead>
+                    <TableHead numeric>Sells/day</TableHead>
                     <TableHead numeric>Cost / unit</TableHead>
                     <TableHead numeric>Capital tied up</TableHead>
                   </>
@@ -303,11 +306,7 @@ export function ProductTabs({
                             groups an order; a SKU code alone is the one thing
                             on the row nobody knows by heart. */}
                         {row.vendor && <span className="font-sans">· {row.vendor}</span>}
-                        {row.abc && (
-                          <Badge tone="neutral" className="font-sans">
-                            {row.abc}
-                          </Badge>
-                        )}
+                        <AbcBadge value={row.abc} />
                         {(() => {
                           const s = standing(row);
                           return s ? (
@@ -323,10 +322,12 @@ export function ProductTabs({
                         <TableCell numeric>{formatNumber(row.onOrderUnits)}</TableCell>
                         <TableCell>{eta(row.expectedArrivalAt)}</TableCell>
                         <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
+                        <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
                       </>
                     ) : tab === "dead" ? (
                       <>
                         <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
+                        <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
                         <TableCell numeric>
                           <CostValue amount={row.costKes} canViewCosts={canViewCosts} />
                         </TableCell>
@@ -337,11 +338,7 @@ export function ProductTabs({
                     ) : (
                       <>
                         <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
-                        <TableCell numeric>
-                          {/* Same presentation as the catalogue: two places, and a
-                              dash rather than 0.00 for something that is not moving. */}
-                          {row.runRate > 0 ? row.runRate.toFixed(2) : "—"}
-                        </TableCell>
+                        <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
                         <TableCell numeric>{daysLeft(row)}</TableCell>
                         <TableCell numeric>
                           {row.onOrderUnits > 0 ? formatNumber(row.onOrderUnits) : "—"}

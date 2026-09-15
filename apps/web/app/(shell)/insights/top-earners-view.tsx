@@ -12,7 +12,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/cn";
-import { formatNumber } from "@/lib/money";
+import { AbcBadge } from "@/components/ui/abc-badge";
+import { formatNumber, formatRunRate } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import type { TopProduct } from "@/lib/data/sales";
@@ -45,6 +46,7 @@ const columns = (currency: string): ExportColumn<TopProduct>[] => [
   { header: "ABC", cell: (r) => r.abc ?? "" },
   { header: "Units", cell: (r) => r.unitsSold },
   { header: `Revenue (${currency})`, cell: (r) => r.revenueKes },
+  { header: "Stock", cell: (r) => r.onHandUnits },
   { header: "Run rate (units/day)", cell: (r) => Math.round(r.runRate * 10) / 10 },
 ];
 
@@ -124,6 +126,7 @@ export function TopEarnersView({ rows, currency }: { rows: TopProduct[]; currenc
               <TableHead>ABC</TableHead>
               <TableHead numeric>Units</TableHead>
               <TableHead numeric>Revenue ({currency})</TableHead>
+              <TableHead numeric>Stock</TableHead>
               <TableHead numeric>Run rate</TableHead>
             </TableHeader>
             <TableBody>
@@ -133,10 +136,13 @@ export function TopEarnersView({ rows, currency }: { rows: TopProduct[]; currenc
                     <span className="font-medium text-ink">{row.title}</span>
                     <span className="block font-mono text-xs text-ink-faint">{row.sku}</span>
                   </TableCell>
-                  <TableCell className="text-ink-muted">{row.abc ?? "—"}</TableCell>
+                  <TableCell>
+                    <AbcBadge value={row.abc} />
+                  </TableCell>
                   <TableCell numeric>{formatNumber(row.unitsSold)}</TableCell>
                   <TableCell numeric>{formatNumber(row.revenueKes)}</TableCell>
-                  <TableCell numeric>{row.runRate.toFixed(1)}/day</TableCell>
+                  <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
+                  <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

@@ -158,6 +158,9 @@ export type TopProduct = {
    *  classified yet (too new, or no run). Lets Reports show top earners per
    *  class without a second query. */
   abc: AbcCategory | null;
+  /** Sellable on-hand right now — so a ranked best-seller list can answer the
+   *  obvious next question, "…and are we about to run out?". */
+  onHandUnits: number;
 };
 
 /** Best sellers by revenue over the trailing `days` days. */
@@ -186,7 +189,7 @@ export async function getTopProducts(
   const [products, history] = await Promise.all([
     db.product.findMany({
       where: { id: { in: productIds } },
-      select: { id: true, sku: true, title: true, abcCategory: true },
+      select: { id: true, sku: true, title: true, abcCategory: true, currentStock: true },
     }),
     db.salesHistory.findMany({
       where: { productId: { in: productIds }, date: { gte: runRateSince } },
@@ -211,6 +214,7 @@ export async function getTopProducts(
       revenueKes: g._sum.revenueKes ?? 0,
       runRate: runRate(historyByProduct.get(g.productId) ?? [], now),
       abc: (product?.abcCategory as AbcCategory | null) ?? null,
+      onHandUnits: product?.currentStock ?? 0,
     };
   });
 }

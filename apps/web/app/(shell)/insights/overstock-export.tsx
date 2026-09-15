@@ -2,6 +2,7 @@
 
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import { useCurrency } from "@/components/currency-provider";
+import { formatRunRate } from "@/lib/money";
 import type { OverstockRow } from "@/lib/data/insights";
 
 /**
@@ -28,6 +29,7 @@ export function overstockExportColumns(
     { header: "SKU", cell: (r) => r.sku },
     { header: "Class", cell: (r) => r.abc ?? "" },
     { header: "On hand", cell: (r) => r.onHandUnits },
+    { header: "Sells/day", cell: (r) => formatRunRate(r.runRatePerDay) },
     { header: "Cover days", cell: (r) => coverCell(r.coverDays) },
     { header: "Excess units", cell: (r) => r.excessUnits },
     ...(canViewCosts
