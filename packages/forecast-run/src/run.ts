@@ -11,7 +11,8 @@ import {
 } from "@wezesha/db";
 import {
   assignAbc,
-  dailySalesValue,
+  trailingRevenue,
+  weightedDailyRateAdjusted,
   forecastProduct,
   historySpanDays,
   anchorToday,
@@ -428,10 +429,18 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
   // left to default: a run replayed with a fixed clock must rank against the
   // run's own date, not against whenever it happens to be executed.
   const abcByProduct = assignAbc(
-    products.map((p) => ({
-      id: p.id,
-      revenue: dailySalesValue(historyByProduct.get(p.id) ?? [], p.priceKes, now),
-    }))
+    products.map((p) => {
+      const history = historyByProduct.get(p.id) ?? [];
+      return {
+        id: p.id,
+        // Rank on real money earned over the trailing window, not an
+        // instantaneous rate×price — "expensive, not revenue" can't ride a
+        // price tag into A on a handful of sales.
+        revenue: trailingRevenue(history, now),
+        // Velocity floor: a slow mover can't be A/B however much it earned.
+        runRate: weightedDailyRateAdjusted(history, now),
+      };
+    })
   );
   const activePromos: ActivePromo[] = promos;
   // Stated seasonality, bounded here so a slipped decimal in the database can

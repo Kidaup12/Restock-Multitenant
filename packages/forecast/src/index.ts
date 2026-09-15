@@ -92,6 +92,7 @@ export {
   guardrailCap,
   guardForecastResult,
   GUARDRAIL_MULTIPLIER,
+  THIN_DATA_ABSOLUTE_CAP_30D,
   type GuardrailDecision,
 } from "./guardrail";
 
@@ -116,7 +117,16 @@ export {
 } from "./lead-time";
 
 // ABC classification
-export { assignAbc, dailySalesValue, type AbcInput, type AbcCategory } from "./abc";
+export {
+  assignAbc,
+  dailySalesValue,
+  trailingRevenue,
+  MIN_RUN_RATE_FOR_A,
+  MIN_RUN_RATE_FOR_B,
+  ABC_WINDOW_DAYS,
+  type AbcInput,
+  type AbcCategory,
+} from "./abc";
 
 // ABC-class minimum serving rate
 export {
@@ -126,6 +136,9 @@ export {
   shelfWasMostlyEmpty,
   ABC_RATE_FLOORS,
 } from "./rate-floor";
+
+// Weekly spot-check picker (shelf-vs-system drift)
+export { selectSpotChecks, SPOT_CHECK_COUNT, type SpotCandidate } from "./spot-check";
 
 // Ingest-health gate ("no data ≠ no demand")
 export {
