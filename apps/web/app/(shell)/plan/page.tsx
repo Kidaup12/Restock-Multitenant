@@ -142,7 +142,7 @@ export default async function PlanPage() {
       <PageHeader
         eyebrow="Buy"
         title="This week's Buy List"
-        description="Start from what the forecast recommends, plan against a budget, or look ahead at the ordering calendar."
+        description="Start from what the forecast recommends, or plan against a budget."
       />
       <Suspense
         fallback={

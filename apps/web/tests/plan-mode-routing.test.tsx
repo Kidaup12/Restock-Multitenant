@@ -85,11 +85,13 @@ function render(params: string, canBudget = true) {
 }
 
 describe("plan modes live in the URL", () => {
-  it("shows the two ways in (budget + recommended) plus the calendar link when no mode is asked for", () => {
+  it("shows exactly the two ways in (budget + recommended) when no mode is asked for", () => {
     const html = render("");
     expect(html).toContain("Start with a budget");
     expect(html).toContain("See recommended purchase");
-    expect(html).toContain("See my ordering calendar"); // secondary link
+    // The ordering calendar is still reachable via ?mode=calendar, but it is no
+    // longer offered on the chooser — the two cards are the whole choice.
+    expect(html).not.toContain("See my ordering calendar");
     expect(html).not.toContain("All plan options");
   });
 
