@@ -1,7 +1,8 @@
 import { prismaForTenant, prismaForTenantTx } from "@wezesha/db";
 import {
   assignAbc,
-  dailySalesValue,
+  trailingRevenue,
+  weightedDailyRateAdjusted,
   walkForwardBacktest,
   walkForwardCutoffs,
   championsByClass,
@@ -119,10 +120,16 @@ export async function runBacktest(
   // letter, written by the nightly run). Nothing user-facing reads these — they
   // only bucket accuracy scores inside BacktestRun.
   const abcByProduct = assignAbc(
-    products.map((p) => ({
-      id: p.id,
-      revenue: dailySalesValue(historyByProduct.get(p.id) ?? [], p.priceKes),
-    }))
+    products.map((p) => {
+      const history = historyByProduct.get(p.id) ?? [];
+      return {
+        id: p.id,
+        // Same ranking the live run uses (trailing revenue + velocity floor), so
+        // the audition buckets accuracy by the classes production actually sizes.
+        revenue: trailingRevenue(history, now),
+        runRate: weightedDailyRateAdjusted(history, now),
+      };
+    })
   );
 
   const backtestProducts: BacktestProduct[] = products.map((p) => ({

@@ -1,17 +1,33 @@
 /**
  * ABC classification — single source of truth.
  *
- * Pareto on **sales value** (the industry standard — inventory tools rank ABC
- * by value, never units): sort products by sales value (desc) and cut by
- * cumulative share — top 70% = A, next 20% = B, tail 10% = C.
+ * Pareto on **revenue** (the industry standard — inventory tools rank ABC by
+ * value, never units): sort products by revenue (desc) and cut by cumulative
+ * share — top 70% = A, next 20% = B, tail 10% = C.
  *
- * Feed `revenue` DAILY sales value (run rate x price) rather than a cumulative
- * total, so a SKU that USED to sell but has gone slow drops out of A, while a
- * pricey earner still outranks a cheap fast-mover.
+ * Feed `revenue` ACTUAL TRAILING revenue (real money sold over the ABC window,
+ * default 90 days) rather than an instantaneous rate×price, so classification
+ * reflects what a SKU has genuinely earned — "expensive, not revenue" can't ride
+ * a price tag into A on a handful of sales.
+ *
+ * VELOCITY FLOOR: even ranked by real revenue, a rarely-selling premium item can
+ * carry high revenue on very few sales. A product below MIN_RUN_RATE_FOR_A
+ * units/day can never be A (demoted to B, or to C below MIN_RUN_RATE_FOR_B), so
+ * the A service level and buy-list priority stay reserved for genuine movers.
+ * Pass each product's run rate to enable the floor; omit it to skip.
  */
 import { weightedDailyRateAdjusted, type SalesPoint } from "./baseline";
 
-export type AbcInput = { id: string; revenue: number };
+/** A near-stockout premium SKU can carry high revenue on a handful of sales; the
+ *  floor keeps it out of A so A means "a genuine mover". ~1 unit / 2.5 days. */
+export const MIN_RUN_RATE_FOR_A = 0.4;
+/** Below this (~1 unit / 10 days) an item is C — the tail's lean-cash sizing. */
+export const MIN_RUN_RATE_FOR_B = 0.1;
+
+/** Trailing window (days) over which ABC revenue is summed. */
+export const ABC_WINDOW_DAYS = 90;
+
+export type AbcInput = { id: string; revenue: number; runRate?: number };
 export type AbcCategory = "A" | "B" | "C";
 
 export function assignAbc(productsWithValue: AbcInput[]): Record<string, AbcCategory> {
@@ -26,17 +42,37 @@ export function assignAbc(productsWithValue: AbcInput[]): Record<string, AbcCate
     // the tail's lean-cash min/max sizing then took over its ordering.
     const above = total > 0 ? cumulative / total : 1;
     cumulative += p.revenue;
-    if (above < 0.7) map[p.id] = "A";
-    else if (above < 0.9) map[p.id] = "B";
-    else map[p.id] = "C";
+    let cls: AbcCategory = above < 0.7 ? "A" : above < 0.9 ? "B" : "C";
+    // Velocity floor: a slow mover can't ride revenue into A/B.
+    if (p.runRate != null) {
+      if (cls === "A" && p.runRate < MIN_RUN_RATE_FOR_A) cls = "B";
+      if (cls === "B" && p.runRate < MIN_RUN_RATE_FOR_B) cls = "C";
+    }
+    map[p.id] = cls;
   }
   return map;
 }
 
-/** The ABC ranking value for one product: gap-corrected recency-weighted daily
- *  units x unit price. Uses the stockout-adjusted rate so a strong earner that
- *  keeps selling out isn't ranked on its deflated on-shelf rate. Compute this
- *  for every product, then pass the lot to assignAbc. */
+/** Actual revenue a product earned over the trailing window — the ABC ranking
+ *  value. Sums SalesHistory.revenueKes in [asOf - windowDays, asOf). This is
+ *  what a SKU really brought in, not a rate×price projection. */
+export function trailingRevenue(
+  history: SalesPoint[],
+  asOf: Date = new Date(),
+  windowDays: number = ABC_WINDOW_DAYS
+): number {
+  const since = new Date(asOf);
+  since.setUTCDate(since.getUTCDate() - windowDays);
+  let sum = 0;
+  for (const p of history) {
+    if (p.date >= since && p.date < asOf) sum += p.revenueKes ?? 0;
+  }
+  return sum;
+}
+
+/** Instantaneous sales value: gap-corrected recency-weighted daily units × unit
+ *  price. Kept for callers that want a rate×price figure; ABC ranking now uses
+ *  trailingRevenue instead. */
 export function dailySalesValue(history: SalesPoint[], priceKes: number, asOf?: Date): number {
   return weightedDailyRateAdjusted(history, asOf) * priceKes;
 }

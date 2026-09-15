@@ -22,6 +22,7 @@
     "@wezesha/shopify": "*",
     "better-auth": "^1.6.24",
     "bullmq": "^5.80.11",
+    "exceljs": "^4.4.0",
     "ioredis": "^5.11.1",
     "next": "16.2.11",
     "pdf-lib": "^1.17.1",

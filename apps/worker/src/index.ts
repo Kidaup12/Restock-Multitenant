@@ -53,6 +53,13 @@ import {
   type SnapshotCronQueue,
 } from "./snapshot-cron";
 import {
+  SPOT_CHECK_QUEUE,
+  createSpotCheckQueue,
+  createSpotCheckWorker,
+  registerSpotCheckSchedules,
+  type SpotCheckQueue,
+} from "./spot-check-cron";
+import {
   SYNC_SCHEDULE_QUEUE,
   createSyncScheduleQueue,
   createSyncScheduleWorker,
@@ -88,6 +95,9 @@ import { createSyncWorker } from "./worker";
  *                           (nightly cost-moved checks); unset keeps dev/CI quiet
  *   SNAPSHOT_CRON         — "1" registers + runs the inventory-snapshot cron
  *                           (nightly on-hand history); unset keeps dev/CI quiet
+ *   SPOT_CHECK_CRON       — "1" registers + runs the weekly spot-check cron
+ *                           (Monday prompts of SKUs to physically count); unset
+ *                           keeps dev/CI quiet
  *   SHOPIFY_SYNC_CRON     — "1" registers + runs the recurring Shopify sync
  *                           (every SHOPIFY_SYNC_PATTERN, plus a daily full pull
  *                           so removed products are noticed); unset keeps
@@ -226,6 +236,19 @@ async function main(): Promise<void> {
     console.log("worker: snapshot cron registered (nightly inventory snapshot)");
   }
 
+  let spotCheckQueue: SpotCheckQueue | null = null;
+  let spotCheckWorker: Worker | null = null;
+  if (process.env.SPOT_CHECK_CRON === "1") {
+    spotCheckQueue = createSpotCheckQueue(connection);
+    await registerSpotCheckSchedules(spotCheckQueue);
+    spotCheckWorker = createSpotCheckWorker({ connection, queue: spotCheckQueue });
+    spotCheckWorker.on("failed", (job, err) => {
+      console.error(`worker: spot-check cron ${job?.id} failed`, err);
+      captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: SPOT_CHECK_QUEUE });
+    });
+    console.log("worker: spot-check cron registered (weekly count prompts)");
+  }
+
   let syncScheduleQueue: SyncScheduleQueue | null = null;
   let syncScheduleWorker: Worker | null = null;
   let syncProducerQueue: SyncQueue | null = null;
@@ -267,6 +290,8 @@ async function main(): Promise<void> {
       costQueue?.close(),
       snapshotWorker?.close(),
       snapshotQueue?.close(),
+      spotCheckWorker?.close(),
+      spotCheckQueue?.close(),
       syncScheduleWorker?.close(),
       syncScheduleQueue?.close(),
       syncProducerQueue?.close(),

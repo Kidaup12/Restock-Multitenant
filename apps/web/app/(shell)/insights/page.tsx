@@ -7,6 +7,7 @@ import { PLAN_TIER_LABEL, planAllows, planFeatureTier } from "@/lib/capabilities
 
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { GuideBox } from "@/components/ui/guide-box";
 import { SegmentedNav } from "@/components/ui/segmented-nav";
 import { PageHeader } from "@/components/ui/page-header";
 import { ABC_KEYS, abcLabel, parseAbcKey, type AbcKey } from "@/lib/data/abc-lens";
@@ -26,6 +27,12 @@ import { PeriodTable } from "./period-table";
 import { DeadStockMonths } from "./dead-stock-months";
 import { StockoutTrend } from "./stockout-trend";
 import { TopEarners } from "./top-earners";
+import { OverstockSection } from "./overstock-section";
+import { RevenueBreakdownSection } from "./revenue-breakdown";
+import { OnOrderSection } from "./on-order-section";
+import { BeforeAfter } from "./before-after";
+import { MissedRevenueSection } from "./missed-revenue";
+import { LeakageMatrixSection } from "./leakage-matrix";
 
 export const metadata: Metadata = {
   title: "Reports",
@@ -223,6 +230,32 @@ export default async function InsightsPage({
         actions={<ShopReportLink />}
       />
       <ViewTabs view={view} />
+
+      {view === "now" ? (
+        <GuideBox
+          id="insights-now"
+          scope={membership.tenantId}
+          title="Where your money is stuck right now"
+        >
+          A snapshot of today, not a trend. Start with <strong>Over-bought</strong> and{" "}
+          <strong>Cash asleep</strong> — that is money sitting on the shelf you could put back to
+          work. <strong>Top earners</strong> shows what to protect, and <strong>On the way</strong>{" "}
+          is stock already ordered, so you don&rsquo;t buy it twice. The period buttons set the
+          revenue windows; the shelf figures are always right-now.
+        </GuideBox>
+      ) : (
+        <GuideBox
+          id="insights-proof"
+          scope={membership.tenantId}
+          title="Is it actually working?"
+        >
+          The proof, measured since your first order. Look at <strong>Before and after</strong>{" "}
+          first — fewer empty shelves and fewer products sitting unsold is the whole point, and down
+          is the good direction. Below it, <strong>How close we&rsquo;ve been</strong> grades the
+          forecast, and the week-by-week table says which products caused the bad weeks.
+        </GuideBox>
+      )}
+
       <RangeRail range={range} view={view} />
 
       {view === "now" ? (
@@ -269,6 +302,60 @@ export default async function InsightsPage({
         </Suspense>
       )}
 
+      {view === "now" && (
+        <Suspense
+          fallback={
+            <div role="status" aria-label="Loading revenue breakdown">
+              <SkeletonCard lines={5} />
+            </div>
+          }
+        >
+          {/* Where the money comes from — by category and by brand, over the
+              selected window. Revenue is a sales figure, so no cost gate. */}
+          <RevenueBreakdownSection
+            tenantId={membership.tenantId}
+            currency={membership.tenant.currency}
+            days={rangeDays(range)}
+          />
+        </Suspense>
+      )}
+
+      {view === "now" && (
+        <Suspense
+          fallback={
+            <div role="status" aria-label="Loading over-bought stock">
+              <SkeletonTableRows rows={6} />
+            </div>
+          }
+        >
+          {/* Excess above a healthy cover — the part of the shelf you over-bought,
+              honouring the same ABC lens as shelf health. */}
+          <OverstockSection
+            tenantId={membership.tenantId}
+            currency={membership.tenant.currency}
+            canViewCosts={canViewCosts}
+            abc={abc}
+          />
+        </Suspense>
+      )}
+
+      {view === "now" && (
+        <Suspense
+          fallback={
+            <div role="status" aria-label="Loading stock on the way">
+              <SkeletonTableRows rows={6} />
+            </div>
+          }
+        >
+          {/* What's already inbound, so an owner doesn't double-order. */}
+          <OnOrderSection
+            tenantId={membership.tenantId}
+            currency={membership.tenant.currency}
+            canViewCosts={canViewCosts}
+          />
+        </Suspense>
+      )}
+
       {view === "proof" && (
         <div className="space-y-6">
           <Suspense
@@ -279,6 +366,17 @@ export default async function InsightsPage({
             }
           >
             <ImpactCard tenantId={membership.tenantId} />
+          </Suspense>
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading before-and-after">
+                <SkeletonCard lines={3} />
+              </div>
+            }
+          >
+            {/* The table cut of the impact card's two numbers — before against
+                now, with the direction coloured. */}
+            <BeforeAfter tenantId={membership.tenantId} />
           </Suspense>
           <Suspense
             fallback={
@@ -301,6 +399,40 @@ export default async function InsightsPage({
             }
           >
             <StockoutTrend tenantId={membership.tenantId} weeks={rangeWeeks(range)} />
+          </Suspense>
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading sales missed to empty shelves">
+                <SkeletonCard lines={5} />
+              </div>
+            }
+          >
+            {/* What the empty shelves the chart above counts actually cost in
+                sales — a headline, a weekly trend and the worst culprits. A
+                sales estimate, so no cost gate; honours the same ABC lens. */}
+            <MissedRevenueSection
+              tenantId={membership.tenantId}
+              currency={membership.tenant.currency}
+              weeks={rangeWeeks(range)}
+              abc={abc}
+            />
+          </Suspense>
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading where it's leaking">
+                <SkeletonTableRows rows={6} />
+              </div>
+            }
+          >
+            {/* The same loss, grouped: which category or class leaks most, by
+                stockouts, dead stock and missed sales. Capital tied up is a
+                cost and drops for a money-blind member. */}
+            <LeakageMatrixSection
+              tenantId={membership.tenantId}
+              currency={membership.tenant.currency}
+              weeks={rangeWeeks(range)}
+              canViewCosts={canViewCosts}
+            />
           </Suspense>
           <Suspense
             fallback={

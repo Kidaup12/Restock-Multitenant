@@ -22,6 +22,16 @@ export const GUARDRAIL_MULTIPLIER = 3;
  *  slow-but-alive items aren't zeroed, without funding a dead one. */
 const ZERO_SALES_CAP_30D = 3;
 
+/** Absolute 30-day ceiling for a thin-data item — one with under 30 days of
+ *  history, or so heavily out of stock that recent sales can't be the 3× yardstick.
+ *  Recent sales can't bound the forecast in those cases, but the number still
+ *  can't be pure fantasy: a cold-start borrow or a censored rate could otherwise
+ *  print 90 units on a shelf that has moved almost nothing. Cap at the larger of
+ *  3× what it DID sell and this ceiling — a real breakout has room, cold-start
+ *  inflation gets cut. Set to a month of the Class-A rate floor (0.4/day × 30 = 12)
+ *  so a legitimately floored bestseller is never clipped below its own floor. */
+export const THIN_DATA_ABSOLUTE_CAP_30D = 12;
+
 export type GuardrailDecision = {
   /** The (possibly clamped) 30-day forecast. */
   finalForecast30d: number;
@@ -36,16 +46,24 @@ export function guardrailCap(input: {
   /** Proven out-of-stock days within the last 30 — when the shelf was empty a
    *  big chunk of the window, sold30 understates demand and can't be a cap. */
   stockoutDays30?: number;
+  /** Owner override of the thin-data ceiling. Defaults to the shipped constant. */
+  thinCap?: number;
 }): GuardrailDecision {
   const { finalForecast30d, sold30, historySpanDays, currentStock } = input;
+  const THIN = input.thinCap ?? THIN_DATA_ABSOLUTE_CAP_30D;
 
-  // Too young to judge — the estimate is all we have.
-  if (historySpanDays < 30) return { finalForecast30d, capped: false };
-
-  // Heavily censored window (out >7 of 30 days): recent sales are not a fair
-  // yardstick — the forecast is allowed to exceed them (that's the point of
-  // stockout correction).
-  if ((input.stockoutDays30 ?? 0) > 7) return { finalForecast30d, capped: false };
+  // Thin data: under 30 days of history, or so heavily censored (out >7 of 30
+  // days) that sold30 understates demand. Recent sales can't be the 3× yardstick
+  // here — but the forecast still can't be fantasy, so cap at the larger of
+  // 3× what it DID sell and the thin-data ceiling. (These two branches used to
+  // return uncapped, which is exactly how cold-start / borrowed inflation leaked
+  // a huge number onto the buy list.)
+  const thin = historySpanDays < 30 || (input.stockoutDays30 ?? 0) > 7;
+  if (thin) {
+    const cap = Math.max(GUARDRAIL_MULTIPLIER * sold30, THIN);
+    if (finalForecast30d > cap) return { finalForecast30d: cap, capped: true };
+    return { finalForecast30d, capped: false };
+  }
 
   if (sold30 > 0) {
     const cap = GUARDRAIL_MULTIPLIER * sold30;
@@ -53,8 +71,14 @@ export function guardrailCap(input: {
     return { finalForecast30d, capped: false };
   }
 
-  // Zero sales in 30d. An empty shelf can't sell — censored, leave alone.
-  if (currentStock <= 0) return { finalForecast30d, capped: false };
+  // Zero sales in 30d, out of stock but not heavily censored (≤7 stockout days,
+  // ≥30d history). An empty shelf can't sell, so we don't zero it — but a big
+  // forecast is still fantasy, so hold it to the thin-data ceiling rather than
+  // letting it run unbounded (the old leak).
+  if (currentStock <= 0) {
+    if (finalForecast30d > THIN) return { finalForecast30d: THIN, capped: true };
+    return { finalForecast30d, capped: false };
+  }
 
   // On the shelf, sold nothing -> any big forecast is fantasy.
   if (finalForecast30d > ZERO_SALES_CAP_30D) {
@@ -98,8 +122,14 @@ export function guardForecastResult(
 
   const ratio = decision.finalForecast30d / result.finalForecast30d;
   const newRate = decision.finalForecast30d / 30;
+  // The cap that actually bit: 3× recent sales for a normal item, or the
+  // thin-data ceiling when history is short / the shelf was mostly empty.
+  const thin = spanDays < 30 || stockoutDays30 > 7 || sold30 === 0;
+  const label = thin
+    ? `Reality check: forecast held to ${Math.round(decision.finalForecast30d)} on thin data (sold ${Math.round(sold30)} in 30d)`
+    : `Reality check: forecast capped to ${GUARDRAIL_MULTIPLIER}× recent sales (sold ${Math.round(sold30)} in 30d)`;
   const signal: Signal = {
-    label: `Reality check: forecast capped to ${GUARDRAIL_MULTIPLIER}× recent sales (sold ${Math.round(sold30)} in 30d)`,
+    label,
     deltaPct: (ratio - 1) * 100,
     emoji: "🛡️",
   };
