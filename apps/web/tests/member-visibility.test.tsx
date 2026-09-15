@@ -19,7 +19,7 @@ import {
   type BuyList,
   type BuyListRow,
 } from "../lib/data/plan";
-import { getInsightsOverview, getOverstock, getOnOrder } from "../lib/data/insights";
+import { getInsightsOverview, getOverstock, getOnOrder, getLeakageMatrix } from "../lib/data/insights";
 import { getCostCoverage, getCostMovedAlerts } from "../lib/data/costs";
 import { getUnreadCount, listNotifications } from "../lib/notifications/data";
 import {
@@ -439,6 +439,22 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
 
     const owner = await getOnOrder(seeded.tenantId, { canViewCosts: true });
     for (const row of owner.rows) expect(row.valueKes).not.toBeNull();
+  });
+
+  it("the leakage matrix carries no capital figure for a member, but keeps missed sales", async () => {
+    // Capital tied up is a cost — nulled for a member in every group, on both
+    // the category and the ABC cut. Missed revenue is a sales estimate (price x
+    // run rate x empty days), so it stays a number for both roles.
+    const member = await getLeakageMatrix(seeded.tenantId, { canViewCosts: false });
+    for (const group of [...member.byCategory, ...member.byAbc]) {
+      expect(group.capitalKes).toBeNull();
+      expect(typeof group.missedRevenueKes).toBe("number");
+    }
+    expect(costNumbers(member)).toEqual([]);
+
+    // Owner keeps real capital figures — redaction must not blank everyone.
+    const owner = await getLeakageMatrix(seeded.tenantId, { canViewCosts: true });
+    for (const group of [...owner.byCategory, ...owner.byAbc]) expect(group.capitalKes).not.toBeNull();
   });
 
   it("stock payloads carry no cost numbers for a member", async () => {

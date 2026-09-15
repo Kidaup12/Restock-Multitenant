@@ -1195,3 +1195,297 @@ export async function getOnOrder(
     totalValueKes: canViewCosts ? Math.round(totalValue) : null,
   };
 }
+
+// ── Revenue missed to stockouts (report #1, phase 2) ─────────────────────────
+// The money an empty shelf cost: for every product-day the nightly snapshot
+// shows onHand<=0, the shop lost roughly (that product's normal run rate ×
+// price) in sales. Summed per week it is a trend; summed per ABC class it says
+// where the loss concentrates. An ESTIMATE, and labelled as one — a stockout's
+// true lost demand is unknowable, so run-rate × empty-days is the honest proxy,
+// the same rate the buy list already sizes on.
+//
+// Reuses getStockoutTrend for the weekly gate (a week with too few snapshot days
+// is dropped, never counted as loss-free) and getCatalogueMetrics for the run
+// rate, so this can't disagree with the trend chart or the buy list.
+
+/** One product's total missed sales across the range. */
+export type MissedCulprit = {
+  productId: string;
+  sku: string;
+  title: string;
+  abc: string | null;
+  emptyDays: number;
+  unitsMissed: number;
+  /** Revenue is price already-would-have-earned — a sales figure, shown to all. */
+  missedRevenueKes: number;
+};
+
+/** Missed sales in one week. */
+export type MissedPeriodPoint = { weekStart: Date; missedRevenueKes: number };
+
+/** Missed sales rolled up by ABC class. */
+export type MissedClassRow = {
+  cls: "A" | "B" | "C" | "unrated";
+  skuCount: number;
+  emptyDays: number;
+  unitsMissed: number;
+  missedRevenueKes: number;
+};
+
+export type MissedRevenue = {
+  totalMissedKes: number;
+  totalEmptyProductDays: number;
+  trend: MissedPeriodPoint[]; // oldest → newest
+  byClass: MissedClassRow[];
+  culprits: MissedCulprit[]; // worst first
+  trackingSince: Date | null;
+};
+
+const MISSED_CULPRITS = 8;
+
+export async function getMissedRevenue(
+  tenantId: string,
+  { weeks = 12, abc = "all" }: { weeks?: number; abc?: AbcKey } = {}
+): Promise<MissedRevenue> {
+  const db = prismaForTenant(tenantId);
+  const trend = await getStockoutTrend(tenantId, { weeks, abc });
+  if (trend.weeks.length === 0) {
+    return {
+      totalMissedKes: 0,
+      totalEmptyProductDays: 0,
+      trend: [],
+      byClass: [],
+      culprits: [],
+      trackingSince: trend.trackingSince,
+    };
+  }
+
+  const weekStarts = trend.weeks.map((w) => w.weekStart);
+  const kept = new Set(weekStarts.map((w) => w.getTime()));
+  const earliest = new Date(Math.min(...weekStarts.map((w) => w.getTime())));
+
+  const [metrics, snapshots, products] = await Promise.all([
+    getCatalogueMetrics(tenantId),
+    db.inventorySnapshot.findMany({
+      where: { date: { gte: earliest }, onHand: { lte: 0 } },
+      select: { date: true, productId: true },
+    }),
+    db.product.findMany({
+      where: { ...BUYABLE_PRODUCT_WHERE },
+      select: { id: true, sku: true, title: true, priceKes: true, abcCategory: true },
+    }),
+  ]);
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const classKey = (c: string | null): MissedClassRow["cls"] =>
+    c === "A" || c === "B" || c === "C" ? c : "unrated";
+
+  // Empty product-days per week (snapshot onHand<=0), ABC-lens filtered.
+  const trendMap = new Map<number, number>(); // weekStart → missed KES
+  const perProduct = new Map<string, { emptyDays: number }>();
+  for (const row of snapshots) {
+    const p = productById.get(row.productId);
+    if (!p) continue; // not a buyable product
+    if (!matchesAbc({ abc: p.abcCategory ?? null }, abc)) continue;
+    const wk = weekStartOf(row.date).getTime();
+    if (!kept.has(wk)) continue;
+    const rate = metrics.get(row.productId)?.runRate ?? 0;
+    if (rate <= NO_RATE_EPSILON) continue; // a shelf that never sells loses nothing
+    const missed = rate * p.priceKes; // one day's missed sales
+    trendMap.set(wk, (trendMap.get(wk) ?? 0) + missed);
+    const cur = perProduct.get(row.productId) ?? { emptyDays: 0 };
+    cur.emptyDays += 1;
+    perProduct.set(row.productId, cur);
+  }
+
+  const trendPts: MissedPeriodPoint[] = weekStarts.map((w) => ({
+    weekStart: w,
+    missedRevenueKes: Math.round(trendMap.get(w.getTime()) ?? 0),
+  }));
+
+  // Per-product totals + per-class rollup.
+  const classAgg = new Map<MissedClassRow["cls"], MissedClassRow>();
+  const culpritsAll: MissedCulprit[] = [];
+  let totalMissed = 0;
+  let totalEmptyDays = 0;
+  for (const [productId, { emptyDays }] of perProduct) {
+    const p = productById.get(productId)!;
+    const rate = metrics.get(productId)?.runRate ?? 0;
+    const unitsMissed = rate * emptyDays;
+    const missedRevenueKes = unitsMissed * p.priceKes;
+    totalMissed += missedRevenueKes;
+    totalEmptyDays += emptyDays;
+    const cls = classKey(p.abcCategory ?? null);
+    const row = classAgg.get(cls) ?? { cls, skuCount: 0, emptyDays: 0, unitsMissed: 0, missedRevenueKes: 0 };
+    row.skuCount += 1;
+    row.emptyDays += emptyDays;
+    row.unitsMissed += unitsMissed;
+    row.missedRevenueKes += missedRevenueKes;
+    classAgg.set(cls, row);
+    culpritsAll.push({
+      productId,
+      sku: p.sku,
+      title: p.title,
+      abc: p.abcCategory ?? null,
+      emptyDays,
+      unitsMissed: Math.round(unitsMissed),
+      missedRevenueKes: Math.round(missedRevenueKes),
+    });
+  }
+
+  const classOrder: MissedClassRow["cls"][] = ["A", "B", "C", "unrated"];
+  const byClass = classOrder
+    .map((c) => classAgg.get(c))
+    .filter((r): r is MissedClassRow => r != null)
+    .map((r) => ({ ...r, unitsMissed: Math.round(r.unitsMissed), missedRevenueKes: Math.round(r.missedRevenueKes) }));
+
+  culpritsAll.sort((a, b) => b.missedRevenueKes - a.missedRevenueKes || b.emptyDays - a.emptyDays);
+
+  return {
+    totalMissedKes: Math.round(totalMissed),
+    totalEmptyProductDays: totalEmptyDays,
+    trend: trendPts,
+    byClass,
+    culprits: culpritsAll.slice(0, MISSED_CULPRITS),
+    trackingSince: trend.trackingSince,
+  };
+}
+
+// ── Category / ABC leakage matrix (report #2, phase 2) ───────────────────────
+// "Where is it happening?" — stockout %, dead-stock %, missed revenue and
+// capital tied up, rolled up by product category OR by ABC class over the range,
+// worst first. One row per group, so an owner sees which shelf leaks most.
+// Reuses the same snapshot empty-days machinery and getCatalogueMetrics; the
+// dead-stock test mirrors getInsightsOverview (held, past the dead window).
+
+export type LeakageGroup = {
+  group: string;
+  skuCount: number;
+  /** SKUs empty at the latest snapshot. */
+  stockoutSkus: number;
+  stockoutPct: number | null;
+  deadStockSkus: number;
+  deadStockPct: number | null;
+  /** Estimated missed sales over the range — a sales figure, shown to all. */
+  missedRevenueKes: number;
+  /** Capital tied up in this group's stock right now. Null for money-blind. */
+  capitalKes: number | null;
+};
+
+export type LeakageMatrix = {
+  byCategory: LeakageGroup[];
+  byAbc: LeakageGroup[];
+  windowDays: number;
+  trackingSince: Date | null;
+};
+
+export async function getLeakageMatrix(
+  tenantId: string,
+  { weeks = 12, canViewCosts }: { weeks?: number; canViewCosts: boolean }
+): Promise<LeakageMatrix> {
+  const db = prismaForTenant(tenantId);
+  const [trend, missedByProduct, metrics, products, lastSales, config] = await Promise.all([
+    getStockoutTrend(tenantId, { weeks }),
+    missedByProductOverWeeks(tenantId, weeks),
+    getCatalogueMetrics(tenantId),
+    db.product.findMany({
+      where: { ...BUYABLE_PRODUCT_WHERE },
+      select: { id: true, customCategory: true, productType: true, currentStock: true, abcCategory: true },
+    }),
+    db.salesHistory.groupBy({ by: ["productId"], _max: { date: true } }),
+    db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } }),
+  ]);
+  const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
+  const deadCutoff = Date.now() - windowDays * 86_400_000;
+  const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date?.getTime() ?? null]));
+
+  type Acc = {
+    skuCount: number;
+    stockoutSkus: number;
+    deadStockSkus: number;
+    missedRevenueKes: number;
+    capitalKes: number;
+  };
+  const fresh = (): Acc => ({ skuCount: 0, stockoutSkus: 0, deadStockSkus: 0, missedRevenueKes: 0, capitalKes: 0 });
+  const catAgg = new Map<string, Acc>();
+  const abcAgg = new Map<string, Acc>();
+  const bump = (agg: Map<string, Acc>, key: string, p: (typeof products)[number]) => {
+    const a = agg.get(key) ?? fresh();
+    a.skuCount += 1;
+    const onHand = p.currentStock;
+    const sold = lastSale.get(p.id) ?? null;
+    if (onHand <= 0) {
+      a.stockoutSkus += 1;
+    } else if (sold == null || sold < deadCutoff) {
+      // Dead stock = held with no sale inside the window. Deliberately NOT
+      // folding in overstock (over-bought but still selling) — that is a
+      // different condition, and counting it here would inflate "dead-stock %"
+      // past what the rest of the app reports.
+      a.deadStockSkus += 1;
+    }
+    a.missedRevenueKes += missedByProduct.get(p.id) ?? 0;
+    a.capitalKes += metrics.get(p.id)?.moneyAtRestKes ?? 0;
+    agg.set(key, a);
+  };
+
+  for (const p of products) {
+    bump(catAgg, p.customCategory ?? p.productType ?? "Uncategorised", p);
+    bump(abcAgg, p.abcCategory ?? "Unrated", p);
+  }
+
+  const toGroups = (agg: Map<string, Acc>): LeakageGroup[] =>
+    [...agg.entries()]
+      .map(([group, a]) => ({
+        group,
+        skuCount: a.skuCount,
+        stockoutSkus: a.stockoutSkus,
+        stockoutPct: a.skuCount > 0 ? Math.round((a.stockoutSkus / a.skuCount) * 1000) / 10 : null,
+        deadStockSkus: a.deadStockSkus,
+        deadStockPct: a.skuCount > 0 ? Math.round((a.deadStockSkus / a.skuCount) * 1000) / 10 : null,
+        missedRevenueKes: Math.round(a.missedRevenueKes),
+        capitalKes: canViewCosts ? Math.round(a.capitalKes) : null,
+      }))
+      .sort((x, y) => y.missedRevenueKes - x.missedRevenueKes || (y.stockoutPct ?? 0) - (x.stockoutPct ?? 0));
+
+  // ABC groups in class order rather than by leak, so the lens reads A→B→C.
+  const abcRank = (g: string) => (g === "A" ? 0 : g === "B" ? 1 : g === "C" ? 2 : 3);
+  const byAbc = toGroups(abcAgg).sort((a, b) => abcRank(a.group) - abcRank(b.group));
+
+  return { byCategory: toGroups(catAgg), byAbc, windowDays, trackingSince: trend.trackingSince };
+}
+
+/**
+ * Per-product estimated missed revenue over the gated weeks — the shared engine
+ * behind both report #1 (missed-revenue) and report #2 (leakage matrix), so the
+ * two can never quote different totals. Returns a Map<productId, missedKes>
+ * covering EVERY product (not just top culprits), keyed off the same weekly gate
+ * and run rate as getStockoutTrend / getCatalogueMetrics.
+ */
+async function missedByProductOverWeeks(tenantId: string, weeks: number): Promise<Map<string, number>> {
+  const db = prismaForTenant(tenantId);
+  const trend = await getStockoutTrend(tenantId, { weeks });
+  const out = new Map<string, number>();
+  if (trend.weeks.length === 0) return out;
+  const weekStarts = trend.weeks.map((w) => w.weekStart);
+  const kept = new Set(weekStarts.map((w) => w.getTime()));
+  const earliest = new Date(Math.min(...weekStarts.map((w) => w.getTime())));
+
+  const [metrics, snapshots, products] = await Promise.all([
+    getCatalogueMetrics(tenantId),
+    db.inventorySnapshot.findMany({
+      where: { date: { gte: earliest }, onHand: { lte: 0 } },
+      select: { date: true, productId: true },
+    }),
+    db.product.findMany({ where: { ...BUYABLE_PRODUCT_WHERE }, select: { id: true, priceKes: true } }),
+  ]);
+  const priceById = new Map(products.map((p) => [p.id, p.priceKes]));
+  for (const row of snapshots) {
+    const price = priceById.get(row.productId);
+    if (price == null) continue;
+    const wk = weekStartOf(row.date).getTime();
+    if (!kept.has(wk)) continue;
+    const rate = metrics.get(row.productId)?.runRate ?? 0;
+    if (rate <= NO_RATE_EPSILON) continue;
+    out.set(row.productId, (out.get(row.productId) ?? 0) + rate * price);
+  }
+  return out;
+}

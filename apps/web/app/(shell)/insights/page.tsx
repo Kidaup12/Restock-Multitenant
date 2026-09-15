@@ -31,6 +31,8 @@ import { OverstockSection } from "./overstock-section";
 import { RevenueBreakdownSection } from "./revenue-breakdown";
 import { OnOrderSection } from "./on-order-section";
 import { BeforeAfter } from "./before-after";
+import { MissedRevenueSection } from "./missed-revenue";
+import { LeakageMatrixSection } from "./leakage-matrix";
 
 export const metadata: Metadata = {
   title: "Reports",
@@ -397,6 +399,40 @@ export default async function InsightsPage({
             }
           >
             <StockoutTrend tenantId={membership.tenantId} weeks={rangeWeeks(range)} />
+          </Suspense>
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading sales missed to empty shelves">
+                <SkeletonCard lines={5} />
+              </div>
+            }
+          >
+            {/* What the empty shelves the chart above counts actually cost in
+                sales — a headline, a weekly trend and the worst culprits. A
+                sales estimate, so no cost gate; honours the same ABC lens. */}
+            <MissedRevenueSection
+              tenantId={membership.tenantId}
+              currency={membership.tenant.currency}
+              weeks={rangeWeeks(range)}
+              abc={abc}
+            />
+          </Suspense>
+          <Suspense
+            fallback={
+              <div role="status" aria-label="Loading where it's leaking">
+                <SkeletonTableRows rows={6} />
+              </div>
+            }
+          >
+            {/* The same loss, grouped: which category or class leaks most, by
+                stockouts, dead stock and missed sales. Capital tied up is a
+                cost and drops for a money-blind member. */}
+            <LeakageMatrixSection
+              tenantId={membership.tenantId}
+              currency={membership.tenant.currency}
+              weeks={rangeWeeks(range)}
+              canViewCosts={canViewCosts}
+            />
           </Suspense>
           <Suspense
             fallback={
