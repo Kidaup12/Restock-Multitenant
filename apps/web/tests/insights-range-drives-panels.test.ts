@@ -13,14 +13,26 @@ import { describe, expect, it } from "vitest";
  * that query the database; rendering them here would test the loader, not the
  * wiring. The regexes require the range EXPRESSION, not a literal, so hardcoding
  * `days={30}` back in fails.
+ *
+ * The Reports page splits into tabs (page.tsx wires the Performance panels; the
+ * Overview panels live in overview-tab.tsx), so the wiring is scanned across
+ * both files — a panel reading the period counts wherever it is rendered.
  */
 
-const page = readFileSync(new URL("../app/(shell)/insights/page.tsx", import.meta.url), "utf8");
+const page = [
+  readFileSync(new URL("../app/(shell)/insights/page.tsx", import.meta.url), "utf8"),
+  readFileSync(new URL("../app/(shell)/insights/overview-tab.tsx", import.meta.url), "utf8"),
+].join("\n");
 
 describe("the report period reaches the panels", () => {
   it("drives the top-earners window", () => {
+    // Accept the inline expression OR a `days` bound to rangeDays(range) then
+    // passed through — either way the rail, not a literal, sets the window.
+    const inline = /<TopEarners[\s\S]{0,200}days=\{rangeDays\(range\)\}/.test(page);
+    const viaVar =
+      /const days = rangeDays\(range\)/.test(page) && /<TopEarners[\s\S]{0,200}days=\{days\}/.test(page);
     expect(
-      /<TopEarners[\s\S]{0,200}days=\{rangeDays\(range\)\}/.test(page),
+      inline || viaVar,
       "top earners is not reading the period — the rail cannot change it"
     ).toBe(true);
   });

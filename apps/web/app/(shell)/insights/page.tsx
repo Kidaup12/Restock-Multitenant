@@ -7,8 +7,6 @@ import { PLAN_TIER_LABEL, planAllows, planFeatureTier } from "@/lib/capabilities
 
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { GuideBox } from "@/components/ui/guide-box";
-import { SegmentedNav } from "@/components/ui/segmented-nav";
 import { PageHeader } from "@/components/ui/page-header";
 import { ABC_KEYS, abcLabel, parseAbcKey, type AbcKey } from "@/lib/data/abc-lens";
 import {
@@ -19,17 +17,21 @@ import {
   rangeWeeks,
   type RangeKey,
 } from "@/lib/data/report-range";
-import { SkeletonCard, SkeletonStatTile, SkeletonTableRows } from "@/components/ui/skeleton";
+import { SkeletonCard, SkeletonTableRows } from "@/components/ui/skeleton";
+import { parseReportTab, type ReportTab } from "./tabs";
+import { ReportTabNav } from "./report-tab-nav";
+import { ReportGuide } from "./report-guides";
+import { OverviewTab } from "./overview-tab";
+import { HistoryTab } from "./history-tab";
+// Performance panels — kept inline (not the PerformanceTab wrapper) so the tab
+// stays byte-identical to the prior "Is it working?" view, including DeadStockMonths
+// and the class rail, which the thin wrapper deliberately omits. The exact-match
+// Performance rebuild is a documented follow-up.
 import { ForecastScorecard } from "./forecast-scorecard";
 import { ImpactCard } from "./impact-card";
-import { ShelfHealth } from "./shelf-health";
 import { PeriodTable } from "./period-table";
 import { DeadStockMonths } from "./dead-stock-months";
 import { StockoutTrend } from "./stockout-trend";
-import { TopEarners } from "./top-earners";
-import { OverstockSection } from "./overstock-section";
-import { RevenueBreakdownSection } from "./revenue-breakdown";
-import { OnOrderSection } from "./on-order-section";
 import { BeforeAfter } from "./before-after";
 import { MissedRevenueSection } from "./missed-revenue";
 import { LeakageMatrixSection } from "./leakage-matrix";
@@ -41,35 +43,13 @@ export const metadata: Metadata = {
 const DESCRIPTION = "Where your money is stuck, and whether the forecast is earning its keep";
 
 /**
- * The period the report covers.
+ * The A/B/C lens for the Performance tab. (Overview has its own ClassFilter.)
  *
- * Server-rendered links, not client state: a period is then shareable, survives
- * a reload and works with Back, the same way the view tabs already do.
- *
- * It says what it does NOT drive, deliberately. Shelf health and the impact
- * card are snapshots — what is empty right now, and everything since the first
- * order — so a period control silently sitting above them would be read as
- * changing numbers it cannot change. That is the "control far from its effect"
- * defect this codebase has already produced three times.
+ * Rendered here rather than inside a panel because this is where the URL is
+ * known, and it keeps what crosses into a panel a plain string. Passing an
+ * href-builder down would break the moment a panel became a client component.
  */
-/**
- * The A/B/C lens over shelf health.
- *
- * Rendered here rather than inside ShelfHealth because this is where the URL is
- * known, and it keeps what crosses into the panel a plain string. Passing an
- * href-builder down would work today and break the moment that panel became a
- * client component — the closure-across-the-boundary fault that took a whole
- * page down once already.
- */
-function ClassRail({
-  abc,
-  range,
-  view,
-}: {
-  abc: AbcKey;
-  range: RangeKey;
-  view: "now" | "proof";
-}) {
+function PerfClassRail({ abc, range }: { abc: AbcKey; range: RangeKey }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs font-medium text-ink-muted">Class</span>
@@ -79,7 +59,7 @@ function ClassRail({
           return (
             <a
               key={key}
-              href={`/insights?${view === "proof" ? "view=proof&" : ""}range=${range}&class=${key}`}
+              href={`/insights?tab=performance&range=${range}&class=${key}`}
               aria-current={current ? "true" : undefined}
               className={
                 current
@@ -96,8 +76,10 @@ function ClassRail({
   );
 }
 
-function RangeRail({ range, view }: { range: RangeKey; view: "now" | "proof" }) {
-  const base = view === "proof" ? "/insights?view=proof" : "/insights?";
+/** The report period. Server-rendered links, not client state: a period is then
+ *  shareable, survives a reload and works with Back. Present on both Overview
+ *  (drives the revenue/top-earner windows) and Performance (drives the trend). */
+function RangeRail({ tab, range }: { tab: ReportTab; range: RangeKey }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
       <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Report period">
@@ -106,7 +88,7 @@ function RangeRail({ range, view }: { range: RangeKey; view: "now" | "proof" }) 
           return (
             <a
               key={key}
-              href={`${base}${view === "proof" ? "&" : ""}range=${key}`}
+              href={`/insights?tab=${tab}&range=${key}`}
               aria-current={current ? "true" : undefined}
               className={
                 current
@@ -120,25 +102,18 @@ function RangeRail({ range, view }: { range: RangeKey; view: "now" | "proof" }) 
         })}
       </div>
       <p className="text-xs text-ink-muted">
-        {view === "proof"
+        {tab === "performance"
           ? "Sets the trend and adherence windows. Accuracy grades whole elapsed horizons, and the impact card measures everything since your first order."
-          : "Sets the top-earners window. Shelf health is what’s on the shelf right now."}
+          : "Sets the top-earners and revenue windows. Shelf health is what’s on the shelf right now."}
       </p>
     </div>
   );
 }
 
 /**
- * The whole-shop report — revenue, capital tied up, ABC mix, dead stock,
- * stockouts and top movers on one page.
- *
- * It was built, routed and rendered, and nothing anywhere linked to it: the only
- * mention of /api/reports/pdf in the tree was its own renderer's comment. A
- * report nobody can reach is not a feature, and this is the fourth time in this
- * codebase that something complete has sat unreachable.
- *
- * A plain link, not a client component: the route is a session-guarded GET with
- * no parameters, and it drops cost figures for a money-blind member itself.
+ * The whole-shop report PDF — a session-guarded GET with no parameters that
+ * drops cost figures for a money-blind member itself. A plain link, not a client
+ * component.
  */
 function ShopReportLink() {
   return (
@@ -151,21 +126,7 @@ function ShopReportLink() {
   );
 }
 
-function ViewTabs({ view }: { view: "now" | "proof" }) {
-  return (
-    <SegmentedNav
-      label="Report views"
-      data-tour="insights-tabs"
-      items={[
-        { href: "/insights", label: "Where you stand", active: view === "now" },
-        { href: "/insights?view=proof", label: "Is it working?", active: view === "proof" },
-      ]}
-    />
-  );
-}
-
-/** Locked shell for a plan that doesn't include Insights — name what it holds so
- *  the owner can see what upgrading buys rather than an empty page. */
+/** Locked shell for a plan that doesn't include Insights. */
 function InsightsLocked() {
   return (
     <Card>
@@ -184,15 +145,115 @@ function InsightsLocked() {
   );
 }
 
+/** The Performance tab — the trend/proof panels. Kept inline (see import note). */
+function PerformanceContent({
+  tenantId,
+  currency,
+  canViewCosts,
+  canRunCheck,
+  range,
+  abc,
+}: {
+  tenantId: string;
+  currency: string;
+  canViewCosts: boolean;
+  canRunCheck: boolean;
+  range: RangeKey;
+  abc: AbcKey;
+}) {
+  return (
+    <div className="space-y-6">
+      <Suspense
+        fallback={
+          <div role="status" aria-label="Loading impact summary">
+            <SkeletonCard lines={3} />
+          </div>
+        }
+      >
+        <ImpactCard tenantId={tenantId} />
+      </Suspense>
+      <Suspense
+        fallback={
+          <div role="status" aria-label="Loading before-and-after">
+            <SkeletonCard lines={3} />
+          </div>
+        }
+      >
+        <BeforeAfter tenantId={tenantId} />
+      </Suspense>
+      <Suspense
+        fallback={
+          <div role="status" aria-label="Loading forecast scorecard">
+            <SkeletonCard lines={3} />
+          </div>
+        }
+      >
+        <ForecastScorecard tenantId={tenantId} canRunCheck={canRunCheck} windowDays={rangeDays(range)} />
+      </Suspense>
+      <Suspense
+        fallback={
+          <div role="status" aria-label="Loading stockout trend">
+            <SkeletonCard lines={3} />
+          </div>
+        }
+      >
+        <StockoutTrend tenantId={tenantId} weeks={rangeWeeks(range)} />
+      </Suspense>
+      <Suspense
+        fallback={
+          <div role="status" aria-label="Loading sales missed to empty shelves">
+            <SkeletonCard lines={5} />
+          </div>
+        }
+      >
+        <MissedRevenueSection tenantId={tenantId} currency={currency} weeks={rangeWeeks(range)} abc={abc} />
+      </Suspense>
+      <Suspense
+        fallback={
+          <div role="status" aria-label="Loading where it's leaking">
+            <SkeletonTableRows rows={6} />
+          </div>
+        }
+      >
+        <LeakageMatrixSection
+          tenantId={tenantId}
+          currency={currency}
+          weeks={rangeWeeks(range)}
+          canViewCosts={canViewCosts}
+        />
+      </Suspense>
+      <Suspense
+        fallback={
+          <div role="status" aria-label="Loading dead stock by month">
+            <SkeletonCard lines={3} />
+          </div>
+        }
+      >
+        <DeadStockMonths tenantId={tenantId} canViewCosts={canViewCosts} />
+      </Suspense>
+      <PerfClassRail abc={abc} range={range} />
+      <Suspense
+        fallback={
+          <div role="status" aria-label="Loading week-by-week metrics">
+            <SkeletonTableRows rows={6} />
+          </div>
+        }
+      >
+        <PeriodTable tenantId={tenantId} weeks={rangeWeeks(range)} abc={abc} />
+      </Suspense>
+    </div>
+  );
+}
+
 export default async function InsightsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; range?: string; class?: string }>;
+  searchParams: Promise<{ tab?: string; view?: string; range?: string; class?: string }>;
 }) {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
   const params = await searchParams;
-  const view = params.view === "proof" ? "proof" : "now";
+  const tab = parseReportTab(params);
   const range = parseRangeKey(typeof params.range === "string" ? params.range : null);
   const abc = parseAbcKey(typeof params.class === "string" ? params.class : null);
 
@@ -229,241 +290,35 @@ export default async function InsightsPage({
         description={DESCRIPTION}
         actions={<ShopReportLink />}
       />
-      <ViewTabs view={view} />
+      <ReportTabNav tab={tab} range={range} abc={abc} />
 
-      {view === "now" ? (
-        <GuideBox
-          id="insights-now"
-          scope={membership.tenantId}
-          title="Where your money is stuck right now"
-        >
-          A snapshot of today, not a trend. Start with <strong>Over-bought</strong> and{" "}
-          <strong>Cash asleep</strong> — that is money sitting on the shelf you could put back to
-          work. <strong>Top earners</strong> shows what to protect, and <strong>On the way</strong>{" "}
-          is stock already ordered, so you don&rsquo;t buy it twice. The period buttons set the
-          revenue windows; the shelf figures are always right-now.
-        </GuideBox>
-      ) : (
-        <GuideBox
-          id="insights-proof"
-          scope={membership.tenantId}
-          title="Is it actually working?"
-        >
-          The proof, measured since your first order. Look at <strong>Before and after</strong>{" "}
-          first — fewer empty shelves and fewer products sitting unsold is the whole point, and down
-          is the good direction. Below it, <strong>How close we&rsquo;ve been</strong> grades the
-          forecast, and the week-by-week table says which products caused the bad weeks.
-        </GuideBox>
+      <ReportGuide tab={tab} scope={membership.tenantId} />
+
+      {tab !== "history" && <RangeRail tab={tab} range={range} />}
+
+      {tab === "overview" && (
+        <OverviewTab
+          tenantId={membership.tenantId}
+          currency={membership.tenant.currency}
+          canViewCosts={canViewCosts}
+          abc={abc}
+          range={range}
+          tab="overview"
+        />
       )}
 
-      <RangeRail range={range} view={view} />
-
-      {view === "now" ? (
-        <Suspense
-          fallback={
-            <div className="space-y-6" role="status" aria-label="Loading shelf health">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <SkeletonStatTile />
-                <SkeletonStatTile />
-                <SkeletonStatTile />
-              </div>
-              {/* Shelf health loads TWO tables — empty shelves, then dead
-                  stock. One stood in for both and the page jumped on load. */}
-              <SkeletonTableRows rows={6} />
-              <SkeletonTableRows rows={6} />
-            </div>
-          }
-        >
-          <ShelfHealth
-            tenantId={membership.tenantId}
-            canViewCosts={canViewCosts}
-            currency={membership.tenant.currency}
-            abc={abc}
-            classRail={<ClassRail abc={abc} range={range} view="now" />}
-          />
-        </Suspense>
-      ) : null}
-
-      {view === "now" && (
-        <Suspense
-          fallback={
-            <div role="status" aria-label="Loading top earners">
-              <SkeletonTableRows rows={8} />
-            </div>
-          }
-        >
-          {/* The report's headline: which products actually bring the money in,
-              filterable by ABC class. */}
-          <TopEarners
-            tenantId={membership.tenantId}
-            currency={membership.tenant.currency}
-            days={rangeDays(range)}
-          />
-        </Suspense>
+      {tab === "performance" && (
+        <PerformanceContent
+          tenantId={membership.tenantId}
+          currency={membership.tenant.currency}
+          canViewCosts={canViewCosts}
+          canRunCheck={hasPermission(membership, "manage_settings")}
+          range={range}
+          abc={abc}
+        />
       )}
 
-      {view === "now" && (
-        <Suspense
-          fallback={
-            <div role="status" aria-label="Loading revenue breakdown">
-              <SkeletonCard lines={5} />
-            </div>
-          }
-        >
-          {/* Where the money comes from — by category and by brand, over the
-              selected window. Revenue is a sales figure, so no cost gate. */}
-          <RevenueBreakdownSection
-            tenantId={membership.tenantId}
-            currency={membership.tenant.currency}
-            days={rangeDays(range)}
-          />
-        </Suspense>
-      )}
-
-      {view === "now" && (
-        <Suspense
-          fallback={
-            <div role="status" aria-label="Loading over-bought stock">
-              <SkeletonTableRows rows={6} />
-            </div>
-          }
-        >
-          {/* Excess above a healthy cover — the part of the shelf you over-bought,
-              honouring the same ABC lens as shelf health. */}
-          <OverstockSection
-            tenantId={membership.tenantId}
-            currency={membership.tenant.currency}
-            canViewCosts={canViewCosts}
-            abc={abc}
-          />
-        </Suspense>
-      )}
-
-      {view === "now" && (
-        <Suspense
-          fallback={
-            <div role="status" aria-label="Loading stock on the way">
-              <SkeletonTableRows rows={6} />
-            </div>
-          }
-        >
-          {/* What's already inbound, so an owner doesn't double-order. */}
-          <OnOrderSection
-            tenantId={membership.tenantId}
-            currency={membership.tenant.currency}
-            canViewCosts={canViewCosts}
-          />
-        </Suspense>
-      )}
-
-      {view === "proof" && (
-        <div className="space-y-6">
-          <Suspense
-            fallback={
-              <div role="status" aria-label="Loading impact summary">
-                <SkeletonCard lines={3} />
-              </div>
-            }
-          >
-            <ImpactCard tenantId={membership.tenantId} />
-          </Suspense>
-          <Suspense
-            fallback={
-              <div role="status" aria-label="Loading before-and-after">
-                <SkeletonCard lines={3} />
-              </div>
-            }
-          >
-            {/* The table cut of the impact card's two numbers — before against
-                now, with the direction coloured. */}
-            <BeforeAfter tenantId={membership.tenantId} />
-          </Suspense>
-          <Suspense
-            fallback={
-              <div role="status" aria-label="Loading forecast scorecard">
-                <SkeletonCard lines={3} />
-              </div>
-            }
-          >
-            <ForecastScorecard
-              tenantId={membership.tenantId}
-              canRunCheck={hasPermission(membership, "manage_settings")}
-              windowDays={rangeDays(range)}
-            />
-          </Suspense>
-          <Suspense
-            fallback={
-              <div role="status" aria-label="Loading stockout trend">
-                <SkeletonCard lines={3} />
-              </div>
-            }
-          >
-            <StockoutTrend tenantId={membership.tenantId} weeks={rangeWeeks(range)} />
-          </Suspense>
-          <Suspense
-            fallback={
-              <div role="status" aria-label="Loading sales missed to empty shelves">
-                <SkeletonCard lines={5} />
-              </div>
-            }
-          >
-            {/* What the empty shelves the chart above counts actually cost in
-                sales — a headline, a weekly trend and the worst culprits. A
-                sales estimate, so no cost gate; honours the same ABC lens. */}
-            <MissedRevenueSection
-              tenantId={membership.tenantId}
-              currency={membership.tenant.currency}
-              weeks={rangeWeeks(range)}
-              abc={abc}
-            />
-          </Suspense>
-          <Suspense
-            fallback={
-              <div role="status" aria-label="Loading where it's leaking">
-                <SkeletonTableRows rows={6} />
-              </div>
-            }
-          >
-            {/* The same loss, grouped: which category or class leaks most, by
-                stockouts, dead stock and missed sales. Capital tied up is a
-                cost and drops for a money-blind member. */}
-            <LeakageMatrixSection
-              tenantId={membership.tenantId}
-              currency={membership.tenant.currency}
-              weeks={rangeWeeks(range)}
-              canViewCosts={canViewCosts}
-            />
-          </Suspense>
-          <Suspense
-            fallback={
-              <div role="status" aria-label="Loading dead stock by month">
-                <SkeletonCard lines={3} />
-              </div>
-            }
-          >
-            {/* Dead stock lives here rather than in the weekly table: it is a
-                window measure, and a weekly figure mostly shows the window
-                filling rather than anything the shop did. */}
-            <DeadStockMonths tenantId={membership.tenantId} canViewCosts={canViewCosts} />
-          </Suspense>
-          <ClassRail abc={abc} range={range} view="proof" />
-          <Suspense
-            fallback={
-              <div role="status" aria-label="Loading week-by-week metrics">
-                <SkeletonTableRows rows={6} />
-              </div>
-            }
-          >
-            {/* The chart says which weeks were bad; this says which products
-                made them so. */}
-            <PeriodTable
-              tenantId={membership.tenantId}
-              weeks={rangeWeeks(range)}
-              abc={abc}
-            />
-          </Suspense>
-        </div>
-      )}
+      {tab === "history" && <HistoryTab tenantId={membership.tenantId} />}
     </div>
   );
 }
