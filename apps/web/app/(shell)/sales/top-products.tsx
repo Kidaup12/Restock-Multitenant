@@ -1,6 +1,7 @@
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { formatNumber } from "@/lib/money";
+import { formatNumber, formatRunRate } from "@/lib/money";
 import {
   Table,
   TableBody,
@@ -48,7 +49,9 @@ export async function TopProducts({
           <TableHeader>
             <TableHead>Product</TableHead>
             <TableHead>SKU</TableHead>
+            <TableHead>Class</TableHead>
             <TableHead numeric>Units</TableHead>
+            <TableHead numeric>Stock</TableHead>
             <TableHead numeric>Revenue ({currency})</TableHead>
             <TableHead numeric>Run rate</TableHead>
           </TableHeader>
@@ -57,9 +60,13 @@ export async function TopProducts({
               <TableRow key={row.productId}>
                 <TableCell className="font-medium text-ink">{row.title}</TableCell>
                 <TableCell className="font-mono text-xs">{row.sku}</TableCell>
+                <TableCell>
+                  <AbcBadge value={row.abc} />
+                </TableCell>
                 <TableCell numeric>{formatNumber(row.unitsSold)}</TableCell>
+                <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
                 <TableCell numeric>{formatNumber(row.revenueKes)}</TableCell>
-                <TableCell numeric>{row.runRate.toFixed(1)}/day</TableCell>
+                <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
               </TableRow>
             ))}
           </TableBody>

@@ -2,10 +2,11 @@ import Link from "next/link";
 import { getInsightsOverview } from "@/lib/data/insights";
 import { matchesAbc, type AbcKey } from "@/lib/data/abc-lens";
 
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
-import { formatMoney, formatNumber } from "@/lib/money";
+import { formatMoney, formatNumber, formatRunRate } from "@/lib/money";
 import { cols } from "@/lib/export/print-pdf";
 import { ExportPdfButton } from "./export-pdf-button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -72,23 +73,24 @@ export async function ShelfHealth({
   // redaction — a money-blind caller's rows never carry a cash figure. Rebuilt
   // from the same rows the tables render, so the PDF can't drift from the screen.
   const shelfExport = {
-    columns: cols(["Product", "SKU", "Normally sells/day", "Missing/day", "Last sold"], [2, 3]),
+    columns: cols(["Product", "SKU", "Normally sells", "Missing/day", "Last sold"], [2, 3]),
     rows: shelfRows.map((r) => [
       r.title,
       r.sku,
-      r.runRatePerDay.toFixed(1),
+      formatRunRate(r.runRatePerDay),
       formatMoney(r.missedSalesKes, currency),
       r.lastSoldAt ? dayLabel(r.lastSoldAt) : "never",
     ]),
   };
-  const cashHeaders = ["Product", "SKU", "Why", "On hand", "Cover"];
+  const cashHeaders = ["Product", "SKU", "Why", "On hand", "Sells/day", "Cover"];
   const cashExport = {
-    columns: cols(canViewCosts ? [...cashHeaders, `Cash tied up`] : cashHeaders, [3, 4, 5]),
+    columns: cols(canViewCosts ? [...cashHeaders, `Cash tied up`] : cashHeaders, [3, 4, 5, 6]),
     rows: cashRows.map((r) => [
       r.title,
       r.sku,
       r.reason === "not_selling" ? "Not selling" : "Way too much",
       formatNumber(r.onHandUnits),
+      formatRunRate(r.runRatePerDay),
       r.coverDays == null ? "—" : `${Math.round(r.coverDays)}d`,
       ...(canViewCosts
         ? [r.costKnown && r.cashKes != null ? formatMoney(r.cashKes, currency) : "—"]
@@ -183,13 +185,9 @@ export async function ShelfHealth({
                       <div className="text-xs text-ink-muted">{row.sku}</div>
                     </TableCell>
                     <TableCell>
-                      {row.abc ? (
-                        <Badge tone="neutral">{row.abc}</Badge>
-                      ) : (
-                        <span className="text-xs text-ink-faint">—</span>
-                      )}
+                      <AbcBadge value={row.abc} />
                     </TableCell>
-                    <TableCell numeric>{row.runRatePerDay.toFixed(1)}/day</TableCell>
+                    <TableCell numeric>{formatRunRate(row.runRatePerDay)}</TableCell>
                     <TableCell numeric>
                       <CostValue amount={row.missedSalesKes} />
                     </TableCell>
@@ -246,6 +244,7 @@ export async function ShelfHealth({
                 <TableHead>Class</TableHead>
                 <TableHead>Why</TableHead>
                 <TableHead numeric>On hand</TableHead>
+                <TableHead numeric>Sells/day</TableHead>
                 <TableHead numeric>Cover</TableHead>
                 <TableHead numeric>Cash tied up</TableHead>
               </TableHeader>
@@ -257,11 +256,7 @@ export async function ShelfHealth({
                       <div className="text-xs text-ink-muted">{row.sku}</div>
                     </TableCell>
                     <TableCell>
-                      {row.abc ? (
-                        <Badge tone="neutral">{row.abc}</Badge>
-                      ) : (
-                        <span className="text-xs text-ink-faint">—</span>
-                      )}
+                      <AbcBadge value={row.abc} />
                     </TableCell>
                     <TableCell>
                       <Badge tone={row.reason === "not_selling" ? "negative" : "warning"}>
@@ -269,6 +264,7 @@ export async function ShelfHealth({
                       </Badge>
                     </TableCell>
                     <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
+                    <TableCell numeric>{formatRunRate(row.runRatePerDay)}</TableCell>
                     <TableCell numeric>
                       {row.coverDays == null ? (
                         <span title="No sales, so there is no cover to measure">—</span>

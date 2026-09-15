@@ -16,7 +16,7 @@ vi.mock("@/components/currency-provider", () => ({ useCurrency: () => "KES" }));
 
 const row = (over: Partial<TopProduct>): TopProduct => ({
   productId: over.sku ?? "p", sku: "SKU-1", title: "A product",
-  unitsSold: 10, revenueKes: 1000, runRate: 0.5, abc: "A", ...over,
+  unitsSold: 10, revenueKes: 1000, runRate: 0.5, abc: "A", onHandUnits: 12, ...over,
 });
 
 const rows: TopProduct[] = [
@@ -50,7 +50,12 @@ describe("top earners", () => {
     const html = render();
     expect(html).toContain("Best sellers");
     expect(html).toContain("Slow movers");
-    expect(html).not.toContain("Class A");
+    // The class FILTER chips use shop-language names, never "Class A/B/C" as a
+    // visible label. (The AbcBadge in the table carries a `title="Class A"`
+    // tooltip for accessibility — that's an attribute, not a chip label, so we
+    // check for the visible ">Class A<" text rather than the attribute string.)
+    expect(html).not.toContain(">Class A<");
+    expect(html).not.toContain(">Class B<");
   });
 
   it("shows an empty state when nothing has sold", () => {

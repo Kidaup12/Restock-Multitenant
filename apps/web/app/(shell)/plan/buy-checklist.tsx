@@ -4,6 +4,7 @@ import { Fragment, useMemo, useState, useTransition } from "react";
 import { ChevronDownIcon } from "@/components/icons";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
@@ -612,7 +613,7 @@ export function ExcludedSection({
                             >
                               {row.title}
                             </Link>
-                            {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
+                            <AbcBadge value={row.abc} />
                             <TrustChips row={row} />
                           </div>
                           <div className="mt-0.5 font-mono text-xs text-ink-muted">{row.sku}</div>
@@ -987,6 +988,9 @@ export function BuyChecklist({
                         catalogue's "Sells/day" is what the shelf actually did. One name
                         each, or the two get read as the same number. */}
                     <th scope="col" className={cn(TH_NUM, "hidden md:table-cell")}>Buying at/day</th>
+                    {/* What's on the shelf now — the count the run sized the order
+                        against, sitting beside the days it buys. */}
+                    <th scope="col" className={TH_NUM}>Stock</th>
                     <th scope="col" className={TH_NUM}>Days left</th>
                     <th scope="col" className={cn(TH, "hidden md:table-cell")}>Order by</th>
                     <th scope="col" className={TH_NUM}>Qty</th>
@@ -1031,7 +1035,7 @@ export function BuyChecklist({
                               >
                                 {row.title}
                               </Link>
-                              {row.abc && <Badge tone="neutral">{row.abc}</Badge>}
+                              <AbcBadge value={row.abc} />
                               <TrustChips row={row} />
                             </div>
                             <div className="mt-0.5 font-mono text-xs text-ink-muted">
@@ -1057,6 +1061,7 @@ export function BuyChecklist({
                           <td className={cn(TD_NUM, "hidden lg:table-cell")}>{row.moq}</td>
                           <td className={cn(TD_NUM, "hidden lg:table-cell")}>{row.leadDays}d</td>
                           <td className={cn(TD_NUM, "hidden md:table-cell")}>{row.runRatePerDay}</td>
+                          <td className={TD_NUM}>{formatNumber(row.onHandUnits)}</td>
                           <td className={TD_NUM}>
                             <DaysLeft days={row.daysUntilStockout} onHandUnits={row.onHandUnits} />
                           </td>
@@ -1098,7 +1103,7 @@ export function BuyChecklist({
                         </tr>
                         {isOpen && (
                           <tr className="border-b border-edge">
-                            <td colSpan={13} className="px-5 pt-0 pb-4">
+                            <td colSpan={14} className="px-5 pt-0 pb-4">
                               <WhyPanel row={row} />
                             </td>
                           </tr>

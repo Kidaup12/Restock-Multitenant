@@ -57,6 +57,9 @@ export type CashAsleepRow = {
    *  but carrying more cover than OVERSTOCK_COVER_DAYS. */
   reason: "not_selling" | "too_much";
   onHandUnits: number;
+  /** Blended run rate (units/day) — the velocity that tells "dead" from "slow".
+   *  A sales figure, shown to every role. */
+  runRatePerDay: number;
   /** Null when the run rate is ~zero (no cover to measure) — never the sentinel. */
   coverDays: number | null;
   /** Cost × on-hand. Null when the caller can't view costs. */
@@ -207,6 +210,7 @@ export async function getInsightsOverview(
       title: p.title,
       reason: idle ? "not_selling" : "too_much",
       onHandUnits: onHand,
+      runRatePerDay: rate,
       coverDays: rate > NO_RATE_EPSILON ? (m?.coverDays ?? null) : null,
       cashKes: cash,
       costKnown: p.costKes > 0,
@@ -1012,6 +1016,8 @@ export type OverstockRow = {
   title: string;
   abc: string | null;
   onHandUnits: number;
+  /** Blended run rate (units/day) — how fast the over-bought stock is moving. */
+  runRatePerDay: number;
   coverDays: number | null;
   /** Units over the healthy-cover threshold. */
   excessUnits: number;
@@ -1061,6 +1067,7 @@ export async function getOverstock(
       title: p.title,
       abc: cls,
       onHandUnits: p.currentStock,
+      runRatePerDay: rate,
       coverDays: ex.coverDays,
       excessUnits: Math.round(ex.excessUnits),
       excessValueKes: canViewCosts ? Math.round(ex.excessValueKes) : null,
@@ -1145,6 +1152,9 @@ export type OnOrderRow = {
   title: string;
   abc: string | null;
   onOrderUnits: number;
+  /** Sellable on-hand right now — an inbound order to a full shelf reads very
+   *  differently from one to an empty one, so the decision needs both. */
+  onHandUnits: number;
   expectedArrivalAt: Date | null;
   leadDays: number;
   supplierName: string | null;
@@ -1177,6 +1187,7 @@ export async function getOnOrder(
       title: c.title,
       abc: c.abc,
       onOrderUnits: c.onOrderUnits,
+      onHandUnits: c.onHandUnits,
       expectedArrivalAt: c.expectedArrivalAt,
       leadDays: c.leadDays,
       supplierName: c.supplierName,

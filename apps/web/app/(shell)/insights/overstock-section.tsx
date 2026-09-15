@@ -1,12 +1,12 @@
 import { getOverstock } from "@/lib/data/insights";
 import { type AbcKey } from "@/lib/data/abc-lens";
 
-import { Badge } from "@/components/ui/badge";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatTile } from "@/components/ui/stat-tile";
-import { formatMoney, formatNumber } from "@/lib/money";
+import { formatMoney, formatNumber, formatRunRate } from "@/lib/money";
 import { cols } from "@/lib/export/print-pdf";
 import { ExportPdfButton } from "./export-pdf-button";
 import {
@@ -52,14 +52,15 @@ export async function OverstockSection({
   // The PDF mirrors the on-screen columns and honours the same cost redaction —
   // a money-blind caller's rows never carry a capital figure. Rebuilt from the
   // same rows the table renders, so the PDF can't drift from the screen.
-  const headers = ["Product", "SKU", "Class", "On hand", "Cover days", "Excess units"];
+  const headers = ["Product", "SKU", "Class", "On hand", "Sells/day", "Cover days", "Excess units"];
   const pdf = {
-    columns: cols(canViewCosts ? [...headers, "Capital frozen"] : headers, [3, 4, 5, 6]),
+    columns: cols(canViewCosts ? [...headers, "Capital frozen"] : headers, [3, 4, 5, 6, 7]),
     rows: rows.map((r) => [
       r.title,
       r.sku,
       r.abc ?? "—",
       formatNumber(r.onHandUnits),
+      formatRunRate(r.runRatePerDay),
       r.coverDays == null ? "—" : `${Math.round(r.coverDays)}d`,
       formatNumber(r.excessUnits),
       ...(canViewCosts
@@ -114,6 +115,7 @@ export async function OverstockSection({
                 <TableHead>Product</TableHead>
                 <TableHead>Class</TableHead>
                 <TableHead numeric>On hand</TableHead>
+                <TableHead numeric>Sells/day</TableHead>
                 <TableHead numeric>Cover days</TableHead>
                 <TableHead numeric>Excess units</TableHead>
                 <TableHead numeric>Capital frozen</TableHead>
@@ -126,13 +128,10 @@ export async function OverstockSection({
                       <div className="text-xs text-ink-muted">{row.sku}</div>
                     </TableCell>
                     <TableCell>
-                      {row.abc ? (
-                        <Badge tone="neutral">{row.abc}</Badge>
-                      ) : (
-                        <span className="text-xs text-ink-faint">—</span>
-                      )}
+                      <AbcBadge value={row.abc} />
                     </TableCell>
                     <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
+                    <TableCell numeric>{formatRunRate(row.runRatePerDay)}</TableCell>
                     <TableCell numeric>
                       {row.coverDays == null ? (
                         <span title="No sales, so there is no cover to measure">—</span>

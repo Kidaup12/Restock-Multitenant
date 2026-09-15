@@ -15,10 +15,12 @@ import { PlanFreshness } from "./plan-freshness";
 import { PreflightStrip } from "./preflight-strip";
 import { deleteScope, listScopes, saveScope, type SavedScope } from "./scope-actions";
 import {
-  EMPTY_SCOPE,
   filterBuyListRows,
   isUrgentRow,
+  parseScopeFromParams,
   ScopeBar,
+  SCOPE_PARAM_NAMES,
+  scopeToParams,
   type ScopeSelection,
 } from "./scope-bar";
 import { SupplyCalendarMode } from "./supply-calendar";
@@ -145,25 +147,76 @@ export function PlanView({
   const [switching, startSwitching] = useTransition();
   const [opening, setOpening] = useState<Mode | null>(null);
 
-  const setMode = useCallback(
-    (next: Mode) => {
+  // One way to write the URL — start from the current params so every write
+  // preserves the others (?mode, ?urgent, the scope's class/category/supplier/
+  // lead), mutate, then push without scrolling. Both the mode switch and the
+  // scope writer go through here, so neither clobbers the other's params.
+  const pushParams = useCallback(
+    (mutate: (params: URLSearchParams) => void, inTransition = false) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (next === "choose") params.delete("mode");
-      else params.set("mode", next);
+      mutate(params);
       const query = params.toString();
-      setOpening(next);
-      startSwitching(() => {
-        router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
-      });
+      const href = query ? `${pathname}?${query}` : pathname;
+      if (inTransition) startSwitching(() => router.push(href, { scroll: false }));
+      else router.push(href, { scroll: false });
     },
     [pathname, router, searchParams]
+  );
+
+  const setMode = useCallback(
+    (next: Mode) => {
+      setOpening(next);
+      // In a transition: opening a mode is a server round-trip, so the press
+      // needs something to show for itself while it happens.
+      pushParams((params) => {
+        if (next === "choose") params.delete("mode");
+        else params.set("mode", next);
+      }, true);
+    },
+    [pushParams]
+  );
+
+  // Reflect a scope change into the URL: drop the four scope params, then set
+  // the active ones. ?mode / ?urgent and anything else on the query survive
+  // because pushParams starts from the current params. Not a server round-trip
+  // (filtering is client-side), so no transition — the chips respond at once.
+  const writeScope = useCallback(
+    (next: ScopeSelection) => {
+      pushParams((params) => {
+        for (const name of SCOPE_PARAM_NAMES) params.delete(name);
+        for (const [name, value] of Object.entries(scopeToParams(next))) params.set(name, value);
+      });
+    },
+    [pushParams]
   );
 
   // Derived, not synced: `opening` only means anything while the transition is
   // in flight, so there is nothing to clear and no effect to write.
   const openingNow = switching ? opening : null;
 
-  const [scope, setScope] = useState<ScopeSelection>(EMPTY_SCOPE);
+  // Initialised from the URL (like ?mode / ?urgent), so a refreshed or shared
+  // link reproduces the filter instead of resetting to nothing. The URL is the
+  // authority: every change writes there and mirrors here in one handler, so
+  // the chips and the address bar stay one truth.
+  const [scope, setScope] = useState<ScopeSelection>(() => parseScopeFromParams(searchParams));
+  // Back/forward (and any other write) change the URL without going through
+  // handleScopeChange, so reconcile the local scope with the address bar during
+  // render — the React-blessed "adjust state when a prop changes" pattern, no
+  // effect. The key is the serialised scope, so this fires only when the scope
+  // params actually move, not on every ?mode / ?urgent write.
+  const urlScopeKey = new URLSearchParams(scopeToParams(parseScopeFromParams(searchParams))).toString();
+  const [lastScopeKey, setLastScopeKey] = useState(urlScopeKey);
+  if (urlScopeKey !== lastScopeKey) {
+    setLastScopeKey(urlScopeKey);
+    setScope(parseScopeFromParams(searchParams));
+  }
+  const handleScopeChange = useCallback(
+    (next: ScopeSelection) => {
+      setScope(next);
+      writeScope(next);
+    },
+    [writeScope]
+  );
   /**
    * The two lenses that change WHICH rows the list shows, held here rather than
    * inside the checklist.
@@ -319,7 +372,7 @@ export function PlanView({
         <ScopeBar
           rows={buyList.rows}
           selection={scope}
-          onChange={setScope}
+          onChange={handleScopeChange}
           showing={filteredRows.length}
           savedScopes={savedScopes}
           onSaveScope={handleSaveScope}

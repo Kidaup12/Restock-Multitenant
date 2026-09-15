@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { CostValue } from "@/components/ui/cost-value";
+import { formatRunRate } from "@/lib/money";
 import {
   Table,
   TableBody,
@@ -218,6 +220,9 @@ export function QueueGroup({
             </TableHead>
             <TableHead>Product</TableHead>
             <TableHead numeric>In stock</TableHead>
+            {/* Demand context, not a cost figure — visible to a money-blind
+                member alongside stock, before the gated money columns. */}
+            <TableHead numeric>Sells/day</TableHead>
             <TableHead numeric>Order qty</TableHead>
             <TableHead numeric>Unit cost</TableHead>
             <TableHead numeric>Line cost</TableHead>
@@ -240,10 +245,14 @@ export function QueueGroup({
                   />
                 </TableCell>
                 <TableCell className="font-medium text-ink">
-                  {line.title}
+                  <span className="inline-flex items-center gap-2">
+                    <AbcBadge value={line.abc} />
+                    {line.title}
+                  </span>
                   <span className="ml-2 font-mono text-xs text-ink-faint">{line.sku}</span>
                 </TableCell>
                 <TableCell numeric>{line.onHandUnits}</TableCell>
+                <TableCell numeric>{formatRunRate(line.runRatePerDay)}</TableCell>
                 <TableCell numeric>
                   <QueueQty line={line} planned={plannedByProduct.get(line.productId)} />
                 </TableCell>

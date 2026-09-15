@@ -1,6 +1,6 @@
 import { getOnOrder } from "@/lib/data/insights";
 
-import { Badge } from "@/components/ui/badge";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -50,13 +50,14 @@ export async function OnOrderSection({
   // The PDF mirrors the on-screen columns and honours the same cost redaction —
   // a money-blind caller's rows never carry a value figure. Rebuilt from the
   // same rows the table renders, so the PDF can't drift from the screen.
-  const headers = ["Product", "SKU", "Class", "On the way", "ETA", "Lead days", "Supplier"];
+  const headers = ["Product", "SKU", "Class", "Stock now", "On the way", "ETA", "Lead days", "Supplier"];
   const pdf = {
-    columns: cols(canViewCosts ? [...headers, "Value in transit"] : headers, [3, 5, 7]),
+    columns: cols(canViewCosts ? [...headers, "Value in transit"] : headers, [3, 4, 6, 8]),
     rows: rows.map((r) => [
       r.title,
       r.sku,
       r.abc ?? "—",
+      formatNumber(r.onHandUnits),
       formatNumber(r.onOrderUnits),
       r.expectedArrivalAt ? etaLabel(r.expectedArrivalAt) : "—",
       `${r.leadDays}d`,
@@ -113,6 +114,7 @@ export async function OnOrderSection({
               <TableHeader>
                 <TableHead>Product</TableHead>
                 <TableHead>Class</TableHead>
+                <TableHead numeric>Stock now</TableHead>
                 <TableHead numeric>On the way</TableHead>
                 <TableHead>ETA</TableHead>
                 <TableHead numeric>Lead days</TableHead>
@@ -127,12 +129,9 @@ export async function OnOrderSection({
                       <div className="text-xs text-ink-muted">{row.sku}</div>
                     </TableCell>
                     <TableCell>
-                      {row.abc ? (
-                        <Badge tone="neutral">{row.abc}</Badge>
-                      ) : (
-                        <span className="text-xs text-ink-faint">—</span>
-                      )}
+                      <AbcBadge value={row.abc} />
                     </TableCell>
+                    <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
                     <TableCell numeric>{formatNumber(row.onOrderUnits)}</TableCell>
                     <TableCell>
                       {row.expectedArrivalAt ? (
