@@ -20,6 +20,7 @@ import {
   type BuyListRow,
 } from "../lib/data/plan";
 import { getInsightsOverview, getOverstock, getOnOrder, getLeakageMatrix } from "../lib/data/insights";
+import { getOverviewKpis } from "../lib/data/overview-kpis";
 import { getCostCoverage, getCostMovedAlerts } from "../lib/data/costs";
 import { getUnreadCount, listNotifications } from "../lib/notifications/data";
 import {
@@ -439,6 +440,21 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
 
     const owner = await getOnOrder(seeded.tenantId, { canViewCosts: true });
     for (const row of owner.rows) expect(row.valueKes).not.toBeNull();
+  });
+
+  it("the overview KPI row carries no capital-at-cost figure for a member", async () => {
+    // Capital tied up is derived (getCatalogueMetrics.moneyAtRestKes) so it names
+    // no cost column and the manifest scan can't see it — this is its money-blind
+    // proof, the same as the leakage matrix. Revenue / at-risk / capital-at-retail
+    // are sales figures and stay.
+    const member = await getOverviewKpis(seeded.tenantId, { canViewCosts: false });
+    expect(member.capitalAtCostKes).toBeNull();
+    expect(member.capitalAtRetailKes).not.toBeNull(); // sales figure, visible
+    expect(typeof member.revenueAtRisk7dKes).toBe("number");
+    expect(typeof member.lastMonthRevenueKes).toBe("number");
+
+    const owner = await getOverviewKpis(seeded.tenantId, { canViewCosts: true });
+    expect(owner.capitalAtCostKes).not.toBeNull();
   });
 
   it("the leakage matrix carries no capital figure for a member, but keeps missed sales", async () => {
