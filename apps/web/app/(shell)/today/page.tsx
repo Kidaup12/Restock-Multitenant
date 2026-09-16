@@ -21,6 +21,8 @@ import { TodayLimitNotice } from "./today-limit-notice";
 import { TodaySetupStrip } from "./today-setup-strip";
 import { CostGapBar } from "./setup-gap-bars";
 import { ProductBoard } from "./product-board";
+import { RedistributionCard } from "./redistribution-card";
+import { BuyThisWeek } from "./buy-this-week";
 
 export const metadata: Metadata = {
   title: "Today",
@@ -82,6 +84,13 @@ export default async function TodayPage() {
         open the Restock planner.
       </GuideBox>
 
+      {/* What to buy this week to protect sales — the latest run's must-restock
+          essentials. Its own fetch, so it streams behind its own Suspense and
+          renders nothing when there is nothing urgent to buy. */}
+      <Suspense fallback={null}>
+        <BuyThisWeek tenantId={tenantId} canViewCosts={canViewCosts} />
+      </Suspense>
+
       <Suspense
         fallback={
           <Card className="px-5 py-4">
@@ -107,6 +116,17 @@ export default async function TodayPage() {
 
       <Suspense fallback={null}>
         <CostGapBar tenantId={tenantId} canViewCosts={canViewCosts} />
+      </Suspense>
+
+      {/* "Move stock, don't buy it" — nudges the owner toward a transfer before
+          the buy list. No-shows for a single-location shop or when every branch
+          is already covered. Placed after the buy-this-week banner would land. */}
+      <Suspense fallback={null}>
+        <RedistributionCard
+          tenantId={tenantId}
+          canViewCosts={canViewCosts}
+          currency={membership.tenant.currency}
+        />
       </Suspense>
 
       <div data-tour="today-metrics">

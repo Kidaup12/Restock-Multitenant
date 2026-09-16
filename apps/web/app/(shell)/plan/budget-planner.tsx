@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { DaysLeft } from "@/components/ui/days-left";
-import { formatCompact, formatMoney, formatNumber } from "@/lib/money";
+import { formatCompact, formatMoney, formatNumber, formatRunRate } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
 import { Input } from "@/components/ui/input";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -32,6 +32,7 @@ import {
 } from "./cover";
 import { Stepper } from "@/components/ui/stepper";
 import { LeadFlooredNote } from "./lead-floored-note";
+import type { ScopeSelection } from "./scope-bar";
 import { useOrderPicker } from "./use-order-picker";
 import { ActionBar } from "@/components/ui/action-bar";
 import { cn } from "@/lib/cn";
@@ -86,14 +87,25 @@ export function BudgetPlanner({
   canViewCosts,
   criticalsCashKes,
   orderTodayCashKes,
+  scope,
 }: {
   canViewCosts: boolean;
-  /** Cash to clear the critical lines, from planDecisionSummary. Null when the
-   *  viewer cannot see costs, or when a critical row's cost is hidden. */
+  /** Cash to clear the critical lines, over the SCOPED set — plan-view computes
+   *  this from the rows the current filter leaves, so it prices the criticals the
+   *  budget will actually plan over. Null when the viewer cannot see costs, or
+   *  when a critical row's cost is hidden. */
   criticalsCashKes: number | null;
-  /** Cash for everything already past its safe order day — the fallback basis
-   *  when nothing is flagged critical, which is the common case. */
+  /** Cash for everything already past its safe order day, over the SCOPED set —
+   *  the fallback basis when nothing is flagged critical, which is the common
+   *  case. Also computed by plan-view from the filtered rows. */
   orderTodayCashKes: number | null;
+  /** The screen's ABC/category/supplier/lead filter (the ScopeBar's selection).
+   *  Threaded into every planBudget call so the split spreads over the filtered
+   *  set — the same rows list mode shows. An empty scope = whole shop (the split
+   *  is then identical to the old unscoped behaviour). plan-view renders the
+   *  ScopeBar above this component and owns this value; this component never
+   *  renders the bar itself. */
+  scope: ScopeSelection;
 }) {
   const currency = useCurrency();
   // The same selection, order call and outcome wording as the checklist.
@@ -127,7 +139,9 @@ export function BudgetPlanner({
   function plan(budgetKes: number, cover: number | null, overflow = allowOverflow) {
     setError(null);
     startTransition(async () => {
-      const result = await planBudget({ budgetKes, coverDays: cover, allowOverflow: overflow });
+      // Carry the current scope so the split spreads over the filtered set — the
+      // same rows list mode shows. An empty scope budgets the whole shop.
+      const result = await planBudget({ budgetKes, coverDays: cover, allowOverflow: overflow, scope });
       if (!result.ok) {
         setError(result.error);
         return;
@@ -500,79 +514,69 @@ export function BudgetTable({
           </TableHead>
         )}
         <TableHead>Product</TableHead>
-        <TableHead className="hidden md:table-cell">Supplier</TableHead>
-        <TableHead numeric className="hidden md:table-cell">Buying at/day</TableHead>
-        <TableHead numeric>Stock</TableHead>
+        <TableHead numeric>Run/day</TableHead>
+        <TableHead numeric className="hidden lg:table-cell">30d rev ({currency})</TableHead>
         <TableHead numeric>Days left</TableHead>
-        <TableHead className="hidden md:table-cell">Order by</TableHead>
-        <TableHead numeric>Qty</TableHead>
-        <TableHead numeric className="hidden lg:table-cell">Rev · 30d ({currency})</TableHead>
+        <TableHead numeric>Stock</TableHead>
+        <TableHead numeric className="hidden md:table-cell">En route</TableHead>
+        <TableHead numeric>Order</TableHead>
+        <TableHead numeric className="hidden md:table-cell">Unit {currency}</TableHead>
         <TableHead numeric>Line total</TableHead>
-        <TableHead numeric>At risk (30d)</TableHead>
       </TableHeader>
       <TableBody>
-        {rows.map((row) => {
-          const overdue = row.daysLeftToOrder <= 0;
-          return (
-            <TableRow key={row.predictionId}>
-              {selectable && (
-                <TableCell>
-                  <input
-                    type="checkbox"
-                    checked={picked?.has(row.predictionId) ?? false}
-                    onChange={() => onToggle?.(row.predictionId)}
-                    aria-label={`Order ${row.title}`}
-                    className="size-4 accent-accent"
-                  />
-                </TableCell>
-              )}
+        {rows.map((row) => (
+          <TableRow key={row.predictionId}>
+            {selectable && (
               <TableCell>
-                <div className="flex items-center gap-2">
-                  <Link
-                    href={`/products/${row.productId}`}
-                    className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                  >
-                    {row.title}
-                  </Link>
-                  <AbcBadge value={row.abc} />
-                </div>
-                <div className="mt-0.5 font-mono text-xs text-ink-muted">{row.sku}</div>
+                <input
+                  type="checkbox"
+                  checked={picked?.has(row.predictionId) ?? false}
+                  onChange={() => onToggle?.(row.predictionId)}
+                  aria-label={`Order ${row.title}`}
+                  className="size-4 accent-accent"
+                />
               </TableCell>
-              <TableCell className="hidden md:table-cell">{row.supplierName ?? "—"}</TableCell>
-              <TableCell numeric className="hidden md:table-cell">{row.runRatePerDay}</TableCell>
-              <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
-              <TableCell numeric>
-                <DaysLeft days={row.daysUntilStockout} onHandUnits={row.onHandUnits} />
-              </TableCell>
-              <TableCell className="hidden md:table-cell">
-                {overdue ? (
-                  <span className="font-medium text-negative">{dayLabel(row.orderByDate)}</span>
-                ) : (
-                  dayLabel(row.orderByDate)
-                )}
-              </TableCell>
-              <TableCell numeric>
-                {row.recommendedQty}
-                {row.leadFloored && <LeadFlooredNote leadDays={row.leadDays} />}
-              </TableCell>
-              <TableCell numeric className="hidden lg:table-cell">
-                {/* Revenue is a sales figure — visible to every role as a plain
-                    amount whose unit lives in the header. */}
-                {row.revenue30dKes > 0 ? formatNumber(row.revenue30dKes) : "—"}
-              </TableCell>
-              <TableCell numeric>
-                <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
-              </TableCell>
-              <TableCell numeric>
-                {(row.atRiskKes ?? 0) > 0 ? (
-                  <CostValue amount={row.atRiskKes} canViewCosts={canViewCosts} className="text-negative" />
-                ) : (
-                  "—"
-                )}
-              </TableCell>
-            </TableRow>
-          );
-        })}
+            )}
+            <TableCell>
+              <div className="flex items-center gap-2">
+                <Link
+                  href={`/products/${row.productId}`}
+                  className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                >
+                  {row.title}
+                </Link>
+                <AbcBadge value={row.abc} />
+              </div>
+              <div className="mt-0.5 font-mono text-xs text-ink-muted">
+                {row.sku}
+                {row.supplierName ? ` · ${row.supplierName}` : ""}
+              </div>
+            </TableCell>
+            <TableCell numeric>{formatRunRate(row.runRatePerDay)}</TableCell>
+            <TableCell numeric className="hidden lg:table-cell">
+              {/* Revenue is a sales figure — visible to every role as a plain
+                  amount whose unit lives in the header. */}
+              {row.revenue30dKes > 0 ? formatNumber(row.revenue30dKes) : "—"}
+            </TableCell>
+            <TableCell numeric>
+              <DaysLeft days={row.daysUntilStockout} onHandUnits={row.onHandUnits} />
+            </TableCell>
+            <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
+            <TableCell numeric className="hidden md:table-cell">
+              {row.onOrderUnits > 0 ? formatNumber(row.onOrderUnits) : "—"}
+            </TableCell>
+            <TableCell numeric>
+              {row.recommendedQty}
+              {row.leadFloored && <LeadFlooredNote leadDays={row.leadDays} />}
+            </TableCell>
+            <TableCell numeric className="hidden md:table-cell">
+              <CostValue amount={row.unitCostKes} canViewCosts={canViewCosts} />
+            </TableCell>
+            <TableCell numeric>
+              <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
+            </TableCell>
+          </TableRow>
+        ))}
       </TableBody>
     </Table>
   );

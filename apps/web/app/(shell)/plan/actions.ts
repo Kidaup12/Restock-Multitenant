@@ -25,6 +25,13 @@ import {
 // Sanity cap on the cover-days horizon — a year of cover is already well past
 // any real ordering decision. Shared with the steppers that offer it.
 import { MAX_COVER_DAYS } from "./cover";
+// The same pure filter list mode uses, plus its type. Importing these from the
+// scope bar (a "use client" module) into this server action is safe: only the
+// type and the pure `filterBuyListRows` value are pulled, and scope-actions.ts
+// already imports a runtime value (LEAD_BANDS) from the same module server-side.
+// The filter touches only row metadata (class/category/supplier/lead) — no cost
+// figure enters it — so it is money-blind safe.
+import { filterBuyListRows, LEAD_BANDS, type LeadBand, type ScopeSelection } from "./scope-bar";
 
 /**
  * Plan-screen actions. Each re-resolves the caller's session and active
@@ -46,6 +53,32 @@ const MAX_OVERRIDE_QTY = 1_000_000;
 /** Sanity cap on the sales-push what-if (whole percent). 500% is 6x demand —
  *  well past any real promotion, and the guard against a runaway order size. */
 const MAX_UPLIFT_PCT = 500;
+
+/** Keep only the string members of an unknown value — the scope arrives from the
+ *  client, so nothing is trusted on the way in. Mirrors scope-actions' guard. */
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/**
+ * Reconstruct a clean ScopeSelection from whatever the client sent. Same
+ * defensive shape as scope-actions' parseSelection: unknown values become empty
+ * dimensions and an unknown lead band is dropped, so the applied scope is always
+ * one the filter can reason about. A missing/empty scope means "no filter" —
+ * `filterBuyListRows` then returns the input list unchanged (whole shop).
+ */
+function parseScope(raw: unknown): ScopeSelection {
+  const rec = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const leadBand = asStringArray(rec.leadBand).filter((v): v is LeadBand =>
+    (LEAD_BANDS as readonly string[]).includes(v)
+  );
+  return {
+    abc: asStringArray(rec.abc),
+    category: asStringArray(rec.category),
+    supplier: asStringArray(rec.supplier),
+    leadBand,
+  };
+}
 
 export async function addToOrder(input: {
   predictionIds: string[];
@@ -78,6 +111,15 @@ export async function addToOrder(input: {
  * re-sized list — which is what "spend this cash, but stock to this horizon"
  * means. Note the screen itself opens with a target already set, so the common
  * call carries one; absent is the unticked case, not the default view.
+ *
+ * `scope` is the screen's ABC/category/supplier/lead filter (the ScopeBar). When
+ * present it narrows the re-read buy list to the SAME set list mode shows before
+ * the budget is spread, so the split funds the filtered rows — "spend this cash
+ * over this slice of the shop". An absent or empty scope imposes nothing:
+ * `filterBuyListRows` returns the list unchanged, so a shop that sets no filter
+ * budgets the whole shop exactly as before. This deliberately replaces the old
+ * whole-shop-only behaviour to match the reference app, which filters the budget
+ * screen. The scope is validated defensively — it comes from the client.
  */
 export async function planBudget(input: {
   budgetKes: number;
@@ -85,6 +127,9 @@ export async function planBudget(input: {
   /** The shop's own decision to let must-restock lines push past the cap.
    *  Absent means cap — a budget is a cap unless someone says otherwise. */
   allowOverflow?: boolean;
+  /** The screen's ABC/category/supplier/lead filter. Absent/empty = whole shop
+   *  (unchanged). Parsed defensively — it comes from the client. */
+  scope?: ScopeSelection;
 }): Promise<PlanActionResult<BudgetSplit>> {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
@@ -124,7 +169,16 @@ export async function planBudget(input: {
   const buyList = await getBuyList(membership.tenantId, { canViewCosts: true, coverDays });
   if (!buyList) return err("Run a forecast first — there's nothing to plan yet.");
 
-  const split = splitByBudget(buyList.rows, budget, {
+  // Narrow to the screen's filter before spreading the budget, so the split funds
+  // the SAME set list mode shows. An absent/empty scope returns the input list
+  // unchanged (whole shop) — so an unfiltered plan is identical to before.
+  // `heldBackCount` stays the whole-shop excluded count on purpose: the "N
+  // products held back — open the buy list to see why" hint is about products
+  // the allocator never saw, a shop-wide data problem, not the current slice.
+  const scope = parseScope(input.scope);
+  const rows = filterBuyListRows(buyList.rows, scope);
+
+  const split = splitByBudget(rows, budget, {
     strict: !input.allowOverflow,
     heldBackCount: buyList.excluded.length,
   });
