@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendEmail } from "../src/email";
+import { sendEmail, type MailTransport } from "../src/email";
 
 /**
  * The worker half of the outbound seam, held to the same promise as the web
@@ -8,16 +8,12 @@ import { sendEmail } from "../src/email";
  * EmailLog row, and outside production the console fallback still resolves.
  */
 
-function okFetch(status = 201, id = "resend-message-id") {
-  return vi.fn(async () => ({
-    ok: status < 400,
-    status,
-    json: async () => ({ id }),
-    text: async () => "",
-  })) as unknown as typeof fetch;
+/** A Brevo transport that accepts every send, standing in for a real relay. */
+function okTransport(id = "brevo-message-id") {
+  return { sendMail: vi.fn(async () => ({ messageId: id })) } satisfies MailTransport;
 }
 
-const KEY = "test-resend-key";
+const KEY = "test-brevo-key";
 const FROM = "Wezesha Restock <alerts@wezesha.test>";
 
 const url = process.env.SERVICE_DATABASE_URL ?? "";
@@ -29,7 +25,7 @@ describe.skipIf(!runnable)("worker email log + missing-key behaviour (local db)"
   let prismaService: typeof import("@wezesha/db").prismaService;
   let tenantId: string;
 
-  const original = { key: process.env.RESEND_API_KEY, from: process.env.EMAIL_FROM };
+  const original = { key: process.env.BREVO_SMTP_KEY, from: process.env.EMAIL_FROM };
 
   beforeAll(async () => {
     ({ prismaService } = await import("@wezesha/db"));
@@ -47,14 +43,14 @@ describe.skipIf(!runnable)("worker email log + missing-key behaviour (local db)"
   }, 30_000);
 
   beforeEach(async () => {
-    delete process.env.RESEND_API_KEY;
+    delete process.env.BREVO_SMTP_KEY;
     delete process.env.EMAIL_FROM;
     vi.unstubAllEnvs();
     await prismaService.emailLog.deleteMany({ where: { tenantId } });
   });
 
   afterEach(() => {
-    process.env.RESEND_API_KEY = original.key;
+    process.env.BREVO_SMTP_KEY = original.key;
     process.env.EMAIL_FROM = original.from;
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -63,26 +59,26 @@ describe.skipIf(!runnable)("worker email log + missing-key behaviour (local db)"
   it("refuses to send in production when the provider key is missing", async () => {
     vi.stubEnv("NODE_ENV", "production");
 
+    // No key AND no injected transport -> production hard-fails.
     await expect(
-      sendEmail({ to: "owner@shop.test", subject: "Action needed", text: "Sync failing." }, okFetch()),
-    ).rejects.toThrow(/RESEND_API_KEY/);
+      sendEmail({ to: "owner@shop.test", subject: "Action needed", text: "Sync failing." }),
+    ).rejects.toThrow(/BREVO_SMTP_KEY/);
   });
 
   it("still resolves outside production so local dev keeps working", async () => {
     vi.stubEnv("NODE_ENV", "test");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const fetchMock = okFetch();
 
+    // No key and no transport -> the console fallback.
     await expect(
-      sendEmail({ to: "owner@shop.test", subject: "Hi", text: "body" }, fetchMock),
+      sendEmail({ to: "owner@shop.test", subject: "Hi", text: "body" }),
     ).resolves.toBeUndefined();
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("no RESEND_API_KEY"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("no BREVO_SMTP_KEY"));
   });
 
   it("writes exactly one 'sent' row after a successful send", async () => {
-    process.env.RESEND_API_KEY = KEY;
+    process.env.BREVO_SMTP_KEY = KEY;
     process.env.EMAIL_FROM = FROM;
 
     await sendEmail(
@@ -93,7 +89,7 @@ describe.skipIf(!runnable)("worker email log + missing-key behaviour (local db)"
         tenantId,
         kind: "reconnect_alert",
       },
-      okFetch(),
+      okTransport(),
     );
 
     const rows = await prismaService.emailLog.findMany({ where: { tenantId } });
@@ -101,33 +97,41 @@ describe.skipIf(!runnable)("worker email log + missing-key behaviour (local db)"
     expect(rows[0]!.status).toBe("sent");
     expect(rows[0]!.to).toBe("owner@shop.test");
     expect(rows[0]!.kind).toBe("reconnect_alert");
-    expect(rows[0]!.providerId).toBe("resend-message-id");
+    // The provider id is now the nodemailer messageId, not Resend's json .id.
+    expect(rows[0]!.providerId).toBe("brevo-message-id");
   });
 
   it("records a failed send with the provider's reason, and still throws", async () => {
-    process.env.RESEND_API_KEY = KEY;
+    process.env.BREVO_SMTP_KEY = KEY;
     process.env.EMAIL_FROM = FROM;
+    // A failing send is now a transport whose sendMail throws (SMTP rejection),
+    // not an HTTP 401.
+    const failing: MailTransport = {
+      sendMail: vi.fn(async () => {
+        throw new Error("401 unauthorized");
+      }),
+    };
 
     await expect(
-      sendEmail({ to: "owner@shop.test", subject: "Hi", text: "body", tenantId }, okFetch(401)),
-    ).rejects.toThrow(/Resend send failed \(401\)/);
+      sendEmail({ to: "owner@shop.test", subject: "Hi", text: "body", tenantId }, failing),
+    ).rejects.toThrow(/Brevo send failed/);
 
     const rows = await prismaService.emailLog.findMany({ where: { tenantId } });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.status).toBe("failed");
-    expect(rows[0]!.error).toMatch(/401/);
+    expect(rows[0]!.error).toMatch(/unauthorized/);
   });
 
   it("a logging failure never fails an otherwise successful send", async () => {
-    process.env.RESEND_API_KEY = KEY;
+    process.env.BREVO_SMTP_KEY = KEY;
     process.env.EMAIL_FROM = FROM;
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(prismaService.emailLog, "create").mockRejectedValue(new Error("db down"));
-    const fetchMock = okFetch();
+    const transport = okTransport();
 
     await expect(
-      sendEmail({ to: "owner@shop.test", subject: "Hi", text: "body", tenantId }, fetchMock),
+      sendEmail({ to: "owner@shop.test", subject: "Hi", text: "body", tenantId }, transport),
     ).resolves.toBeUndefined();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(transport.sendMail).toHaveBeenCalledTimes(1);
   });
 });

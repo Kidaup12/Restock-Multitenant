@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
  * supplier received the same order twice while one PO showed as sent. That is a
  * real order placed twice, not a cosmetic bug.
  *
- * Emails are counted here rather than merely suppressed: without RESEND_API_KEY
+ * Emails are counted here rather than merely suppressed: without BREVO_SMTP_KEY
  * the real sender only logs and never throws, so a duplicate would be invisible.
  */
 

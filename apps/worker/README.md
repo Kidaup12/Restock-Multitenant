@@ -38,7 +38,7 @@ but serve the `sync` queue.
 | `POS_CRONS` | off | `1` = daily POS sales-gap check |
 | `OPS_CRONS` | off | `1` = daily plan-limit check |
 | `EMAIL_CRONS` | off | `1` = weekly summary email |
-| `RESEND_API_KEY` / `EMAIL_FROM` | unset | outbound mail; unset logs to the console |
+| `BREVO_SMTP_KEY` / `BREVO_SMTP_LOGIN` / `EMAIL_FROM` | unset | outbound mail via Brevo SMTP; unset logs to the console |
 | `SENTRY_DSN` | unset | error tracking; unset is a complete no-op |
 
 ```

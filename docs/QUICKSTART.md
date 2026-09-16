@@ -53,9 +53,9 @@ Not locally — Shopify needs a public address to send the install back to, whic
 localhost doesn't have. Connect a store on the deployed app instead. You can create your own free
 development store rather than borrowing anyone's: see `docs/SHOPIFY-DEV-STORE.md`.
 
-Locally, email doesn't leave the machine unless `RESEND_API_KEY` and `EMAIL_FROM` are set — invites,
-sign-in codes and supplier purchase orders are written to the terminal running the app, so a fresh
-clone is still testable end to end. The link you need is in that terminal.
+Locally, email doesn't leave the machine unless `BREVO_SMTP_KEY`, `BREVO_SMTP_LOGIN` and `EMAIL_FROM`
+are set - invites, sign-in codes and supplier purchase orders are written to the terminal running the
+app, so a fresh clone is still testable end to end. The link you need is in that terminal.
 
 > **After a new version deploys, open a fresh tab.** A tab left open across a deploy posts to a
 > server action that no longer exists and gets a 404 that looks exactly like a broken feature.

@@ -1,9 +1,9 @@
 import type { OwnerReport, TrendRow, AttentionLine } from "./owner-report";
 
 /**
- * Render an OwnerReport into a branded HTML email — a WEEK-BY-WEEK (or monthly)
+ * Render an OwnerReport into a branded HTML email: a WEEK-BY-WEEK (or monthly)
  * health trend table (no buttons), a one-line "are we improving?" read, a short
- * bestsellers-stocked-out list, the restock buy-list, and any warehouse→branch
+ * bestsellers-stocked-out list, the restock buy-list, and any warehouse-to-branch
  * transfers. Plain-text fallback included.
  *
  * Ported from the reference app's lib/reports/report-email.ts. Brand strings are
@@ -15,9 +15,9 @@ const DEFAULT_BRAND = "Wezesha Restock";
 
 /** Short money: the tenant's currency code + a k/M-abbreviated amount. A null
  *  is a number the report never had the inputs to compute, and renders as a
- *  dash — never as a confident zero. */
+ *  dash, never as a confident zero. */
 function money(cur: string, n: number | null): string {
-  if (n == null) return "—";
+  if (n == null) return "-";
   const a = Math.abs(n);
   const short =
     a >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
@@ -25,7 +25,7 @@ function money(cur: string, n: number | null): string {
     : `${Math.round(n)}`;
   return `${cur} ${short}`;
 }
-const pct = (n: number | null) => (n == null ? "—" : `${n}%`);
+const pct = (n: number | null) => (n == null ? "-" : `${n}%`);
 
 const abcChip = (abc: AttentionLine["abc"]) => {
   const cls = abc ?? "C";
@@ -34,7 +34,7 @@ const abcChip = (abc: AttentionLine["abc"]) => {
   return `<span style="display:inline-block;width:18px;height:18px;line-height:18px;text-align:center;border-radius:5px;background:${bg};color:${fg};font-size:11px;font-weight:700">${cls}</span>`;
 };
 
-/** Neutral one-line summary of the latest period vs the one before — states the
+/** Neutral one-line summary of the latest period vs the one before: states the
  *  numbers, no "improving/worsening" verdict (owner reads the trend themselves). */
 function improvementLine(trend: TrendRow[], unit: string): string {
   const withData = trend.filter((t) => t.stockoutPct != null);
@@ -73,8 +73,8 @@ function trendTable(cur: string, trend: TrendRow[], unit: string): string {
 /** "What to restock next period" — the buy list + budget. */
 function restockTable(cur: string, r: OwnerReport, unit: string): string {
   const budget = money(cur, r.restockBudgetKes);
-  const header = `<h3 style="font-size:14px;margin:28px 0 4px">🛒 Restock next ${unit} — ${r.restockCount} item${r.restockCount === 1 ? "" : "s"} · budget ${budget}</h3>`;
-  if (r.restock.length === 0) return `${header}<p style="color:#2f8a4c;font-size:13px;margin:4px 0 0">Nothing urgent to restock — you're well covered.</p>`;
+  const header = `<h3 style="font-size:14px;margin:28px 0 4px">Restock next ${unit} - ${r.restockCount} item${r.restockCount === 1 ? "" : "s"} · budget ${budget}</h3>`;
+  if (r.restock.length === 0) return `${header}<p style="color:#2f8a4c;font-size:13px;margin:4px 0 0">Nothing urgent to restock - you're well covered.</p>`;
   const rows = r.restock.map((l) => `<tr>
     <td style="padding:6px 4px;font-size:13px">${abcChip(l.abc)} ${l.title}</td>
     <td style="padding:6px 4px;font-size:13px;text-align:right;font-weight:600;white-space:nowrap">${l.qty}</td>
@@ -83,7 +83,7 @@ function restockTable(cur: string, r: OwnerReport, unit: string): string {
   </tr>`).join("");
   const more = r.restockCount > r.restock.length ? `<p style="color:#aaa;font-size:11px;margin:6px 0 0">Showing the top ${r.restock.length} by urgency · ${r.restockCount - r.restock.length} more in the Restock planner. <b>Budget ${budget} covers all ${r.restockCount} items.</b></p>` : "";
   return `${header}
-  <p style="color:#666;font-size:12px;margin:2px 0 6px">Order these from your suppliers by next ${unit} — quantities already account for stock on hand and what's on the way.</p>
+  <p style="color:#666;font-size:12px;margin:2px 0 6px">Order these from your suppliers by next ${unit}. Quantities already account for stock on hand and what's on the way.</p>
   <table style="width:100%;border-collapse:collapse;margin-top:4px">
     <tr><th style="text-align:left;font-size:10px;color:#aaa;text-transform:uppercase;padding:4px">Product</th><th style="text-align:right;font-size:10px;color:#aaa;text-transform:uppercase;padding:4px">Order</th><th style="text-align:right;font-size:10px;color:#aaa;text-transform:uppercase;padding:4px">Cost</th><th style="text-align:right;font-size:10px;color:#aaa;text-transform:uppercase;padding:4px">Runway</th></tr>
     ${rows}
@@ -93,13 +93,13 @@ function restockTable(cur: string, r: OwnerReport, unit: string): string {
 /** "Distribute from the warehouse" — transfers to the branches. */
 function transferTable(r: OwnerReport): string {
   if (r.transferCount === 0) return "";
-  const header = `<h3 style="font-size:14px;margin:28px 0 4px">🚚 Distribute from ${r.transferFrom || "the warehouse"} — ${r.transferCount} transfer${r.transferCount === 1 ? "" : "s"}</h3>`;
+  const header = `<h3 style="font-size:14px;margin:28px 0 4px">Distribute from ${r.transferFrom || "the warehouse"} - ${r.transferCount} transfer${r.transferCount === 1 ? "" : "s"}</h3>`;
   const rows = r.transfers.map((l) => `<tr>
     <td style="padding:6px 4px;font-size:13px">${abcChip(l.abc)} ${l.title}</td>
     <td style="padding:6px 4px;font-size:13px;text-align:right;font-weight:600;white-space:nowrap">${l.qty}</td>
     <td style="padding:6px 4px;font-size:12px;color:#666;text-align:right;white-space:nowrap">→ ${l.toBranch}</td>
   </tr>`).join("");
-  const more = r.transferCount > r.transfers.length ? `<p style="color:#aaa;font-size:11px;margin:6px 0 0">Showing the top ${r.transfers.length} · ${r.transferCount - r.transfers.length} more in Distribution. Move stock you already own to the branches that need it (no new purchase).</p>` : `<p style="color:#aaa;font-size:11px;margin:6px 0 0">Move stock you already own to the branches that need it — no new purchase.</p>`;
+  const more = r.transferCount > r.transfers.length ? `<p style="color:#aaa;font-size:11px;margin:6px 0 0">Showing the top ${r.transfers.length} · ${r.transferCount - r.transfers.length} more in Distribution. Move stock you already own to the branches that need it (no new purchase).</p>` : `<p style="color:#aaa;font-size:11px;margin:6px 0 0">Move stock you already own to the branches that need it, no new purchase.</p>`;
   return `${header}
   <table style="width:100%;border-collapse:collapse;margin-top:4px">
     <tr><th style="text-align:left;font-size:10px;color:#aaa;text-transform:uppercase;padding:4px">Product</th><th style="text-align:right;font-size:10px;color:#aaa;text-transform:uppercase;padding:4px">Move</th><th style="text-align:right;font-size:10px;color:#aaa;text-transform:uppercase;padding:4px">To branch</th></tr>
@@ -108,7 +108,7 @@ function transferTable(r: OwnerReport): string {
 }
 
 function attentionList(lines: AttentionLine[]): string {
-  if (lines.length === 0) return `<p style="color:#2f8a4c;font-size:13px;margin:0">No bestsellers stocked out right now — nicely covered.</p>`;
+  if (lines.length === 0) return `<p style="color:#2f8a4c;font-size:13px;margin:0">No bestsellers stocked out right now - nicely covered.</p>`;
   const rows = lines.map((l) => `<tr>
     <td style="padding:6px 4px;font-size:13px">${abcChip(l.abc)} ${l.title}</td>
     <td style="padding:6px 4px;font-size:13px;text-align:right;font-weight:600;white-space:nowrap">${l.onHand} on hand</td>
@@ -125,7 +125,7 @@ export function renderReportEmail(
   const periodWord = r.granularity === "week" ? "Weekly" : "Monthly";
   const cur = r.currency || "KES";
   const initial = brand.trim().charAt(0).toUpperCase() || "W";
-  const subject = `${periodWord} report — ${r.tenantName} · ${r.latestLabel}`;
+  const subject = `${periodWord} report - ${r.tenantName} · ${r.latestLabel}`;
 
   const html = `<div style="font-family:sans-serif;max-width:640px;margin:0 auto;padding:32px 24px;color:#1a1a1a">
   <div style="margin-bottom:18px">
@@ -139,7 +139,7 @@ export function renderReportEmail(
   <h3 style="font-size:14px;margin:26px 0 4px">Last ${r.trend.length} ${unit}s</h3>
   ${trendTable(cur, r.trend, unit)}
 
-  <h3 style="font-size:14px;margin:28px 0 8px">🔴 Bestsellers stocked out now</h3>
+  <h3 style="font-size:14px;margin:28px 0 8px">Bestsellers stocked out now</h3>
   ${attentionList(r.needsAttention)}
 
   ${restockTable(cur, r, unit)}
@@ -150,12 +150,12 @@ export function renderReportEmail(
   <p style="color:#bbb;font-size:11px;margin:0">Coming from ${brand} · you're receiving this as an owner/admin of ${r.tenantName}.</p>
 </div>`;
 
-  // Plain-text fallback — the same trend as an aligned table.
+  // Plain-text fallback: the same trend as an aligned table.
   const col = (s: string | number, w: number) => String(s).padEnd(w).slice(0, w);
   const head = `${col(unit === "week" ? "Week" : "Month", 9)} ${col("Sales", 10)} ${col("OutA", 5)} ${col("OutB", 5)} ${col("Out%", 6)} ${col("Dead", 14)} Missed`;
   const trendLines = r.trend.map((t) => `${col(t.label, 9)} ${col(money(cur, t.salesKes), 10)} ${col(t.stockoutA, 5)} ${col(t.stockoutB, 5)} ${col(pct(t.stockoutPct), 6)} ${col(t.deadCount + "·" + money(cur, t.deadValueKes), 14)} ${money(cur, t.missedRevenueKes)}`);
   const text = [
-    `${periodWord} report — ${r.tenantName} · ${r.latestLabel}`,
+    `${periodWord} report - ${r.tenantName} · ${r.latestLabel}`,
     ``,
     improvementLine(r.trend, unit).replace(/<[^>]+>/g, ""),
     ``,
@@ -165,18 +165,18 @@ export function renderReportEmail(
     ``,
     `BESTSELLERS STOCKED OUT NOW`,
     r.needsAttention.length
-      ? r.needsAttention.map((l) => `  [${l.abc ?? "C"}] ${l.title} — ${l.onHand} on hand, ${l.enRoute > 0 ? `${l.enRoute} en route` : "nothing coming"}`).join("\n")
-      : "  none — nicely covered.",
+      ? r.needsAttention.map((l) => `  [${l.abc ?? "C"}] ${l.title} - ${l.onHand} on hand, ${l.enRoute > 0 ? `${l.enRoute} en route` : "nothing coming"}`).join("\n")
+      : "  none - nicely covered.",
     ``,
-    `RESTOCK NEXT ${unit.toUpperCase()} (order from suppliers) — ${r.restockCount} items · budget ${money(cur, r.restockBudgetKes)}`,
+    `RESTOCK NEXT ${unit.toUpperCase()} (order from suppliers) - ${r.restockCount} items · budget ${money(cur, r.restockBudgetKes)}`,
     r.restock.length
-      ? r.restock.map((l) => `  [${l.abc ?? "C"}] ${l.title} — order ${l.qty} (${money(cur, l.costKes)}, ${l.daysLeft}d left)`).join("\n")
+      ? r.restock.map((l) => `  [${l.abc ?? "C"}] ${l.title} - order ${l.qty} (${money(cur, l.costKes)}, ${l.daysLeft}d left)`).join("\n")
       : "  nothing urgent.",
     ``,
     ...(r.transferCount > 0
       ? [
-          `DISTRIBUTE FROM ${r.transferFrom.toUpperCase()} — ${r.transferCount} transfers (move stock you own, no purchase)`,
-          r.transfers.map((l) => `  [${l.abc ?? "C"}] ${l.title} — move ${l.qty} → ${l.toBranch}`).join("\n"),
+          `DISTRIBUTE FROM ${r.transferFrom.toUpperCase()} - ${r.transferCount} transfers (move stock you own, no purchase)`,
+          r.transfers.map((l) => `  [${l.abc ?? "C"}] ${l.title} - move ${l.qty} → ${l.toBranch}`).join("\n"),
           ``,
         ]
       : []),

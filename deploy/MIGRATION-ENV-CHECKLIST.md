@@ -58,8 +58,8 @@ Values that are neither secret-critical nor infrastructure-derived. Copy them as
 
 Nothing breaks if these get new values, so long as they are valid.
 
-- `RESEND_API_KEY` (Vercel + Railway) — **with `NODE_ENV=production` an unset key makes every
-  send throw**, so this cannot be left blank on a production host
+- `BREVO_SMTP_KEY` / `BREVO_SMTP_LOGIN` (Railway web + worker) — **with `NODE_ENV=production` an
+  unset key makes every send throw**, so these cannot be left blank on a production host
 - `POS_FEED_SECRET` (Railway) — only matters for tenants with a POS feed URL set
 - `SENTRY_DSN` (Vercel, Railway worker, Railway ws-gateway) — three services, and the tracker is
   a complete no-op without it. A fresh deployment is the natural moment to set it: the contract's

@@ -77,10 +77,12 @@ import { createSyncWorker } from "./worker";
  *   SERVICE_DATABASE_URL  — BYPASSRLS connection: the sync's writes
  *   TOKEN_ENCRYPTION_KEY  — decrypts stored Shopify tokens (32 bytes, base64)
  *   SHOPIFY_APP_URL       — public web origin; registers webhook callbacks when set
- *   RESEND_API_KEY         — Resend API key; unset logs mail to the
+ *   BREVO_SMTP_KEY        — Brevo SMTP key; unset logs mail to the
  *                           console instead of sending (see src/email.ts)
+ *   BREVO_SMTP_LOGIN      — Brevo SMTP login; required alongside the key
+ *   BREVO_SMTP_HOST/PORT  — optional; default smtp-relay.brevo.com / 587
  *   EMAIL_FROM            — outbound sender ("Name <address>" or bare address);
- *                           required once RESEND_API_KEY is set
+ *                           required once BREVO_SMTP_KEY is set
  *   EMAIL_CRONS           — "1" registers + runs the email cron schedules
  *                           (weekly summaries + monthly owner reports); unset
  *                           keeps dev/CI quiet

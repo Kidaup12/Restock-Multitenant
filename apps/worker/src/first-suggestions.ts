@@ -76,15 +76,25 @@ export async function sendFirstSuggestions(
   const recipients = await alertRecipients(tenantId, "first_suggestions");
   if (!recipients) return "no_recipients";
 
+  const productsLine = `${worthBuying} ${worthBuying === 1 ? "product needs" : "products need"} restocking.`;
+  const text =
+    `${tenant.name} has enough sales history for its first buy list.\n\n` +
+    `${productsLine} ` +
+    `Open the Restock Planner to see what to order, how much, and why.\n\n` +
+    `Nothing is ordered until you tick it. The list is a recommendation, not an order.`;
+  const html = `<div style="font-family:sans-serif;max-width:560px;margin:0 auto;padding:32px 24px;color:#1a1a1a">
+  <h1 style="font-size:20px;font-weight:700;margin:0 0 12px">Your first buy list is ready</h1>
+  <p style="font-size:14px;line-height:1.5;margin:0 0 12px">${tenant.name} has enough sales history for its first buy list.</p>
+  <p style="font-size:14px;line-height:1.5;margin:0 0 12px">${productsLine} Open the Restock Planner to see what to order, how much, and why.</p>
+  <p style="font-size:13px;line-height:1.5;color:#666;margin:0">Nothing is ordered until you tick it. The list is a recommendation, not an order.</p>
+</div>`;
+
   for (const to of recipients.emails) {
     await send({
       to,
-      subject: `Your first buy list is ready — ${tenant.name}`,
-      text:
-        `${tenant.name} has enough sales history for its first buy list.\n\n` +
-        `${worthBuying} ${worthBuying === 1 ? "product needs" : "products need"} restocking. ` +
-        `Open the Restock Planner to see what to order, how much, and why.\n\n` +
-        `Nothing is ordered until you tick it — the list is a recommendation, not an order.`,
+      subject: `Your first buy list is ready - ${tenant.name}`,
+      text,
+      html,
       tenantId,
       kind: "first_suggestions",
     });
