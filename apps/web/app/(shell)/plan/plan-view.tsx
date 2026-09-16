@@ -407,18 +407,34 @@ export function PlanView({
       </div>
     );
   }
+  // Budget mode now honours the same filter list mode does: the budget spreads
+  // over the scoped rows, and the opening figure prices the SCOPED criticals —
+  // so "plan KES X across my Korean A-lines" works. An empty scope leaves the
+  // whole shop, identical to the old unscoped behaviour.
+  const budgetRows = filterBuyListRows(buyList.rows, scope);
+  const budgetSummary = planDecisionSummary(budgetRows);
   return (
     <div className="space-y-4">
       {backToOptions}
       {freshness}
+      <ScopeBar
+        rows={buyList.rows}
+        selection={scope}
+        onChange={handleScopeChange}
+        showing={budgetRows.length}
+        savedScopes={savedScopes}
+        onSaveScope={handleSaveScope}
+        onDeleteScope={handleDeleteScope}
+        scopesBusy={scopesBusy}
+      />
       <BudgetPlanner
         canViewCosts={canViewCosts}
-        /* The unscoped list on purpose: the budget allocator plans the whole
-           shop, so the opening figure has to price every critical line, not
-           only the ones the current filter happens to show. */
-        criticalsCashKes={planDecisionSummary(buyList.rows).criticalsCashKes}
-        orderTodayCashKes={planDecisionSummary(buyList.rows).tiers.order_today.cashKes}
+        criticalsCashKes={budgetSummary.criticalsCashKes}
+        orderTodayCashKes={budgetSummary.tiers.order_today.cashKes}
+        scope={scope}
       />
+      {/* The saved-scope dialog lives wherever the ScopeBar renders. */}
+      {dialog}
     </div>
   );
 }

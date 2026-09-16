@@ -1,5 +1,5 @@
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
-import { getBuyList } from "@/lib/data/plan";
+import { byBuyListPriority, getBuyList } from "@/lib/data/plan";
 import { getStockCatalogue, type CatalogueRow } from "@/lib/data/stock";
 import { trailingWindow } from "@/lib/data/trailing-window";
 import { moneyAtRest } from "@/lib/metrics";
@@ -299,12 +299,25 @@ export async function getDashboardTable(
     .sort((a, b) => (a.expectedArrivalAt?.getTime() ?? Infinity) - (b.expectedArrivalAt?.getTime() ?? Infinity));
 
   const byId = new Map(rows.map((r) => [r.productId, r]));
+  // Reorder inherits the planner's own ordering: buyList.rows is already sorted
+  // by `byBuyListPriority` (Class A → urgency → soonest stockout) inside
+  // getBuyList, and this only maps it back onto catalogue rows in that same
+  // sequence — so this tab reads in the exact order of the plan a person acts on.
   const reorder = (buyList?.rows ?? [])
     .map((r) => byId.get(r.productId))
     .filter((r): r is CatalogueRow => r != null);
 
+  // Adapt a CatalogueRow to the planner's PriorityRow so Stockout sorts the SAME
+  // way the buy list does: urgency is null on rows with no run rate → "low";
+  // daysCover is the days-until-stockout proxy the comparator expects.
+  const priority = (r: CatalogueRow) => ({
+    abc: r.abc,
+    urgency: r.urgency ?? "low",
+    daysUntilStockout: r.daysCover,
+  });
+
   const piles: Record<DashboardTab, CatalogueRow[]> = {
-    stockout: stockout.sort((a, b) => b.runRate - a.runRate),
+    stockout: stockout.sort((a, b) => byBuyListPriority(priority(a), priority(b))),
     reorder,
     onway,
     dead: dead.sort((a, b) => (b.moneyAtRestKes ?? 0) - (a.moneyAtRestKes ?? 0)),

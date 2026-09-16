@@ -273,6 +273,22 @@ const ABC_RANK: Record<string, number> = { A: 0, B: 1, C: 2 };
 const abcRank = (r: { abc: string | null }): number => ABC_RANK[r.abc ?? ""] ?? 3;
 
 /**
+ * The buy-list ordering, on the minimum a row needs to carry it — so any screen
+ * with a product's class, urgency and days-until-stockout can order the SAME way
+ * the planner does (Class A first, then most urgent, then soonest to empty). The
+ * dashboard's Stockout and Reorder tabs use this so they read in the same order
+ * as the plan a person acts on. Neither key is money.
+ */
+export type PriorityRow = { abc: string | null; urgency: string; daysUntilStockout: number | null };
+export function byBuyListPriority(a: PriorityRow, b: PriorityRow): number {
+  return (
+    abcRank(a) - abcRank(b) ||
+    (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
+    stockoutRank(a) - stockoutRank(b)
+  );
+}
+
+/**
  * The shared head of every buy-list ordering: bestsellers first, then most
  * urgent, then whatever empties soonest. Neither key is money.
  *
@@ -285,9 +301,7 @@ const abcRank = (r: { abc: string | null }): number => ABC_RANK[r.abc ?? ""] ?? 
  * which deliberately keeps its own ordering.
  */
 const byUrgencyThenStockout = (a: BuyListRow, b: BuyListRow): number =>
-  abcRank(a) - abcRank(b) ||
-  (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
-  stockoutRank(a) - stockoutRank(b);
+  byBuyListPriority(a, b);
 
 /** Cost viewer's ordering: within a tie-group, the biggest line first. */
 const byUrgencyCostAware = (a: FullBuyListRow, b: FullBuyListRow): number =>
