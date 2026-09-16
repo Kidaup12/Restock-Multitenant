@@ -86,6 +86,10 @@ const REVENUE_KEYS = new Set([
   "budgetKes",
   // price x run rate — what an empty shelf costs in sales, not a cost figure.
   "missedSalesKes",
+  // The same estimate under the leakage matrix's name (units missed x retail
+  // price). A sales figure priced at retail, shown to every role; the group's
+  // cost figure is capitalKes, which is nulled for a member.
+  "missedRevenueKes",
 ]);
 
 /** Every numeric non-revenue `*Kes` leaf in a payload, as "path=value". For a
