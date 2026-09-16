@@ -152,10 +152,10 @@ describe.skipIf(!runnable)("email crons (real redis + db)", () => {
     await expect(crons.sendWeeklySummary(tenantId, send)).resolves.toBe(true);
     expect(sent).toHaveLength(1);
     expect(sent[0]!.to).toBe(ALERT_EMAIL);
-    expect(sent[0]!.subject).toContain("Weekly report — Crons Test");
+    expect(sent[0]!.subject).toContain("Weekly report - Crons Test");
     expect(sent[0]!.kind).toBe("weekly_summary");
     expect(sent[0]!.html).toContain("How your shop is trending");
-    expect(sent[0]!.text).toContain("Weekly report — Crons Test");
+    expect(sent[0]!.text).toContain("Weekly report - Crons Test");
   });
 
   it("labels the money in the workspace's own currency", async () => {

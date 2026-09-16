@@ -4,7 +4,7 @@ import type { OwnerReport, TrendRow } from "../src/owner-report";
 
 /**
  * What the owner actually reads. The email's first line is the bestseller
- * stockout rate, and with nothing to measure it rendered "—%" — a dash wearing
+ * stockout rate, and with nothing to measure it rendered "-%", a dash wearing
  * a percent sign, which reads as a number too small to print rather than as no
  * number at all. The missed revenue in the same table rendered "KES 0".
  */
@@ -43,8 +43,8 @@ const report = (trend: TrendRow[]): OwnerReport => ({
 describe("the weekly email, when there was nothing to measure", () => {
   it("does not print a percent sign on a dash", () => {
     const { html } = renderReportEmail(report([row()]));
-    expect(html).not.toContain("—%");
-    expect(html).toContain("Bestseller stockout rate this week: —.");
+    expect(html).not.toContain("-%");
+    expect(html).toContain("Bestseller stockout rate this week: -.");
   });
 
   it("prints a dash for missed revenue, not a currency and a zero", () => {
