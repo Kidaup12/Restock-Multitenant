@@ -236,21 +236,24 @@ const renderBudget = (rows: BuyListRow[]) =>
   );
 
 describe("budget planner columns do not come and go with the data", () => {
-  it("keeps the at-risk column on a list with nothing at risk", () => {
-    const html = renderBudget([buyRow()]);
-    expect(html).toContain("At risk (30d)");
+  // The reshaped budget table (matching the shop's screenshot) shows 30d revenue
+  // rather than at-risk cash. The invariant is unchanged: the column is a fixed
+  // part of the table, present whether or not the row has a figure to put in it.
+  it("keeps the revenue column on a list with no revenue", () => {
+    const html = renderBudget([buyRow({ revenue30dKes: 0 })]);
+    expect(html).toContain("30d rev (KES)");
     expect(html).toContain("—");
   });
 
-  it("still carries the figure when something IS at risk", () => {
-    const html = renderBudget([buyRow({ atRiskKes: 9100 })]);
-    expect(html).toContain("At risk (30d)");
+  it("still carries the figure when there IS revenue", () => {
+    const html = renderBudget([buyRow({ revenue30dKes: 9100 })]);
+    expect(html).toContain("30d rev (KES)");
     expect(html).toContain("9,100");
   });
 
   it("shows the same columns either way", () => {
-    expect(headerCells(renderBudget([buyRow()]))).toHaveLength(
-      headerCells(renderBudget([buyRow({ atRiskKes: 9100 })])).length
+    expect(headerCells(renderBudget([buyRow({ revenue30dKes: 0 })]))).toHaveLength(
+      headerCells(renderBudget([buyRow({ revenue30dKes: 9100 })])).length
     );
   });
 });
