@@ -16,16 +16,22 @@ function okTransport(id = "brevo-1") {
 const KEY = "test-brevo-key";
 
 describe("worker sendEmail", () => {
-  const original = { key: process.env.BREVO_SMTP_KEY, from: process.env.EMAIL_FROM };
+  const original = {
+    key: process.env.BREVO_SMTP_KEY,
+    from: process.env.EMAIL_FROM,
+    replyTo: process.env.EMAIL_REPLY_TO,
+  };
 
   beforeEach(() => {
     delete process.env.BREVO_SMTP_KEY;
     delete process.env.EMAIL_FROM;
+    delete process.env.EMAIL_REPLY_TO;
   });
 
   afterEach(() => {
     process.env.BREVO_SMTP_KEY = original.key;
     process.env.EMAIL_FROM = original.from;
+    process.env.EMAIL_REPLY_TO = original.replyTo;
     vi.restoreAllMocks();
   });
 
@@ -48,6 +54,19 @@ describe("worker sendEmail", () => {
       subject: "Action needed",
       text: "Sync is failing.",
     });
+  });
+
+  it("routes replies to EMAIL_REPLY_TO while sending From the authenticated domain", async () => {
+    process.env.BREVO_SMTP_KEY = KEY;
+    process.env.EMAIL_FROM = "Wezesha Restock <alerts@wezesha.test>";
+    process.env.EMAIL_REPLY_TO = "teamsimplydone@gmail.com";
+    const transport = okTransport();
+
+    await sendEmail({ to: "owner@shop.test", subject: "Hi", text: "body" }, transport);
+
+    const msg = transport.sendMail.mock.calls[0]![0];
+    expect(msg.from).toBe("Wezesha Restock <alerts@wezesha.test>");
+    expect(msg.replyTo).toBe("teamsimplydone@gmail.com");
   });
 
   it("passes a bare EMAIL_FROM address through unchanged", async () => {

@@ -24,6 +24,8 @@ import { prismaService } from "@wezesha/db";
  *   BREVO_SMTP_KEY   the Brevo SMTP key (a secret, never committed)
  *   EMAIL_FROM       sender as "Name <address>" or a bare address; the domain
  *                    must be authenticated in Brevo or the send is rejected.
+ *   EMAIL_REPLY_TO   optional Reply-To for every send (e.g. a monitored Gmail
+ *                    inbox); the From stays on the authenticated domain.
  */
 export interface EmailMessage {
   to: string;
@@ -31,6 +33,9 @@ export interface EmailMessage {
   text: string;
   /** Optional rich HTML body; clients without HTML fall back to `text`. */
   html?: string;
+  /** Where replies should go; falls back to EMAIL_REPLY_TO. The From stays on
+   *  the authenticated EMAIL_FROM domain either way. */
+  replyTo?: string;
   /** Workspace the send belongs to; omitted for mail that precedes one. */
   tenantId?: string | null;
   /** What kind of message this is, for the ledger ("reconnect_alert"). */
@@ -43,6 +48,7 @@ export type MailTransport = {
   sendMail(message: {
     from: string;
     to: string;
+    replyTo?: string;
     subject: string;
     text: string;
     html?: string;
@@ -96,7 +102,7 @@ const brevoTransport = (): MailTransport => {
   return shared;
 };
 
-export const sendEmail: SendEmail = async ({ to, subject, text, html, tenantId, kind }, transport) => {
+export const sendEmail: SendEmail = async ({ to, subject, text, html, replyTo, tenantId, kind }, transport) => {
   const envelope = { tenantId, to, subject, kind };
   const configured = Boolean(process.env.BREVO_SMTP_KEY) || transport != null;
   if (!configured) {
@@ -118,10 +124,12 @@ export const sendEmail: SendEmail = async ({ to, subject, text, html, tenantId, 
     throw new Error(detail);
   }
 
+  const reply = replyTo?.trim() || process.env.EMAIL_REPLY_TO?.trim() || undefined;
+
   const mailer = transport ?? brevoTransport();
   let info: { messageId?: string };
   try {
-    info = await mailer.sendMail({ from, to, subject, text, ...(html ? { html } : {}) });
+    info = await mailer.sendMail({ from, to, ...(reply ? { replyTo: reply } : {}), subject, text, ...(html ? { html } : {}) });
   } catch (err) {
     const message = `Brevo send failed: ${err instanceof Error ? err.message : String(err)}`;
     await record({ ...envelope, status: "failed", error: message });
