@@ -514,7 +514,10 @@ export function BudgetTable({
           </TableHead>
         )}
         <TableHead>Product</TableHead>
-        <TableHead numeric>Run/day</TableHead>
+        {/* NOT the catalogue's "Sells/day": this is the rate the order was sized
+            from (forecast / 30, ABC-floored), not what the shelf actually did.
+            One name per rate; see tests/one-name-per-rate.test.ts. */}
+        <TableHead numeric>Buying at/day</TableHead>
         <TableHead numeric className="hidden lg:table-cell">30d rev ({currency})</TableHead>
         <TableHead numeric>Days left</TableHead>
         <TableHead numeric>Stock</TableHead>

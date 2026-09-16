@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendEmail } from "../lib/email";
+import nodemailer from "nodemailer";
+import { sendEmail, type MailTransport } from "../lib/email";
 
 /**
  * The send is not allowed to lie about itself.
@@ -21,16 +22,12 @@ import { sendEmail } from "../lib/email";
  * reading "the supplier has not been told".
  */
 
-function okFetch(status = 201, id = "resend-message-id") {
-  return vi.fn(async () => ({
-    ok: status < 400,
-    status,
-    json: async () => ({ id }),
-    text: async () => "",
-  })) as unknown as typeof fetch;
+/** A Brevo transport that accepts every send, standing in for a real relay. */
+function okTransport(id = "brevo-message-id") {
+  return { sendMail: vi.fn(async () => ({ messageId: id })) } satisfies MailTransport;
 }
 
-const KEY = "test-resend-key";
+const KEY = "test-brevo-key";
 const FROM = "Wezesha Restock <no-reply@wezesha.test>";
 
 const url = process.env.SERVICE_DATABASE_URL ?? "";
@@ -45,7 +42,7 @@ describe.skipIf(!runnable)("email log + missing-key behaviour (local db)", () =>
   let tenantId: string;
   let supplierId: string;
 
-  const original = { key: process.env.RESEND_API_KEY, from: process.env.EMAIL_FROM };
+  const original = { key: process.env.BREVO_SMTP_KEY, from: process.env.EMAIL_FROM };
 
   beforeAll(async () => {
     ({ prismaService } = await import("@wezesha/db"));
@@ -67,14 +64,14 @@ describe.skipIf(!runnable)("email log + missing-key behaviour (local db)", () =>
   }, 30_000);
 
   beforeEach(async () => {
-    delete process.env.RESEND_API_KEY;
+    delete process.env.BREVO_SMTP_KEY;
     delete process.env.EMAIL_FROM;
     vi.unstubAllEnvs();
     await prismaService.emailLog.deleteMany({ where: { tenantId } });
   });
 
   afterEach(() => {
-    process.env.RESEND_API_KEY = original.key;
+    process.env.BREVO_SMTP_KEY = original.key;
     process.env.EMAIL_FROM = original.from;
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
@@ -114,29 +111,31 @@ describe.skipIf(!runnable)("email log + missing-key behaviour (local db)", () =>
   it("refuses to send in production when the provider key is missing", async () => {
     vi.stubEnv("NODE_ENV", "production");
 
+    // No key AND no injected transport -> production hard-fails. (An injected
+    // transport would count as "configured", so this test passes none.)
     await expect(
-      sendEmail({ to: "owner@shop.test", subject: "Your code", text: "123456" }, okFetch()),
-    ).rejects.toThrow(/RESEND_API_KEY/);
+      sendEmail({ to: "owner@shop.test", subject: "Your code", text: "123456" }),
+    ).rejects.toThrow(/BREVO_SMTP_KEY/);
   });
 
   it("resolves as 'skipped' outside production so local dev keeps working", async () => {
     vi.stubEnv("NODE_ENV", "test");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const fetchMock = okFetch();
 
     // Resolving is what keeps local dev working; resolving as "skipped" is what
-    // stops a caller reporting it as delivery.
+    // stops a caller reporting it as delivery. No key and no transport -> the
+    // console fallback path.
     await expect(
-      sendEmail({ to: "owner@shop.test", subject: "Your code", text: "123456" }, fetchMock),
+      sendEmail({ to: "owner@shop.test", subject: "Your code", text: "123456" }),
     ).resolves.toBe("skipped");
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("no RESEND_API_KEY"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("no BREVO_SMTP_KEY"));
   });
 
   it("writes exactly one 'sent' row after a successful send", async () => {
-    process.env.RESEND_API_KEY = KEY;
+    process.env.BREVO_SMTP_KEY = KEY;
     process.env.EMAIL_FROM = FROM;
+    const transport = okTransport();
 
     await sendEmail(
       {
@@ -147,7 +146,7 @@ describe.skipIf(!runnable)("email log + missing-key behaviour (local db)", () =>
         tenantId,
         kind: "purchase_order",
       },
-      okFetch(),
+      transport,
     );
 
     const rows = await prismaService.emailLog.findMany({ where: { tenantId } });
@@ -156,30 +155,39 @@ describe.skipIf(!runnable)("email log + missing-key behaviour (local db)", () =>
     expect(rows[0]!.to).toBe(SUPPLIER_EMAIL);
     expect(rows[0]!.subject).toBe("Purchase order PO-1001");
     expect(rows[0]!.kind).toBe("purchase_order");
-    expect(rows[0]!.providerId).toBe("resend-message-id");
+    // The provider id is now the nodemailer messageId, not Resend's json .id.
+    expect(rows[0]!.providerId).toBe("brevo-message-id");
     expect(rows[0]!.error).toBeNull();
     expect(rows[0]!.createdAt).toBeInstanceOf(Date);
   });
 
   it("records a failed send with the provider's reason, and still throws", async () => {
-    process.env.RESEND_API_KEY = KEY;
+    process.env.BREVO_SMTP_KEY = KEY;
     process.env.EMAIL_FROM = FROM;
+    // A failing send is now a transport whose sendMail throws (SMTP rejection),
+    // not an HTTP 422.
+    const failing: MailTransport = {
+      sendMail: vi.fn(async () => {
+        throw new Error("550 relay denied");
+      }),
+    };
 
     await expect(
-      sendEmail({ to: SUPPLIER_EMAIL, subject: "Hi", text: "body", tenantId }, okFetch(422)),
-    ).rejects.toThrow(/Resend send failed \(422\)/);
+      sendEmail({ to: SUPPLIER_EMAIL, subject: "Hi", text: "body", tenantId }, failing),
+    ).rejects.toThrow(/Brevo send failed/);
 
     const rows = await prismaService.emailLog.findMany({ where: { tenantId } });
     expect(rows).toHaveLength(1);
     expect(rows[0]!.status).toBe("failed");
-    expect(rows[0]!.error).toMatch(/422/);
+    expect(rows[0]!.error).toMatch(/relay denied/);
   });
 
   it("records the console fallback as skipped, not sent", async () => {
     vi.stubEnv("NODE_ENV", "test");
     vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await sendEmail({ to: SUPPLIER_EMAIL, subject: "Hi", text: "body", tenantId }, okFetch());
+    // No key and no transport -> the console fallback.
+    await sendEmail({ to: SUPPLIER_EMAIL, subject: "Hi", text: "body", tenantId });
 
     const rows = await prismaService.emailLog.findMany({ where: { tenantId } });
     expect(rows).toHaveLength(1);
@@ -188,13 +196,13 @@ describe.skipIf(!runnable)("email log + missing-key behaviour (local db)", () =>
   });
 
   it("never stores the message body", async () => {
-    process.env.RESEND_API_KEY = KEY;
+    process.env.BREVO_SMTP_KEY = KEY;
     process.env.EMAIL_FROM = FROM;
     const secret = "Unit cost KES 1,250 — supplier margin";
 
     await sendEmail(
       { to: SUPPLIER_EMAIL, subject: "Purchase order PO-1002", text: secret, html: secret, tenantId },
-      okFetch(),
+      okTransport(),
     );
 
     const rows = await prismaService.emailLog.findMany({ where: { tenantId } });
@@ -202,24 +210,24 @@ describe.skipIf(!runnable)("email log + missing-key behaviour (local db)", () =>
   });
 
   it("a logging failure never fails an otherwise successful send", async () => {
-    process.env.RESEND_API_KEY = KEY;
+    process.env.BREVO_SMTP_KEY = KEY;
     process.env.EMAIL_FROM = FROM;
     vi.spyOn(console, "warn").mockImplementation(() => {});
     // Break the ledger write the way a database outage would.
     vi.spyOn(prismaService.emailLog, "create").mockRejectedValue(new Error("db down"));
-    const fetchMock = okFetch();
+    const transport = okTransport();
 
     await expect(
-      sendEmail({ to: SUPPLIER_EMAIL, subject: "Hi", text: "body", tenantId }, fetchMock),
+      sendEmail({ to: SUPPLIER_EMAIL, subject: "Hi", text: "body", tenantId }, transport),
     ).resolves.toBe("sent");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(transport.sendMail).toHaveBeenCalledTimes(1);
   });
 
   it("reports a skipped send instead of claiming the supplier was emailed", async () => {
     // The console fallback: no key, not production. The order is legitimately
     // marked sent — that is the shop's own record — but nothing left the
     // building, and the result has to carry that fact to whatever tells a person.
-    delete process.env.RESEND_API_KEY;
+    delete process.env.BREVO_SMTP_KEY;
     vi.spyOn(console, "log").mockImplementation(() => {});
     const poId = await draftPo("skipped");
 
@@ -245,13 +253,14 @@ describe.skipIf(!runnable)("email log + missing-key behaviour (local db)", () =>
   it("reports a real send as emailed", async () => {
     // The control: with a key and a provider that accepts it, the same path must
     // still say the supplier was told. Break `emailed` and this is what fails.
-    // send-po takes no fetch seam, so the global is stubbed — nothing in this
-    // suite is allowed to reach the real provider.
-    process.env.RESEND_API_KEY = KEY;
+    // send-po takes no transport seam, so the nodemailer transport it builds
+    // internally is stubbed here — nothing in this suite is allowed to reach a
+    // real relay.
+    process.env.BREVO_SMTP_KEY = KEY;
     process.env.EMAIL_FROM = FROM;
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      okFetch() as unknown as typeof globalThis.fetch
-    );
+    vi.spyOn(nodemailer, "createTransport").mockReturnValue({
+      sendMail: async () => ({ messageId: "brevo-message-id" }),
+    } as unknown as ReturnType<typeof nodemailer.createTransport>);
     const poId = await draftPo("emailed");
 
     expect(await sendPoToSupplier(tenantId, poId)).toMatchObject({ ok: true, emailed: true });
@@ -263,7 +272,7 @@ describe.skipIf(!runnable)("email log + missing-key behaviour (local db)", () =>
     vi.stubEnv("NODE_ENV", "production");
     const poId = await draftPo("prod");
 
-    await expect(sendPoToSupplier(tenantId, poId)).rejects.toThrow(/RESEND_API_KEY/);
+    await expect(sendPoToSupplier(tenantId, poId)).rejects.toThrow(/BREVO_SMTP_KEY/);
 
     const po = await prismaService.purchaseOrder.findUnique({
       where: { id: poId },

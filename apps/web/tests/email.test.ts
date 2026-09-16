@@ -1,41 +1,37 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sendEmail } from "../lib/email";
+import { sendEmail, type MailTransport } from "../lib/email";
 
 /**
- * The outbound seam in isolation: with a key it posts the right Resend request
- * over an injected fetch (including the rich html body PO emails carry);
- * without one it falls back to console and never calls the network. No real
- * network — the fetch is always a fake.
+ * The outbound seam in isolation: with a key it hands the right message to the
+ * injected Brevo transport (including the rich html body PO emails carry);
+ * without one it falls back to console and never sends. No real SMTP — the
+ * transport is always a fake.
  */
 
-function okFetch(status = 201) {
-  return vi.fn(async () => ({
-    ok: status < 400,
-    status,
-    text: async () => "",
-  })) as unknown as typeof fetch;
+function okTransport(id = "brevo-1") {
+  return { sendMail: vi.fn<MailTransport["sendMail"]>(async () => ({ messageId: id })) } satisfies MailTransport;
 }
 
-const KEY = "test-resend-key";
+const KEY = "test-brevo-key";
 
 describe("web sendEmail", () => {
-  const original = { key: process.env.RESEND_API_KEY, from: process.env.EMAIL_FROM };
+  const original = { key: process.env.BREVO_SMTP_KEY, from: process.env.EMAIL_FROM };
 
   beforeEach(() => {
-    delete process.env.RESEND_API_KEY;
+    delete process.env.BREVO_SMTP_KEY;
     delete process.env.EMAIL_FROM;
   });
 
   afterEach(() => {
-    process.env.RESEND_API_KEY = original.key;
+    process.env.BREVO_SMTP_KEY = original.key;
     process.env.EMAIL_FROM = original.from;
     vi.restoreAllMocks();
   });
 
-  it("posts to Resend with headers and an html body when a key is set", async () => {
-    process.env.RESEND_API_KEY = KEY;
+  it("hands the transport the sender, recipient and an html body when a key is set", async () => {
+    process.env.BREVO_SMTP_KEY = KEY;
     process.env.EMAIL_FROM = "Wezesha Restock <no-reply@wezesha.test>";
-    const fetchMock = okFetch();
+    const transport = okTransport();
 
     await sendEmail(
       {
@@ -44,19 +40,13 @@ describe("web sendEmail", () => {
         text: "Plain-text PO",
         html: "<h1>PO-1001</h1>",
       },
-      fetchMock,
+      transport,
     );
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = (fetchMock as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(url).toBe("https://api.resend.com/emails");
-    expect(init.method).toBe("POST");
-    expect(init.headers.authorization).toBe(`Bearer ${KEY}`);
-    expect(init.headers["content-type"]).toBe("application/json");
-    expect(JSON.parse(init.body)).toEqual({
-      // The sender passes through as written — Resend takes one RFC-5322 string.
+    expect(transport.sendMail).toHaveBeenCalledTimes(1);
+    expect(transport.sendMail).toHaveBeenCalledWith({
       from: "Wezesha Restock <no-reply@wezesha.test>",
-      to: ["supplier@example.test"],
+      to: "supplier@example.test",
       subject: "Purchase order PO-1001",
       text: "Plain-text PO",
       html: "<h1>PO-1001</h1>",
@@ -64,59 +54,53 @@ describe("web sendEmail", () => {
   });
 
   it("omits the html body for text-only messages", async () => {
-    process.env.RESEND_API_KEY = KEY;
+    process.env.BREVO_SMTP_KEY = KEY;
     process.env.EMAIL_FROM = "no-reply@wezesha.test";
-    const fetchMock = okFetch();
+    const transport = okTransport();
 
-    await sendEmail({ to: "user@example.test", subject: "Your code", text: "123456" }, fetchMock);
+    await sendEmail({ to: "user@example.test", subject: "Your code", text: "123456" }, transport);
 
-    const [, init] = (fetchMock as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    const body = JSON.parse(init.body);
-    expect(body).not.toHaveProperty("html");
-    expect(body.from).toBe("no-reply@wezesha.test");
-    expect(body.to).toEqual(["user@example.test"]);
+    const msg = transport.sendMail.mock.calls[0]![0];
+    expect(msg).not.toHaveProperty("html");
+    expect(msg.from).toBe("no-reply@wezesha.test");
+    expect(msg.to).toBe("user@example.test");
   });
 
-  it("never puts the api key anywhere but the authorization header", async () => {
-    process.env.RESEND_API_KEY = KEY;
-    process.env.EMAIL_FROM = "no-reply@wezesha.test";
-    const fetchMock = okFetch();
-
-    await sendEmail({ to: "user@example.test", subject: "Your code", text: "123456" }, fetchMock);
-
-    const [url, init] = (fetchMock as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    expect(String(url)).not.toContain(KEY);
-    expect(init.body).not.toContain(KEY);
-  });
-
-  it("falls back to console and does not call fetch without a key", async () => {
+  it("falls back to console and does not send without a key", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    const fetchMock = okFetch();
+    const transport = okTransport();
 
+    // No key AND no injected transport -> console fallback. (Passing a transport
+    // counts as "configured", so this test passes none.)
     await expect(
-      sendEmail({ to: "user@example.test", subject: "Your code", text: "123456" }, fetchMock),
+      sendEmail({ to: "user@example.test", subject: "Your code", text: "123456" }),
     ).resolves.toBe("skipped");
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("no RESEND_API_KEY"));
+    expect(transport.sendMail).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("no BREVO_SMTP_KEY"));
   });
 
   it("throws a clear error when the key is set but EMAIL_FROM is missing", async () => {
-    process.env.RESEND_API_KEY = KEY;
-    const fetchMock = okFetch();
+    process.env.BREVO_SMTP_KEY = KEY;
+    const transport = okTransport();
 
     await expect(
-      sendEmail({ to: "user@example.test", subject: "Hi", text: "body" }, fetchMock),
+      sendEmail({ to: "user@example.test", subject: "Hi", text: "body" }, transport),
     ).rejects.toThrow(/EMAIL_FROM is not set/);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(transport.sendMail).not.toHaveBeenCalled();
   });
 
-  it("throws when Resend rejects the send", async () => {
-    process.env.RESEND_API_KEY = KEY;
+  it("throws when Brevo rejects the send", async () => {
+    process.env.BREVO_SMTP_KEY = KEY;
     process.env.EMAIL_FROM = "no-reply@wezesha.test";
+    const failing: MailTransport = {
+      sendMail: vi.fn(async () => {
+        throw new Error("550 relay denied");
+      }),
+    };
 
     await expect(
-      sendEmail({ to: "user@example.test", subject: "Hi", text: "body" }, okFetch(400)),
-    ).rejects.toThrow(/Resend send failed \(400\)/);
+      sendEmail({ to: "user@example.test", subject: "Hi", text: "body" }, failing),
+    ).rejects.toThrow(/Brevo send failed/);
   });
 });

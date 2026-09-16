@@ -161,7 +161,7 @@ describe.skipIf(!runnable)("purchase order email outcome (local db)", () => {
           subject: `Purchase order PO-9002 from ${SHOP}`,
           kind: "purchase_order",
           status: "failed",
-          error: "Resend send failed (422): domain not verified",
+          error: "Brevo send failed: 550 sender domain not verified",
           createdAt: sentAt,
         },
         {
@@ -170,7 +170,7 @@ describe.skipIf(!runnable)("purchase order email outcome (local db)", () => {
           subject: `Purchase order PO-9004 from ${SHOP}`,
           kind: "purchase_order",
           status: "failed",
-          error: "Resend send failed (422): domain not verified",
+          error: "Brevo send failed: 550 sender domain not verified",
           createdAt: sentAt,
         },
       ],
@@ -217,7 +217,7 @@ describe.skipIf(!runnable)("purchase order email outcome (local db)", () => {
     const html = await render(po.failed!);
     // The provider's error text and the subject line are engineer-facing; the
     // shop owner gets plain language and no raw log content.
-    expect(html).not.toContain("Resend");
+    expect(html).not.toContain("Brevo");
     expect(html).not.toContain("Purchase order PO-9002 from");
   });
 

@@ -1,7 +1,7 @@
 import { inflateSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { sendEmail } from "../lib/email";
+import { sendEmail, type MailTransport } from "../lib/email";
 import { PoDocument } from "../lib/po/po-document";
 import { poAmount, type PoDocumentData } from "../lib/po/po-model";
 import { poPdfBytes, poPdfFilename } from "../lib/po/po-pdf";
@@ -157,34 +157,31 @@ describe("purchase-order PDF", () => {
 });
 
 describe("outbound seam attachments", () => {
-  const original = { key: process.env.RESEND_API_KEY, from: process.env.EMAIL_FROM };
+  const original = { key: process.env.BREVO_SMTP_KEY, from: process.env.EMAIL_FROM };
 
   beforeEach(() => {
-    process.env.RESEND_API_KEY = "test-resend-key";
+    process.env.BREVO_SMTP_KEY = "test-brevo-key";
     process.env.EMAIL_FROM = "no-reply@wezesha.test";
   });
 
   afterEach(() => {
-    process.env.RESEND_API_KEY = original.key;
+    process.env.BREVO_SMTP_KEY = original.key;
     process.env.EMAIL_FROM = original.from;
   });
 
-  function okFetch() {
-    return vi.fn(async () => ({
-      ok: true,
-      status: 201,
-      text: async () => "",
-      json: async () => ({ id: "msg_1" }),
-    })) as unknown as typeof fetch;
+  function okTransport() {
+    return {
+      sendMail: vi.fn<MailTransport["sendMail"]>(async () => ({ messageId: "msg_1" })),
+    } satisfies MailTransport;
   }
 
-  function bodyOf(fetchMock: typeof fetch) {
-    const [, init] = (fetchMock as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
-    return JSON.parse(init.body);
+  /** The single message the transport was handed. */
+  function messageOf(transport: ReturnType<typeof okTransport>) {
+    return transport.sendMail.mock.calls[0]![0];
   }
 
-  it("posts exactly one attachment whose decoded bytes are a PDF", async () => {
-    const fetchMock = okFetch();
+  it("hands the transport exactly one attachment whose bytes are a PDF", async () => {
+    const transport = okTransport();
 
     await sendEmail(
       {
@@ -193,19 +190,21 @@ describe("outbound seam attachments", () => {
         text: "body",
         attachments: [{ filename: poPdfFilename(doc), content: await poPdfBytes(doc) }],
       },
-      fetchMock
+      transport
     );
 
-    const body = bodyOf(fetchMock);
-    expect(body.attachments).toHaveLength(1);
-    expect(body.attachments[0].filename).toBe("PO-2087.pdf");
-    const decoded = Buffer.from(body.attachments[0].content, "base64");
-    expect(decoded.subarray(0, 5).toString("latin1")).toBe("%PDF-");
+    const msg = messageOf(transport);
+    expect(msg.attachments).toHaveLength(1);
+    expect(msg.attachments![0]!.filename).toBe("PO-2087.pdf");
+    // nodemailer takes the raw bytes directly as a Buffer — no base64 hop.
+    const content = msg.attachments![0]!.content;
+    expect(Buffer.isBuffer(content)).toBe(true);
+    expect(content.subarray(0, 5).toString("latin1")).toBe("%PDF-");
   });
 
   it("omits the attachments key for mail that carries no file", async () => {
-    const fetchMock = okFetch();
-    await sendEmail({ to: "user@example.test", subject: "Your code", text: "123456" }, fetchMock);
-    expect(bodyOf(fetchMock)).not.toHaveProperty("attachments");
+    const transport = okTransport();
+    await sendEmail({ to: "user@example.test", subject: "Your code", text: "123456" }, transport);
+    expect(messageOf(transport)).not.toHaveProperty("attachments");
   });
 });

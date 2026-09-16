@@ -261,7 +261,7 @@ second.
    Then the rest as the environment needs them: `REDIS_URL`, `NEXT_PUBLIC_WS_URL`
    (`wss://<gateway-domain>` from section 4 — without it the app never opens a socket),
    the Shopify credentials, `TOKEN_ENCRYPTION_KEY` (same value as the worker),
-   `RESEND_API_KEY` / `EMAIL_FROM`, `ADMIN_EMAILS`, `SENTRY_DSN`. Do not set
+   `BREVO_SMTP_KEY` / `BREVO_SMTP_LOGIN` / `EMAIL_FROM`, `ADMIN_EMAILS`, `SENTRY_DSN`. Do not set
    `NEXT_OUTPUT` — it is for the Docker image only.
 6. Deploy; confirm the production URL renders and `/api/health` returns `db: true`.
 7. Seed the first operator: `npm run bootstrap:admin -- <email>` against the

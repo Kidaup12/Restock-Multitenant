@@ -265,6 +265,12 @@ export async function sendInviteEmail(input: {
   const url = `${base.replace(/\/$/, "")}/invite/${input.invite.token}`;
   const roleLabel =
     input.invite.role === "OWNER" ? "its owner" : input.invite.role === "ADMIN" ? "an admin" : "a member";
+  const html = `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;color:#1a1a1a">
+  <h1 style="font-size:18px;font-weight:700;margin:0 0 12px">You've been invited to ${input.tenantName}</h1>
+  <p style="font-size:14px;line-height:1.5;margin:0 0 16px">${input.invitedBy} invited you to join ${input.tenantName} as ${roleLabel} on Wezesha Restock.</p>
+  <p style="margin:0 0 16px"><a href="${url}" style="font-size:14px;color:#a62f5c;word-break:break-all">${url}</a></p>
+  <p style="font-size:13px;line-height:1.5;color:#666;margin:0">The link expires in 7 days. If you weren't expecting this, ignore this email.</p>
+</div>`;
   await sendEmail({
     to: input.invite.email,
     subject: `You've been invited to ${input.tenantName} on Wezesha Restock`,
@@ -272,6 +278,7 @@ export async function sendInviteEmail(input: {
       `${input.invitedBy} invited you to join ${input.tenantName} as ${roleLabel}.\n\n` +
       `Accept the invite:\n\n${url}\n\n` +
       `The link expires in 7 days. If you weren't expecting this, ignore this email.`,
+    html,
     tenantId: input.invite.tenantId,
     kind: "invite",
   });
