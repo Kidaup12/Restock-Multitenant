@@ -42,6 +42,7 @@ it embeds a password).
 | `BREVO_SMTP_HOST` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Railway | config | defaults to `smtp-relay.brevo.com` when unset |
 | `BREVO_SMTP_PORT` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Railway | config | defaults to `587` (STARTTLS) when unset |
 | `EMAIL_FROM` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Railway | config | unset (required once `BREVO_SMTP_KEY` is set; sender as `Name <address>` or a bare address). The domain must be authenticated in Brevo or the send is rejected |
+| `EMAIL_REPLY_TO` | `apps/web/lib/email.ts`; `apps/worker/src/email.ts` | web, worker | Railway | config | unset. Optional `Reply-To` for every send (e.g. a monitored Gmail inbox). The `From` stays on the authenticated `EMAIL_FROM` domain; this only steers replies. A per-message `replyTo` overrides it |
 | `ADMIN_EMAILS` | `apps/web/lib/admin/gate.ts` | web | Vercel | config (sensitive — names the operator accounts) | unset. Bootstrap only: it answers who is an admin while the `PlatformAdmin` table has no live row, and goes inert once one does. With both empty the console 404s for everyone — fail closed |
 | `SENTRY_DSN` | `packages/observability/src/index.ts` (via each service's init) | web (`apps/web/instrumentation.ts`) | Vercel | secret | unset (error tracking disabled — complete no-op) |
 | `SENTRY_DSN` | same | worker (`apps/worker/src/index.ts`) | Railway | secret | unset (no-op) |
@@ -263,6 +264,7 @@ previews must never hold prod credentials.
 - `BREVO_SMTP_HOST` / `BREVO_SMTP_PORT` — optional; default to
   `smtp-relay.brevo.com` / `587`
 - `EMAIL_FROM` — same sender as web for the environment
+- `EMAIL_REPLY_TO` — optional; same reply inbox as web for the environment
 - `SENTRY_DSN` — when provisioned; unset keeps tracking a no-op
 
 **CI** (`.github/workflows/ci.yml`) — nothing to provision. Nine jobs run on Node 22:

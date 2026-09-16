@@ -29,6 +29,9 @@ import { prismaService } from "@wezesha/db";
  *   BREVO_SMTP_KEY   the Brevo SMTP key (a secret, never committed)
  *   EMAIL_FROM       sender as "Name <address>" or a bare address; the domain
  *                    must be authenticated in Brevo or the send is rejected.
+ *   EMAIL_REPLY_TO   optional Reply-To for every send (e.g. a monitored Gmail
+ *                    inbox). The From stays on the authenticated domain; this
+ *                    only steers where replies land. A per-message replyTo wins.
  */
 
 /**
@@ -53,6 +56,11 @@ export interface EmailMessage {
   tenantId?: string | null;
   /** What kind of message this is, for the ledger ("purchase_order", "invite"). */
   kind?: string;
+  /** Where replies should go. Sends stay From the authenticated EMAIL_FROM
+   *  domain (Brevo rejects an unverifiable sender, and Gmail's DMARC bounces a
+   *  gmail.com From), but a person hitting Reply reaches a real inbox. Falls
+   *  back to EMAIL_REPLY_TO when omitted; omit both to reply to the sender. */
+  replyTo?: string;
   /** The order this send belongs to, when it belongs to one. The ledger is read
    *  back by this rather than by the PO number in the subject, which is reused. */
   purchaseOrderId?: string | null;
@@ -102,6 +110,7 @@ export type MailTransport = {
   sendMail(message: {
     from: string;
     to: string;
+    replyTo?: string;
     subject: string;
     text: string;
     html?: string;
@@ -128,7 +137,7 @@ function brevoTransport(): MailTransport {
 export type EmailOutcome = "sent" | "skipped";
 
 export async function sendEmail(
-  { to, subject, text, html, attachments, tenantId, kind, purchaseOrderId }: EmailMessage,
+  { to, subject, text, html, attachments, tenantId, kind, replyTo, purchaseOrderId }: EmailMessage,
   transport?: MailTransport,
 ): Promise<EmailOutcome> {
   const envelope = { tenantId, to, subject, kind, purchaseOrderId };
@@ -157,12 +166,17 @@ export async function sendEmail(
     throw new Error(detail);
   }
 
+  // A per-message replyTo wins; otherwise the workspace default (EMAIL_REPLY_TO),
+  // so a team can point replies at a monitored inbox without a code change.
+  const reply = replyTo?.trim() || process.env.EMAIL_REPLY_TO?.trim() || undefined;
+
   const mailer = transport ?? brevoTransport();
   let info: { messageId?: string };
   try {
     info = await mailer.sendMail({
       from,
       to,
+      ...(reply ? { replyTo: reply } : {}),
       subject,
       text,
       ...(html ? { html } : {}),

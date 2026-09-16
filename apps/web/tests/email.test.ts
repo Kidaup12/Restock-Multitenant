@@ -15,16 +15,22 @@ function okTransport(id = "brevo-1") {
 const KEY = "test-brevo-key";
 
 describe("web sendEmail", () => {
-  const original = { key: process.env.BREVO_SMTP_KEY, from: process.env.EMAIL_FROM };
+  const original = {
+    key: process.env.BREVO_SMTP_KEY,
+    from: process.env.EMAIL_FROM,
+    replyTo: process.env.EMAIL_REPLY_TO,
+  };
 
   beforeEach(() => {
     delete process.env.BREVO_SMTP_KEY;
     delete process.env.EMAIL_FROM;
+    delete process.env.EMAIL_REPLY_TO;
   });
 
   afterEach(() => {
     process.env.BREVO_SMTP_KEY = original.key;
     process.env.EMAIL_FROM = original.from;
+    process.env.EMAIL_REPLY_TO = original.replyTo;
     vi.restoreAllMocks();
   });
 
@@ -51,6 +57,36 @@ describe("web sendEmail", () => {
       text: "Plain-text PO",
       html: "<h1>PO-1001</h1>",
     });
+  });
+
+  it("routes replies to EMAIL_REPLY_TO while sending From the authenticated domain", async () => {
+    // The From must stay on the verified domain (Brevo rejects an unverifiable
+    // sender; Gmail's DMARC bounces a gmail.com From). Reply-To is how a team
+    // still collects replies in a Gmail inbox.
+    process.env.BREVO_SMTP_KEY = KEY;
+    process.env.EMAIL_FROM = "Wezesha Restock <no-reply@wezesha.test>";
+    process.env.EMAIL_REPLY_TO = "teamsimplydone@gmail.com";
+    const transport = okTransport();
+
+    await sendEmail({ to: "user@example.test", subject: "Hi", text: "body" }, transport);
+
+    const msg = transport.sendMail.mock.calls[0]![0];
+    expect(msg.from).toBe("Wezesha Restock <no-reply@wezesha.test>");
+    expect(msg.replyTo).toBe("teamsimplydone@gmail.com");
+  });
+
+  it("lets a per-message replyTo override the env default", async () => {
+    process.env.BREVO_SMTP_KEY = KEY;
+    process.env.EMAIL_FROM = "no-reply@wezesha.test";
+    process.env.EMAIL_REPLY_TO = "default@wezesha.test";
+    const transport = okTransport();
+
+    await sendEmail(
+      { to: "user@example.test", subject: "Hi", text: "body", replyTo: "specific@wezesha.test" },
+      transport,
+    );
+
+    expect(transport.sendMail.mock.calls[0]![0].replyTo).toBe("specific@wezesha.test");
   });
 
   it("omits the html body for text-only messages", async () => {
