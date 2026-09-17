@@ -1,4 +1,4 @@
-import { PLATFORM_TENANT_ID, prismaService } from "@wezesha/db";
+import { PLATFORM_TENANT_ID, looksLikeEmail, prismaService } from "@wezesha/db";
 import type { AdminActor } from "@/lib/admin/gate";
 
 /**
@@ -85,6 +85,12 @@ export async function grantPlatformAdmin(
 ): Promise<AdminMutationResult> {
   const email = norm(rawEmail);
   if (!email) return { ok: false, error: "Enter an email address." };
+  // Before the lookup, so "no account with that address" can only ever mean
+  // that. A mistyped address used to come back as "they need to sign in once",
+  // which reads as an onboarding problem and is not one.
+  if (!looksLikeEmail(email)) {
+    return { ok: false, error: `"${rawEmail.trim()}" is not an email address.` };
+  }
 
   const user = await prismaService.user.findFirst({
     where: { email: { equals: email, mode: "insensitive" } },
