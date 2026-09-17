@@ -436,6 +436,7 @@ export function PlanView({
       />
       <BudgetPlanner
         canViewCosts={canViewCosts}
+        canOverride={canOverride}
         criticalsCashKes={budgetSummary.criticalsCashKes}
         orderTodayCashKes={budgetSummary.tiers.order_today.cashKes}
         scope={scope}

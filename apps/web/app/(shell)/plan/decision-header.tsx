@@ -67,6 +67,19 @@ export function planDecisionSummary(rows: BuyListRow[]): PlanDecisionSummary {
   };
 }
 
+/** The single most urgent row on the (already scoped) list — soonest to empty,
+ *  with a stockout in sight. No stockout predicted sorts last, so a calm list can
+ *  come back with none. Days-until-stockout only, never a money figure, so the
+ *  tile it feeds is safe for a money-blind member. */
+function mostUrgentRow(rows: BuyListRow[]): BuyListRow | null {
+  let best: BuyListRow | null = null;
+  for (const r of rows) {
+    if (r.daysUntilStockout == null) continue;
+    if (best == null || r.daysUntilStockout < (best.daysUntilStockout ?? Infinity)) best = r;
+  }
+  return best;
+}
+
 export function PlanDecisionHeader({
   rows,
   canViewCosts,
@@ -81,6 +94,10 @@ export function PlanDecisionHeader({
 
   const { order_today: today, this_week: thisWeek, can_wait: canWait } = summary.tiers;
   const urgent = today.count > 0;
+  // Which product runs out first — a name and a deadline, not money, so it shows
+  // for every role. `daysLeftToOrder <= 0` means the last safe order day has
+  // already passed: the deadline reads "Overdue" rather than a day count.
+  const mostUrgent = mostUrgentRow(rows);
 
   return (
     <div className="rounded-lg border border-edge bg-surface p-5 shadow-card">
@@ -123,6 +140,25 @@ export function PlanDecisionHeader({
         Revenue at risk if you wait —{" "}
         <CostValue amount={summary.atRiskKes} canViewCosts={canViewCosts} compact />
       </div>
+
+      {/* Most urgent: a name and a deadline, so the header points at the single
+          product to look at first, not only at aggregates. Not money — shown to
+          every role. */}
+      {mostUrgent && (
+        <div className="mt-3 flex flex-wrap items-baseline gap-x-2 border-t border-edge pt-3 text-sm">
+          <span className="text-2xs tracking-wider text-ink-muted uppercase">Most urgent</span>
+          <span className="font-medium text-ink">{mostUrgent.title}</span>
+          <span
+            className={
+              mostUrgent.daysLeftToOrder <= 0 ? "font-medium text-negative" : "text-ink-muted"
+            }
+          >
+            {mostUrgent.daysLeftToOrder <= 0
+              ? "Overdue"
+              : `${mostUrgent.daysUntilStockout}d of cover left`}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

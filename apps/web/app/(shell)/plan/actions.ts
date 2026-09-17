@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma, prismaForTenant, prismaService } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import {
@@ -307,4 +308,90 @@ export async function clearPlanOverride(input: {
   await removePlanOverride(membership.tenantId, productId);
   revalidatePath("/plan");
   return { ok: true, data: { productId } };
+}
+
+/** Sanity cap on an edited cost/price — a real unit figure never approaches it. */
+const MAX_UNIT_MONEY = 100_000_000;
+
+/**
+ * Fix a product's cost (and, when relevant, its selling price) straight from the
+ * plan — the inline "check these costs" fixer on the excluded/held-back rows and
+ * in the budget planner's "check these costs" card. A blank or broken cost is the
+ * only reason those rows are held off the buy list; setting one folds them back
+ * in on the next re-plan.
+ *
+ * Gated on `view_costs` (you cannot fix a cost you may not see) AND
+ * `approve_orders` (the same ordering permission the plan's overrides check — a
+ * fixer that puts a real number on a real order belongs behind it). Tenant and
+ * actor resolve server-side; the write runs on the RLS-scoped tenant client so a
+ * foreign productId resolves to nothing, and the change is audited on the service
+ * client. The cost is pinned (`costSource: "manual"`) so the next sync can't
+ * quietly overwrite the owner's fix.
+ */
+export async function fixProductCost(input: {
+  productId: string;
+  costKes?: number | null;
+  priceKes?: number | null;
+}): Promise<PlanActionResult<{ productId: string }>> {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+  if (!membership) return err("You're not in a workspace.");
+  if (!hasPermission(membership, "view_costs")) return err("Fixing costs needs cost access.");
+  if (!hasPermission(membership, "approve_orders")) return err("You don't have ordering access.");
+
+  const productId = typeof input.productId === "string" ? input.productId.trim() : "";
+  if (!productId) return err("Pick a product to fix.");
+
+  // Only the figures actually supplied are written; each is validated on its own.
+  const data: Prisma.ProductUpdateInput = {};
+  const meta: Record<string, unknown> = { productId, source: "plan_fixer" };
+
+  if (input.costKes != null) {
+    const cost = Number(input.costKes);
+    if (!Number.isFinite(cost) || cost <= 0) return err("Enter a cost greater than zero.");
+    if (cost > MAX_UNIT_MONEY) return err("That cost is too large.");
+    const rounded = Math.round(cost * 100) / 100;
+    data.costKes = rounded;
+    data.costSource = "manual";
+    data.costUpdatedAt = new Date();
+    data.costMovedPct = null;
+    data.costMovedAt = null;
+    meta.costKes = rounded;
+  }
+
+  if (input.priceKes != null) {
+    const price = Number(input.priceKes);
+    if (!Number.isFinite(price) || price < 0) return err("Enter a price of zero or more.");
+    if (price > MAX_UNIT_MONEY) return err("That price is too large.");
+    const rounded = Math.round(price * 100) / 100;
+    data.priceKes = rounded;
+    meta.priceKes = rounded;
+  }
+
+  if (Object.keys(data).length === 0) return err("Enter a cost.");
+
+  const db = prismaForTenant(membership.tenantId);
+  const product = await db.product.findFirst({
+    where: { id: productId },
+    select: { id: true },
+  });
+  if (!product) return err("That product isn't in this workspace.");
+
+  await db.product.update({ where: { id: product.id }, data });
+  await prismaService.auditEvent.create({
+    data: {
+      tenantId: membership.tenantId,
+      entity: "Product",
+      entityId: product.id,
+      action: "cost_changed",
+      actorUserId: session.user.id,
+      actorName: membership.displayName ?? session.user.name ?? session.user.email,
+      meta: meta as Prisma.InputJsonObject,
+    },
+  });
+  // Fixing a cost changes what the buy list contains and what the budget can plan.
+  revalidatePath("/plan");
+  revalidatePath("/products");
+  revalidatePath("/costs");
+  return { ok: true, data: { productId: product.id } };
 }

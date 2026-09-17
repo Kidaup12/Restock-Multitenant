@@ -1,7 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState, useTransition } from "react";
-import { ChevronDownIcon } from "@/components/icons";
+import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { AbcBadge } from "@/components/ui/abc-badge";
@@ -9,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { DaysLeft } from "@/components/ui/days-left";
-import { formatMoney, formatNumber } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
 import { cn } from "@/lib/cn";
 import { ActionBar } from "@/components/ui/action-bar";
@@ -23,7 +22,7 @@ import type {
   PlanConfidence,
 } from "@/lib/data/plan";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
-import { moqPreview, type MoqPreview } from "@/lib/plan/moq-preview";
+import type { MoqPreview } from "@/lib/plan/moq-preview";
 import {
   COVER_MAX,
   COVER_MIN,
@@ -32,7 +31,8 @@ import {
   clampCoverDays,
 } from "./cover";
 import { Stepper } from "@/components/ui/stepper";
-import { LeadFlooredNote } from "./lead-floored-note";
+import { BuyTable } from "./buy-table";
+import { CostFixer } from "./cost-fixer";
 import { useOrderPicker } from "./use-order-picker";
 import {
   clearPlanOverride,
@@ -74,7 +74,7 @@ const TIERS: { tier: BuyTier; title: string; subtitle: string }[] = [
  * caller who may see costs. Sorting a money-blind member's list by line total
  * would hand back the cost ranking the data layer just spent a re-sort hiding.
  */
-type SortKey = "plan" | "urgent" | "fastest" | "revenue" | "alpha" | "costly" | "earners";
+export type SortKey = "plan" | "urgent" | "fastest" | "revenue" | "alpha" | "costly" | "earners";
 
 const SORTS: { key: SortKey; label: string; needsCosts?: true }[] = [
   { key: "plan", label: "Plan order (bestsellers first)" },
@@ -95,7 +95,7 @@ export function earnerScore(row: Pick<BuyListRow, "runRatePerDay" | "priceKes" |
 
 /** Non-mutating; "plan" hands back the same array so the run's own order is
  *  passed through untouched rather than re-derived. */
-function sortRows(rows: BuyListRow[], key: SortKey): BuyListRow[] {
+export function sortRows(rows: BuyListRow[], key: SortKey): BuyListRow[] {
   if (key === "plan") return rows;
   const copy = [...rows];
   switch (key) {
@@ -271,7 +271,7 @@ function TrustNotes({ row }: { row: Pick<BuyListRow, "confidence" | "coldStart" 
  * can give — then the run's own words. Shared by the tier rows and the held-back
  * ones so a product's explanation has one wording wherever it appears.
  */
-function WhyPanel({ row }: { row: BuyListRow }) {
+export function WhyPanel({ row }: { row: BuyListRow }) {
   return (
     <div className="rounded-md bg-surface-2/60 px-4 py-3 text-sm">
       <p className="font-mono text-xs text-ink">{row.explain?.summary ?? row.qtySummary}</p>
@@ -327,7 +327,7 @@ const TH_NUM = "px-5 py-3 text-right text-2xs font-medium tracking-wider whitesp
 const TD = "px-5 py-3 whitespace-nowrap text-ink-secondary";
 const TD_NUM = "px-5 py-3 text-right font-mono tabular-nums whitespace-nowrap text-ink";
 
-const dayLabel = (date: Date) =>
+export const dayLabel = (date: Date) =>
   new Date(date).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 
 /**
@@ -337,7 +337,7 @@ const dayLabel = (date: Date) =>
  * "set qty" affordance. Writes go through the tenant/permission-gated actions,
  * then the plan revalidates and the new figure streams back down.
  */
-function QtyCell({ row, canOverride }: { row: BuyListRow; canOverride: boolean }) {
+export function QtyCell({ row, canOverride }: { row: BuyListRow; canOverride: boolean }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(String(row.recommendedQty));
   const [error, setError] = useState<string | null>(null);
@@ -442,7 +442,7 @@ function QtyCell({ row, canOverride }: { row: BuyListRow; canOverride: boolean }
  * so it renders for every role. The floor itself is applied at PO creation —
  * this is read-only.
  */
-function MoqNote({ preview }: { preview: MoqPreview }) {
+export function MoqNote({ preview }: { preview: MoqPreview }) {
   if (!preview.roundedUp) return null;
   return (
     <span
@@ -580,6 +580,11 @@ export function ExcludedSection({
         // a column — 0 and KES 0 down the page is noise, not information.
         const showsQty = QTY_GROUPS.has(reason);
         const offersOverride = canOverride && OVERRIDABLE_GROUPS.has(reason);
+        // The "cost needs checking" group is the one an owner can fix in place:
+        // set the cost (and price where relevant) and the row rejoins the buy
+        // list. Gated behind BOTH cost access and the ordering permission — a
+        // fixer that puts a real number on a real order belongs there.
+        const offersFix = canViewCosts && canOverride && reason === "unplannable";
         return (
           <Card key={reason}>
             <CardHeader title={`${title} · ${groupRows.length}`} subtitle={subtitle} />
@@ -598,6 +603,7 @@ export function ExcludedSection({
                       </>
                     )}
                     {offersOverride && <th scope="col" className={TH_NUM}>Order anyway</th>}
+                    {offersFix && <th scope="col" className={TH_NUM}>Fix cost</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -657,6 +663,11 @@ export function ExcludedSection({
                             <OrderAnyway row={row} />
                           </td>
                         )}
+                        {offersFix && (
+                          <td className={TD_NUM}>
+                            <CostFixer productId={row.productId} plannable={row.plannable} />
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -697,7 +708,6 @@ export function BuyChecklist({
   // Selection, the order call and the words for its outcome are shared with
   // budget mode; see use-order-picker.
   const { picked, toggle, replace, submit, notice, setNotice, pending } = useOrderPicker();
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   // What-if lenses: the re-sized list the server returns is handed UP, because
   // the decision header has to total the same rows this renders. Both lenses
@@ -721,6 +731,17 @@ export function BuyChecklist({
   // unaffected: a row ticked before the filter narrowed stays ticked and stays
   // in the total.
   const shownRows = useMemo(() => sortRows(rows, sort), [rows, sort]);
+
+  // The card-footer grand total, null-propagating so a money-blind member's
+  // masked lines keep the total masked rather than dropping to a wrong sum.
+  const shownTotalKes = useMemo(() => {
+    let total = 0;
+    for (const r of shownRows) {
+      if (r.lineTotalKes == null) return null;
+      total += r.lineTotalKes;
+    }
+    return total;
+  }, [shownRows]);
 
   const sortOptions = SORTS.filter((s) => !s.needsCosts || canViewCosts);
 
@@ -775,13 +796,6 @@ export function BuyChecklist({
     [rows, picked]
   );
 
-  function toggleSet(set: Set<string>, id: string): Set<string> {
-    const next = new Set(set);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    return next;
-  }
-
   const exportColumns: ExportColumn<BuyListRow>[] = [
     { header: "Tier", cell: (r) => TIERS.find((t) => t.tier === r.tier)?.title ?? r.tier },
     { header: "SKU", cell: (r) => r.sku },
@@ -821,8 +835,7 @@ export function BuyChecklist({
             screen is now whatever the scope and urgency lenses left, and this
             sentence describes that. */}
         <p className="text-sm text-ink-muted">
-          {shownRows.length} products to order · they cost{" "}
-          <CostValue amount={view.totalCostKes} canViewCosts={canViewCosts} />
+          {shownRows.length} products to order
           {view.excluded.length > 0 && <> · {view.excluded.length} held back</>}
         </p>
         <ExportBar
@@ -964,159 +977,32 @@ export function BuyChecklist({
         </div>
       </div>
 
-      {TIERS.map(({ tier, title, subtitle }) => {
-        const tierRows = shownRows.filter((r) => r.tier === tier);
-        if (tierRows.length === 0) return null;
-        return (
-          <Card key={tier}>
-            <CardHeader title={`${title} · ${tierRows.length}`} subtitle={subtitle} />
-            <div className="mt-2 w-full overflow-x-auto pb-2">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead>
-                  <tr className="border-b border-edge bg-surface-2">
-                    <th scope="col" className="w-10 px-5 py-3" aria-label="Tick to order" />
-                    <th scope="col" className={TH}>Product</th>
-                    <th scope="col" className={cn(TH, "hidden md:table-cell")}>Supplier</th>
-                    {/* Stock on its way, however it was set in motion — an
-                        en-route transfer or the store's own incoming count, not
-                        only a purchase order this shop raised. */}
-                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>En route</th>
-                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>MOQ</th>
-                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>Lead</th>
-                    {/* NOT "Sells/day": this is the rate the order was sized from, which the
-                        class floor can set on a line whose shelf has been empty. The
-                        catalogue's "Sells/day" is what the shelf actually did. One name
-                        each, or the two get read as the same number. */}
-                    <th scope="col" className={cn(TH_NUM, "hidden md:table-cell")}>Buying at/day</th>
-                    {/* What's on the shelf now — the count the run sized the order
-                        against, sitting beside the days it buys. */}
-                    <th scope="col" className={TH_NUM}>Stock</th>
-                    <th scope="col" className={TH_NUM}>Days left</th>
-                    <th scope="col" className={cn(TH, "hidden md:table-cell")}>Order by</th>
-                    <th scope="col" className={TH_NUM}>Qty</th>
-                    <th scope="col" className={cn(TH_NUM, "hidden lg:table-cell")}>Rev · 30d ({currency})</th>
-                    <th scope="col" className={TH_NUM}>Line total</th>
-                    <th scope="col" className="w-10 px-5 py-3" aria-label="Show reasoning" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {tierRows.map((row) => {
-                    const isPicked = picked.has(row.predictionId);
-                    const isOpen = expanded.has(row.predictionId);
-                    // Overdue keys off the run-date-relative days-left (stable across
-                    // SSR/hydration), not a live clock: <= 0 means the order-by day
-                    // is here or past.
-                    const overdue = row.daysLeftToOrder <= 0;
-                    return (
-                      <Fragment key={row.predictionId}>
-                        <tr
-                          className={cn(
-                            "border-b border-edge transition-colors hover:bg-surface-2/60",
-                            isOpen && "border-b-0"
-                          )}
-                        >
-                          <td className="px-5 py-3">
-                            <input
-                              type="checkbox"
-                              checked={isPicked}
-                              onChange={() => {
-                                toggle(row.predictionId);
-                                setNotice(null);
-                              }}
-                              aria-label={`Order ${row.title}`}
-                              className="size-4 accent-accent"
-                            />
-                          </td>
-                          <td className="px-5 py-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Link
-                                href={`/products/${row.productId}`}
-                                className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                              >
-                                {row.title}
-                              </Link>
-                              <AbcBadge value={row.abc} />
-                              <TrustChips row={row} />
-                            </div>
-                            <div className="mt-0.5 font-mono text-xs text-ink-muted">
-                              {row.sku}
-                              {row.plannable !== "ok" && (
-                                <Badge tone="warning" className="ml-2 font-sans">
-                                  Check cost
-                                </Badge>
-                              )}
-                              {row.doubleOrderWarn && (
-                                <Badge tone="warning" className="ml-2 font-sans">
-                                  also on a draft PO
-                                </Badge>
-                              )}
-                            </div>
-                          </td>
-                          <td className={cn(TD, "hidden md:table-cell")}>
-                            {row.supplierName ?? "—"}
-                          </td>
-                          <td className={cn(TD_NUM, "hidden lg:table-cell")}>
-                            {row.onOrderUnits > 0 ? row.onOrderUnits : "—"}
-                          </td>
-                          <td className={cn(TD_NUM, "hidden lg:table-cell")}>{row.moq}</td>
-                          <td className={cn(TD_NUM, "hidden lg:table-cell")}>{row.leadDays}d</td>
-                          <td className={cn(TD_NUM, "hidden md:table-cell")}>{row.runRatePerDay}</td>
-                          <td className={TD_NUM}>{formatNumber(row.onHandUnits)}</td>
-                          <td className={TD_NUM}>
-                            <DaysLeft days={row.daysUntilStockout} onHandUnits={row.onHandUnits} />
-                          </td>
-                          <td className={cn(TD, "hidden md:table-cell")}>
-                            {overdue ? (
-                              <span className="font-medium text-negative">{dayLabel(row.orderByDate)}</span>
-                            ) : (
-                              dayLabel(row.orderByDate)
-                            )}
-                          </td>
-                          <td className={TD_NUM}>
-                            <div className="flex flex-col items-end gap-0.5">
-                              <QtyCell row={row} canOverride={canOverride} />
-                              <MoqNote preview={moqPreview(row)} />
-                              {row.leadFloored && <LeadFlooredNote leadDays={row.leadDays} />}
-                            </div>
-                          </td>
-                          <td className={cn(TD_NUM, "hidden lg:table-cell")}>
-                            {/* Revenue is a sales figure — shown to every role as a plain
-                                amount (unit in the header), like the Stock catalogue. */}
-                            {row.revenue30dKes > 0 ? formatNumber(row.revenue30dKes) : "—"}
-                          </td>
-                          <td className={TD_NUM}>
-                            <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
-                          </td>
-                          <td className="px-5 py-3">
-                            <button
-                              type="button"
-                              onClick={() => setExpanded((e) => toggleSet(e, row.predictionId))}
-                              aria-expanded={isOpen}
-                              aria-label={`Why ${row.recommendedQty} units of ${row.title}`}
-                              className="grid size-7 place-items-center rounded-md text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink"
-                            >
-                              <ChevronDownIcon
-                                className={cn("size-4 transition-transform", isOpen && "rotate-180")}
-                              />
-                            </button>
-                          </td>
-                        </tr>
-                        {isOpen && (
-                          <tr className="border-b border-edge">
-                            <td colSpan={14} className="px-5 pt-0 pb-4">
-                              <WhyPanel row={row} />
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        );
-      })}
+      {/* One flat, sortable table over the whole (already scoped + urgency-
+          filtered) list — the reference app's single Buy List, not three tier
+          cards. Selection, sort and the footer total are shared with the
+          controls above so every count on the screen describes the same set. */}
+      <BuyTable
+        rows={shownRows}
+        canViewCosts={canViewCosts}
+        canOverride={canOverride}
+        picked={picked}
+        onToggle={(id) => {
+          toggle(id);
+          setNotice(null);
+        }}
+        sort={sort}
+        onSortChange={setSort}
+        showOrderBy
+        title="Buy list"
+        totalLabel="Order cost · at supplier cost"
+        footerTotalKes={shownTotalKes}
+      />
+      {shownRows.length === 0 && (
+        <p className="text-sm text-ink-muted">
+          Nothing to order in this view.
+          {urgentOnly && " Turn off Urgent only to see the rest of the list."}
+        </p>
+      )}
 
       {view.excluded.length > 0 && (
         <ExcludedSection
