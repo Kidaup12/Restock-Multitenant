@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 export function Table({
   className,
   dense = false,
+  boxed = false,
   children,
 }: {
   className?: string;
@@ -13,14 +14,30 @@ export function Table({
    *  pushed the row actions off the side of the suppliers table — the room comes
    *  back from the spacing rather than from dropping a column someone needs. */
   dense?: boolean;
+  /**
+   * Scroll the rows inside a bounded box rather than down the page.
+   *
+   * A wide table in a page-height container puts its horizontal scrollbar at the
+   * BOTTOM of every row it has — so on a 700-product buy list you had to reach
+   * the end of the list before you could scroll sideways. Bounding the height
+   * keeps that bar on screen, and pins the header while the rows move under it.
+   *
+   * Opt-in: most tables here are short enough that an inner scroll region would
+   * be worse than the page's own.
+   */
+  boxed?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className="w-full overflow-x-auto">
+    <div className={cn("w-full overflow-x-auto", boxed && "max-h-[70vh] overflow-y-auto")}>
       <table
         className={cn(
           "w-full min-w-[560px] text-sm",
           dense && "[&_td]:px-3 [&_th]:px-3",
+          // Sticky belongs on the cells, not the row: `position: sticky` on a
+          // <tr> is ignored by some engines, and each cell needs the header's
+          // own background or the rows show through it.
+          boxed && "[&_thead_th]:sticky [&_thead_th]:top-0 [&_thead_th]:z-10 [&_thead_th]:bg-surface-2",
           className,
         )}
       >

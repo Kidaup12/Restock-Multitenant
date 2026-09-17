@@ -170,7 +170,7 @@ export function BuyTable({
         </h2>
       </div>
 
-      <Table className="min-w-[720px]" dense>
+      <Table className="min-w-[720px]" dense boxed>
         <TableHeader>
           <TableHead className="w-10">
             <span className="sr-only">Tick to order</span>
