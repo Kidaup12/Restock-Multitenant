@@ -1,6 +1,7 @@
 import type { Role } from "@wezesha/db";
 import { activeMembership, listMemberships, requireSession } from "@/lib/auth";
 import { isPlatformAdmin } from "@/lib/admin/gate";
+import { getTenantFeatureOverrides } from "@/lib/capabilities";
 import { planAllows } from "@/lib/capabilities/plan-features";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getUnreadCount } from "@/lib/notifications/data";
@@ -33,7 +34,7 @@ export default async function ShellLayout({
   // Match the badge to the feed the caller can actually open: cost alerts are
   // filtered out of a money-blind member's list, so counting them here would
   // leave a badge that never clears.
-  const [unreadNotifications, connectionStatus] = membership
+  const [unreadNotifications, connectionStatus, featureOverrides] = membership
     ? await Promise.all([
         getUnreadCount(membership.tenantId, {
           canViewCosts: hasPermission(membership, "view_costs"),
@@ -41,8 +42,11 @@ export default async function ShellLayout({
         // Rides above every screen, so a shop whose sync has stopped finds out
         // on the page it is already looking at rather than only in Settings.
         getConnectionStatus(membership.tenantId),
+        // The Insights nav link honours an operator grant/deny, not just the
+        // tier — so a granted workspace sees the link it can actually open.
+        getTenantFeatureOverrides(membership.tenantId),
       ])
-    : [0, null];
+    : [0, null, {}];
 
   return (
     <AppShell
@@ -60,7 +64,7 @@ export default async function ShellLayout({
               // Already loaded — activeMembership includes the tenant — so this
               // costs nothing and every money figure below can read it.
               currency: membership.tenant.currency,
-              canOpenInsights: planAllows(membership.tenant.plan, "insights"),
+              canOpenInsights: planAllows(membership.tenant.plan, "insights", featureOverrides),
             }
           : null
       }

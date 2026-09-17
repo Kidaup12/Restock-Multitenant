@@ -30,7 +30,14 @@ vi.mock("@/lib/admin/audit", () => ({
   },
 }));
 
-import { inviteWorkspaceOwner, provisionWorkspaceAction, setTenantPlan } from "../app/admin/actions";
+import {
+  inviteWorkspaceOwner,
+  provisionWorkspaceAction,
+  setTenantBilling,
+  setTenantFeatureFlag,
+  setTenantFeatureOverride,
+  setTenantPlan,
+} from "../app/admin/actions";
 import { STEP_UP_REQUIRED } from "../lib/admin/step-up-contract";
 
 function form(entries: Record<string, string>): FormData {
@@ -49,6 +56,32 @@ describe("console mutations without a step-up grant", () => {
   it("refuses to provision a workspace", async () => {
     const result = await provisionWorkspaceAction(
       form({ name: "Should Not Exist", ownerEmail: "nobody@example.test" })
+    );
+    expect(result).toEqual({ ok: false, error: STEP_UP_REQUIRED });
+    expect(writes.audit).toBe(0);
+  });
+
+  it("refuses to grant or deny a plan feature, before it looks at the tenant", async () => {
+    // The operator console's finer knob over the tier — it must fail closed
+    // for the same reason the tier change does: it moves what a customer reaches.
+    const result = await setTenantFeatureOverride(
+      form({ tenantId: "any", feature: "transfers", value: "grant" })
+    );
+    expect(result).toEqual({ ok: false, error: STEP_UP_REQUIRED });
+    expect(writes.audit).toBe(0);
+  });
+
+  it("refuses to flip a tenant feature switch", async () => {
+    const result = await setTenantFeatureFlag(
+      form({ tenantId: "any", feature: "transfers", enabled: "false" })
+    );
+    expect(result).toEqual({ ok: false, error: STEP_UP_REQUIRED });
+    expect(writes.audit).toBe(0);
+  });
+
+  it("refuses to change a workspace's billing", async () => {
+    const result = await setTenantBilling(
+      form({ tenantId: "any", status: "past_due", periodMode: "extend" })
     );
     expect(result).toEqual({ ok: false, error: STEP_UP_REQUIRED });
     expect(writes.audit).toBe(0);

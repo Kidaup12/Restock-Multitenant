@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   PLAN_FEATURES,
   PLAN_TIER_LABEL,
+  parseFeatureOverrides,
   planAllows,
   planFeatureTier,
 } from "../lib/capabilities/plan-features";
@@ -59,6 +60,73 @@ describe("planAllows", () => {
     expect(planAllows("essential", "core_ordering")).toBe(true);
     expect(planAllows("Essential", "transfers")).toBe(false);
     expect(planAllows("Growth", "transfers")).toBe(true);
+  });
+});
+
+describe("planAllows with per-tenant overrides (operator console)", () => {
+  it("a deny wins over the tier — a Scale feature is off for a granted-nothing deny", () => {
+    // team_depth is a Scale feature; scale would normally include it.
+    expect(planAllows("scale", "team_depth")).toBe(true);
+    expect(planAllows("scale", "team_depth", { team_depth: "deny" })).toBe(false);
+  });
+
+  it("a grant wins over the tier — a Growth feature is on for an entry-tier tenant", () => {
+    // transfers is a Growth feature; starter would normally lock it.
+    expect(planAllows("starter", "transfers")).toBe(false);
+    expect(planAllows("starter", "transfers", { transfers: "grant" })).toBe(true);
+    expect(planAllows(null, "transfers", { transfers: "grant" })).toBe(true);
+  });
+
+  it("deny beats grant is not a case — each feature has one override — but deny beats a high tier and grant beats a low one", () => {
+    // The precedence is deny -> grant -> tier, so an unrelated grant never
+    // rescues a denied feature, and a deny on a feature the tier includes still
+    // turns it off.
+    expect(planAllows("scale", "transfers", { transfers: "deny" })).toBe(false);
+    expect(planAllows("starter", "team_depth", { team_depth: "grant" })).toBe(true);
+  });
+
+  it("falls back to the tier when no override applies to the feature", () => {
+    // An override on a different feature leaves this one on the tier's own answer.
+    expect(planAllows("starter", "transfers", { team_depth: "grant" })).toBe(false);
+    expect(planAllows("growth", "transfers", { team_depth: "deny" })).toBe(true);
+    expect(planAllows("starter", "transfers", {})).toBe(false);
+  });
+
+  it("is backward compatible: omitting overrides is exactly the tier check", () => {
+    expect(planAllows("growth", "transfers")).toBe(planAllows("growth", "transfers", {}));
+    expect(planAllows("starter", "transfers")).toBe(planAllows("starter", "transfers", undefined));
+  });
+});
+
+describe("parseFeatureOverrides robustness", () => {
+  it("keeps only real feature keys mapped to real overrides", () => {
+    expect(parseFeatureOverrides({ transfers: "grant", team_depth: "deny" })).toEqual({
+      transfers: "grant",
+      team_depth: "deny",
+    });
+  });
+
+  it("drops unknown feature keys", () => {
+    expect(parseFeatureOverrides({ transfers: "grant", not_a_feature: "grant" })).toEqual({
+      transfers: "grant",
+    });
+  });
+
+  it("drops values that are not grant/deny", () => {
+    expect(
+      parseFeatureOverrides({ transfers: "on", team_depth: true, insights: null, budget_planner: "deny" })
+    ).toEqual({ budget_planner: "deny" });
+  });
+
+  it("treats null, arrays and non-objects as no overrides", () => {
+    for (const bad of [null, undefined, "grant", 42, ["transfers"], [], true]) {
+      expect(parseFeatureOverrides(bad)).toEqual({});
+    }
+  });
+
+  it("round-trips through planAllows: a parsed deny still turns a feature off", () => {
+    const overrides = parseFeatureOverrides({ transfers: "deny", junk: "grant" });
+    expect(planAllows("scale", "transfers", overrides)).toBe(false);
   });
 });
 

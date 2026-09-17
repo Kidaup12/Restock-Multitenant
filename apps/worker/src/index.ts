@@ -17,6 +17,13 @@ import {
   type OpsCronQueue,
 } from "./limits-cron";
 import {
+  BILLING_CRON_QUEUE,
+  createBillingCronQueue,
+  createBillingCronWorker,
+  registerBillingCronSchedules,
+  type BillingCronQueue,
+} from "./billing-cron";
+import {
   POS_CRON_QUEUE,
   createPosCronQueue,
   createPosCronWorker,
@@ -88,6 +95,9 @@ import { createSyncWorker } from "./worker";
  *                           keeps dev/CI quiet
  *   OPS_CRONS             — "1" registers + runs the ops cron schedules
  *                           (daily plan-limit checks); unset keeps dev/CI quiet
+ *   BILLING_CRONS         — "1" registers + runs the billing enforcement cron
+ *                           (daily: soften a lapsed workspace to past_due past a
+ *                           grace window — soft, no lockout); unset keeps dev/CI quiet
  *   POS_CRONS             — "1" registers + runs the POS cron schedules
  *                           (daily sales-gap checks); unset keeps dev/CI quiet
  *   FORECAST_CRON         — "1" registers + runs the forecast crons (nightly
@@ -168,6 +178,19 @@ async function main(): Promise<void> {
       captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: OPS_CRON_QUEUE });
     });
     console.log("worker: ops crons registered (limits check)");
+  }
+
+  let billingQueue: BillingCronQueue | null = null;
+  let billingWorker: Worker | null = null;
+  if (process.env.BILLING_CRONS === "1") {
+    billingQueue = createBillingCronQueue(connection);
+    await registerBillingCronSchedules(billingQueue);
+    billingWorker = createBillingCronWorker({ connection, queue: billingQueue });
+    billingWorker.on("failed", (job, err) => {
+      console.error(`worker: billing cron ${job?.id} failed`, err);
+      captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: BILLING_CRON_QUEUE });
+    });
+    console.log("worker: billing crons registered (period enforcement)");
   }
 
   let posQueue: PosCronQueue | null = null;
@@ -284,6 +307,8 @@ async function main(): Promise<void> {
       cronQueue?.close(),
       opsWorker?.close(),
       opsQueue?.close(),
+      billingWorker?.close(),
+      billingQueue?.close(),
       posWorker?.close(),
       posQueue?.close(),
       forecastWorker?.close(),
