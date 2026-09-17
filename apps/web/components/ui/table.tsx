@@ -44,13 +44,19 @@ export function TableBody({ children }: { children: React.ReactNode }) {
 
 export function TableRow({
   className,
+  onClick,
   children,
 }: {
   className?: string;
+  /** Makes the whole row a click target (e.g. tick-to-select). Interactive
+   *  children — checkboxes, links, buttons — should `stopPropagation` so they
+   *  keep their own behaviour. Omitted, the row is not clickable. */
+  onClick?: React.MouseEventHandler<HTMLTableRowElement>;
   children: React.ReactNode;
 }) {
   return (
     <tr
+      onClick={onClick}
       className={cn(
         "border-b border-edge transition-colors last:border-0 hover:bg-surface-2/60",
         className,

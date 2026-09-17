@@ -31,6 +31,7 @@ import {
   clampCoverDays,
 } from "./cover";
 import { Stepper } from "@/components/ui/stepper";
+import { CostFixer } from "./cost-fixer";
 import { LeadFlooredNote } from "./lead-floored-note";
 import type { ScopeSelection } from "./scope-bar";
 import { useOrderPicker } from "./use-order-picker";
@@ -85,11 +86,16 @@ const dayLabel = (date: Date) =>
 
 export function BudgetPlanner({
   canViewCosts,
+  canOverride = false,
   criticalsCashKes,
   orderTodayCashKes,
   scope,
 }: {
   canViewCosts: boolean;
+  /** Whether this reader may order — gates the inline "fix these costs" control
+   *  in the check-costs card, alongside canViewCosts. Defaults false so a caller
+   *  that omits it (older render, tests) never shows an editable field. */
+  canOverride?: boolean;
   /** Cash to clear the critical lines, over the SCOPED set — plan-view computes
    *  this from the rows the current filter leaves, so it prices the criticals the
    *  budget will actually plan over. Null when the viewer cannot see costs, or
@@ -429,7 +435,11 @@ export function BudgetPlanner({
             <Card>
               <CardHeader
                 title={`Check these costs · ${split.checkCost.length}`}
-                subtitle="Missing or broken cost data — the allocator can't budget them until the numbers are fixed."
+                subtitle={
+                  canViewCosts && canOverride
+                    ? "Missing or broken cost data — fix the numbers here and they rejoin the plan on the next re-plan."
+                    : "Missing or broken cost data — the allocator can't budget them until the numbers are fixed."
+                }
               />
               <CardContent className="pt-3">
                 <ul className="space-y-2 text-sm">
@@ -443,6 +453,11 @@ export function BudgetPlanner({
                       </Link>
                       <span className="font-mono text-xs text-ink-muted">{row.sku}</span>
                       <Badge tone="warning">{PLANNABLE_LABELS[row.plannable] ?? row.plannable}</Badge>
+                      {canViewCosts && canOverride && (
+                        <span className="ml-auto">
+                          <CostFixer productId={row.productId} plannable={row.plannable} />
+                        </span>
+                      )}
                     </li>
                   ))}
                 </ul>

@@ -20,6 +20,10 @@ import {
   type QtyExplanation,
 } from "@wezesha/forecast";
 
+// Re-exported so client modules (the plan's inline cost fixer) can type a
+// held-back row's reason without importing the server-only forecast package.
+export type { PlannableReason };
+
 /**
  * Plan-screen queries: the buy list built from the latest forecast run, the
  * budget split over it, and the add-to-order write. Server-only: every function

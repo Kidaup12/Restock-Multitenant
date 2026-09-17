@@ -2,6 +2,8 @@
 
 import { Fragment, useMemo, useState } from "react";
 import { ChevronDownIcon } from "@/components/icons";
+import { InfoDot } from "@/components/ui/term";
+import { abcTone } from "@/components/ui/abc-badge";
 import { cn } from "@/lib/cn";
 import type { BuyListRow } from "@/lib/data/plan";
 // The "no value" sentinel is shared with the catalogue facets so scoping to a
@@ -248,6 +250,49 @@ const DIMENSIONS: { key: ScopeDimension; label: string }[] = [
   { key: "leadBand", label: "Lead time" },
 ];
 
+/**
+ * How a chip is tinted when it is NOT selected — a wash of its own colour so the
+ * dimension reads at a glance, matching the tinted `Badge`/`AbcBadge` chips the
+ * rest of the plan uses. The selected state stays the shared accent-soft "on"
+ * look for every dimension, so "which are chosen" is never ambiguous.
+ */
+type ChipTint = { off: string };
+
+/** ABC uses the same tone the AbcBadge does: A is what the shop leans on
+ *  (loudest), B the mid warning, C the quiet tail. */
+const ABC_TINT: Record<"critical" | "warning" | "neutral", string> = {
+  critical: "border-critical/20 bg-critical/10 text-critical hover:bg-critical/15",
+  warning: "border-warning/20 bg-warning/10 text-warning hover:bg-warning/15",
+  neutral: "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink",
+};
+
+/** A small fixed palette for category chips — each value lands on a stable tint
+ *  (same value, same colour every render and everywhere it appears), with the
+ *  neutral accent-soft wash as the fallback when the hash lands there. */
+const CATEGORY_TINTS: string[] = [
+  "border-accent-200 bg-accent-soft text-accent-ink hover:bg-accent-soft/70",
+  "border-positive/20 bg-positive/10 text-positive hover:bg-positive/15",
+  "border-warning/20 bg-warning/10 text-warning hover:bg-warning/15",
+  "border-critical/20 bg-critical/10 text-critical hover:bg-critical/15",
+];
+
+/** Stable string hash → a category's tint index. Deterministic, so a category
+ *  keeps its colour across renders and screens. */
+function categoryTint(value: string): string {
+  let h = 0;
+  for (let i = 0; i < value.length; i += 1) h = (h * 31 + value.charCodeAt(i)) >>> 0;
+  return CATEGORY_TINTS[h % CATEGORY_TINTS.length]!;
+}
+
+/** The tint for one chip in a dimension. ABC keys off the class, category off a
+ *  stable hash; every other dimension keeps the plain neutral chip. */
+function tintFor(key: ScopeDimension, value: string): ChipTint | undefined {
+  if (value === NONE_VALUE) return undefined; // the gap chips stay neutral
+  if (key === "abc") return { off: ABC_TINT[abcTone(value)] };
+  if (key === "category") return { off: categoryTint(value) };
+  return undefined;
+}
+
 export function ScopeBar({
   rows,
   selection,
@@ -324,6 +369,7 @@ export function ScopeBar({
               ? `· ${activeCount} on`
               : `(${activeDims.map((d) => d.label).join(" · ")})`}
           </span>
+          <InfoDot hint="Narrow the buy list by class, category, supplier and lead time. Filtering is AND across dimensions and OR within one — a row shows when it matches every dimension you've picked a value in." />
           <ChevronDownIcon className={cn("size-3.5 transition-transform", open && "rotate-180")} />
         </button>
 
@@ -433,6 +479,7 @@ export function ScopeBar({
                 label={key === "abc" && opt.value !== NONE_VALUE ? `Class ${opt.label}` : opt.label}
                 count={opt.count}
                 on={chosen.includes(opt.value)}
+                tint={tintFor(key, opt.value)}
                 onClick={() => toggle(key, opt.value)}
               />
             ))}
@@ -476,16 +523,20 @@ export function ScopeBar({
 }
 
 /** One filter value. Carries its count so a reader can see what narrowing costs
- *  before they click it. */
+ *  before they click it. A `tint` gives the unselected chip a wash of its own
+ *  colour (ABC class, category); selected always reads as the shared accent-soft
+ *  "on" so "which are chosen" stays unambiguous. */
 function ScopeChip({
   label,
   count,
   on,
+  tint,
   onClick,
 }: {
   label: string;
   count: number;
   on: boolean;
+  tint?: ChipTint;
   onClick: () => void;
 }) {
   return (
@@ -497,7 +548,7 @@ function ScopeChip({
         "rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
         on
           ? "border-accent-200 bg-accent-soft text-accent-ink"
-          : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink"
+          : (tint?.off ?? "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink")
       )}
     >
       {label}
