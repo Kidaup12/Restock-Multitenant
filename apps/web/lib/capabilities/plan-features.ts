@@ -113,10 +113,63 @@ export function planFeatureTier(feature: PlanFeature): PlanTier {
   return PLAN_FEATURES[feature];
 }
 
-/** Does this plan include the feature? (≥ the feature's minimum tier.) */
+/**
+ * A per-tenant override of the tier's own answer for one feature.
+ *
+ *   "grant" — on regardless of tier (a paid add-on, a pilot, a make-good).
+ *   "deny"  — off regardless of tier (a feature pulled for one workspace).
+ *
+ * An absent key inherits the tier. Set from the operator console; stored on
+ * Tenant.featureOverrides and layered in by planAllows below.
+ */
+export type FeatureOverride = "grant" | "deny";
+export type FeatureOverrides = Partial<Record<PlanFeature, FeatureOverride>>;
+
+const OVERRIDE_VALUES = ["grant", "deny"] as const;
+
+function isPlanFeature(key: string): key is PlanFeature {
+  return Object.prototype.hasOwnProperty.call(PLAN_FEATURES, key);
+}
+
+function isFeatureOverride(value: unknown): value is FeatureOverride {
+  return typeof value === "string" && (OVERRIDE_VALUES as readonly string[]).includes(value);
+}
+
+/**
+ * Parse a stored featureOverrides blob into a clean map, defensively.
+ *
+ * Mirrors featureEnabled's robustness: the JSON column can hold anything a bad
+ * write or an old shape left there, so an unknown feature key or a value that is
+ * not "grant"/"deny" is dropped rather than trusted. The result only ever
+ * contains real PlanFeature keys mapped to real overrides, so planAllows can
+ * read it without re-checking.
+ */
+export function parseFeatureOverrides(json: unknown): FeatureOverrides {
+  const out: FeatureOverrides = {};
+  if (json && typeof json === "object" && !Array.isArray(json)) {
+    for (const [key, value] of Object.entries(json as Record<string, unknown>)) {
+      if (isPlanFeature(key) && isFeatureOverride(value)) out[key] = value;
+    }
+  }
+  return out;
+}
+
+/**
+ * Does this plan include the feature?
+ *
+ * Precedence: a per-tenant override wins over the tier — "deny" is off and
+ * "grant" is on regardless of rank — and only when no override applies does the
+ * ≥-tier rule decide. Backward compatible: with `overrides` omitted this is
+ * exactly the tier check it always was, so every existing call site is
+ * unaffected.
+ */
 export function planAllows(
   plan: string | null | undefined,
   feature: PlanFeature,
+  overrides?: FeatureOverrides,
 ): boolean {
+  const override = overrides?.[feature];
+  if (override === "deny") return false;
+  if (override === "grant") return true;
   return rank(plan) >= rank(PLAN_FEATURES[feature]);
 }

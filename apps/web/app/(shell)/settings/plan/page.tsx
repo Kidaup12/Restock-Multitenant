@@ -3,7 +3,7 @@ import { activeMembership, requireSession } from "@/lib/auth";
 import { Card, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { CheckIcon } from "@/components/icons";
-import { getTenantPlan } from "@/lib/capabilities";
+import { getTenantFeatureOverrides, getTenantPlan } from "@/lib/capabilities";
 import {
   PLAN_FEATURES,
   PLAN_FEATURE_LABEL,
@@ -34,7 +34,14 @@ const FEATURES_BY_TIER = (tier: PlanTier): PlanFeature[] =>
 export default async function PlanPage() {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
-  const plan = membership ? await getTenantPlan(membership.tenantId) : null;
+  // The plan matrix reflects what this workspace can actually reach, so an
+  // operator grant/deny shows through the ticks — not just the raw tier.
+  const [plan, overrides] = membership
+    ? await Promise.all([
+        getTenantPlan(membership.tenantId),
+        getTenantFeatureOverrides(membership.tenantId),
+      ])
+    : [null, {}];
   const currentLabel = PLAN_TIER_LABEL[
     (PLAN_ORDER.find((t) => t === plan) ?? "starter") as PlanTier
   ];
@@ -48,7 +55,7 @@ export default async function PlanPage() {
       />
 
       {PLAN_ORDER.map((tier) => {
-        const included = planAllows(plan, FEATURES_BY_TIER(tier)[0] ?? "core_ordering");
+        const included = planAllows(plan, FEATURES_BY_TIER(tier)[0] ?? "core_ordering", overrides);
         return (
           <Card key={tier}>
             <CardHeader
@@ -61,7 +68,7 @@ export default async function PlanPage() {
             />
             <ul className="px-5 pb-5">
               {FEATURES_BY_TIER(tier).map((feature) => {
-                const has = planAllows(plan, feature);
+                const has = planAllows(plan, feature, overrides);
                 return (
                   <li key={feature} className="flex items-center gap-2 py-1 text-sm">
                     <span

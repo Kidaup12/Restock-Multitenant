@@ -3,9 +3,11 @@ import { hasPermission, type PermissionKey, type PermissionSource } from "@/lib/
 import { evaluateLimits } from "@/lib/limits/evaluate";
 import { featureEnabled, type FeatureConfigSource, type FeatureKey } from "./feature-flags";
 import {
+  parseFeatureOverrides,
   planAllows,
   planFeatureTier,
   PLAN_TIER_LABEL,
+  type FeatureOverrides,
   type PlanFeature,
 } from "./plan-features";
 import { setupDepth, type SetupDepth, type SetupLevel } from "./setup-depth";
@@ -132,6 +134,9 @@ export type CapabilityContext = {
   tenantId: string;
   /** Tenant billing plan key (starter/growth/scale; null = starter). */
   plan: string | null;
+  /** Per-tenant feature grants/denies layered over the plan tier (gate 2).
+   *  Empty = pure tier. */
+  overrides: FeatureOverrides;
   membership: CapabilityMembership;
   config: FeatureConfigSource | null;
   setup: SetupDepth;
@@ -157,8 +162,9 @@ export function resolveCapability(
     };
   }
 
-  // 2 · plan — before setup (the plan lock is the thing they'd buy first).
-  if (req.planFeature && !planAllows(ctx.plan, req.planFeature)) {
+  // 2 · plan — before setup (the plan lock is the thing they'd buy first). A
+  // per-tenant grant/deny from the operator console wins over the tier here.
+  if (req.planFeature && !planAllows(ctx.plan, req.planFeature, ctx.overrides)) {
     const tier = PLAN_TIER_LABEL[planFeatureTier(req.planFeature)];
     const value = req.planValue ?? `Unlock ${req.label}`;
     return {
@@ -205,7 +211,10 @@ export async function resolveCapabilityContext(
 ): Promise<CapabilityContext> {
   const db = prismaForTenant(tenantId);
   const [tenant, config, setup, limits] = await Promise.all([
-    db.tenant.findUnique({ where: { id: tenantId }, select: { plan: true } }),
+    db.tenant.findUnique({
+      where: { id: tenantId },
+      select: { plan: true, featureOverrides: true },
+    }),
     db.tenantConfig.findFirst({ select: { featureFlags: true } }),
     setupDepth(tenantId),
     evaluateLimits(tenantId),
@@ -213,6 +222,7 @@ export async function resolveCapabilityContext(
   return {
     tenantId,
     plan: tenant?.plan ?? null,
+    overrides: parseFeatureOverrides(tenant?.featureOverrides),
     membership,
     config: config ?? null,
     setup,
@@ -231,6 +241,21 @@ export async function getTenantPlan(tenantId: string): Promise<string | null> {
     select: { plan: true },
   });
   return tenant?.plan ?? null;
+}
+
+/**
+ * Resolve just this tenant's per-feature grants/denies on the RLS-scoped client
+ * — for the plan-only gates (planAllows) that fetch the plan directly rather
+ * than through the full four-gate context. Empty = pure tier. Parsed
+ * defensively; pass alongside the plan to planAllows so an operator grant is
+ * honoured server-side and a crafted request cannot bypass a deny.
+ */
+export async function getTenantFeatureOverrides(tenantId: string): Promise<FeatureOverrides> {
+  const tenant = await prismaForTenant(tenantId).tenant.findUnique({
+    where: { id: tenantId },
+    select: { featureOverrides: true },
+  });
+  return parseFeatureOverrides(tenant?.featureOverrides);
 }
 
 export * from "./setup-depth";

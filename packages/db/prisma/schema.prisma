@@ -103,6 +103,21 @@ model Tenant {
   // Per-tenant limit overrides: { maxProducts?, maxMembers?, maxOrders30d? }.
   // null = the plan's code defaults; a set key overrides just that limit.
   planLimits    Json?
+  // Per-tenant feature GRANTS/DENIES layered over the plan tier (operator
+  // console, capability gate 2): { <PlanFeature>: "grant" | "deny" }. A "grant"
+  // turns a feature on regardless of tier; a "deny" turns it off regardless.
+  // An absent key inherits the tier's own answer. null = pure tier. Parsed
+  // defensively — see lib/capabilities/plan-features.ts parseFeatureOverrides.
+  featureOverrides Json?
+  // Billing period + status, set from the operator console (there is no
+  // self-serve billing yet). planPeriodEnd is when the current paid period runs
+  // out; planStatus is one of "active" | "trialing" | "past_due" | "canceled".
+  // Both null = no billing record kept for this workspace. The enforcement cron
+  // (apps/worker) reads these and flips planStatus to past_due past a grace
+  // window — soft, no hard lockout. billingNote is a free-text operator memo.
+  planPeriodEnd DateTime?
+  planStatus    String?
+  billingNote   String?
   // Wezesha's own workspace, not a customer's. It exists to anchor audit rows
   // for platform-level actions (granting admin, step-up) that belong to no
   // customer, so AuditEvent.tenantId stays a real reference. Memberless and

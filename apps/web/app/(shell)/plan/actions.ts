@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import {
+  getTenantFeatureOverrides,
   getTenantPlan,
   planAllows,
   planFeatureTier,
@@ -146,8 +147,13 @@ export async function planBudget(input: {
 
   // Gate 2 (plan) re-checked server-side: the budget allocator is a Growth
   // feature, so a crafted call from a Starter tenant can't bypass the UI lock.
-  const plan = await getTenantPlan(membership.tenantId);
-  if (!planAllows(plan, "budget_planner")) {
+  // Overrides ride alongside the plan so an operator grant is honoured and a
+  // deny cannot be bypassed.
+  const [plan, overrides] = await Promise.all([
+    getTenantPlan(membership.tenantId),
+    getTenantFeatureOverrides(membership.tenantId),
+  ]);
+  if (!planAllows(plan, "budget_planner", overrides)) {
     return err(`Budget planner is on the ${PLAN_TIER_LABEL[planFeatureTier("budget_planner")]} plan.`);
   }
 

@@ -10,7 +10,7 @@ import { planFreshnessLabel } from "@/lib/data/forecast-freshness";
 import { getBuyList } from "@/lib/data/plan";
 import { tenantIngestVerdict } from "@wezesha/forecast-run";
 import { getConnectionStatus, type ConnectionStatus } from "@/lib/data/connection-status";
-import { getTenantPlan, planAllows } from "@/lib/capabilities";
+import { getTenantFeatureOverrides, getTenantPlan, planAllows } from "@/lib/capabilities";
 import { RunForecastButton } from "../today/run-forecast-button";
 import { PlanView } from "./plan-view";
 
@@ -58,15 +58,17 @@ async function PlanContent({
   // canViewCosts flows into the query: PlanView is a client component, so the
   // rows serialize to the browser — costs come back null for a money-blind
   // member and the figures never reach the payload.
-  const [buyList, plan] = await Promise.all([
+  const [buyList, plan, overrides] = await Promise.all([
     getBuyList(tenantId, { canViewCosts }),
     getTenantPlan(tenantId),
+    getTenantFeatureOverrides(tenantId),
   ]);
   // The budget allocator is an entry-tier feature now, so this is true for every
   // plan — the locked card is unreachable. The gate stays wired (rather than
   // hard-coded true) so moving budgeting back behind a tier is a one-line change,
-  // and the server action re-checks either way so it can't be spoofed.
-  const canBudget = planAllows(plan, "budget_planner");
+  // and the server action re-checks either way so it can't be spoofed. Overrides
+  // are layered in so an operator deny/grant is honoured here too.
+  const canBudget = planAllows(plan, "budget_planner", overrides);
 
   if (!buyList) {
     // The staleness gate holds a run back only to protect a last-good forecast,

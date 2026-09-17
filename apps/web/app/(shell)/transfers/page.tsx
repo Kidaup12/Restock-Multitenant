@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { SkeletonCard, SkeletonStatTile, SkeletonTableRows } from "@/components/ui/skeleton";
 import {
+  getTenantFeatureOverrides,
   getTenantPlan,
   planAllows,
   planFeatureTier,
@@ -64,8 +65,12 @@ async function TransfersContent({
   from?: string;
   coverDays: number;
 }) {
-  const [plan, locations] = await Promise.all([getTenantPlan(tenantId), getTransferLocations(tenantId)]);
-  if (!planAllows(plan, "transfers")) return <LockedTransfers />;
+  const [plan, overrides, locations] = await Promise.all([
+    getTenantPlan(tenantId),
+    getTenantFeatureOverrides(tenantId),
+    getTransferLocations(tenantId),
+  ]);
+  if (!planAllows(plan, "transfers", overrides)) return <LockedTransfers />;
 
   // One location can't distribute to anything — the whole idea needs a second.
   if (locations.length < 2) {

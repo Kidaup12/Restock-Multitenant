@@ -5,6 +5,7 @@ import { prismaService } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import {
+  getTenantFeatureOverrides,
   getTenantPlan,
   planAllows,
   planFeatureTier,
@@ -52,8 +53,14 @@ async function actorContext(): Promise<{ ok: true; actor: Actor } | { ok: false;
   if (!hasPermission(membership, "approve_orders")) {
     return { ok: false, error: "You don't have permission to move stock between locations." };
   }
-  const plan = await getTenantPlan(membership.tenantId);
-  if (!planAllows(plan, "transfers")) {
+  // Overrides fetched alongside the plan so an operator grant is honoured here —
+  // the server re-check is the enforcement, so it must see the same grant/deny
+  // the console wrote or a granted tenant would be refused its own feature.
+  const [plan, overrides] = await Promise.all([
+    getTenantPlan(membership.tenantId),
+    getTenantFeatureOverrides(membership.tenantId),
+  ]);
+  if (!planAllows(plan, "transfers", overrides)) {
     return {
       ok: false,
       error: `Transfers are on the ${PLAN_TIER_LABEL[planFeatureTier("transfers")]} plan.`,

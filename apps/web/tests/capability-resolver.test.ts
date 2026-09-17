@@ -26,6 +26,8 @@ type Overrides = {
   plan?: string | null;
   setupLevel?: 0 | 1 | 2 | 3;
   flags?: Record<string, boolean>;
+  /** Per-tenant plan-feature grants/denies (gate 2). Empty = pure tier. */
+  featureOverrides?: import("../lib/capabilities/plan-features").FeatureOverrides;
 };
 
 function makeCtx(over: Overrides = {}): CapabilityContext {
@@ -33,6 +35,7 @@ function makeCtx(over: Overrides = {}): CapabilityContext {
   return {
     tenantId: "t1",
     plan: over.plan ?? "scale",
+    overrides: over.featureOverrides ?? {},
     membership: { role: over.role ?? "OWNER", permissions: over.permissions ?? null },
     config: over.flags ? { featureFlags: over.flags } : null,
     setup: {
