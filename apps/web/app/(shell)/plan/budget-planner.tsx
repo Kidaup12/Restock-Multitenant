@@ -3,23 +3,13 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { AbcBadge } from "@/components/ui/abc-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
-import { DaysLeft } from "@/components/ui/days-left";
-import { formatCompact, formatMoney, formatNumber, formatRunRate } from "@/lib/money";
+import { formatCompact, formatMoney } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
 import { Input } from "@/components/ui/input";
 import { StatTile } from "@/components/ui/stat-tile";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { BudgetSplit, BuyListRow } from "@/lib/data/plan";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import { planBudget } from "./actions";
@@ -31,8 +21,9 @@ import {
   clampCoverDays,
 } from "./cover";
 import { Stepper } from "@/components/ui/stepper";
+import { BuyTable } from "./buy-table";
+import { type SortKey } from "./buy-checklist";
 import { CostFixer } from "./cost-fixer";
-import { LeadFlooredNote } from "./lead-floored-note";
 import type { ScopeSelection } from "./scope-bar";
 import { useOrderPicker } from "./use-order-picker";
 import { ActionBar } from "@/components/ui/action-bar";
@@ -132,6 +123,10 @@ export function BudgetPlanner({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  // Sort is owned here (not by BuyTable) so the funded and deferred tables can
+  // share one ordering — the same ownership model as the checklist's own sort.
+  const [sort, setSort] = useState<SortKey>("plan");
+
   // The cover target starts on: "spend this much" is only half a question
   // without "to last how long". Unticking it returns to the plan's own horizon,
   // which is what this screen allocated against before the target existed.
@@ -168,6 +163,16 @@ export function BudgetPlanner({
   function applyOverflow(next: boolean) {
     setAllowOverflow(next);
     if (split) plan(Number(budget) || 0, coverDays, next);
+  }
+
+  // The single soonest-to-stock-out funded row — the same "what happens if I
+  // do nothing else today" question the checklist's decision header answers.
+  let mostUrgent: BuyListRow | null = null;
+  for (const row of split?.funded ?? []) {
+    if (row.daysUntilStockout == null) continue;
+    if (mostUrgent == null || row.daysUntilStockout < (mostUrgent.daysUntilStockout ?? Infinity)) {
+      mostUrgent = row;
+    }
   }
 
   const exportColumns: ExportColumn<BuyListRow & { status: string }>[] = [
@@ -330,23 +335,46 @@ export function BudgetPlanner({
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <StatTile
-              label="Funded now"
+              label="Products to reorder"
               value={String(split.funded.length)}
               delta={{
-                label: canViewCosts
-                  ? `${formatMoney(split.fundedCostKes ?? 0, currency, { compact: true })} of the budget`
-                  : "items bought within budget",
+                label: `${split.deferred.length} deferred`,
                 tone: "neutral",
               }}
             />
             <StatTile
-              label="Deferred"
-              value={String(split.deferred.length)}
+              label="Order cost"
+              value={<CostValue amount={split.fundedCostKes} canViewCosts={canViewCosts} compact />}
+              delta={
+                (split.overBudgetKes ?? 0) > 0
+                  ? {
+                      label: canViewCosts
+                        ? `of ${formatMoney(Number(budget) || 0, currency, { compact: true })} budget · over by ${formatMoney(split.overBudgetKes ?? 0, currency, { compact: true })}`
+                        : "over the budget",
+                      tone: "negative",
+                    }
+                  : {
+                      label: canViewCosts
+                        ? `of ${formatMoney(Number(budget) || 0, currency, { compact: true })} budget · ${formatMoney(split.leftoverKes ?? 0, currency, { compact: true })} to spare`
+                        : "at cost · every line traceable",
+                      tone: "positive",
+                    }
+              }
+            />
+            <StatTile
+              label="Most urgent"
+              value={
+                mostUrgent
+                  ? (mostUrgent.daysUntilStockout ?? 0) < 0
+                    ? "Overdue"
+                    : `${mostUrgent.daysUntilStockout} days`
+                  : "—"
+              }
               delta={{
-                label: canViewCosts
-                  ? `${formatMoney(split.deferredCostKes ?? 0, currency, { compact: true })} to fund fully`
-                  : "items held for later",
-                tone: "neutral",
+                label: mostUrgent
+                  ? `${mostUrgent.title} ${(mostUrgent.daysUntilStockout ?? 0) < 0 ? "is out of stock" : "runs out first"}`
+                  : "nothing urgent",
+                tone: mostUrgent && (mostUrgent.daysUntilStockout ?? 0) < 0 ? "negative" : "neutral",
               }}
             />
             <StatTile
@@ -354,81 +382,70 @@ export function BudgetPlanner({
               value={<CostValue amount={split.deferredAtRiskKes} canViewCosts={canViewCosts} compact />}
               delta={{ label: "next 30 days, if deferrals stock out", tone: "neutral" }}
             />
-            <StatTile
-              label={(split.overBudgetKes ?? 0) > 0 ? "Over budget" : "Left over"}
-              value={
-                <CostValue
-                  amount={(split.overBudgetKes ?? 0) > 0 ? split.overBudgetKes : split.leftoverKes}
-                  canViewCosts={canViewCosts}
-                  compact
-                />
-              }
-              delta={
-                (split.overBudgetKes ?? 0) > 0
-                  ? { label: "criticals don't wait for budget", tone: "negative" }
-                  : { label: "unspent after funding", tone: "positive" }
-              }
-            />
           </div>
 
-          <Card>
-            <CardHeader
-              title={`Buy now · ${split.funded.length}`}
-              subtitle="Funded within the budget, highest earners first."
-            />
-            <div className="mt-2 pb-2">
-              {split.funded.length === 0 ? (
-                <CardContent>
-                  {/* Two different situations, and only one of them is about the
-                      budget. Telling an owner to raise an untouched KES 800K
-                      because nothing was waiting to be ordered points them away
-                      from the real cause — a buy list held back for missing
-                      costs, products too new, or stock already on order. */}
-                  {split.incomingCount === 0 ? (
-                    <p className="text-sm text-ink-muted">
-                      Nothing is waiting to be ordered, so there is nothing for this budget to
-                      fund.
-                      {split.heldBackCount > 0 && (
-                        <>
-                          {" "}
-                          {split.heldBackCount}{" "}
-                          {split.heldBackCount === 1 ? "product is" : "products are"} held back —
-                          open the buy list to see why.
-                        </>
-                      )}
-                    </p>
-                  ) : (
-                    <p className="text-sm text-ink-muted">
-                      The budget doesn&apos;t reach anything — raise it or clear a critical first.
-                    </p>
-                  )}
-                </CardContent>
-              ) : (
-                <BudgetTable
-                  rows={split.funded}
-                  canViewCosts={canViewCosts}
-                  picked={picker.picked}
-                  onToggle={picker.toggle}
-                />
-              )}
-            </div>
-          </Card>
-
-          {split.deferred.length > 0 && (
+          {split.funded.length === 0 ? (
             <Card>
               <CardHeader
-                title={`Deferred · ${split.deferred.length}`}
-                subtitle="What waiting costs: sales the forecast expects each item to miss while it sits stocked out over the next 30 days."
+                title={`Buy now · ${split.funded.length}`}
+                subtitle="Funded within the budget, highest earners first."
               />
-              <div className="mt-2 pb-2">
-                <BudgetTable
-                  rows={split.deferred}
-                  canViewCosts={canViewCosts}
-                  picked={picker.picked}
-                  onToggle={picker.toggle}
-                />
-              </div>
+              <CardContent>
+                {/* Two different situations, and only one of them is about the
+                    budget. Telling an owner to raise an untouched KES 800K
+                    because nothing was waiting to be ordered points them away
+                    from the real cause — a buy list held back for missing
+                    costs, products too new, or stock already on order. */}
+                {split.incomingCount === 0 ? (
+                  <p className="text-sm text-ink-muted">
+                    Nothing is waiting to be ordered, so there is nothing for this budget to
+                    fund.
+                    {split.heldBackCount > 0 && (
+                      <>
+                        {" "}
+                        {split.heldBackCount}{" "}
+                        {split.heldBackCount === 1 ? "product is" : "products are"} held back —
+                        open the buy list to see why.
+                      </>
+                    )}
+                  </p>
+                ) : (
+                  <p className="text-sm text-ink-muted">
+                    The budget doesn&apos;t reach anything — raise it or clear a critical first.
+                  </p>
+                )}
+              </CardContent>
             </Card>
+          ) : (
+            <BuyTable
+              rows={split.funded}
+              canViewCosts={canViewCosts}
+              canOverride={canOverride}
+              picked={picker.picked}
+              onToggle={picker.toggle}
+              sort={sort}
+              onSortChange={setSort}
+              title={`Buy now · ${split.funded.length}`}
+              totalLabel="Order cost · at supplier cost"
+              footerTotalKes={split.fundedCostKes}
+            />
+          )}
+
+          {/* Always open, never a collapsible disclosure — a deferred line is
+              part of the decision, not an aside to dig for. */}
+          {split.deferred.length > 0 && (
+            <BuyTable
+              rows={split.deferred}
+              canViewCosts={canViewCosts}
+              canOverride={canOverride}
+              picked={picker.picked}
+              onToggle={picker.toggle}
+              sort={sort}
+              onSortChange={setSort}
+              title={`Didn't fit the budget · ${split.deferred.length}`}
+              totalLabel="Deferred cost · at supplier cost"
+              footerTotalKes={split.deferredCostKes}
+            />
           )}
 
           {split.checkCost.length > 0 && (
@@ -500,102 +517,5 @@ export function BudgetPlanner({
         </>
       )}
     </div>
-  );
-}
-
-export function BudgetTable({
-  rows,
-  canViewCosts,
-  picked,
-  onToggle,
-}: {
-  rows: BuyListRow[];
-  canViewCosts: boolean;
-  /** Ticked rows, when this table is orderable. */
-  picked?: Set<string>;
-  /** Supplied only where a selection is offered. Its absence is what keeps the
-   *  column out — a table nobody can order from must not grow a dead checkbox,
-   *  and the column-stability guard renders this component without it. */
-  onToggle?: (predictionId: string) => void;
-}) {
-  const currency = useCurrency();
-  const selectable = onToggle != null;
-  return (
-    <Table>
-      <TableHeader>
-        {selectable && (
-          <TableHead>
-            <span className="sr-only">Order</span>
-          </TableHead>
-        )}
-        <TableHead>Product</TableHead>
-        {/* NOT the catalogue's "Sells/day": this is the rate the order was sized
-            from (forecast / 30, ABC-floored), not what the shelf actually did.
-            One name per rate; see tests/one-name-per-rate.test.ts. */}
-        <TableHead numeric>Buying at/day</TableHead>
-        <TableHead numeric className="hidden lg:table-cell">30d rev ({currency})</TableHead>
-        <TableHead numeric>Days left</TableHead>
-        <TableHead numeric>Stock</TableHead>
-        <TableHead numeric className="hidden md:table-cell">En route</TableHead>
-        <TableHead numeric>Order</TableHead>
-        <TableHead numeric className="hidden md:table-cell">Unit {currency}</TableHead>
-        <TableHead numeric>Line total</TableHead>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <TableRow key={row.predictionId}>
-            {selectable && (
-              <TableCell>
-                <input
-                  type="checkbox"
-                  checked={picked?.has(row.predictionId) ?? false}
-                  onChange={() => onToggle?.(row.predictionId)}
-                  aria-label={`Order ${row.title}`}
-                  className="size-4 accent-accent"
-                />
-              </TableCell>
-            )}
-            <TableCell>
-              <div className="flex items-center gap-2">
-                <Link
-                  href={`/products/${row.productId}`}
-                  className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                >
-                  {row.title}
-                </Link>
-                <AbcBadge value={row.abc} />
-              </div>
-              <div className="mt-0.5 font-mono text-xs text-ink-muted">
-                {row.sku}
-                {row.supplierName ? ` · ${row.supplierName}` : ""}
-              </div>
-            </TableCell>
-            <TableCell numeric>{formatRunRate(row.runRatePerDay)}</TableCell>
-            <TableCell numeric className="hidden lg:table-cell">
-              {/* Revenue is a sales figure — visible to every role as a plain
-                  amount whose unit lives in the header. */}
-              {row.revenue30dKes > 0 ? formatNumber(row.revenue30dKes) : "—"}
-            </TableCell>
-            <TableCell numeric>
-              <DaysLeft days={row.daysUntilStockout} onHandUnits={row.onHandUnits} />
-            </TableCell>
-            <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
-            <TableCell numeric className="hidden md:table-cell">
-              {row.onOrderUnits > 0 ? formatNumber(row.onOrderUnits) : "—"}
-            </TableCell>
-            <TableCell numeric>
-              {row.recommendedQty}
-              {row.leadFloored && <LeadFlooredNote leadDays={row.leadDays} />}
-            </TableCell>
-            <TableCell numeric className="hidden md:table-cell">
-              <CostValue amount={row.unitCostKes} canViewCosts={canViewCosts} />
-            </TableCell>
-            <TableCell numeric>
-              <CostValue amount={row.lineTotalKes} canViewCosts={canViewCosts} />
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
   );
 }

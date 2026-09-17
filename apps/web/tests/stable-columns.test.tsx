@@ -28,7 +28,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { CatalogueView, RowGroup } = await import("../app/(shell)/products/catalogue-view");
-const { BudgetTable } = await import("../app/(shell)/plan/budget-planner");
+const { BuyTable } = await import("../app/(shell)/plan/buy-table");
 
 const headerCells = (html: string) => html.match(/<th\b/g) ?? [];
 
@@ -231,23 +231,33 @@ const buyRow = (over: Partial<BuyListRow> = {}): BuyListRow => ({
 const renderBudget = (rows: BuyListRow[]) =>
   renderToStaticMarkup(
     <CurrencyProvider currency="KES">
-      <BudgetTable rows={rows} canViewCosts />
+      <BuyTable
+        rows={rows}
+        canViewCosts
+        canOverride={false}
+        picked={new Set()}
+        onToggle={() => {}}
+        sort="plan"
+        onSortChange={() => {}}
+        footerTotalKes={rows.reduce((s, r) => s + (r.lineTotalKes ?? 0), 0)}
+      />
     </CurrencyProvider>
   );
 
 describe("budget planner columns do not come and go with the data", () => {
-  // The reshaped budget table (matching the shop's screenshot) shows 30d revenue
-  // rather than at-risk cash. The invariant is unchanged: the column is a fixed
-  // part of the table, present whether or not the row has a figure to put in it.
+  // Budget mode renders the SAME BuyTable list mode does, so this is really
+  // "the shared table's revenue column doesn't come and go" — its header reads
+  // "Rev 30d (KES)". The invariant is unchanged: the column is a fixed part of
+  // the table, present whether or not the row has a figure to put in it.
   it("keeps the revenue column on a list with no revenue", () => {
     const html = renderBudget([buyRow({ revenue30dKes: 0 })]);
-    expect(html).toContain("30d rev (KES)");
+    expect(html).toContain("Rev 30d (KES)");
     expect(html).toContain("—");
   });
 
   it("still carries the figure when there IS revenue", () => {
     const html = renderBudget([buyRow({ revenue30dKes: 9100 })]);
-    expect(html).toContain("30d rev (KES)");
+    expect(html).toContain("Rev 30d (KES)");
     expect(html).toContain("9,100");
   });
 
