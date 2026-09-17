@@ -110,7 +110,10 @@ function splitParam(raw: string | null): string[] {
  * abc/category/supplier are free-form (category and supplier names, or the
  * NONE_VALUE sentinel) so they pass through as given.
  */
-export function parseScopeFromParams(params: ParamReader): ScopeSelection {
+export function parseScopeFromParams(params: ParamReader | null | undefined): ScopeSelection {
+  // `useSearchParams()` is null during server prerender, so a caller can hand us
+  // one; a null reader is simply no params, the same as every dimension empty.
+  if (!params) return EMPTY_SCOPE;
   const leadBand = splitParam(params.get(SCOPE_PARAMS.leadBand)).filter((v): v is LeadBand =>
     (LEAD_BANDS as readonly string[]).includes(v)
   );

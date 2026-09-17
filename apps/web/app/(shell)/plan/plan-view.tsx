@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { cn } from "@/lib/cn";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BanknoteIcon, ClipboardIcon } from "@/components/icons";
@@ -134,7 +134,14 @@ export function PlanView({
   // the cards, and a mode could be neither linked nor reloaded into.
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
+  // `useSearchParams()` is null while the route renders on the server — and this
+  // component reads it unconditionally (mode, scope, urgent) on every render, so
+  // a null would take the whole page down before it hydrates. Coalesce once here
+  // and every reader below is safe; an empty set reads exactly like no params.
+  // Memoised on the raw hook value so the fallback object is stable across
+  // renders and doesn't churn the useCallback that depends on it.
+  const rawSearchParams = useSearchParams();
+  const searchParams = useMemo(() => rawSearchParams ?? new URLSearchParams(), [rawSearchParams]);
   const requested = searchParams.get("mode") as Mode | null;
   const mode: Mode =
     requested && MODES.includes(requested) && !(requested === "budget" && !canBudget)
