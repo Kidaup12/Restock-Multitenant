@@ -91,12 +91,15 @@ async function sendOwnerReport(
 ): Promise<boolean> {
   const recipients = await alertRecipients(tenantId, kind);
   if (!recipients) return false;
+  const excluded = new Set((process.env.REPORT_EXCLUDE_EMAILS ?? "").split(",").map(email => email.trim().toLowerCase()).filter(Boolean));
+  const emails = recipients.emails.filter(email => !excluded.has(email.toLowerCase()));
+  if (emails.length === 0) return false;
   const report = await buildOwnerReport(tenantId, granularity);
   if (!report) return false;
   // One copy each, in series: the same body, addressed to whoever still wants
   // it. Built once — the report is the workspace's, not the reader's.
   const { subject, text, html } = renderReportEmail(report);
-  for (const to of recipients.emails) {
+  for (const to of emails) {
     await send({ to, subject, text, html, tenantId, kind });
   }
   return true;

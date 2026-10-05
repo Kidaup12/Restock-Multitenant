@@ -13,17 +13,21 @@ export function ReportTabNav({
   tab,
   range,
   abc,
+  from,
+  to,
 }: {
   tab: ReportTab;
   range?: string;
   abc?: string;
+  from?: string;
+  to?: string;
 }) {
   return (
     <SegmentedNav
       label="Report views"
       data-tour="insights-tabs"
       items={REPORT_TABS.map((t) => ({
-        href: reportTabHref(t, { range, class: abc }),
+        href: reportTabHref(t, { range, class: abc, from, to }),
         label: reportTabLabel(t),
         active: t === tab,
       }))}

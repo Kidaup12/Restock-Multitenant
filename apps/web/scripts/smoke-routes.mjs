@@ -18,6 +18,7 @@ export const ROUTES = [
   ["/plan", "Buy List"],
   ["/products", "Every product you sell"],
   ["/inventory", "Where your stock sits, branch by branch"],
+  ["/inventory/position", "Inventory position"],
   ["/spot-check", "shelf-vs-app drift is caught before it costs you"],
   ["/insights", "Reports"],
   ["/orders", "every purchase order from draft to delivered"],

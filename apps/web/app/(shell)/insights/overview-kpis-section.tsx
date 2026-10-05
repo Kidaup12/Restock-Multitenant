@@ -1,4 +1,5 @@
 import { CostValue } from "@/components/ui/cost-value";
+import type { ReportRange } from "@/lib/data/report-range";
 import { StatTile } from "@/components/ui/stat-tile";
 import { formatMoney, formatNumber } from "@/lib/money";
 import {
@@ -26,12 +27,14 @@ export async function OverviewKpis({
   tenantId,
   currency,
   canViewCosts,
+  period,
 }: {
   tenantId: string;
   currency: string;
   canViewCosts: boolean;
+  period?: ReportRange;
 }) {
-  const kpis = await getOverviewKpis(tenantId, { canViewCosts });
+  const kpis = await getOverviewKpis(tenantId, { canViewCosts, period });
 
   const {
     lastMonthRevenueKes,
@@ -50,13 +53,13 @@ export async function OverviewKpis({
       data-tour="insights-overview-kpis"
     >
       <StatTile
-        label="Last-month revenue"
+        label={period ? `Revenue · ${period.label}` : "Last-month revenue"}
         value={<CostValue amount={lastMonthRevenueKes} compact />}
         delta={
           momPercent == null
-            ? { label: "no prior month to compare", tone: "neutral" }
+            ? { label: "no prior period to compare", tone: "neutral" }
             : {
-                label: `${momPercent > 0 ? "+" : ""}${momPercent}% vs prior 30 days`,
+                label: `${momPercent > 0 ? "+" : ""}${momPercent}% vs prior ${period?.days ?? 30} days`,
                 tone: momPercent > 0 ? "positive" : momPercent < 0 ? "negative" : "neutral",
                 direction:
                   momDirection === "up" ? "up" : momDirection === "down" ? "down" : undefined,
@@ -65,7 +68,7 @@ export async function OverviewKpis({
       />
 
       <StatTile
-        label="Capital tied up"
+        label="Capital tied up now"
         // The cost figure leads for a reader allowed to see it; a money-blind
         // member gets the at-retail figure, which is a sales number they may
         // have, rather than a masked tile that says nothing.
@@ -98,7 +101,7 @@ export async function OverviewKpis({
       />
 
       <StatTile
-        label="ABC mix"
+        label="Current ABC mix"
         value={
           <span className="tabular-nums">
             {formatNumber(abcMix.a)}

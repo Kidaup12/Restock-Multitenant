@@ -1,6 +1,8 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import { activeMembership, requireSession } from "@/lib/auth";
+import { hasPermission } from "@/lib/auth/permissions";
+import { SalesReviewSection } from "@/components/sales-review-section";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -48,6 +50,12 @@ export default async function SalesPage() {
   return (
     <div className="space-y-6">
       <PageHeader eyebrow="Account" title="Sales data" description={DESCRIPTION} />
+
+      <section id="unusual-sales" aria-label="Unusual sales review">
+        <Suspense fallback={null}>
+          <SalesReviewSection tenantId={tenantId} canManage={hasPermission(membership, "manage_settings")} limit={100} reviewLink={false} />
+        </Suspense>
+      </section>
 
       {/* POS data-health surfaces (spec §3). Each hides itself when clean, so a
           healthy tenant sees only the metrics below. */}

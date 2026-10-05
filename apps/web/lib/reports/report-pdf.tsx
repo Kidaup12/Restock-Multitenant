@@ -105,7 +105,7 @@ function ReportDocument({ data, brand }: { data: ReportPdfData; brand: string })
         </View>
         <View style={s.kpiRow}>
           <Kpi label="Dead stock (no 90d sale)" value={dead} />
-          <Kpi label="Stockouts (A/B at zero)" value={String(data.stockoutCount)} />
+          <Kpi label="Stockouts (all buyable products)" value={String(data.stockoutCount)} />
         </View>
 
         <View style={s.section}>

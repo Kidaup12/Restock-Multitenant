@@ -8,7 +8,8 @@
  * catalog (dailySalesValue + assignAbc), promo windows need the tenant's promo
  * table, and the stockout mask comes from inventory snapshots.
  */
-import type { SalesPoint, Urgency } from "./baseline";
+import type { BaselineMethod, SalesPoint, Urgency } from "./baseline";
+import { debulkSeries } from "./big-buyer";
 import type { MonthlyExpectation } from "./seasonality";
 import {
   anchorToday,
@@ -75,6 +76,8 @@ export type ProductForecastInput = {
   demandOverride?: DemandOverride | null;
   /** The demand method this product's class won in the last audition. */
   demandMethod?: DemandMethod;
+  baselineMethod?: BaselineMethod;
+  bigBuyerDamping?: boolean;
 };
 
 /** The Prediction row fields the engine is responsible for. `signals` stays
@@ -129,6 +132,8 @@ export function forecastProduct(input: ProductForecastInput): PredictionFields {
     capMultiple: input.capMultiple,
     demandOverride: input.demandOverride ?? null,
     demandMethod: input.demandMethod,
+    baselineMethod: input.baselineMethod,
+    bigBuyerDamping: input.bigBuyerDamping,
   });
 
   // The reality guardrail clamps engine output to recent actual sales. It must
@@ -137,7 +142,9 @@ export function forecastProduct(input: ProductForecastInput): PredictionFields {
   const result = input.demandOverride
     ? forecast
     : guardForecastResult(forecast, {
-        history: input.history,
+        history: input.bigBuyerDamping
+          ? debulkSeries(input.history, { asOf: today, excludedDates: input.excludedDates }).series
+          : input.history,
         currentStock: product.currentStock,
         today,
         stockoutDates: input.stockoutDates,

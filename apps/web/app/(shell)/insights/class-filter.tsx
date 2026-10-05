@@ -1,5 +1,5 @@
 import { ABC_KEYS, abcLabel, type AbcKey } from "@/lib/data/abc-lens";
-import { type RangeKey } from "@/lib/data/report-range";
+import { type RangeKey, type ReportRange } from "@/lib/data/report-range";
 
 /**
  * The A/B/C lens as a compact segmented control — the cleaner, ref-styled
@@ -24,6 +24,7 @@ export function ClassFilter({
   abc,
   tab,
   range,
+  period,
 }: {
   /** The class currently in force, from the URL. */
   abc: AbcKey;
@@ -31,6 +32,7 @@ export function ClassFilter({
   tab: string;
   /** The report period to preserve alongside the class. */
   range: RangeKey;
+  period?: ReportRange;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -45,7 +47,7 @@ export function ClassFilter({
           return (
             <a
               key={key}
-              href={`/insights?tab=${tab}&range=${range}&class=${key}`}
+              href={`/insights?tab=${tab}&range=${range}&class=${key}${period?.custom ? `&from=${period.from}&to=${period.to}` : ""}`}
               aria-current={current ? "true" : undefined}
               className={
                 current

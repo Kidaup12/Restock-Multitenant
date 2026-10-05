@@ -12,10 +12,11 @@ import { ABC_KEYS, abcLabel, parseAbcKey, type AbcKey } from "@/lib/data/abc-len
 import {
   RANGE_KEYS,
   parseRangeKey,
-  rangeDays,
   rangeShortLabel,
   rangeWeeks,
   type RangeKey,
+  resolveReportRange,
+  type ReportRange,
 } from "@/lib/data/report-range";
 import { SkeletonCard, SkeletonTableRows } from "@/components/ui/skeleton";
 import { parseReportTab, type ReportTab } from "./tabs";
@@ -30,6 +31,7 @@ import { HistoryTab } from "./history-tab";
 import { ForecastScorecard } from "./forecast-scorecard";
 import { ImpactCard } from "./impact-card";
 import { PeriodTable } from "./period-table";
+import { PurchasingHistory } from "./purchasing-history";
 import { DeadStockMonths } from "./dead-stock-months";
 import { StockoutTrend } from "./stockout-trend";
 import { BeforeAfter } from "./before-after";
@@ -49,7 +51,7 @@ const DESCRIPTION = "Where your money is stuck, and whether the forecast is earn
  * known, and it keeps what crosses into a panel a plain string. Passing an
  * href-builder down would break the moment a panel became a client component.
  */
-function PerfClassRail({ abc, range }: { abc: AbcKey; range: RangeKey }) {
+function PerfClassRail({ abc, range, period }: { abc: AbcKey; range: RangeKey; period: ReportRange }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="text-xs font-medium text-ink-muted">Class</span>
@@ -59,7 +61,7 @@ function PerfClassRail({ abc, range }: { abc: AbcKey; range: RangeKey }) {
           return (
             <a
               key={key}
-              href={`/insights?tab=performance&range=${range}&class=${key}`}
+              href={`/insights?tab=performance&range=${range}&class=${key}${period.custom ? `&from=${period.from}&to=${period.to}` : ""}`}
               aria-current={current ? "true" : undefined}
               className={
                 current
@@ -79,16 +81,16 @@ function PerfClassRail({ abc, range }: { abc: AbcKey; range: RangeKey }) {
 /** The report period. Server-rendered links, not client state: a period is then
  *  shareable, survives a reload and works with Back. Present on both Overview
  *  (drives the revenue/top-earner windows) and Performance (drives the trend). */
-function RangeRail({ tab, range }: { tab: ReportTab; range: RangeKey }) {
+function RangeRail({ tab, range, abc, period }: { tab: ReportTab; range: RangeKey; abc: AbcKey; period: ReportRange }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
       <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Report period">
         {RANGE_KEYS.map((key) => {
-          const current = key === range;
+          const current = !period.custom && key === range;
           return (
             <a
               key={key}
-              href={`/insights?tab=${tab}&range=${key}`}
+              href={`/insights?tab=${tab}&range=${key}&class=${abc}`}
               aria-current={current ? "true" : undefined}
               className={
                 current
@@ -101,9 +103,19 @@ function RangeRail({ tab, range }: { tab: ReportTab; range: RangeKey }) {
           );
         })}
       </div>
+      <form action="/insights" method="get" className="flex flex-wrap items-end gap-2">
+        <input type="hidden" name="tab" value={tab} />
+        <input type="hidden" name="class" value={abc} />
+        <input type="hidden" name="range" value={range} />
+        <label className="text-xs text-ink-muted">From<input required aria-label="Report start date" type="date" name="from" defaultValue={period.from} className="ml-2 rounded border border-edge bg-surface px-2 py-1 text-ink" /></label>
+        <label className="text-xs text-ink-muted">To<input required aria-label="Report end date" type="date" name="to" defaultValue={period.to} className="ml-2 rounded border border-edge bg-surface px-2 py-1 text-ink" /></label>
+        <button type="submit" className="rounded border border-edge px-3 py-1 text-xs font-medium">Apply dates</button>
+      </form>
+      {period.error && <p role="alert" className="w-full text-sm text-status-warn">{period.error} Showing {period.label}.</p>}
+      <p className="w-full text-xs font-medium text-ink">{period.label} · {period.days} calendar days</p>
       <p className="text-xs text-ink-muted">
         {tab === "performance"
-          ? "Sets the trend and adherence windows. Accuracy grades whole elapsed horizons, and the impact card measures everything since your first order."
+          ? "Dates apply to weekly trends, missed-sales estimates and adherence. Partial weeks need at least five observed days. Accuracy, lifetime impact and the labeled monthly dead-stock history use their own windows; current stock and ABC remain current."
           : "Sets the top-earners and revenue windows. Shelf health is what’s on the shelf right now."}
       </p>
     </div>
@@ -121,7 +133,7 @@ function ShopReportLink() {
       href="/api/reports/pdf"
       className="inline-flex h-9 items-center rounded-md border border-edge px-3 text-sm font-medium text-ink hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
     >
-      Download shop report
+      Download current shop report
     </a>
   );
 }
@@ -153,6 +165,7 @@ function PerformanceContent({
   canRunCheck,
   range,
   abc,
+  period,
 }: {
   tenantId: string;
   currency: string;
@@ -160,6 +173,7 @@ function PerformanceContent({
   canRunCheck: boolean;
   range: RangeKey;
   abc: AbcKey;
+  period: ReportRange;
 }) {
   return (
     <div className="space-y-6">
@@ -188,7 +202,7 @@ function PerformanceContent({
           </div>
         }
       >
-        <ForecastScorecard tenantId={tenantId} canRunCheck={canRunCheck} windowDays={rangeDays(range)} />
+        <ForecastScorecard tenantId={tenantId} canRunCheck={canRunCheck} windowDays={period.days} period={period} />
       </Suspense>
       <Suspense
         fallback={
@@ -197,7 +211,7 @@ function PerformanceContent({
           </div>
         }
       >
-        <StockoutTrend tenantId={tenantId} weeks={rangeWeeks(range)} />
+        <StockoutTrend tenantId={tenantId} weeks={rangeWeeks(range)} period={period} />
       </Suspense>
       <Suspense
         fallback={
@@ -206,7 +220,7 @@ function PerformanceContent({
           </div>
         }
       >
-        <MissedRevenueSection tenantId={tenantId} currency={currency} weeks={rangeWeeks(range)} abc={abc} />
+        <MissedRevenueSection tenantId={tenantId} currency={currency} weeks={rangeWeeks(range)} abc={abc} period={period} />
       </Suspense>
       <Suspense
         fallback={
@@ -220,6 +234,7 @@ function PerformanceContent({
           currency={currency}
           weeks={rangeWeeks(range)}
           canViewCosts={canViewCosts}
+          period={period}
         />
       </Suspense>
       <Suspense
@@ -231,7 +246,7 @@ function PerformanceContent({
       >
         <DeadStockMonths tenantId={tenantId} canViewCosts={canViewCosts} />
       </Suspense>
-      <PerfClassRail abc={abc} range={range} />
+      <PerfClassRail abc={abc} range={range} period={period} />
       <Suspense
         fallback={
           <div role="status" aria-label="Loading week-by-week metrics">
@@ -239,7 +254,10 @@ function PerformanceContent({
           </div>
         }
       >
-        <PeriodTable tenantId={tenantId} weeks={rangeWeeks(range)} abc={abc} />
+        <PeriodTable tenantId={tenantId} weeks={rangeWeeks(range)} abc={abc} period={period} />
+      </Suspense>
+      <Suspense fallback={<SkeletonTableRows rows={6} />}>
+        <PurchasingHistory tenantId={tenantId} canViewCosts={canViewCosts} currency={currency} abc={abc} period={period} weeks={rangeWeeks(range)} />
       </Suspense>
     </div>
   );
@@ -248,7 +266,7 @@ function PerformanceContent({
 export default async function InsightsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; view?: string; range?: string; class?: string }>;
+  searchParams: Promise<{ tab?: string; view?: string; range?: string; class?: string; q?: string; product?: string; from?: string; to?: string }>;
 }) {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
@@ -270,6 +288,7 @@ export default async function InsightsPage({
   }
 
   const plan = await getTenantPlan(membership.tenantId);
+  const period = resolveReportRange({ range, from: typeof params.from === "string" ? params.from : undefined, to: typeof params.to === "string" ? params.to : undefined }, membership.tenant.timezone);
   // Money-blind gate: MEMBERs (without view_costs) see no KES cost figures.
   const canViewCosts = hasPermission(membership, "view_costs");
 
@@ -290,11 +309,11 @@ export default async function InsightsPage({
         description={DESCRIPTION}
         actions={<ShopReportLink />}
       />
-      <ReportTabNav tab={tab} range={range} abc={abc} />
+      <ReportTabNav tab={tab} range={range} abc={abc} from={period.custom ? period.from : undefined} to={period.custom ? period.to : undefined} />
 
       <ReportGuide tab={tab} scope={membership.tenantId} />
 
-      {tab !== "history" && <RangeRail tab={tab} range={range} />}
+      {tab !== "history" && <RangeRail tab={tab} range={range} abc={abc} period={period} />}
 
       {tab === "overview" && (
         <OverviewTab
@@ -304,6 +323,7 @@ export default async function InsightsPage({
           abc={abc}
           range={range}
           tab="overview"
+          period={period}
         />
       )}
 
@@ -315,10 +335,11 @@ export default async function InsightsPage({
           canRunCheck={hasPermission(membership, "manage_settings")}
           range={range}
           abc={abc}
+          period={period}
         />
       )}
 
-      {tab === "history" && <HistoryTab tenantId={membership.tenantId} />}
+      {tab === "history" && <Suspense fallback={<SkeletonCard />}><HistoryTab tenantId={membership.tenantId} timezone={membership.tenant.timezone} query={typeof params.q === "string" ? params.q : ""} productId={typeof params.product === "string" ? params.product : undefined} /></Suspense>}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { prismaForTenant } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
-import { LEAD_BANDS, type LeadBand, type ScopeSelection } from "./scope-bar";
+import { LEAD_BANDS, type LeadBand, type ScopeSelection } from "./scope";
 
 /**
  * Saved planner scopes: named presets of the scope-bar's ABC / category /

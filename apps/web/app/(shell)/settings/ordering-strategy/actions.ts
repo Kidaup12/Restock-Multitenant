@@ -5,6 +5,7 @@ import { prismaForTenant, prismaService } from "@wezesha/db";
 import { parseOrderMethod, type OrderMethod } from "@wezesha/forecast";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
+import { parseForecastSettings } from "./forecast-settings";
 
 /**
  * Save the buying style for each product group.
@@ -24,6 +25,35 @@ export type OrderingStrategyInput = {
 };
 
 export type OrderingStrategyResult = { ok: true } | { ok: false; error: string };
+
+export async function saveForecastSettings(input: unknown): Promise<OrderingStrategyResult> {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+  if (!membership) return { ok: false, error: "You're not in a workspace." };
+  if (!hasPermission(membership, "manage_settings")) return { ok: false, error: "You don't have settings access." };
+  const settings = parseForecastSettings(input);
+  if (!settings) return { ok: false, error: "Choose a valid forecast method, ABC window and bulk-purchase setting." };
+  const db = prismaForTenant(membership.tenantId);
+  const before = await db.tenantConfig.findUnique({ where: { tenantId: membership.tenantId }, select: { baselineMethod: true, abcWindowDays: true, bigBuyerDamping: true } });
+  await db.tenantConfig.upsert({
+    where: { tenantId: membership.tenantId },
+    create: { tenantId: membership.tenantId, ...settings },
+    update: settings,
+  });
+  await prismaService.auditEvent.create({ data: {
+    tenantId: membership.tenantId, entity: "TenantConfig", entityId: membership.tenantId,
+    action: "forecast_settings_changed", actorUserId: session.user.id,
+    actorName: membership.displayName ?? session.user.name ?? session.user.email,
+    meta: { before, after: settings },
+  } });
+  revalidatePath("/settings/ordering-strategy");
+  revalidatePath("/products");
+  revalidatePath("/stock");
+  revalidatePath("/inventory");
+  revalidatePath("/today");
+  revalidatePath("/insights");
+  return { ok: true };
+}
 
 export async function saveOrderingStrategy(
   input: OrderingStrategyInput,

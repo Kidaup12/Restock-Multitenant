@@ -1,4 +1,5 @@
 import { prismaForTenant } from "@wezesha/db";
+import { dayMarker, tenantDayKey } from "@wezesha/pos";
 import {
   coverDays,
   moneyAtRest,
@@ -57,9 +58,11 @@ export async function getCatalogueMetrics(
 ): Promise<Map<string, ProductMetrics>> {
   const asOf = opts.asOf ?? new Date();
   const db = prismaForTenant(tenantId);
-  const since = new Date(asOf.getTime() - HISTORY_DAYS * DAY_MS);
+  // One extra day covers the earliest tenant-day marker in western timezones;
+  // each metric still applies its own exact window below.
+  const since = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate()) - (HISTORY_DAYS + 1) * DAY_MS);
 
-  const [products, sales, emptyShelfDays, firstSnapshot] = await Promise.all([
+  const [products, sales, emptyShelfDays, firstSnapshot, config, tenant] = await Promise.all([
     db.product.findMany({
       select: {
         id: true,
@@ -88,7 +91,12 @@ export async function getCatalogueMetrics(
     // How far back that proof reaches. Anything older keeps gap inference rather
     // than being read as "was in stock".
     db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
+    db.tenantConfig.findFirst({ select: { baselineMethod: true, bigBuyerDamping: true } }),
+    db.tenant.findUnique({ where: { id: tenantId }, select: { timezone: true } }),
   ]);
+  // Sales dates represent trading days, not instants. Exclude the unfinished
+  // local day from fitting even when its date differs from the UTC date.
+  const rateDay = dayMarker(tenantDayKey(tenant?.timezone ?? "Africa/Nairobi", asOf));
 
   const historyByProduct = new Map<string, SalesPoint[]>();
   for (const row of sales) {
@@ -114,7 +122,7 @@ export async function getCatalogueMetrics(
   const out = new Map<string, ProductMetrics>();
   for (const p of products) {
     const history = historyByProduct.get(p.id) ?? [];
-    const rate = runRate(history, asOf, stockoutsByProduct.get(p.id), snapshotsSince);
+    const rate = runRate(history, rateDay, stockoutsByProduct.get(p.id), snapshotsSince, config?.baselineMethod === "median" ? "median" : "mean", config?.bigBuyerDamping === true);
     out.set(p.id, {
       productId: p.id,
       sellableOnHand: p.currentStock,

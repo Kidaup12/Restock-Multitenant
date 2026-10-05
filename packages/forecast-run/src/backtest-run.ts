@@ -1,6 +1,8 @@
 import { prismaForTenant, prismaForTenantTx } from "@wezesha/db";
 import {
   assignAbc,
+  saleSpanDays,
+  resolveAbcWindowDays,
   trailingRevenue,
   weightedDailyRateAdjusted,
   walkForwardBacktest,
@@ -92,7 +94,7 @@ export async function runBacktest(
 
   // One connection for both reads — see the note in packages/db on why a batch
   // through the per-operation client asks the pool for one connection per query.
-  const { products, sales } = await prismaForTenantTx(
+  const { products, sales, config } = await prismaForTenantTx(
     tenantId,
     async (tx) => ({
       products: await tx.product.findMany({
@@ -101,8 +103,9 @@ export async function runBacktest(
       }),
       sales: await tx.salesHistory.findMany({
         where: { date: { gte: historySince } },
-        select: { productId: true, date: true, quantity: true },
+        select: { productId: true, date: true, quantity: true, revenueKes: true },
       }),
+      config: await tx.tenantConfig.findFirst({ select: { abcWindowDays: true, baselineMethod: true, bigBuyerDamping: true } }),
     }),
     { maxWait: 30_000, timeout: 120_000 }
   );
@@ -126,7 +129,8 @@ export async function runBacktest(
         id: p.id,
         // Same ranking the live run uses (trailing revenue + velocity floor), so
         // the audition buckets accuracy by the classes production actually sizes.
-        revenue: trailingRevenue(history, now),
+        revenue: trailingRevenue(history, now, resolveAbcWindowDays(config?.abcWindowDays)),
+        saleSpanDays: saleSpanDays(history, now, resolveAbcWindowDays(config?.abcWindowDays)),
         runRate: weightedDailyRateAdjusted(history, now),
       };
     })
@@ -145,7 +149,7 @@ export async function runBacktest(
     return { rowsWritten: 0, champions: null, degraded: false, methodChanged: false, result: null };
   }
 
-  const result = walkForwardBacktest(backtestProducts, cutoffs, horizonDays);
+  const result = walkForwardBacktest(backtestProducts, cutoffs, horizonDays, { baselineMethod: config?.baselineMethod === "median" ? "median" : "mean", bigBuyerDamping: config?.bigBuyerDamping === true });
   const runDate = now;
 
   // Persist every scored (class × method) row, sharing one runDate.

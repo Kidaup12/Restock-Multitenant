@@ -27,14 +27,16 @@ const rows: TopProduct[] = [
   row({ sku: "u1", abc: null, revenueKes: 500 }),
 ];
 
-const render = () => renderToStaticMarkup(<TopEarnersView rows={rows} currency="KES" />);
+const periodLabel = "2026-08-01 to 2026-08-14";
+const render = () => renderToStaticMarkup(<TopEarnersView rows={rows} currency="KES" periodLabel={periodLabel} />);
 
 describe("top earners", () => {
   it("ranks by revenue and shows the class per row", () => {
     const html = render();
     // Highest earner first, and its class beside it.
     expect(html.indexOf("a1")).toBeLessThan(html.indexOf("c1"));
-    expect(html).toContain("Top earners, 30 days");
+    expect(html).toContain(`Top earners · ${periodLabel}`);
+    expect(html).not.toContain("Top earners, 30 days");
   });
 
   it("carries the true count on each class chip", () => {
@@ -59,7 +61,9 @@ describe("top earners", () => {
   });
 
   it("shows an empty state when nothing has sold", () => {
-    const html = renderToStaticMarkup(<TopEarnersView rows={[]} currency="KES" />);
-    expect(html).toContain("No sales in the last 30 days");
+    const html = renderToStaticMarkup(<TopEarnersView rows={[]} currency="KES" periodLabel={periodLabel} />);
+    expect(html).toContain("No sales in the selected period");
+    expect(html).toContain(periodLabel);
+    expect(html).not.toContain("last 30 days");
   });
 });

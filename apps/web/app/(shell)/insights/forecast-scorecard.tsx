@@ -100,6 +100,7 @@ export async function ForecastScorecard({
   tenantId,
   canRunCheck,
   windowDays,
+  period,
 }: {
   tenantId: string;
   /** Whether this reader may trigger the check. It writes a grade row, so it
@@ -110,11 +111,12 @@ export async function ForecastScorecard({
    *  horizons and the other replays fixed history, so a period control would
    *  change nothing on either. */
   windowDays: number;
+  period?: import("@/lib/data/report-range").ReportRange;
 }) {
   const [scorecard, asShown, adherence] = await Promise.all([
     getAccuracyScorecard(tenantId),
     getAsShownScorecard(tenantId),
-    getPlanAdherence(tenantId, { windowDays }),
+    getPlanAdherence(tenantId, { windowDays, period }),
   ]);
   const latest = scorecard.latest;
   const asShownLatest = asShown.latest;
@@ -226,7 +228,7 @@ export async function ForecastScorecard({
       <Card data-tour="insights-adherence">
         <CardHeader
           title="Did you act on it?"
-          subtitle={`Recommendations from the last ${adherence.windowDays} days`}
+          subtitle={period ? `Recommendations · ${period.label}` : `Recommendations from the last ${adherence.windowDays} days`}
         />
         <CardContent>
           {!adherence.hasHistory ? (

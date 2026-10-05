@@ -229,6 +229,10 @@ model TenantConfig {
   // 30/60/90; null = code default.
   abcWindowDays Int?
 
+  // Baseline aggregation borrowed from the original app. null = mean.
+  baselineMethod String? // "mean" | "median"
+  bigBuyerDamping Boolean? // Optional original-app bulk-day baseline correction; null = off.
+
   // Per-ABC-class ordering method (null = recommended default):
   // "stay_in_stock" | "balanced" | "lean_cash".
   methodA String?

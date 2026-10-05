@@ -30,7 +30,7 @@ describe("the report period reaches the panels", () => {
     // passed through — either way the rail, not a literal, sets the window.
     const inline = /<TopEarners[\s\S]{0,200}days=\{rangeDays\(range\)\}/.test(page);
     const viaVar =
-      /const days = rangeDays\(range\)/.test(page) && /<TopEarners[\s\S]{0,200}days=\{days\}/.test(page);
+      /const days = (?:period\?\.days \?\? )?rangeDays\(range\)/.test(page) && /<TopEarners[\s\S]{0,200}days=\{days\}/.test(page);
     expect(
       inline || viaVar,
       "top earners is not reading the period — the rail cannot change it"
@@ -46,7 +46,7 @@ describe("the report period reaches the panels", () => {
 
   it("drives the adherence window", () => {
     expect(
-      /<ForecastScorecard[\s\S]{0,240}windowDays=\{rangeDays\(range\)\}/.test(page),
+      /<ForecastScorecard[\s\S]{0,240}windowDays=\{(?:rangeDays\(range\)|period.days)\}/.test(page),
       "adherence is not reading the period"
     ).toBe(true);
   });

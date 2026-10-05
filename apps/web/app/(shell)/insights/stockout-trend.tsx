@@ -1,4 +1,5 @@
 import { getStockoutTrend } from "@/lib/data/insights";
+import type { ReportRange } from "@/lib/data/report-range";
 import { ChartIcon } from "@/components/icons";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { formatNumber } from "@/lib/money";
@@ -16,12 +17,14 @@ const WEEKS_BEFORE_A_TREND = 4;
 export async function StockoutTrend({
   tenantId,
   weeks: weeksRequested,
+  period,
 }: {
   tenantId: string;
   /** Weeks to chart, from the report's period. Was fixed at the loader's 8. */
   weeks: number;
+  period?: ReportRange;
 }) {
-  const { weeks, trackingSince } = await getStockoutTrend(tenantId, { weeks: weeksRequested });
+  const { weeks, trackingSince } = await getStockoutTrend(tenantId, { weeks: weeksRequested, period });
 
   if (weeks.length < 2) {
     const readyOn =

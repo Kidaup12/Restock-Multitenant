@@ -27,13 +27,8 @@ import {
 // Sanity cap on the cover-days horizon — a year of cover is already well past
 // any real ordering decision. Shared with the steppers that offer it.
 import { MAX_COVER_DAYS } from "./cover";
-// The same pure filter list mode uses, plus its type. Importing these from the
-// scope bar (a "use client" module) into this server action is safe: only the
-// type and the pure `filterBuyListRows` value are pulled, and scope-actions.ts
-// already imports a runtime value (LEAD_BANDS) from the same module server-side.
-// The filter touches only row metadata (class/category/supplier/lead) — no cost
-// figure enters it — so it is money-blind safe.
-import { filterBuyListRows, LEAD_BANDS, type LeadBand, type ScopeSelection } from "./scope-bar";
+// Shared pure filtering must stay outside the client component boundary.
+import { filterBuyListRows, LEAD_BANDS, type LeadBand, type ScopeSelection } from "./scope";
 
 /**
  * Plan-screen actions. Each re-resolves the caller's session and active

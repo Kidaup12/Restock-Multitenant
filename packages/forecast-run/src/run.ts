@@ -11,6 +11,8 @@ import {
 } from "@wezesha/db";
 import {
   assignAbc,
+  saleSpanDays,
+  resolveAbcWindowDays,
   trailingRevenue,
   weightedDailyRateAdjusted,
   forecastProduct,
@@ -424,6 +426,8 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
   const knobs = resolveForecastKnobs(config);
   // The method each class earned in the last audition; run rate until audited.
   const champions = resolveChampions(config?.forecastChampions);
+  const abcWindowDays = resolveAbcWindowDays(config?.abcWindowDays);
+  const baselineMethod = config?.baselineMethod === "median" ? "median" : "mean";
   // This is the ONE place a product's current ABC class is decided; the column
   // it writes is what every screen reads. `now` is passed explicitly rather than
   // left to default: a run replayed with a fixed clock must rank against the
@@ -436,7 +440,8 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
         // Rank on real money earned over the trailing window, not an
         // instantaneous rate×price — "expensive, not revenue" can't ride a
         // price tag into A on a handful of sales.
-        revenue: trailingRevenue(history, now),
+        revenue: trailingRevenue(history, now, abcWindowDays),
+        saleSpanDays: saleSpanDays(history, now, abcWindowDays),
         // Velocity floor: a slow mover can't be A/B however much it earned.
         runRate: weightedDailyRateAdjusted(history, now),
       };
@@ -517,6 +522,8 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
       excludedDates: excludedByProduct.get(product.id),
       policy: policyForClass(knobs.methods, abcCategory),
       demandMethod: championForClass(champions, abcCategory),
+      baselineMethod,
+      bigBuyerDamping: config?.bigBuyerDamping === true,
       serviceZ: knobs.serviceZ,
       capMultiple: knobs.capMultiple,
       runDateKey,
@@ -620,6 +627,8 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
             excludedDates: excludedByProduct.get(product.id),
             policy: policyForClass(knobs.methods, abcCategory),
             demandMethod: championForClass(champions, abcCategory),
+            baselineMethod,
+            bigBuyerDamping: config?.bigBuyerDamping === true,
             serviceZ: knobs.serviceZ,
             capMultiple: knobs.capMultiple,
             runDateKey,

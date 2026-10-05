@@ -1,0 +1,36 @@
+# ABC and forecast audition audit — 2026-10-05
+
+Scope: static comparison with `../../../_ref-wezesha-restock`, plus executable pure-function cases. No production changes or live database claims.
+
+Run from repository root: `node scripts/audit-abc/run.cjs`. Six deterministic reproductions pass. The small CommonJS harness uses the installed TypeScript compiler because tsx's Windows user-info lookup failed in the restricted session; no network/dependencies are needed.
+
+## Confirmed defects
+
+1. **High: monthly backtest puts every SKU in C.** `packages/forecast-run/src/backtest-run.ts:105` selects quantity/date but not `revenueKes`; :130 calls `trailingRevenue` anyway. `packages/forecast/src/abc.ts:69-76` treats absent revenue as zero; :45-47 classifies zero total as C. Fixture: 90 one-unit daily sales earning KES 9,000 classify A with full data, C with backtest projection. A/B never receive their actual auditions; `backtest-run.ts:218` consequently writes default champions for those groups. Restore revenue selection and test DB projection, not only pure classification.
+
+2. **High: silent holdout periods disappear from accuracy.** `packages/forecast/src/backtest.ts:241-242` requires a sale record at/after the horizon's last day. Sparse sales histories cannot prove observational coverage that way. Fixture: 90 days selling one/day then 30 silent days returns zero score rows. Adding one explicit zero on the last holdout day produces the same real outcome but scores 25.479 forecast units vs zero sold, MAE 25.479. Establish feed/observation coverage separately from last positive sale and retain covered zero-sales windows.
+
+3. **High: audition and production evaluate different inputs.** `backtest.ts:70-71` calls `demandRateFor` without masks; live `forecast-run/src/run.ts:517-521` passes stockouts, snapshot coverage, promo/closure exclusions and method. Fixture with 20 confirmed stockout days: live baseline 1.68116/day versus audition 0.876712/day. Historical product observations, exclusions and censored targets need replay; otherwise underforecasting unavailable stock can win. This harness auditions only raw baseline, not full promo/seasonality/floor/guardrail/order policy outputs: those omissions may be deliberate for baseline selection, but scores must not be presented as complete production accuracy.
+
+4. **Medium: first-to-last sale span is not sustained recovery.** `abc.ts:85-90` subtracts earliest from latest positive sale; :54 only requires span >=14. Two sale days of 40 units each, 79 days apart, return span79, adjusted rate2.7105/day and A. An old sale plus one resurrection burst passes the newly ported rule. The original has the same conceptual weakness (`lib/forecast/run-batch.ts:80-92`). Define sustained selling after the latest dormancy/recovery; regression must include old isolated sale + recent burst, not just wholly recent histories.
+
+5. **Medium: no per-product training eligibility.** `backtest.ts:238-245` checks only history end, never minimum training age/sale days before cutoff. Fixture consisting of one 5-unit sale in the holdout gets scored as forecast0 vs actual5 despite having no training observations. Original `lib/backtest/model-backtest.ts:194-197` has explicit eligibility checks (but counts sales records, not unique dates). Use an explicit product-observation start and training threshold.
+
+6. **Medium: temporal leakage in classification/scaling.** `backtest-run.ts:130-139` assigns today's ABC once to every historical window; the comment claiming historical classes is inaccurate. Fixing missing revenue alone will expose this. `backtest.ts:236,254` also builds scale-free normalizers from full product history including holdouts; `accuracy.ts:113-118` explicitly says the scale should use training history. This affects per-product weighting/champion aggregation, even though it does not change raw predictions. Recompute class and scale from each origin's available history.
+
+7. **Medium: live ABC uses a different velocity definition from live demand.** `forecast-run/src/run.ts:440-443` always uses uncensored inferred-gap adjusted weighted rate. Production :517-524 uses confirmed inventory, exclusions and class champion. This can assign A service to an in-stock intermittent item or demote a genuinely unavailable seller inconsistent with its demand basis. Original runtime uses raw `weightedDailyRate` instead (`lib/forecast/run-batch.ts:82`), so this is an existing divergence, not identical behavior to port.
+
+8. **Medium: backtest product universe differs from live.** `backtest-run.ts:100` selects `active:true`; live `run.ts:285` uses `BUYABLE_PRODUCT_WHERE` (active plus notForSale=false, present in Shopify, not draft/archived; `packages/db/src/product-lifecycle.ts:27`). Non-buyable lines can influence champions and totals.
+
+## Intentional differences and changes to preserve
+
+- **Current ABC boundary fixes an original bug.** Current `abc.ts:45-47` ranks by revenue share above the item; original `lib/forecast/abc.ts:53-56` includes the item's own share before classifying. Fixture 95% dominant earner + 5% tail: original gives both C, current gives A/C. Do not regress this in a port.
+- **Current C sizing protects lead time.** `packages/forecast/src/reorder.ts:149` uses max(14, lead+review) days. Original `lib/forecast/reorder.ts:106` always uses 14 days, under-covering imports. Preserve current horizon handling.
+- **ABC window:** current fixed 90 days (`abc.ts:28`); original configurable via `lib/tenant/config.ts:202` and runtime `run-batch.ts:68`. Configurability is a feature decision, not automatic proof current default is wrong.
+- **Model controls:** original runtime supports weighted mean / weekly median and Python forecast sidecar (`lib/forecast/run-batch.ts:179-190`); current TS demand union only `run_rate`/`recent_heavy` (`layered.ts:218`). Original `lib/backtest/model-backtest.ts:44` auditions weightedMA, medianMA, flatMA and sidecar. Current does not implement equivalent median/sidecar runtime by connecting the separate audit engine.
+- **Audit-engine integration is lossy by design.** `forecast-run/src/onboarding-audit.ts:55-92` maps many selected models (including median/ETS/Theta) to weighted run_rate, others to recent_heavy. :110-127 chooses the single ABC×XYZ segment with lowest WAPE as representative of its whole ABC class. This does not establish that the mapped method wins across the whole class. Treat as an approximation requiring validation, not deployment of the Python winning model.
+- **Original backtest is not a complete reference implementation:** it recomputes origin ABC (`lib/backtest/model-backtest.ts:166-187`) but omits velocity and stability floors there, and its weighted/median inputs also omit historical masks (:257-263). Borrow sound point-in-time structure, not all its semantics.
+
+## Recommended sequence
+
+Repair revenue projection and observation-window eligibility first; then create one explicit historical-input contract (day aggregation, lifecycle, available stock, missing feed/closure/promo status), replay origin ABC and normalization, and only then compare mean versus weekly median or promote models. Keep sustained recovery as a separately specified business rule. Existing champions/accuracy scores should be treated as unvalidated until recomputed on corrected inputs.

@@ -26,6 +26,7 @@ export {
 } from "./auth";
 export {
   ingestPosSales,
+  healPosRollup,
   writeDerivedPosSalesHistory,
 } from "./ingest";
 export type { PosIngestResult } from "./ingest";

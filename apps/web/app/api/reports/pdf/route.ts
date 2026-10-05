@@ -3,6 +3,7 @@ import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { activeMembership, getSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getTodayMetrics } from "@/lib/data/today";
+import { moneyAtRest } from "@/lib/metrics/calc";
 import { renderReportPdf, type ReportPdfData } from "@/lib/reports/report-pdf";
 import { withCapture } from "@/lib/observability/wrap";
 
@@ -58,7 +59,7 @@ export const GET = withCapture(
     const abc = { A: 0, B: 0, C: 0 };
     let capital = 0;
     for (const p of products) {
-      capital += p.currentStock * p.costKes;
+      capital += moneyAtRest(p.costKes, p.currentStock);
       if (p.abcCategory === "A") abc.A++;
       else if (p.abcCategory === "B") abc.B++;
       else if (p.abcCategory === "C") abc.C++;

@@ -3,6 +3,7 @@ import {
   daysOfStockRemaining,
   NO_STOCKOUT_DAYS,
   type SalesPoint,
+  type BaselineMethod,
 } from "@wezesha/forecast";
 
 /**
@@ -43,9 +44,11 @@ export function runRate(
   history: SalesPoint[],
   asOf: Date = new Date(),
   stockoutDates?: Date[],
-  snapshotsSince?: Date
+  snapshotsSince?: Date,
+  baselineMethod: BaselineMethod = "mean",
+  bigBuyerDamping = false
 ): number {
-  return runRateDaily(history, asOf, stockoutDates, undefined, snapshotsSince);
+  return runRateDaily(history, asOf, stockoutDates, undefined, snapshotsSince, baselineMethod, bigBuyerDamping);
 }
 
 /**

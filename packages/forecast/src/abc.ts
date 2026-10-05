@@ -27,7 +27,14 @@ export const MIN_RUN_RATE_FOR_B = 0.1;
 /** Trailing window (days) over which ABC revenue is summed. */
 export const ABC_WINDOW_DAYS = 90;
 
-export type AbcInput = { id: string; revenue: number; runRate?: number };
+/** Original app's supported ranking windows; old/invalid settings use 90 days. */
+export function resolveAbcWindowDays(value: number | null | undefined): 30 | 60 | 90 {
+  return value === 30 || value === 60 ? value : 90;
+}
+
+export const MIN_SALE_SPAN_DAYS_FOR_A = 14;
+
+export type AbcInput = { id: string; revenue: number; runRate?: number; saleSpanDays?: number };
 export type AbcCategory = "A" | "B" | "C";
 
 export function assignAbc(productsWithValue: AbcInput[]): Record<string, AbcCategory> {
@@ -48,6 +55,8 @@ export function assignAbc(productsWithValue: AbcInput[]): Record<string, AbcCate
       if (cls === "A" && p.runRate < MIN_RUN_RATE_FOR_A) cls = "B";
       if (cls === "B" && p.runRate < MIN_RUN_RATE_FOR_B) cls = "C";
     }
+    // A brief burst is not yet a sustained bestseller.
+    if (cls === "A" && p.saleSpanDays != null && p.saleSpanDays < MIN_SALE_SPAN_DAYS_FOR_A) cls = "B";
     map[p.id] = cls;
   }
   return map;
@@ -75,4 +84,12 @@ export function trailingRevenue(
  *  trailingRevenue instead. */
 export function dailySalesValue(history: SalesPoint[], priceKes: number, asOf?: Date): number {
   return weightedDailyRateAdjusted(history, asOf) * priceKes;
+}
+
+/** Positive sale dates inside the same trailing window as ABC revenue. */
+export function saleSpanDays(history: SalesPoint[], asOf: Date, windowDays = ABC_WINDOW_DAYS): number {
+  const since = asOf.getTime() - windowDays * 86_400_000;
+  const dates = history.filter(p => p.quantity > 0 && p.date.getTime() >= since && p.date < asOf).map(p => p.date.getTime());
+  if (dates.length < 2) return 0;
+  return (Math.max(...dates) - Math.min(...dates)) / 86_400_000;
 }

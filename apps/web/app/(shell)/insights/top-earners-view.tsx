@@ -50,7 +50,7 @@ const columns = (currency: string): ExportColumn<TopProduct>[] => [
   { header: "Run rate (units/day)", cell: (r) => Math.round(r.runRate * 10) / 10 },
 ];
 
-export function TopEarnersView({ rows, currency }: { rows: TopProduct[]; currency: string }) {
+export function TopEarnersView({ rows, currency, periodLabel = "30 days" }: { rows: TopProduct[]; currency: string; periodLabel?: string }) {
   const [cls, setCls] = useState<ClassKey>("all");
   const ctxCurrency = useCurrency();
 
@@ -62,10 +62,10 @@ export function TopEarnersView({ rows, currency }: { rows: TopProduct[]; currenc
   if (rows.length === 0) {
     return (
       <Card>
-        <CardHeader title="Top earners, 30 days" />
+        <CardHeader title={`Top earners · ${periodLabel}`} />
         <CardContent>
           <EmptyState
-            title="No sales in the last 30 days"
+            title="No sales in the selected period"
             description="Your best sellers rank here once sales land."
           />
         </CardContent>
@@ -76,15 +76,15 @@ export function TopEarnersView({ rows, currency }: { rows: TopProduct[]; currenc
   return (
     <Card>
       <CardHeader
-        title="Top earners, 30 days"
-        subtitle="Ranked by revenue, all channels"
+        title={`Top earners · ${periodLabel}`}
+        subtitle="Revenue in the selected period, all channels. Stock and run rate are current."
         action={
           <ExportBar
             rows={filtered}
             columns={columns(ctxCurrency)}
-            filename="top-earners"
+            filename={`top-earners-${periodLabel.replaceAll(" ", "-")}`}
             document={{
-              title: "Top earners, 30 days",
+              title: `Top earners · ${periodLabel}`,
               subtitle: `Ranked by revenue · ${cls === "all" ? "all classes" : `class ${cls}`} · ${filtered.length} products`,
             }}
           />
@@ -117,7 +117,7 @@ export function TopEarnersView({ rows, currency }: { rows: TopProduct[]; currenc
       <div className="mt-1 pb-2">
         {filtered.length === 0 ? (
           <p className="px-4 py-6 text-sm text-ink-muted">
-            No products in this class earned anything in the last 30 days.
+            No products in this class earned anything in the selected period.
           </p>
         ) : (
           <Table>

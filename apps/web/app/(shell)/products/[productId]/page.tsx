@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonCard } from "@/components/ui/skeleton";
 import { getProductDetail } from "@/lib/data/product-detail";
 import { ProductDetailView } from "./product-detail-view";
+import { SalesReviewSection } from "@/components/sales-review-section";
 
 export const metadata: Metadata = {
   title: "Product",
@@ -76,6 +77,10 @@ export default async function ProductPage({
           productId={productId}
           canViewCosts={hasPermission(membership, "view_costs")}
         />
+      </Suspense>
+      <Suspense fallback={null}>
+        <SalesReviewSection tenantId={membership.tenantId} productId={productId}
+          canManage={hasPermission(membership, "manage_settings")} limit={20} />
       </Suspense>
     </div>
   );

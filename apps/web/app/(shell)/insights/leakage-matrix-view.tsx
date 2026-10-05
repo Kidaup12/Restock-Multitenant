@@ -64,12 +64,14 @@ export function LeakageMatrixView({
   windowDays,
   canViewCosts,
   currency,
+  periodLabel,
 }: {
   byCategory: LeakageGroup[];
   byAbc: LeakageGroup[];
   windowDays: number;
   canViewCosts: boolean;
   currency: string;
+  periodLabel?: string;
 }) {
   const [lens, setLens] = useState<LensKey>("category");
   const ctxCurrency = useCurrency();
@@ -94,17 +96,17 @@ export function LeakageMatrixView({
   return (
     <Card data-tour="insights-leakage-matrix">
       <CardHeader
-        title={`Where it's leaking · ${windowDays} days`}
-        subtitle="Stockouts, dead stock and missed sales, grouped — worst first"
+        title="Where it's leaking"
+        subtitle={`Current shelf health and capital; no sales in ${windowDays} days defines dead stock. Missed-sales estimate: ${periodLabel ?? "selected weeks"}, at current run rates.`}
         action={
           groups.length > 0 ? (
             <ExportBar
               rows={groups}
               columns={cols}
-              filename={`leakage-${lens}`}
+              filename={`leakage-${lens}${periodLabel ? `-${periodLabel.replaceAll(" ", "-")}` : ""}`}
               document={{
                 title: "Where it's leaking",
-                subtitle: `${lens === "category" ? "By category" : "By ABC class"} · ${windowDays} days`,
+                subtitle: `${lens === "category" ? "By category" : "By ABC class"} · missed sales ${periodLabel ?? "selected weeks"}; current stock, ${windowDays}-day dead-stock rule`,
               }}
             />
           ) : undefined

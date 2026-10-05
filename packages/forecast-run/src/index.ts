@@ -60,3 +60,5 @@ export {
   type RoutingSegment,
   type EngineAuditResult,
 } from "./engine-client";
+
+export { latestForecastRun } from "./latest-run";

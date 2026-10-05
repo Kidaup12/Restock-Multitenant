@@ -1,3 +1,4 @@
+import { latestForecastRun } from "@wezesha/forecast-run";
 import {
   OUTSTANDING_PO_STATUSES,
   Prisma,
@@ -396,10 +397,7 @@ export async function getBuyList(
   }: { canViewCosts: boolean; coverDays?: number; demandUplift?: number }
 ): Promise<BuyList | null> {
   const db = prismaForTenant(tenantId);
-  const latest = await db.prediction.findFirst({
-    orderBy: { runDate: "desc" },
-    select: { forecastRunId: true, runDate: true },
-  });
+  const latest = await latestForecastRun(tenantId);
   if (!latest) return null;
 
   const predictions = await db.prediction.findMany({

@@ -1,6 +1,8 @@
 import { BUYABLE_PRODUCT_WHERE, isSellable, prismaForTenant } from "@wezesha/db";
-import { detectSpikes, expandPromoWindowsToDays } from "@wezesha/forecast";
+import { dayMarker, tenantDayKey } from "@wezesha/pos";
+import { expandPromoWindowsToDays } from "@wezesha/forecast";
 import { SPIKE_IGNORE_KIND, spikeKey } from "@/lib/signals/spikes";
+import { salesReviewDays, type SalesReviewDay } from "@/lib/signals/sales-review";
 
 /**
  * Reads for the declared-signals screen: the promos and closed days an owner has
@@ -232,12 +234,16 @@ export type SpikeSuggestion = {
   /** The product's own normal units/day, for the comparison sentence. */
   baseline: number;
   multiple: number;
+  kind: SalesReviewDay["kind"];
+  threshold: number;
+  inProgress: boolean;
 };
 
 /** How many to put in front of the owner at once — this is a nudge, not a queue. */
 const MAX_SPIKE_SUGGESTIONS = 5;
-/** Enough history for the detector's 60-day baseline plus its 14-day lookback. */
-const SPIKE_HISTORY_DAYS = 90;
+/** Bulk-day evidence uses the original forecast's year of history. The generic
+ * spike detector keeps its own shorter baseline and recent-day window. */
+const SPIKE_HISTORY_DAYS = 365;
 
 /**
  * Unexplained demand spikes, as questions for the owner.
@@ -248,36 +254,40 @@ const SPIKE_HISTORY_DAYS = 90;
  * day as a promotion is the actual fix, because promo days are then left out of
  * the run rate.
  *
- * The detector already knew how to find these (`detectSpikes`); nothing called
- * it, so the shop was still relying on the owner remembering. Days already
- * inside a declared promo are skipped by the detector, and days the owner has
- * answered "one-off" are skipped here.
+ * Combines the original bulk-day detector with the broader promo-spike prompt.
+ * Product-scoped promotions explain only their own products; dismissals are
+ * persisted per product/day. Detection is independent of optional damping.
  */
 export async function getSpikeSuggestions(
   tenantId: string,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options: { productId?: string; limit?: number } = {}
 ): Promise<SpikeSuggestion[]> {
   const db = prismaForTenant(tenantId);
-  const since = new Date(now.getTime() - SPIKE_HISTORY_DAYS * DAY_MS);
+  const tenant = await db.tenant.findUnique({ where: { id: tenantId }, select: { timezone: true } });
+  // SalesHistory dates are tenant-local day labels encoded at UTC midnight,
+  // not instants. Nairobi's new trading day starts before its marker in UTC.
+  const todayKey = tenantDayKey(tenant?.timezone ?? "Africa/Nairobi", now);
+  const today = dayMarker(todayKey);
+  const since = new Date(today.getTime() - SPIKE_HISTORY_DAYS * DAY_MS);
 
   const [salesRows, promoRows, dismissedRows, productRows] = await Promise.all([
     db.salesHistory.findMany({
-      where: { date: { gte: since, lte: now } },
+      where: { date: { gte: since, lte: today }, ...(options.productId ? { productId: options.productId } : {}) },
       select: { productId: true, date: true, quantity: true, revenueKes: true },
     }),
     db.promo.findMany({
       where: { deletedAt: null },
-      select: { startDate: true, endDate: true },
+      select: { startDate: true, endDate: true, scope: true, scopeValue: true },
     }),
     db.ignoreRule.findMany({ where: { kind: SPIKE_IGNORE_KIND }, select: { value: true } }),
     db.product.findMany({
-      where: BUYABLE_PRODUCT_WHERE,
-      select: { id: true, sku: true, title: true },
+      where: options.productId ? { id: options.productId } : BUYABLE_PRODUCT_WHERE,
+      select: { id: true, sku: true, title: true, vendor: true, productType: true },
     }),
   ]);
 
   const dismissed = new Set(dismissedRows.map((r) => r.value));
-  const promoWindows = promoRows.map((p) => ({ start: p.startDate, end: p.endDate }));
   const productById = new Map(productRows.map((p) => [p.id, p]));
 
   const historyByProduct = new Map<string, { date: Date; quantity: number; revenueKes: number }[]>();
@@ -291,23 +301,26 @@ export async function getSpikeSuggestions(
   const out: SpikeSuggestion[] = [];
   for (const [productId, history] of historyByProduct) {
     const product = productById.get(productId)!;
-    for (const spike of detectSpikes(history, promoWindows, now)) {
-      const dayKey = dayKeyOf(spike.date);
+    for (const spike of salesReviewDays({ history, promos: promoRows, product, asOf: today })) {
+      const dayKey = spike.dayKey;
       if (dismissed.has(spikeKey(productId, dayKey))) continue;
       out.push({
         productId,
         sku: product.sku,
         title: product.title,
         dayKey,
-        dayLabel: dayFormat.format(spike.date),
+        dayLabel: dayFormat.format(new Date(`${dayKey}T00:00:00Z`)),
         quantity: Math.round(spike.quantity),
         baseline: Math.round(spike.baseline * 10) / 10,
         multiple: spike.multiple,
+        kind: spike.kind,
+        threshold: spike.threshold,
+        inProgress: dayKey === todayKey,
       });
     }
   }
 
-  // Biggest surprise first, then most recent — the ones worth a moment's thought.
-  out.sort((a, b) => b.multiple - a.multiple || b.dayKey.localeCompare(a.dayKey));
-  return out.slice(0, MAX_SPIKE_SUGGESTIONS);
+  // Recent evidence first; larger surprises break same-day ties.
+  out.sort((a, b) => b.dayKey.localeCompare(a.dayKey) || b.multiple - a.multiple);
+  return out.slice(0, Math.max(1, Math.min(options.limit ?? MAX_SPIKE_SUGGESTIONS, 100)));
 }

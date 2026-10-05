@@ -104,6 +104,7 @@ export function guardForecastResult(
   let sold30 = 0;
   let earliest: Date | null = null;
   for (const p of history) {
+    if (p.date >= today) continue;
     if (p.date >= since30) sold30 += p.quantity;
     if (earliest === null || p.date < earliest) earliest = p.date;
   }

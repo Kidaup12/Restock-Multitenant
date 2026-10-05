@@ -12,6 +12,9 @@ export type SalesPoint = {
   channel?: string;
 };
 
+/** Owner-selected baseline aggregation; mean preserves the existing engine. */
+export type BaselineMethod = "mean" | "median";
+
 /** Recency weighting used by every windowed rate: recent sales dominate, the
  *  trailing year still anchors slow movers. */
 const RATE_WINDOWS: ReadonlyArray<{ days: number; weight: number }> = [
@@ -265,6 +268,96 @@ export function weightedDailyRateCensored(
     weighted += (units / effectiveDays) * w.weight;
   }
   return weighted;
+}
+
+export const MEDIAN_BUCKET_DAYS = 7;
+const MEDIAN_WINDOWS = [
+  { days: 56, weight: 0.5 },
+  { days: 182, weight: 0.3 },
+  { days: 364, weight: 0.2 },
+] as const;
+
+/** Weekly-median baseline using completed days and actual eligible exposure.
+ * Empty-stock weeks are omitted, rather than medianed as zero then uplifted.
+ * At least four weeks with >=3 eligible days each are needed for a median.
+ * With less evidence, or a zero median despite real intermittent sales, use
+ * the spike-damped exposure mean for that window. This deliberately avoids
+ * interpreting intermittent demand or a long stockout as a dead product.
+ * A sale-positive stockout day counts as one exposed day: the snapshot cannot
+ * establish a full-day outage when transactions prove some availability.
+ */
+export function weightedDailyRateMedianCensored(
+  history: SalesPoint[],
+  stockoutDates: Date[],
+  asOf: Date = new Date(),
+  excludedDates?: Date[],
+  snapshotsSince?: Date
+): number {
+  const end = dayKeyOf(asOf);
+  const valid = history.filter((p) => p.date < asOf && dayKeyOf(p.date) < end);
+  if (!valid.length) return 0;
+  let first = end;
+  for (const point of valid) first = Math.min(first, dayKeyOf(point.date));
+  const excluded = new Set((excludedDates ?? []).map(dayKeyOf));
+  const stockouts = new Set(stockoutDates.map(dayKeyOf));
+  let result = 0;
+  for (const window of MEDIAN_WINDOWS) {
+    const start = Math.max(first, end - window.days * 86400000);
+    const since = new Date(start);
+    const inWindow = valid.filter((p) => dayKeyOf(p.date) >= start);
+    const byDay = new Map<number, number>();
+    for (const p of inWindow) {
+      const key = dayKeyOf(p.date);
+      byDay.set(key, (byDay.get(key) ?? 0) + p.quantity);
+    }
+    const blocked = new Set([...excluded, ...stockouts]);
+    // Preserve the mean engine's >=0.5/day internal-gap inference only where
+    // snapshot evidence does not reach. Never infer over proven coverage.
+    const inferenceEnd = snapshotsSince ? Math.min(end, dayKeyOf(snapshotsSince)) : stockoutDates.length ? start : end;
+    const unknown = inWindow.filter((p) => dayKeyOf(p.date) < inferenceEnd)
+      .sort((a, b) => +a.date - +b.date);
+    const unknownDays = (inferenceEnd - start) / 86400000;
+    if (unknown.length >= 2 && unknownDays > 0 && unknown.reduce((s, p) => s + p.quantity, 0) / unknownDays >= 0.5) {
+      for (let i = 1; i < unknown.length; i++) {
+        const left = dayKeyOf(unknown[i - 1]!.date);
+        const right = dayKeyOf(unknown[i]!.date);
+        if ((right - left) / 86400000 <= 7) continue;
+        for (let key = left + 86400000; key < right; key += 86400000) blocked.add(key);
+      }
+    }
+    // Promo/closure exclusion still wins over a positive sale on that day.
+    for (const [key, units] of byDay) if (units > 0 && !excluded.has(key)) blocked.delete(key);
+    const weeks: number[] = [];
+    let exposure = 0;
+    for (let bucketEnd = end; bucketEnd > start; bucketEnd -= MEDIAN_BUCKET_DAYS * 86400000) {
+      const bucketStart = Math.max(start, bucketEnd - MEDIAN_BUCKET_DAYS * 86400000);
+      let days = 0;
+      let units = 0;
+      for (let key = bucketStart; key < bucketEnd; key += 86400000) {
+        if (blocked.has(key)) continue;
+        days++;
+        units += byDay.get(key) ?? 0;
+      }
+      exposure += days;
+      if (days >= 3) weeks.push(Math.max(0, units / days));
+    }
+    const { units, saleDays } = dampedWindow(valid, since, new Date(end), excluded);
+    const span = Math.max(1, (end - start) / 86400000);
+    const mean = Math.max(0, units) / effectiveWindowDays(span, span - exposure, { inStockDays: exposure, saleDays });
+    const typical = median(weeks);
+    const rate = weeks.length >= 4 && (typical > 0 || units <= 0) ? typical : mean;
+    result += rate * window.weight;
+  }
+  return result;
+}
+
+/** No-snapshot median variant, retaining conservative internal-gap inference. */
+export function weightedDailyRateMedian(
+  history: SalesPoint[],
+  asOf: Date = new Date(),
+  excludedDates?: Date[]
+): number {
+  return weightedDailyRateMedianCensored(history, [], asOf, excludedDates);
 }
 
 /** True if this product has at least one significant stockout gap in the past

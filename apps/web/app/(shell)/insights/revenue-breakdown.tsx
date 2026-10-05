@@ -1,4 +1,5 @@
 import { getRevenueBreakdown, type RevenueGroup } from "@/lib/data/insights";
+import type { ReportRange } from "@/lib/data/report-range";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -71,13 +72,15 @@ export async function RevenueBreakdownSection({
   tenantId,
   currency,
   days,
+  period,
 }: {
   tenantId: string;
   currency: string;
   /** The period the report is set to — the revenue window. */
   days: number;
+  period?: ReportRange;
 }) {
-  const { byCategory, byBrand, windowDays } = await getRevenueBreakdown(tenantId, { days });
+  const { byCategory, byBrand, windowDays } = await getRevenueBreakdown(tenantId, { days, period });
 
   const hasData = byCategory.length > 0 || byBrand.length > 0;
 
@@ -95,12 +98,12 @@ export async function RevenueBreakdownSection({
     <Card data-tour="insights-revenue-breakdown">
       <CardHeader
         title={`Where the money comes from · ${windowDays} days`}
-        subtitle="Revenue by category and by brand, ranked"
+        subtitle={`Revenue by category and by brand, ranked${period ? ` · ${period.label}` : ""}`}
         action={
           hasData ? (
             <ExportPdfButton
               title={`Where the money comes from · ${windowDays} days`}
-              subtitle="Revenue by category and by brand"
+              subtitle={`Revenue by category and by brand${period ? ` · ${period.label}` : ""}`}
               columns={pdf.columns}
               rows={pdf.rows}
             />

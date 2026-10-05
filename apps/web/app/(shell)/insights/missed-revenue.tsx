@@ -1,4 +1,5 @@
 import { getMissedRevenue } from "@/lib/data/insights";
+import type { ReportRange } from "@/lib/data/report-range";
 import type { AbcKey } from "@/lib/data/abc-lens";
 
 import { AbcBadge } from "@/components/ui/abc-badge";
@@ -42,6 +43,7 @@ export async function MissedRevenueSection({
   currency,
   weeks,
   abc,
+  period,
 }: {
   tenantId: string;
   currency: string;
@@ -49,9 +51,10 @@ export async function MissedRevenueSection({
   weeks: number;
   /** The A/B/C lens from the URL — filters the whole section, like shelf health. */
   abc: AbcKey;
+  period?: ReportRange;
 }) {
   const { totalMissedKes, totalEmptyProductDays, trend, byClass, culprits, trackingSince } =
-    await getMissedRevenue(tenantId, { weeks, abc });
+    await getMissedRevenue(tenantId, { weeks, abc, period });
 
   // No loss in the window (or nothing tracked yet) → the good news, said plainly.
   // trackingSince is null when the nightly check has never run; a friendlier line

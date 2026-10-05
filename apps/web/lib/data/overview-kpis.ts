@@ -2,6 +2,7 @@ import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { getCatalogueMetrics } from "@/lib/metrics";
 import { deltaPercent } from "@/lib/data/delta-percent";
 import { getTodayMetrics } from "./today";
+import type { ReportRange } from "./report-range";
 
 /**
  * The Reports Overview KPI row — the four headline figures that sit above the
@@ -70,12 +71,15 @@ export type OverviewKpis = {
  */
 export async function getOverviewKpis(
   tenantId: string,
-  { canViewCosts }: { canViewCosts: boolean }
+  { canViewCosts, period }: { canViewCosts: boolean; period?: ReportRange }
 ): Promise<OverviewKpis> {
   const db = prismaForTenant(tenantId);
 
   const [today, metrics, products] = await Promise.all([
-    getTodayMetrics(tenantId, { canViewCosts }),
+    period ? Promise.all([
+      db.salesHistory.aggregate({ where: { date: { gte: period.start, lt: period.endExclusive } }, _sum: { revenueKes: true } }),
+      db.salesHistory.aggregate({ where: { date: { gte: new Date(+period.start - period.days * 86400000), lt: period.start } }, _sum: { revenueKes: true } }),
+    ]).then(([selected, prior]) => ({ revenue30dKes: selected._sum.revenueKes ?? 0, revenuePrev30dKes: prior._sum.revenueKes ?? 0 })) : getTodayMetrics(tenantId, { canViewCosts }),
     getCatalogueMetrics(tenantId),
     db.product.findMany({
       where: { ...BUYABLE_PRODUCT_WHERE },

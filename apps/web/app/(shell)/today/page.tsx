@@ -23,6 +23,7 @@ import { CostGapBar } from "./setup-gap-bars";
 import { ProductBoard } from "./product-board";
 import { RedistributionCard } from "./redistribution-card";
 import { BuyThisWeek } from "./buy-this-week";
+import { SalesReviewSection } from "@/components/sales-review-section";
 
 export const metadata: Metadata = {
   title: "Today",
@@ -76,6 +77,9 @@ export default async function TodayPage() {
         actions={<AdvancedMenu />}
       />
       <RealtimeRefresh />
+      <Suspense fallback={null}>
+        <SalesReviewSection tenantId={tenantId} canManage={canManageShop} />
+      </Suspense>
 
       <GuideBox id="today" scope={tenantId} title="This is your daily home base">
         The four figures at the top are what needs attention right now — what is

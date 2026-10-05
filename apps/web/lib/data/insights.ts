@@ -1,10 +1,12 @@
+import { observedInStockDays } from "./stock-observation";
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { AS_SHOWN_TAG } from "@wezesha/forecast-run";
 import { overstockExcess } from "@wezesha/forecast";
 import { matchesAbc, type AbcKey } from "@/lib/data/abc-lens";
 import { getCatalogueMetrics } from "@/lib/metrics";
-import { DEFAULT_DEAD_STOCK_DAYS, getTodayMetrics } from "./today";
+import { DEFAULT_DEAD_STOCK_DAYS, getTodayMetrics, pileFor } from "./today";
 import { getStockCatalogue } from "./stock";
+import type { ReportRange } from "./report-range";
 
 /**
  * Insights-screen queries. Server-only: every function takes an explicit tenantId
@@ -163,14 +165,15 @@ export async function getInsightsOverview(
     getCatalogueMetrics(tenantId),
     db.product.findMany({
       where: { ...BUYABLE_PRODUCT_WHERE },
-      select: { id: true, sku: true, title: true, vendor: true, priceKes: true, costKes: true, currentStock: true, abcCategory: true },
+      select: { id: true, sku: true, title: true, vendor: true, priceKes: true, costKes: true, currentStock: true, abcCategory: true, shopifyCreatedAt: true, receivedAt: true },
     }),
-    db.salesHistory.groupBy({ by: ["productId"], _max: { date: true } }),
+    db.salesHistory.groupBy({ by: ["productId"], where: { quantity: { gt: 0 } }, _max: { date: true } }),
   ]);
 
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date]));
   const vendorById = new Map(products.map((p) => [p.id, p.vendor]));
   const deadCutoff = Date.now() - today.deadStock.windowDays * 86_400_000;
+  const observed = await observedInStockDays(tenantId, new Date(deadCutoff));
 
   const shelfRows: EmptyShelfRow[] = [];
   const cashRows: CashAsleepRow[] = [];
@@ -198,7 +201,8 @@ export async function getInsightsOverview(
     }
 
     const last = lastSale.get(p.id);
-    const idle = !last || last.getTime() < deadCutoff;
+    const idle = pileFor({ onHandUnits: onHand, lastSaleAt: last ?? null,
+      firstSeenAt: p.shopifyCreatedAt ?? p.receivedAt, inStockDays: observed.get(p.id) }, deadCutoff) === "dead";
     const overBought = !idle && rate > NO_RATE_EPSILON && (m?.coverDays ?? 0) > OVERSTOCK_COVER_DAYS;
     if (!idle && !overBought) continue;
 
@@ -444,22 +448,23 @@ export type PlanAdherence = {
  */
 export async function getPlanAdherence(
   tenantId: string,
-  { windowDays = 60 }: { windowDays?: number } = {}
+  { windowDays = 60, period }: { windowDays?: number; period?: ReportRange } = {}
 ): Promise<PlanAdherence> {
   const db = prismaForTenant(tenantId);
-  const since = new Date(Date.now() - windowDays * 86_400_000);
+  const since = period?.startInstant ?? new Date(Date.now() - windowDays * 86_400_000);
+  const until = period?.endInstant ?? new Date();
 
   const [asks, orders, poLines] = await Promise.all([
     db.forecastRecommendation.findMany({
-      where: { runDate: { gte: since }, recommendedQty: { gt: 0 } },
+      where: { runDate: { gte: since, lt: until }, recommendedQty: { gt: 0 } },
       select: { productId: true, runDate: true },
     }),
     db.order.findMany({
-      where: { createdAt: { gte: since }, status: { in: ["ordered", "completed"] } },
+      where: { createdAt: { gte: since, lt: until }, status: { in: ["ordered", "completed"] } },
       select: { productId: true, createdAt: true },
     }),
     db.purchaseOrderLine.findMany({
-      where: { recommendedQty: { not: null }, purchaseOrder: { createdAt: { gte: since } } },
+      where: { recommendedQty: { not: null }, purchaseOrder: { createdAt: { gte: since, lt: until } } },
       select: { productId: true, quantity: true, recommendedQty: true },
     }),
   ]);
@@ -495,7 +500,7 @@ export async function getPlanAdherence(
   }
 
   return {
-    windowDays,
+    windowDays: period?.days ?? windowDays,
     askedProducts: firstAsk.size,
     actedProducts: acted.size,
     linesCompared: boughtLess + boughtAsAsked + boughtMore,
@@ -549,10 +554,11 @@ function weekStartOf(d: Date): Date {
  */
 export async function getStockoutTrend(
   tenantId: string,
-  { weeks = 8, abc = "all" }: { weeks?: number; abc?: AbcKey } = {}
+  { weeks = 8, abc = "all", period }: { weeks?: number; abc?: AbcKey; period?: ReportRange } = {}
 ): Promise<StockoutTrend> {
   const db = prismaForTenant(tenantId);
-  const since = weekStartOf(new Date(Date.now() - weeks * 7 * 86_400_000));
+  const since = period?.start ?? weekStartOf(new Date(Date.now() - weeks * 7 * 86_400_000));
+  const until = period?.endExclusive ?? new Date();
 
   // The class lens belongs HERE, not in each caller. The week-by-week table
   // reads this rate rather than computing its own, so filtering downstream
@@ -560,7 +566,7 @@ export async function getStockoutTrend(
   // codebase has shipped more than once.
   const [rows, earliest, classified] = await Promise.all([
     db.inventorySnapshot.findMany({
-      where: { date: { gte: since } },
+      where: { date: { gte: since, lt: until } },
       select: { date: true, onHand: true, productId: true },
     }),
     db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
@@ -797,12 +803,12 @@ const CULPRITS_PER_WEEK = 5;
  */
 export async function getPeriodMetrics(
   tenantId: string,
-  { weeks = 8, abc = "all" }: { weeks?: number; abc?: AbcKey } = {}
+  { weeks = 8, abc = "all", period }: { weeks?: number; abc?: AbcKey; period?: ReportRange } = {}
 ): Promise<PeriodMetrics> {
   const db = prismaForTenant(tenantId);
   // The rate comes from the trend loader with the SAME lens applied, so the
   // table and the chart cannot disagree about a filtered week either.
-  const trend = await getStockoutTrend(tenantId, { weeks, abc });
+  const trend = await getStockoutTrend(tenantId, { weeks, abc, period });
   const config = await db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } });
   const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
 
@@ -816,11 +822,11 @@ export async function getPeriodMetrics(
 
   const [snapshots, salesRows, classified] = await Promise.all([
     db.inventorySnapshot.findMany({
-      where: { date: { gte: earliest } },
+      where: { date: { gte: period?.start ?? earliest, lt: period?.endExclusive ?? new Date() } },
       select: { date: true, productId: true, onHand: true },
     }),
     db.salesHistory.findMany({
-      where: { date: { gte: earliest } },
+      where: { date: { gte: period?.start ?? earliest, lt: period?.endExclusive ?? new Date() } },
       select: { date: true, quantity: true, productId: true },
     }),
     abc === "all"
@@ -1099,14 +1105,14 @@ export type RevenueBreakdown = { byCategory: RevenueGroup[]; byBrand: RevenueGro
 
 export async function getRevenueBreakdown(
   tenantId: string,
-  { days = 30, limit = 8 }: { days?: number; limit?: number } = {}
+  { days = 30, limit = 8, period }: { days?: number; limit?: number; period?: ReportRange } = {}
 ): Promise<RevenueBreakdown> {
   const db = prismaForTenant(tenantId);
-  const since = new Date(Date.now() - days * 86_400_000);
+  const since = period?.start ?? new Date(Date.now() - days * 86_400_000);
   const [rev, products] = await Promise.all([
     db.salesHistory.groupBy({
       by: ["productId"],
-      where: { date: { gte: since } },
+      where: { date: { gte: since, lt: period?.endExclusive ?? new Date() } },
       _sum: { revenueKes: true },
     }),
     db.product.findMany({
@@ -1138,7 +1144,7 @@ export async function getRevenueBreakdown(
       .sort((a, b) => b.revenueKes - a.revenueKes || a.name.localeCompare(b.name))
       .slice(0, limit);
 
-  return { byCategory: rank(catAgg), byBrand: rank(brandAgg), windowDays: days };
+  return { byCategory: rank(catAgg), byBrand: rank(brandAgg), windowDays: period?.days ?? days };
 }
 
 // ── On order & in transit (report #6) ─────────────────────────────────────────
@@ -1256,10 +1262,10 @@ const MISSED_CULPRITS = 8;
 
 export async function getMissedRevenue(
   tenantId: string,
-  { weeks = 12, abc = "all" }: { weeks?: number; abc?: AbcKey } = {}
+  { weeks = 12, abc = "all", period }: { weeks?: number; abc?: AbcKey; period?: ReportRange } = {}
 ): Promise<MissedRevenue> {
   const db = prismaForTenant(tenantId);
-  const trend = await getStockoutTrend(tenantId, { weeks, abc });
+  const trend = await getStockoutTrend(tenantId, { weeks, abc, period });
   if (trend.weeks.length === 0) {
     return {
       totalMissedKes: 0,
@@ -1278,7 +1284,7 @@ export async function getMissedRevenue(
   const [metrics, snapshots, products] = await Promise.all([
     getCatalogueMetrics(tenantId),
     db.inventorySnapshot.findMany({
-      where: { date: { gte: earliest }, onHand: { lte: 0 } },
+      where: { date: { gte: period?.start ?? earliest, lt: period?.endExclusive ?? new Date() }, onHand: { lte: 0 } },
       select: { date: true, productId: true },
     }),
     db.product.findMany({
@@ -1391,22 +1397,23 @@ export type LeakageMatrix = {
 
 export async function getLeakageMatrix(
   tenantId: string,
-  { weeks = 12, canViewCosts }: { weeks?: number; canViewCosts: boolean }
+  { weeks = 12, canViewCosts, period }: { weeks?: number; canViewCosts: boolean; period?: ReportRange }
 ): Promise<LeakageMatrix> {
   const db = prismaForTenant(tenantId);
   const [trend, missedByProduct, metrics, products, lastSales, config] = await Promise.all([
-    getStockoutTrend(tenantId, { weeks }),
-    missedByProductOverWeeks(tenantId, weeks),
+    getStockoutTrend(tenantId, { weeks, period }),
+    missedByProductOverWeeks(tenantId, weeks, period),
     getCatalogueMetrics(tenantId),
     db.product.findMany({
       where: { ...BUYABLE_PRODUCT_WHERE },
-      select: { id: true, customCategory: true, productType: true, currentStock: true, abcCategory: true },
+      select: { id: true, customCategory: true, productType: true, currentStock: true, abcCategory: true, shopifyCreatedAt: true, receivedAt: true },
     }),
-    db.salesHistory.groupBy({ by: ["productId"], _max: { date: true } }),
+    db.salesHistory.groupBy({ by: ["productId"], where: { quantity: { gt: 0 } }, _max: { date: true } }),
     db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } }),
   ]);
   const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
   const deadCutoff = Date.now() - windowDays * 86_400_000;
+  const observed = await observedInStockDays(tenantId, new Date(deadCutoff));
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date?.getTime() ?? null]));
 
   type Acc = {
@@ -1426,7 +1433,8 @@ export async function getLeakageMatrix(
     const sold = lastSale.get(p.id) ?? null;
     if (onHand <= 0) {
       a.stockoutSkus += 1;
-    } else if (sold == null || sold < deadCutoff) {
+    } else if (pileFor({ onHandUnits: onHand, lastSaleAt: sold == null ? null : new Date(sold),
+      firstSeenAt: p.shopifyCreatedAt ?? p.receivedAt, inStockDays: observed.get(p.id) }, deadCutoff) === "dead") {
       // Dead stock = held with no sale inside the window. Deliberately NOT
       // folding in overstock (over-bought but still selling) — that is a
       // different condition, and counting it here would inflate "dead-stock %"
@@ -1471,9 +1479,9 @@ export async function getLeakageMatrix(
  * covering EVERY product (not just top culprits), keyed off the same weekly gate
  * and run rate as getStockoutTrend / getCatalogueMetrics.
  */
-async function missedByProductOverWeeks(tenantId: string, weeks: number): Promise<Map<string, number>> {
+async function missedByProductOverWeeks(tenantId: string, weeks: number, period?: ReportRange): Promise<Map<string, number>> {
   const db = prismaForTenant(tenantId);
-  const trend = await getStockoutTrend(tenantId, { weeks });
+  const trend = await getStockoutTrend(tenantId, { weeks, period });
   const out = new Map<string, number>();
   if (trend.weeks.length === 0) return out;
   const weekStarts = trend.weeks.map((w) => w.weekStart);
@@ -1483,7 +1491,7 @@ async function missedByProductOverWeeks(tenantId: string, weeks: number): Promis
   const [metrics, snapshots, products] = await Promise.all([
     getCatalogueMetrics(tenantId),
     db.inventorySnapshot.findMany({
-      where: { date: { gte: earliest }, onHand: { lte: 0 } },
+      where: { date: { gte: period?.start ?? earliest, lt: period?.endExclusive ?? new Date() }, onHand: { lte: 0 } },
       select: { date: true, productId: true },
     }),
     db.product.findMany({ where: { ...BUYABLE_PRODUCT_WHERE }, select: { id: true, priceKes: true } }),

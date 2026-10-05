@@ -1,3 +1,5 @@
+import { observedInStockDays } from "./stock-observation";
+import { isDeadStock } from "@/lib/inventory/dead-stock";
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { byBuyListPriority, getBuyList } from "@/lib/data/plan";
 import { getStockCatalogue, type CatalogueRow } from "@/lib/data/stock";
@@ -41,15 +43,16 @@ export const DEFAULT_DEAD_STOCK_DAYS = 90;
 export type ProductPile = "stockout" | "dead" | "healthy";
 
 export function pileFor(
-  product: { onHandUnits: number; lastSaleAt: Date | null },
-  deadCutoffMs: number
+  product: { onHandUnits: number; lastSaleAt: Date | null; inStockDays?: number; firstSeenAt?: Date | null },
+  deadCutoffMs: number,
+  asOf: Date = new Date()
 ): ProductPile {
   // An empty shelf cannot also be dead stock — it is the more urgent fact, and
   // counting it twice would make the piles sum past the catalogue.
   if (product.onHandUnits <= 0) return "stockout";
-  const last = product.lastSaleAt;
-  if (last == null || last.getTime() < deadCutoffMs) return "dead";
-  return "healthy";
+  return isDeadStock({ currentStock: product.onHandUnits, lastSaleAt: product.lastSaleAt,
+    firstSeenAt: product.firstSeenAt, inStockDays: product.inStockDays,
+    cutoff: new Date(deadCutoffMs), asOf }) ? "dead" : "healthy";
 }
 
 export type TodayMetrics = {
@@ -81,14 +84,15 @@ export async function getTodayMetrics(
       _sum: { revenueKes: true },
       where: { date: { gte: since60, lt: since30 } },
     }),
-    db.product.findMany({ where: { ...BUYABLE_PRODUCT_WHERE }, select: { id: true, costKes: true, currentStock: true } }),
-    db.salesHistory.groupBy({ by: ["productId"], _max: { date: true } }),
+    db.product.findMany({ where: { ...BUYABLE_PRODUCT_WHERE }, select: { id: true, costKes: true, currentStock: true, shopifyCreatedAt: true, receivedAt: true } }),
+    db.salesHistory.groupBy({ by: ["productId"], where: { quantity: { gt: 0 } }, _max: { date: true } }),
     db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } }),
   ]);
 
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date]));
   const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
   const deadCutoff = Date.now() - windowDays * DAY_MS;
+  const observed = await observedInStockDays(tenantId, new Date(deadCutoff));
 
   let stockedOut = 0;
   let deadSkus = 0;
@@ -96,7 +100,7 @@ export async function getTodayMetrics(
   for (const p of products) {
     // Sellable on-hand — the single source.
     const pile = pileFor(
-      { onHandUnits: p.currentStock, lastSaleAt: lastSale.get(p.id) ?? null },
+      { onHandUnits: p.currentStock, lastSaleAt: lastSale.get(p.id) ?? null, inStockDays: observed.get(p.id), firstSeenAt: p.shopifyCreatedAt ?? p.receivedAt },
       deadCutoff
     );
     if (pile === "stockout") stockedOut += 1;
@@ -266,25 +270,28 @@ export async function getDashboardTable(
   { canViewCosts, limit = DASHBOARD_ROW_CAP }: { canViewCosts: boolean; limit?: number }
 ): Promise<DashboardTable> {
   const db = prismaForTenant(tenantId);
-  const [catalogue, lastSales, config, buyList] = await Promise.all([
+  const [catalogue, lastSales, config, buyList, ages] = await Promise.all([
     getStockCatalogue(tenantId, { canViewCosts }),
-    db.salesHistory.groupBy({ by: ["productId"], _max: { date: true } }),
+    db.salesHistory.groupBy({ by: ["productId"], where: { quantity: { gt: 0 } }, _max: { date: true } }),
     db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } }),
     getBuyList(tenantId, { canViewCosts }),
+    db.product.findMany({ where: { ...BUYABLE_PRODUCT_WHERE }, select: { id: true, shopifyCreatedAt: true, receivedAt: true } }),
   ]);
 
   // Same scope as the tiles: what the shop still sells.
   const rows = catalogue.filter((r) => r.buyable);
+  const firstSeen = new Map(ages.map(p => [p.id, p.shopifyCreatedAt ?? p.receivedAt]));
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date]));
   const deadWindowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
   const deadCutoff = Date.now() - deadWindowDays * DAY_MS;
+  const observed = await observedInStockDays(tenantId, new Date(deadCutoff));
 
   const stockout: CatalogueRow[] = [];
   const dead: CatalogueRow[] = [];
   let healthy = 0;
   for (const row of rows) {
     const pile = pileFor(
-      { onHandUnits: row.onHandUnits, lastSaleAt: lastSale.get(row.productId) ?? null },
+      { onHandUnits: row.onHandUnits, lastSaleAt: lastSale.get(row.productId) ?? null, inStockDays: observed.get(row.productId), firstSeenAt: firstSeen.get(row.productId) },
       deadCutoff
     );
     if (pile === "stockout") stockout.push(row);

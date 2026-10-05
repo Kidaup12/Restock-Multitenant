@@ -7,6 +7,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import type { StrategyClass } from "@/lib/ordering/strategy";
 import { StrategyForm } from "./strategy-form";
+import { ForecastSettingsForm } from "./forecast-settings-form";
+import { parseForecastSettings } from "./forecast-settings";
 
 export const metadata: Metadata = {
   title: "Ordering strategy",
@@ -47,7 +49,7 @@ export default async function OrderingStrategyPage() {
 
   const config = await prismaForTenant(membership.tenantId).tenantConfig.findUnique({
     where: { tenantId: membership.tenantId },
-    select: { methodA: true, methodB: true, methodC: true },
+    select: { methodA: true, methodB: true, methodC: true, baselineMethod: true, abcWindowDays: true, bigBuyerDamping: true },
   });
 
   // An unset column means the engine's default is in force, so the form opens on
@@ -64,6 +66,10 @@ export default async function OrderingStrategyPage() {
         breadcrumbs={[{ label: "Settings", href: "/settings" }, { label: "Ordering strategy" }]}
         title="How Wezesha sizes your reorders"
         description="Choose a style per group. We suggest keeping your best sellers well stocked and leaning on cash for the slow tail — but it's your call. Changes apply on the next forecast run."
+      />
+      <ForecastSettingsForm
+        initial={parseForecastSettings({ baselineMethod: config?.baselineMethod ?? "mean", abcWindowDays: config?.abcWindowDays ?? 90, bigBuyerDamping: config?.bigBuyerDamping ?? false }) ?? { baselineMethod: "mean", abcWindowDays: 90, bigBuyerDamping: false }}
+        canManage={hasPermission(membership, "manage_settings")}
       />
       <StrategyForm
         initial={initial}

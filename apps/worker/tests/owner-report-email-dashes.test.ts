@@ -32,6 +32,11 @@ const report = (trend: TrendRow[]): OwnerReport => ({
   trend,
   needsAttention: [],
   restock: [],
+  bestsellers: { total: 0, healthy: 0, low: 0, out: 0 },
+  topSellers: [],
+  oos: [], criticals: [], upcoming: [], others: [],
+  oosCount: 0, criticalsCount: 0, upcomingCount: 0, othersCount: 0,
+  oosBudgetKes: 0, criticalsBudgetKes: 0, upcomingBudgetKes: 0, othersBudgetKes: 0,
   restockBudgetKes: 7_000,
   restockCount: 0,
   transfers: [],
@@ -48,11 +53,11 @@ describe("the weekly email, when there was nothing to measure", () => {
   });
 
   it("prints a dash for missed revenue, not a currency and a zero", () => {
-    // Every other money on this fixture is deliberately non-zero, so a
-    // "KES 0" anywhere in the output can only be the missed revenue.
+    // Empty restock buckets legitimately show zero; the trend's unmeasured
+    // missed-revenue cell must still be a dash in both formats.
     const { html, text } = renderReportEmail(report([row()]));
-    expect(html).not.toContain("KES 0");
-    expect(text).not.toContain("KES 0");
+    expect(html).toMatch(/<td[^>]*>-<\/td>/);
+    expect(text.split("\n").find(line => line.startsWith("Sep 7"))?.trimEnd()).toMatch(/-$/);
   });
 
   it("still prints real figures when there were real figures", () => {

@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import type { Metadata } from "next";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -59,12 +60,12 @@ export default async function InventoryPage({
         // dismissed for anyone past their first week — and a column you do not
         // know is clickable is a column that never gets clicked.
         description="Where your stock sits, branch by branch. Click any column heading to sort by it."
-        actions={<RefreshButton />}
+        actions={<><Link href="/inventory/position" className="rounded border border-line px-3 py-2 text-sm">Inventory position</Link><RefreshButton /></>}
       />
 
       <GuideBox id="inventory" scope={membership.tenantId} title="Where your stock actually sits">
-        One line per product per branch. Units, value and en-route stock are that
-        branch&rsquo;s own. Cover is not: it is the whole shop&rsquo;s, because sales are
+        One line per product per branch. Units and value are that
+        branch&rsquo;s own. Cover and en-route stock are the whole shop&rsquo;s. Branch cover is unavailable because sales are
         not yet attributed to the branch that made them &mdash; the column and the
         export both say &ldquo;shop&rdquo; for that reason. Click any column heading to sort
         by it.

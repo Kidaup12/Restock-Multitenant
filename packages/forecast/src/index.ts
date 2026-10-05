@@ -1,8 +1,13 @@
 // Demand rates + inventory primitives
+export { applyMoq } from "./order-quantity";
+export { debulkSeries, hasBulkBuy, BULK_MULT, BULK_ABS_FLOOR, BULK_CAP_MULT, type BulkCap, type DebulkOptions, type DebulkResult } from "./big-buyer";
 export {
   weightedDailyRate,
   weightedDailyRateAdjusted,
   weightedDailyRateCensored,
+  weightedDailyRateMedian,
+  weightedDailyRateMedianCensored,
+  MEDIAN_BUCKET_DAYS,
   dampedWindow,
   median,
   SPIKE_CAP_MULTIPLE,
@@ -19,6 +24,7 @@ export {
   zForServiceLevel,
   SERVICE_Z_DEFAULTS,
   type SalesPoint,
+  type BaselineMethod,
   type Urgency,
 } from "./baseline";
 
@@ -119,8 +125,11 @@ export {
 // ABC classification
 export {
   assignAbc,
+  saleSpanDays,
+  MIN_SALE_SPAN_DAYS_FOR_A,
   dailySalesValue,
   trailingRevenue,
+  resolveAbcWindowDays,
   MIN_RUN_RATE_FOR_A,
   MIN_RUN_RATE_FOR_B,
   ABC_WINDOW_DAYS,
@@ -219,3 +228,5 @@ export {
   SEASONAL_MIN,
   type MonthlyExpectation,
 } from "./seasonality";
+
+export { pickBestRun } from "./latest-run";

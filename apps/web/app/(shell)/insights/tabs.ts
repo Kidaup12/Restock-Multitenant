@@ -56,11 +56,13 @@ export function reportTabLabel(t: ReportTab): string {
  * ride along so switching face does not silently reset the period or the ABC
  * filter the reader had chosen.
  */
-export function reportTabHref(t: ReportTab, opts?: { range?: string; class?: string }): string {
+export function reportTabHref(t: ReportTab, opts?: { range?: string; class?: string; from?: string; to?: string }): string {
   const query = new URLSearchParams();
   if (t !== DEFAULT_TAB) query.set("tab", t);
   if (opts?.range) query.set("range", opts.range);
   if (opts?.class) query.set("class", opts.class);
+  if (opts?.from) query.set("from", opts.from);
+  if (opts?.to) query.set("to", opts.to);
   const suffix = query.toString();
   return suffix ? `/insights?${suffix}` : "/insights";
 }

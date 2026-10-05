@@ -30,6 +30,7 @@ it embeds a password).
 | `AUDIT_ENGINE_TOKEN` | `packages/forecast-run/src/engine-client.ts` (sent as `Authorization: Bearer`) | web (same services as `AUDIT_ENGINE_URL`) | Vercel | secret | unset (requests go out with no `Authorization` header — only set it if the audit-engine deployment requires a bearer token) |
 | `POS_FEED_SECRET` | `apps/worker/src/pos-sync.ts` (passed to `packages/pos/src/feed.ts`) | worker | Railway | secret | unset (the feed GET goes out with no `Authorization` header — only matters for tenants that have `TenantConfig.posFeedUrl` set) |
 | `EMAIL_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` to send the weekly summaries) | config | unset — schedule OFF |
+| `REPORT_EXCLUDE_EMAILS` | `apps/worker/src/crons.ts` | worker | Railway | config | unset — no extra exclusions. Comma-separated addresses excluded from weekly/monthly owner reports, case-insensitive; existing notification preferences still apply |
 | `OPS_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` to run the daily plan-limit check) | config | unset — schedule OFF |
 | `POS_CRONS` | `apps/worker/src/index.ts` | worker | Railway (`1` to run the daily POS sales-gap check) | config | unset — schedule OFF |
 | `FORECAST_CRON` | `apps/worker/src/index.ts` | worker | Railway (`1` to run the nightly forecast + monthly backtest) | config | unset — schedule OFF |

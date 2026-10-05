@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 
 import { type AbcKey } from "@/lib/data/abc-lens";
-import { rangeDays, type RangeKey } from "@/lib/data/report-range";
+import { rangeDays, type RangeKey, type ReportRange } from "@/lib/data/report-range";
 import { SkeletonCard } from "@/components/ui/skeleton";
 
 import { ImpactCard } from "./impact-card";
@@ -40,6 +40,7 @@ export function OverviewTab({
   abc,
   range,
   tab,
+  period,
 }: {
   tenantId: string;
   currency: string;
@@ -47,8 +48,9 @@ export function OverviewTab({
   abc: AbcKey;
   range: RangeKey;
   tab: "overview";
+  period?: ReportRange;
 }) {
-  const days = rangeDays(range);
+  const days = period?.days ?? rangeDays(range);
 
   return (
     <div className="space-y-6">
@@ -61,17 +63,17 @@ export function OverviewTab({
       {/* The four headline tiles: last-month revenue, capital tied up, revenue
           at risk, and the ABC mix. */}
       <Suspense fallback={<SkeletonCard />}>
-        <OverviewKpis tenantId={tenantId} currency={currency} canViewCosts={canViewCosts} />
+        <OverviewKpis tenantId={tenantId} currency={currency} canViewCosts={canViewCosts} period={period} />
       </Suspense>
 
       {/* The A/B/C lens over the panels below. A nav control, not a data panel —
           rendered inline with no Suspense boundary. */}
-      <ClassFilter abc={abc} tab={tab} range={range} />
+      <ClassFilter abc={abc} tab={tab} range={range} period={period} />
 
       {/* Top movers: which products actually bring the money in, over the
           selected window. ABC-lensed on the client, so it takes no `abc`. */}
       <Suspense fallback={<SkeletonCard />}>
-        <TopEarners tenantId={tenantId} currency={currency} days={days} />
+        <TopEarners tenantId={tenantId} currency={currency} days={days} period={period} />
       </Suspense>
 
       {/* Cash asleep — stock that has not sold, honouring the class lens. */}
@@ -102,7 +104,7 @@ export function OverviewTab({
       {/* Where the money comes from — revenue by category and by brand, over the
           selected window. A sales figure, so no cost gate. */}
       <Suspense fallback={<SkeletonCard />}>
-        <RevenueBreakdownSection tenantId={tenantId} currency={currency} days={days} />
+        <RevenueBreakdownSection tenantId={tenantId} currency={currency} days={days} period={period} />
       </Suspense>
     </div>
   );

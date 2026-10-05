@@ -1,4 +1,5 @@
 import { getLeakageMatrix } from "@/lib/data/insights";
+import type { ReportRange } from "@/lib/data/report-range";
 import { LeakageMatrixView } from "./leakage-matrix-view";
 
 /**
@@ -16,16 +17,19 @@ export async function LeakageMatrixSection({
   currency,
   weeks,
   canViewCosts,
+  period,
 }: {
   tenantId: string;
   currency: string;
   /** Weeks to cover, from the report's period. */
   weeks: number;
   canViewCosts: boolean;
+  period?: ReportRange;
 }) {
   const { byCategory, byAbc, windowDays } = await getLeakageMatrix(tenantId, {
     weeks,
     canViewCosts,
+    period,
   });
 
   return (
@@ -35,6 +39,7 @@ export async function LeakageMatrixSection({
       windowDays={windowDays}
       canViewCosts={canViewCosts}
       currency={currency}
+      periodLabel={period?.label}
     />
   );
 }
