@@ -61,6 +61,9 @@ export default async function TodayPage() {
   // (connections, costs, plan) gate management on this same permission, so an
   // offered CTA never dead-ends on a permission error.
   const canManageShop = hasPermission(membership, "manage_settings");
+  // Same gate the Plan page's CostFixer uses — without it the missing-cost
+  // notice can only link out to the product page, never edit inline.
+  const canOverride = hasPermission(membership, "approve_orders");
 
   return (
     <div className="space-y-6">
@@ -116,6 +119,7 @@ export default async function TodayPage() {
           <ProductBoard
             tenantId={tenantId}
             canViewCosts={canViewCosts}
+            canOverride={canOverride}
             currency={membership.tenant.currency}
             trend={
               <RevenueTrend tenantId={tenantId} currency={membership.tenant.currency} />

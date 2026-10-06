@@ -24,6 +24,7 @@ import type { DashboardTab, DashboardTable } from "@/lib/data/today";
 import { DeadStockExportBar } from "./dead-stock-export";
 import { UnsoldStockExport } from "@/components/inventory/unsold-export";
 import { UNSOLD_STATUS_LABELS } from "@/lib/inventory/unsold-labels";
+import { CostFixer } from "../plan/cost-fixer";
 
 /**
  * The morning's products, in the five piles worth looking at, with the four
@@ -130,16 +131,23 @@ function KpiCard({
 export function ProductTabs({
   data,
   canViewCosts,
+  canOverride = false,
   trend,
 }: {
   data: DashboardTable;
   canViewCosts: boolean;
+  /** Whether this caller can act on cost/price (approve_orders), the same gate
+   *  the Plan page's CostFixer uses. Without it the missing-cost notice only
+   *  links out to the product page. Defaults false so every existing test
+   *  fixture that doesn't pass it keeps today's link-out behaviour. */
+  canOverride?: boolean;
   /** The revenue chart, rendered on the server and placed here so it can sit
    *  beside the health list without either needing the other's data. */
   trend: ReactNode;
 }) {
   const [tab, setTab] = useState<DashboardTab>("stockout");
   const [unsoldSearch, setUnsoldSearch] = useState("");
+  const [fixedIds, setFixedIds] = useState<Set<string>>(new Set());
   const rows = tab === "unsold" && unsoldSearch.trim()
     ? data.rows.unsold.filter(row => `${row.title} ${row.sku} ${row.vendor ?? ""}`.toLowerCase().includes(unsoldSearch.trim().toLowerCase()))
     : data.rows[tab];
@@ -295,28 +303,49 @@ export function ProductTabs({
         {/* The run sizes these too — never held back for a missing supplier,
             only for unit economics it can't reason about. Shown on Reorder so
             "why isn't this stockout here" has an answer instead of a silent
-            omission; fix the cost on the product, not the supplier. */}
-        {tab === "reorder" && data.missingCostCount > 0 && (
-          <div className="mx-5 mt-4 rounded-lg border border-warning bg-warning-soft p-4 text-sm">
-            <p className="font-semibold text-warning">
-              {formatNumber(data.missingCostCount)} more product{data.missingCostCount === 1 ? "" : "s"} need{data.missingCostCount === 1 ? "s" : ""} a cost before they can be forecasted
-            </p>
-            <p className="mt-1 text-ink-muted">Missing or broken cost data — these are not on this list until the number is fixed, whether or not a supplier is set.</p>
-            <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-              {data.missingCostRows.slice(0, 6).map(row => (
-                <li key={row.productId}>
-                  <Link href={`/products/${row.productId}`} className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
-                    {row.title}
-                  </Link>
-                  <span className="ml-1.5 font-mono text-xs text-ink-muted">{row.sku}</span>
-                </li>
-              ))}
-              {data.missingCostCount > 6 && (
-                <li className="text-ink-muted">+{formatNumber(data.missingCostCount - 6)} more</li>
-              )}
-            </ul>
-          </div>
-        )}
+            omission; fix the cost on the product, not the supplier. The fixer
+            is inline here (not just a link to the product page) because the
+            whole point of the card is that fixing a cost should take one
+            click, not a navigation. */}
+        {tab === "reorder" && data.missingCostCount > 0 && (() => {
+          const remaining = data.missingCostRows.filter(row => !fixedIds.has(row.productId));
+          const remainingCount = data.missingCostCount - fixedIds.size;
+          if (remainingCount <= 0) return null;
+          return (
+            <div className="mx-5 mt-4 rounded-lg border-2 border-warning bg-warning-soft p-4 text-sm shadow-sm">
+              <p className="font-semibold text-warning">
+                {formatNumber(remainingCount)} more product{remainingCount === 1 ? "" : "s"} need{remainingCount === 1 ? "s" : ""} a cost before they can be forecasted
+              </p>
+              <p className="mt-1 text-ink-muted">Missing or broken cost data — these are not on this list until the number is fixed, whether or not a supplier is set.</p>
+              <ul className="mt-3 space-y-2">
+                {remaining.slice(0, 6).map(row => (
+                  <li key={row.productId} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 rounded-md bg-surface-1/70 px-3 py-2">
+                    <span className="min-w-0">
+                      <Link href={`/products/${row.productId}`} className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+                        {row.title}
+                      </Link>
+                      <span className="ml-1.5 font-mono text-xs text-ink-muted">{row.sku}</span>
+                    </span>
+                    {canOverride && canViewCosts ? (
+                      <CostFixer
+                        productId={row.productId}
+                        plannable={row.plannable}
+                        onFixed={() => setFixedIds(prev => new Set(prev).add(row.productId))}
+                      />
+                    ) : (
+                      <Link href={`/products/${row.productId}`} className="text-xs font-medium text-accent-ink hover:underline">
+                        Fix cost →
+                      </Link>
+                    )}
+                  </li>
+                ))}
+                {remainingCount > 6 && (
+                  <li className="px-3 text-ink-muted">+{formatNumber(remainingCount - 6)} more</li>
+                )}
+              </ul>
+            </div>
+          );
+        })()}
 
         <div className="mt-3 pb-2">
           {rows.length === 0 ? (

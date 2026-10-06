@@ -3,6 +3,7 @@ import { isDeadStock, NEW_PRODUCT_DAYS } from "@/lib/inventory/dead-stock";
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { byBuyListPriority, getBuyList } from "@/lib/data/plan";
 import { getStockCatalogue, type CatalogueRow } from "@/lib/data/stock";
+import type { PlannableReason } from "@/lib/data/plan";
 import { trailingWindow } from "@/lib/data/trailing-window";
 import { moneyAtRest } from "@/lib/metrics";
 
@@ -283,7 +284,10 @@ export type DashboardTable = {
    *  this stockout on the list" has an answer instead of a silent omission;
    *  the owner fixes the cost on the product, not the supplier. */
   missingCostCount: number;
-  missingCostRows: CatalogueRow[];
+  /** Carries `plannable` alongside the catalogue fields so the notice can
+   *  render the same inline cost/price fixer the Plan page uses, instead of
+   *  only linking out to the product page. */
+  missingCostRows: (CatalogueRow & { plannable: PlannableReason })[];
   /** The FULL dead pile for the CSV — every dead row, not the capped page the
    *  `dead` tab renders — ranked by frozen cash (cost when visible, else
    *  retail) so the file leads with the most capital sitting still. */
@@ -364,8 +368,11 @@ export async function getDashboardTable(
   // back onto CatalogueRow the same way `reorder` is, so the tab can name them.
   const missingCostRows = (buyList?.excluded ?? [])
     .filter((r) => r.reason === "unplannable")
-    .map((r) => byId.get(r.productId))
-    .filter((r): r is CatalogueRow => r != null);
+    .map((r) => {
+      const row = byId.get(r.productId);
+      return row ? { ...row, plannable: r.plannable } : null;
+    })
+    .filter((r): r is CatalogueRow & { plannable: PlannableReason } => r != null);
 
   // Adapt a CatalogueRow to the planner's PriorityRow so Stockout sorts the SAME
   // way the buy list does: urgency is null on rows with no run rate → "low";

@@ -110,7 +110,10 @@ export async function OnOrderSection({
               description="Nothing on the way right now."
             />
           ) : (
-            <Table>
+            // Unbounded — every product currently on order, not a capped page —
+            // so a tenant with a big queue needs the bounded scroll region the
+            // same way the buy list and unsold-stock tables do.
+            <Table boxed>
               <TableHeader>
                 <TableHead>Product</TableHead>
                 <TableHead>Class</TableHead>

@@ -321,7 +321,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     // that no KES reaches them at all — not that something masks. (The trend
     // chart carries the revenue and is passed in separately; it is not a cost.)
     const member = renderToStaticMarkup(
-      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: false, currency: "KES", trend: null })
+      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: false, canOverride: false, currency: "KES", trend: null })
     );
     expect(kesDigits(member)).toHaveLength(0);
     // And not even a masked one. The data layer nulls the figure, so a card that
@@ -331,7 +331,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     expect(member).not.toContain(MASK);
 
     const owner = renderToStaticMarkup(
-      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: true, currency: "KES", trend: null })
+      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: true, canOverride: true, currency: "KES", trend: null })
     );
     // The owner sees what the dead stock is costing — the figure this shop
     // judges the product by.
@@ -347,7 +347,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     // all; that is the assertion above, not this one.
     for (const canViewCosts of [false, true]) {
       const html = renderToStaticMarkup(
-        await ProductBoard({ tenantId: seeded.tenantId, canViewCosts, currency: "KES", trend: null })
+        await ProductBoard({ tenantId: seeded.tenantId, canViewCosts, canOverride: canViewCosts, currency: "KES", trend: null })
       );
       expect(html).not.toContain("Order cost");
       expect(html).not.toContain("Reorder qty");

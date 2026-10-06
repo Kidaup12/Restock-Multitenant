@@ -20,11 +20,16 @@ import { ProductTabs } from "./product-tabs";
 export async function ProductBoard({
   tenantId,
   canViewCosts,
+  canOverride,
   currency,
   trend,
 }: {
   tenantId: string;
   canViewCosts: boolean;
+  /** Whether this caller can also act on cost/price — approve_orders, same gate
+   *  the Plan page's CostFixer uses. Without it the missing-cost notice can only
+   *  link out, never edit inline. */
+  canOverride: boolean;
   currency: string;
   trend: React.ReactNode;
 }) {
@@ -55,7 +60,7 @@ export async function ProductBoard({
           </Link>
         </div>
       )}
-      <ProductTabs data={data} canViewCosts={canViewCosts} trend={trend} />
+      <ProductTabs data={data} canViewCosts={canViewCosts} canOverride={canOverride} trend={trend} />
     </div>
   );
 }
