@@ -77,6 +77,12 @@ export const REDIRECTS = [
  */
 export const DYNAMIC = [
   {
+    route: "/transfers/[id]",
+    from: "/transfers",
+    pattern: /href="(\/transfers\/[A-Za-z0-9_-]{8,})"/,
+    marker: "Quantities and stock positions were saved with this plan",
+  },
+  {
     // From the dashboard, not the catalogue: /products only links a product to
     // its own page from inside an expanded row, so a server-rendered catalogue
     // carries no such href. Worth knowing — it is also the only way in.

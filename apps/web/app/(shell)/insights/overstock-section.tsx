@@ -88,7 +88,7 @@ export async function OverstockSection({
       <Card data-tour="insights-overstock">
         <CardHeader
           title="Over-bought"
-          subtitle={`Stock above ${thresholdDays} days of cover — cash you could have kept liquid`}
+          subtitle={`Current stock above ${thresholdDays} days of cover · independent of the selected sales dates`}
           action={
             rows.length > 0 ? (
               <div className="flex items-center gap-3">

@@ -144,7 +144,7 @@ export function PlanView({
   const searchParams = useMemo(() => rawSearchParams ?? new URLSearchParams(), [rawSearchParams]);
   const requested = searchParams.get("mode") as Mode | null;
   const mode: Mode =
-    requested && MODES.includes(requested) && !(requested === "budget" && !canBudget)
+    requested && MODES.includes(requested) && !(requested === "budget" && (!canBudget || !canViewCosts))
       ? requested
       : "choose";
 
@@ -235,9 +235,14 @@ export function PlanView({
    * KES 1.21M, and the saved PDF was headed with the unfiltered count. One list
    * is derived here and handed to both, so there is nothing left to disagree.
    */
-  const [urgentOnly, setUrgentOnly] = useState(searchParams.get("urgent") === "1");
+  const urgentOnly = searchParams.get("urgent") === "1";
+  const setUrgentOnly = (next: boolean) => pushParams((params) => {
+    if (next) params.set("urgent", "1");
+    else params.delete("urgent");
+  });
   const [whatIf, setWhatIf] = useState<BuyList | null>(null);
   const [savedScopes, setSavedScopes] = useState<SavedScope[]>([]);
+  const [scopeError, setScopeError] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
   const [scopesBusy, startScopes] = useTransition();
   const budgetTier = PLAN_TIER_LABEL[planFeatureTier("budget_planner")];
@@ -248,6 +253,9 @@ export function PlanView({
     let active = true;
     listScopes().then((res) => {
       if (active && res.ok) setSavedScopes(res.data);
+      else if (active && !res.ok) setScopeError(res.error);
+    }).catch(() => {
+      if (active) setScopeError("Could not load saved scopes. Reload to try again.");
     });
     return () => {
       active = false;
@@ -255,9 +263,15 @@ export function PlanView({
   }, []);
 
   function handleSaveScope(name: string) {
+    setScopeError(null);
     startScopes(async () => {
-      const res = await saveScope({ name, selection: scope });
-      if (res.ok) setSavedScopes((prev) => [...prev, res.data]);
+      try {
+        const res = await saveScope({ name, selection: scope });
+        if (res.ok) setSavedScopes((prev) => [...prev, res.data]);
+        else setScopeError(res.error);
+      } catch {
+        setScopeError("Could not save this scope. Try again.");
+      }
     });
   }
 
@@ -269,9 +283,15 @@ export function PlanView({
       confirmLabel: "Delete list",
     });
     if (!ok) return;
+    setScopeError(null);
     startScopes(async () => {
-      const res = await deleteScope({ id });
-      if (res.ok) setSavedScopes((prev) => prev.filter((s) => s.id !== id));
+      try {
+        const res = await deleteScope({ id });
+        if (res.ok) setSavedScopes((prev) => prev.filter((s) => s.id !== id));
+        else setScopeError(res.error);
+      } catch {
+        setScopeError("Could not delete this scope. Try again.");
+      }
     });
   }
 
@@ -300,7 +320,7 @@ export function PlanView({
           )}
         </p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {canBudget ? (
+          {canBudget && canViewCosts ? (
             <ModeCard
               icon={<BanknoteIcon />}
               title="Start with a budget"
@@ -315,7 +335,7 @@ export function PlanView({
               icon={<BanknoteIcon />}
               title="Start with a budget"
               description="Set what you can spend and get the best list that fits — criticals first, a suggested figure pre-filled."
-              upsell={`Budget planner is on the ${budgetTier} plan.`}
+              upsell={!canViewCosts ? "Budget planning needs cost access. Ask an owner to grant it; you can still use the recommended purchase list." : `Budget planner is on the ${budgetTier} plan.`}
             />
           )}
           <ModeCard
@@ -376,6 +396,7 @@ export function PlanView({
             disappears when you narrow the list is one you order straight past. */}
         <PreflightStrip rows={buyList.rows} />
         <PlanDecisionHeader rows={filteredRows} canViewCosts={canViewCosts} />
+        {scopeError && <p role="alert" className="text-sm text-negative">{scopeError}</p>}
         <ScopeBar
           rows={buyList.rows}
           selection={scope}
@@ -387,6 +408,7 @@ export function PlanView({
           scopesBusy={scopesBusy}
         />
         <BuyChecklist
+          key={`${source.forecastRunId}:${urlScopeKey}:${urgentOnly}`}
           buyList={filteredBuyList}
           canViewCosts={canViewCosts}
           canOverride={canOverride}
@@ -424,6 +446,7 @@ export function PlanView({
     <div className="space-y-4">
       {backToOptions}
       {freshness}
+      {scopeError && <p role="alert" className="text-sm text-negative">{scopeError}</p>}
       <ScopeBar
         rows={buyList.rows}
         selection={scope}
@@ -435,6 +458,7 @@ export function PlanView({
         scopesBusy={scopesBusy}
       />
       <BudgetPlanner
+        key={`${buyList.forecastRunId}:${urlScopeKey}`}
         canViewCosts={canViewCosts}
         canOverride={canOverride}
         criticalsCashKes={budgetSummary.criticalsCashKes}

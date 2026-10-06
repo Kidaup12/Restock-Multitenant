@@ -40,16 +40,19 @@ export async function MonthBars({
             // getRevenueByMonth always ends at the current (partial) month.
             const partial = index === months.length - 1;
             return (
-              <div key={m.month} className="flex h-full flex-1 flex-col justify-end gap-2">
+              <div key={m.month} className="grid h-full min-w-0 flex-1 grid-rows-[1rem_minmax(0,1fr)_2rem] gap-2">
                 <div className="text-center font-mono text-xs text-ink tabular-nums">
                   {formatCompact(m.revenueKes)}
                 </div>
-                <div
+                {/* Labels have their own rows, so flex shrink cannot flatten the tallest bars. */}
+                <div className="flex h-full min-h-0 items-end">
+                  <div
                   className="w-full rounded-t-md bg-accent"
                   style={{ height: `${heightPct}%`, opacity: partial ? 0.55 : 1 }}
                   role="img"
                   aria-label={`${m.label}: ${formatMoney(m.revenueKes, currency, { compact: true })}${partial ? " so far" : ""}`}
-                />
+                  />
+                </div>
                 <div className="text-center text-xs text-ink-muted">
                   {m.label}
                   {partial && <span className="text-ink-muted/70"> (to date)</span>}

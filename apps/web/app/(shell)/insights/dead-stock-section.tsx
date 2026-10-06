@@ -108,7 +108,7 @@ export async function DeadStockSection({
     <Card data-tour="insights-dead-stock">
       <CardHeader
         title={`Dead stock${deadRows.length > 0 ? ` · ${formatNumber(deadRows.length)}` : ""}`}
-        subtitle={`No sales in ${deadStock.windowDays}d · at cost`}
+        subtitle={`Held now with no sales in the last ${deadStock.windowDays} days${canViewCosts ? " · at current cost" : ""}`}
         action={
           deadRows.length > 0 ? (
             <div className="flex items-center gap-3">

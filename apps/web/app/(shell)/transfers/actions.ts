@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prismaService } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
+import { editTransferQuantity } from "@/lib/data/transfer-edit";
 import {
   getTenantFeatureOverrides,
   getTenantPlan,
@@ -25,9 +26,8 @@ import {
  * gates the screen applies: the ordering permission and the Growth plan feature.
  * The UI lock is a courtesy; these checks are the enforcement.
  *
- * Line data is never accepted from the client either: a save re-derives the
- * proposal from the engine with the submitted source and horizon, so a crafted
- * request can't write quantities the sizing engine never produced.
+ * Initial saves re-derive the proposal from the engine. Explicit draft quantity
+ * edits separately validate available source stock across destination lines.
  */
 
 export type TransferActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -36,6 +36,20 @@ const err = <T,>(error: string): TransferActionResult<T> => ({ ok: false, error 
 
 /** Plan names are a label on a list, not free-form content. */
 const MAX_NAME_LENGTH = 80;
+
+/** Explicit manual draft override; the data layer checks stock across all
+ * destination lines under a plan lock before changing the saved instruction. */
+export async function editTransferLine(input: { planId: string; lineId: string; qty: number }): Promise<TransferActionResult<{ planId: string }>> {
+  const ctx = await actorContext();
+  if (!ctx.ok) return err(ctx.error);
+  if (!input.planId || !input.lineId) return err("Choose a saved plan line.");
+  const result = await editTransferQuantity(ctx.actor.tenantId, input);
+  if (!result.ok) return err(result.error);
+  await audit(ctx.actor, input.planId, "quantity_edited", { lineId: input.lineId, previousQty: result.previousQty, qty: input.qty });
+  revalidatePath("/transfers");
+  revalidatePath(`/transfers/${input.planId}`);
+  return { ok: true, data: { planId: input.planId } };
+}
 
 type Actor = {
   tenantId: string;

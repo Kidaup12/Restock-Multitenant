@@ -114,7 +114,7 @@ export function ExportBar<T>({
   const empty = (count ?? rows?.length ?? 0) === 0;
   const disabled = empty || busy;
   return (
-    <div className={className ? `flex items-center gap-2 ${className}` : "flex items-center gap-2"}>
+    <div className={`flex min-w-0 max-w-full flex-wrap items-center gap-2 ${className ?? ""}`}>
       <Button variant="ghost" size={size} disabled={disabled} onClick={downloadCsv}>
         Export CSV
       </Button>

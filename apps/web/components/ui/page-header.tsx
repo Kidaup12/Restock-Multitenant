@@ -20,7 +20,7 @@ function Breadcrumbs({ items }: { items: Crumb[] }) {
         {items.map((crumb, i) => {
           const last = i === items.length - 1;
           return (
-            <li key={`${crumb.label}-${i}`} className="flex items-center gap-1.5">
+            <li key={`${crumb.label}-${i}`} className="flex min-w-0 max-w-full items-center gap-1.5 wrap-anywhere">
               {crumb.href && !last ? (
                 <Link href={crumb.href} className="transition-colors hover:text-ink">
                   {crumb.label}
@@ -65,7 +65,7 @@ export function PageHeader({
 }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
-      <div>
+      <div className="min-w-0 max-w-full wrap-break-word">
         {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs items={breadcrumbs} />}
         {eyebrow && (
           <p className="text-2xs tracking-wider text-ink-muted uppercase">{eyebrow}</p>
@@ -75,7 +75,7 @@ export function PageHeader({
           <div className="mt-1 max-w-2xl text-sm text-ink-muted">{description}</div>
         )}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }

@@ -88,7 +88,7 @@ export async function OnOrderSection({
       <Card data-tour="insights-on-order">
         <CardHeader
           title="On the way"
-          subtitle="Stock already ordered and inbound, soonest arrival first"
+          subtitle="Currently ordered and inbound, soonest arrival first · independent of the selected sales dates"
           action={
             rows.length > 0 ? (
               <div className="flex items-center gap-3">

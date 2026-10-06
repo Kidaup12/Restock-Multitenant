@@ -312,7 +312,7 @@ export function BuyTable({
                     {row.onOrderUnits > 0 ? formatNumber(row.onOrderUnits) : "—"}
                   </TableCell>
                   <TableCell numeric>
-                    <div className="flex flex-col items-end gap-0.5">
+                    <div className="flex flex-col items-end gap-0.5" onClick={(event) => event.stopPropagation()}>
                       <QtyCell row={row} canOverride={canOverride} />
                       <MoqNote preview={moqPreview(row)} />
                       {row.leadFloored && <LeadFlooredNote leadDays={row.leadDays} />}

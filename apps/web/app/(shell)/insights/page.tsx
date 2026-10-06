@@ -83,7 +83,7 @@ function PerfClassRail({ abc, range, period }: { abc: AbcKey; range: RangeKey; p
  *  (drives the revenue/top-earner windows) and Performance (drives the trend). */
 function RangeRail({ tab, range, abc, period }: { tab: ReportTab; range: RangeKey; abc: AbcKey; period: ReportRange }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+    <div className="min-w-0 space-y-3 rounded-lg border border-edge bg-surface p-4">
       <div className="flex flex-wrap items-center gap-1" role="group" aria-label="Report period">
         {RANGE_KEYS.map((key) => {
           const current = !period.custom && key === range;
@@ -103,13 +103,13 @@ function RangeRail({ tab, range, abc, period }: { tab: ReportTab; range: RangeKe
           );
         })}
       </div>
-      <form action="/insights" method="get" className="flex flex-wrap items-end gap-2">
+      <form key={`${period.from}-${period.to}`} action="/insights" method="get" className="grid min-w-0 grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:max-w-xl">
         <input type="hidden" name="tab" value={tab} />
         <input type="hidden" name="class" value={abc} />
         <input type="hidden" name="range" value={range} />
-        <label className="text-xs text-ink-muted">From<input required aria-label="Report start date" type="date" name="from" defaultValue={period.from} className="ml-2 rounded border border-edge bg-surface px-2 py-1 text-ink" /></label>
-        <label className="text-xs text-ink-muted">To<input required aria-label="Report end date" type="date" name="to" defaultValue={period.to} className="ml-2 rounded border border-edge bg-surface px-2 py-1 text-ink" /></label>
-        <button type="submit" className="rounded border border-edge px-3 py-1 text-xs font-medium">Apply dates</button>
+        <label className="min-w-0 space-y-1 text-xs text-ink-muted">From<input required aria-label="Report start date" type="date" name="from" defaultValue={period.from} className="block h-10 w-full min-w-0 rounded border border-edge bg-surface px-2 text-sm text-ink" /></label>
+        <label className="min-w-0 space-y-1 text-xs text-ink-muted">To<input required aria-label="Report end date" type="date" name="to" defaultValue={period.to} className="block h-10 w-full min-w-0 rounded border border-edge bg-surface px-2 text-sm text-ink" /></label>
+        <button type="submit" className="h-10 rounded border border-edge px-3 text-sm font-medium hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">Apply dates</button>
       </form>
       {period.error && <p role="alert" className="w-full text-sm text-status-warn">{period.error} Showing {period.label}.</p>}
       <p className="w-full text-xs font-medium text-ink">{period.label} · {period.days} calendar days</p>
@@ -339,7 +339,7 @@ export default async function InsightsPage({
         />
       )}
 
-      {tab === "history" && <Suspense fallback={<SkeletonCard />}><HistoryTab tenantId={membership.tenantId} timezone={membership.tenant.timezone} query={typeof params.q === "string" ? params.q : ""} productId={typeof params.product === "string" ? params.product : undefined} /></Suspense>}
+      {tab === "history" && <Suspense fallback={<SkeletonCard />}><HistoryTab lenses={{ range, class: abc, from: period.custom ? period.from : undefined, to: period.custom ? period.to : undefined }} tenantId={membership.tenantId} timezone={membership.tenant.timezone} query={typeof params.q === "string" ? params.q : ""} productId={typeof params.product === "string" ? params.product : undefined} /></Suspense>}
     </div>
   );
 }

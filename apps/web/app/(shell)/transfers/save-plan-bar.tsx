@@ -15,11 +15,13 @@ export function SavePlanBar({
   fromLocationId,
   fromLocationName,
   coverDays,
+  windowDays,
   canPlan,
 }: {
   fromLocationId: string;
   fromLocationName: string;
   coverDays: number;
+  windowDays?: number;
   canPlan: boolean;
 }) {
   const router = useRouter();
@@ -37,6 +39,7 @@ export function SavePlanBar({
       const result = await createTransferPlan({
         fromLocationId,
         coverDays,
+        windowDays,
         name: name.trim() || `${fromLocationName} · ${coverDays}d cover`,
       });
       if (!result.ok) {
@@ -44,7 +47,7 @@ export function SavePlanBar({
         return;
       }
       setName("");
-      router.refresh();
+      router.push(`/transfers/${result.data.planId}`);
     });
   }
 

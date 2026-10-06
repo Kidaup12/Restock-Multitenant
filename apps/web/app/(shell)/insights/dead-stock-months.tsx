@@ -77,12 +77,12 @@ export async function DeadStockMonths({
         }
       />
       <CardContent className="pt-3">
-        <div className="overflow-x-auto">
-          <div className="flex min-w-full gap-3">
+        <div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
             {months.map((m) => (
               <div
                 key={m.monthStart.toISOString()}
-                className="min-w-44 flex-1 rounded-lg border border-edge p-4"
+                className="min-w-0 rounded-lg border border-edge p-4"
               >
                 <div className="text-xs font-medium uppercase tracking-wide text-ink-muted">
                   {monthLabel(m.monthStart)}

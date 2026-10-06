@@ -1,7 +1,5 @@
 import { getImpact } from "@/lib/data/insights";
-import { BulbIcon } from "@/components/icons";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/empty-state";
 
 /**
  * "Has this made a difference?" — the two numbers a shop owner actually judges
@@ -58,11 +56,9 @@ export async function ImpactCard({ tenantId }: { tenantId: string }) {
       <Card>
         <CardHeader title="Has this made a difference?" />
         <CardContent>
-          <EmptyState
-            icon={<BulbIcon />}
-            title="Nothing to measure yet"
-            description="We start counting from your first purchase order — before that there's nothing here to take credit for. Send one and this fills in."
-          />
+          <p className="text-sm text-ink-muted">
+            Send your first purchase order to start measuring changes in empty shelves and dead stock.
+          </p>
         </CardContent>
       </Card>
     );
@@ -73,15 +69,11 @@ export async function ImpactCard({ tenantId }: { tenantId: string }) {
       <Card>
         <CardHeader title="Has this made a difference?" />
         <CardContent>
-          <EmptyState
-            icon={<BulbIcon />}
-            title="Still building the picture"
-            description={
-              impact.trackingSince
-                ? `We've been recording shelf levels since ${dateLabel(impact.trackingSince)}${impact.since ? `, and measuring from your first order on ${dateLabel(impact.since)}` : ""}. Two full weeks of both is what this needs.`
-                : "We record what's on the shelf once a night. Two full weeks of that is what this needs."
-            }
-          />
+          <p className="text-sm text-ink-muted">
+            {impact.trackingSince
+              ? `Shelf tracking started ${dateLabel(impact.trackingSince)}${impact.since ? `; your first order was ${dateLabel(impact.since)}` : ""}. Comparisons appear after two full weeks of both.`
+              : "Comparisons appear after two full weeks of nightly shelf records and purchase-order history."}
+          </p>
         </CardContent>
       </Card>
     );
