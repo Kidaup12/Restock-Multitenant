@@ -62,22 +62,31 @@ describe.skipIf(!runnable)("impact figures (local db)", () => {
   });
 
   /**
-   * Prior shelf evidence — MIN_OBSERVED_IN_STOCK_DAYS worth, dated before
-   * weekA — so these products already satisfy the dead-stock eligibility gate
-   * (isDeadStock) once the measured weeks begin, without shifting which weeks
-   * get measured. Only the tests that assert a dead-stock COUNT need this: the
-   * no-order-yet and too-early tests are about having no measurable history at
-   * all, and this extra snapshot range would itself supply the second
-   * qualifying week getStockoutTrend needs — defeating exactly what those two
-   * tests check.
+   * Prior shelf evidence — MIN_OBSERVED_IN_STOCK_DAYS worth — so these products
+   * already satisfy the dead-stock eligibility gate (isDeadStock) once the
+   * measured weeks begin, without becoming a measured week themselves.
+   *
+   * getImpact's `sinceWeek` is weekStartOf(firstOrder), and firstOrder is
+   * weekA minus one day — a Sunday, which belongs to the week BEFORE weekA, not
+   * weekA's own week. So the window getStockoutTrend must leave untouched is
+   * [sinceWeek, weekA), not just "before weekA": seeding into sinceWeek's own
+   * week would hand getImpact an extra qualifying week there instead of weekA,
+   * shifting which week is "first measured" under it. Ending the block at
+   * sinceWeek clears that whole week, not just weekA's eve.
+   *
+   * Only the tests that assert a dead-stock COUNT need this: the no-order-yet
+   * and too-early tests are about having no measurable history at all, and this
+   * range would itself supply the second qualifying week getStockoutTrend
+   * needs — defeating exactly what those two tests check.
    */
   async function seedPriorShelfEvidence() {
+    const sinceWeek = weekStartOf(new Date(+weekA - DAY));
     await prismaService.inventorySnapshot.createMany({
       data: Array.from({ length: 14 }, (_, day) =>
         productIds.map((productId) => ({
           tenantId,
           productId,
-          date: new Date(+weekA - (day + 1) * DAY),
+          date: new Date(+sinceWeek - (day + 1) * DAY),
           onHand: 5,
         }))
       ).flat(),
