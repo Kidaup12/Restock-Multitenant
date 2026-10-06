@@ -16,6 +16,23 @@ const history = () => Array.from({ length: 364 }, (_, i) => ({
 }));
 
 describe("bulk control through forecast consumers", () => {
+  it("corrects a sparse new product's isolated bulk day when explicitly enabled", () => {
+    const sales = [50, 1, 1].map((quantity, i) => ({ date: day(i + 1), quantity }));
+    expect(runRateDaily(sales, today)).toBeCloseTo(52 / 7);
+    expect(runRateDaily(sales, today, undefined, undefined, undefined, "mean", true)).toBeCloseTo(1);
+    expect(debulkSeries(sales, { asOf: today }).caps[0]).toMatchObject({ original: 50, capped: 5, baseline: 1 });
+  });
+
+  it("can leave an established rate unchanged because its existing spike cap is stricter", () => {
+    const sales = Array.from({ length: 365 }, (_, i) => ({ date: day(i + 1), quantity: i === 0 ? 50 : 1 }));
+    const bulk = debulkSeries(sales, { asOf: today });
+    expect(bulk.caps).toHaveLength(1);
+    expect(bulk.caps[0]!.capped).toBe(5);
+    // Mean windows already cap that day at 2 x the typical daily sale (2 units).
+    // An unchanged displayed rate is therefore not evidence of missing wiring.
+    expect(runRateDaily(sales, today, [], undefined, day(365), "mean", true))
+      .toBe(runRateDaily(sales, today, [], undefined, day(365), "mean", false));
+  });
   it.each([false, true])("keeps unfinished and future bulk sales out of fitting and guardrails (enabled=%s)", (bigBuyerDamping) => {
     const sales = history();
     const input = { productId: "sku", product: { sku: "sku", currentStock: 0, onOrder: 0 },

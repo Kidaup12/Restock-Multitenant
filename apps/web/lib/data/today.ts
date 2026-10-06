@@ -1,5 +1,5 @@
 import { observedInStockDays } from "./stock-observation";
-import { isDeadStock } from "@/lib/inventory/dead-stock";
+import { isDeadStock, NEW_PRODUCT_DAYS } from "@/lib/inventory/dead-stock";
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { byBuyListPriority, getBuyList } from "@/lib/data/plan";
 import { getStockCatalogue, type CatalogueRow } from "@/lib/data/stock";
@@ -190,8 +190,8 @@ export async function getReorderNeeded(
 }
 
 
-/** The five piles the dashboard table tabs between. */
-export type DashboardTab = "stockout" | "reorder" | "onway" | "dead" | "all";
+/** Dashboard views; never-sold can overlap confirmed dead stock. */
+export type DashboardTab = "stockout" | "reorder" | "onway" | "dead" | "unsold" | "all";
 
 /**
  * One dead-stock line as the CSV wants it. The dashboard table caps its dead
@@ -218,13 +218,47 @@ export type DeadStockExportRow = {
   valueAtRetailKes: number;
 };
 
+export type UnsoldReason = "new_product" | "insufficient_stock_history" | "unknown_age" | "dead";
+
+export type UnsoldStock = { rows: CatalogueRow[]; skus: number; costKes: number | null; reasons: Record<string, UnsoldReason> };
+
+function unsoldStockFromRows(rows: CatalogueRow[], lastSales: Map<string, Date | null>, ages: Map<string, Date | null>, observed: Map<string, number>, windowDays: number, canViewCosts: boolean, asOf: Date): UnsoldStock {
+  const held = rows.filter(row => row.buyable && row.onHandUnits > 0 && !lastSales.get(row.productId));
+  const reasons: Record<string, UnsoldReason> = {};
+  for (const row of held) {
+    const age = ages.get(row.productId);
+    const dead = pileFor({onHandUnits: row.onHandUnits, lastSaleAt: null, firstSeenAt: age, inStockDays: observed.get(row.productId)}, +asOf - windowDays * DAY_MS, asOf) === "dead";
+    reasons[row.productId] = dead ? "dead" : !age ? "unknown_age" : +asOf - +age < NEW_PRODUCT_DAYS * DAY_MS ? "new_product" : "insufficient_stock_history";
+  }
+  held.sort((a,b) => (canViewCosts ? (b.moneyAtRestKes ?? 0) - (a.moneyAtRestKes ?? 0) : 0) || b.onHandUnits * b.priceKes - a.onHandUnits * a.priceKes || a.title.localeCompare(b.title));
+  return { rows: held, skus: held.length, costKes: canViewCosts ? held.reduce((sum,row) => sum + (row.moneyAtRestKes ?? 0),0) : null, reasons };
+}
+
+/** Same full never-sold universe as Today, without loading the purchasing plan. */
+export async function getUnsoldStock(tenantId: string, {canViewCosts}: {canViewCosts: boolean}): Promise<UnsoldStock> {
+  const db = prismaForTenant(tenantId);
+  const [rows, lastSales, products, config] = await Promise.all([
+    getStockCatalogue(tenantId,{canViewCosts}),
+    db.salesHistory.groupBy({by:["productId"],where:{quantity:{gt:0}},_max:{date:true}}),
+    db.product.findMany({where:{...BUYABLE_PRODUCT_WHERE},select:{id:true,shopifyCreatedAt:true,receivedAt:true}}),
+    db.tenantConfig.findFirst({select:{deadStockWindowDays:true}}),
+  ]);
+  const windowDays=config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
+  const asOf=new Date();
+  const observed=await observedInStockDays(tenantId,new Date(+asOf-windowDays*DAY_MS));
+  return unsoldStockFromRows(rows,new Map(lastSales.map(s=>[s.productId,s._max.date])),new Map(products.map(p=>[p.id,p.shopifyCreatedAt ?? p.receivedAt])),observed,windowDays,canViewCosts,asOf);
+}
+
 export type DashboardTable = {
+  /** All held products with no recorded positive sale; overlaps the dead pile. */
+  unsoldSummary: { skus: number; costKes: number | null };
+  unsoldReasons: Record<string, UnsoldReason>;
   /** Full counts — the tab pills and the health panel read these, never the
    *  length of the capped rows below. */
   counts: Record<DashboardTab, number>;
   /** Products in none of the four problem piles. */
   healthy: number;
-  /** The rows themselves, capped: this is a dashboard, not the catalogue. */
+  /** Dashboard rows are capped except unsold, whose full list must remain visible. */
   rows: Record<DashboardTab, CatalogueRow[]>;
   /** The shop's own dead-stock window, so the tab can say what it means. */
   deadWindowDays: number;
@@ -243,6 +277,13 @@ export type DashboardTable = {
   /** True when a pile had more rows than the cap, so the screen can say so
    *  rather than quietly showing a prefix. */
   capped: Record<DashboardTab, boolean>;
+  /** Products the run sized to reorder but held off the Reorder tab because the
+   *  cost is missing or broken (plannable !== "ok") — never gated on having a
+   *  supplier, only on having usable unit economics. Surfaced so "why isn't
+   *  this stockout on the list" has an answer instead of a silent omission;
+   *  the owner fixes the cost on the product, not the supplier. */
+  missingCostCount: number;
+  missingCostRows: CatalogueRow[];
   /** The FULL dead pile for the CSV — every dead row, not the capped page the
    *  `dead` tab renders — ranked by frozen cash (cost when visible, else
    *  retail) so the file leads with the most capital sitting still. */
@@ -252,7 +293,7 @@ export type DashboardTable = {
 const DASHBOARD_ROW_CAP = 25;
 
 /**
- * The dashboard's product table, in five piles.
+ * The dashboard's product table, including the overlapping never-sold view.
  *
  * Built on the catalogue getter, so every figure on a row (cover, run rate,
  * money at rest, en route) is the one the Stock screen shows and is already
@@ -286,13 +327,17 @@ export async function getDashboardTable(
   const deadCutoff = Date.now() - deadWindowDays * DAY_MS;
   const observed = await observedInStockDays(tenantId, new Date(deadCutoff));
 
+  const asOf = new Date();
+  const unsoldStock = unsoldStockFromRows(rows, lastSale, firstSeen, observed, deadWindowDays, canViewCosts, asOf);
+  const unsold = unsoldStock.rows;
   const stockout: CatalogueRow[] = [];
   const dead: CatalogueRow[] = [];
   let healthy = 0;
   for (const row of rows) {
     const pile = pileFor(
       { onHandUnits: row.onHandUnits, lastSaleAt: lastSale.get(row.productId) ?? null, inStockDays: observed.get(row.productId), firstSeenAt: firstSeen.get(row.productId) },
-      deadCutoff
+      deadCutoff,
+      asOf
     );
     if (pile === "stockout") stockout.push(row);
     else if (pile === "dead") dead.push(row);
@@ -314,6 +359,14 @@ export async function getDashboardTable(
     .map((r) => byId.get(r.productId))
     .filter((r): r is CatalogueRow => r != null);
 
+  // The run sized these too, but held them off the Reorder tab because the
+  // cost is missing or broken — never because there is no supplier. Mapped
+  // back onto CatalogueRow the same way `reorder` is, so the tab can name them.
+  const missingCostRows = (buyList?.excluded ?? [])
+    .filter((r) => r.reason === "unplannable")
+    .map((r) => byId.get(r.productId))
+    .filter((r): r is CatalogueRow => r != null);
+
   // Adapt a CatalogueRow to the planner's PriorityRow so Stockout sorts the SAME
   // way the buy list does: urgency is null on rows with no run rate → "low";
   // daysCover is the days-until-stockout proxy the comparator expects.
@@ -328,6 +381,7 @@ export async function getDashboardTable(
     reorder,
     onway,
     dead: dead.sort((a, b) => (b.moneyAtRestKes ?? 0) - (a.moneyAtRestKes ?? 0)),
+    unsold,
     all: [...rows].sort((a, b) => b.revenue30dKes - a.revenue30dKes),
   };
 
@@ -336,8 +390,9 @@ export async function getDashboardTable(
   const capped_rows = {} as Record<DashboardTab, CatalogueRow[]>;
   for (const key of Object.keys(piles) as DashboardTab[]) {
     counts[key] = piles[key].length;
-    capped[key] = piles[key].length > limit;
-    capped_rows[key] = piles[key].slice(0, limit);
+    // Never-sold needs the full list: otherwise grace-protected products stay hidden.
+    capped[key] = key !== "unsold" && piles[key].length > limit;
+    capped_rows[key] = key === "unsold" ? piles[key] : piles[key].slice(0, limit);
   }
 
   // The export takes the whole dead pile, not the capped page, and adds the
@@ -373,6 +428,8 @@ export async function getDashboardTable(
     counts,
     healthy,
     rows: capped_rows,
+    unsoldSummary: { skus: unsoldStock.skus, costKes: unsoldStock.costKes },
+    unsoldReasons: unsoldStock.reasons,
     deadWindowDays,
     // Summed over every dead row, not the page of them the table shows.
     deadCostKes: canViewCosts
@@ -386,5 +443,7 @@ export async function getDashboardTable(
       : null,
     capped,
     deadStockExport,
+    missingCostCount: missingCostRows.length,
+    missingCostRows,
   };
 }

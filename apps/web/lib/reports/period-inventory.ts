@@ -1,3 +1,4 @@
+import { historicalUnsoldStock } from "../inventory/historical-dead-stock";
 import { overstockExcess } from "@wezesha/forecast";
 const DAY = 86400000;
 export function inventoryWeekStart(date: Date): Date {
@@ -16,7 +17,7 @@ export type InventoryPeriodDetail = {
     productId: string;
     title: string;
     sku: string;
-    kind: "ordered" | "above recommendation" | "dead stock" | "overstock";
+    kind: "ordered" | "above recommendation" | "dead stock" | "unsold" | "overstock";
     units: number;
     valueKes: number | null;
 };
@@ -35,6 +36,8 @@ export type InventoryPeriod = {
     comparisonLines: number;
     unmeasuredLines: number;
     deadCount: number | null;
+    unsoldCount: number | null;
+    unsoldValueKes: number | null;
     deadValueKes: number | null;
     overstockCount: number | null;
     overstockValueKes: number | null;
@@ -96,6 +99,7 @@ export function periodInventory(input: {
         }
         const details: InventoryPeriodDetail[] = [];
         const add = (product: Product, kind: InventoryPeriodDetail["kind"], units: number, value: number) => details.push({ productId: product.id, title: product.title, sku: product.sku, kind, units, valueKes: input.canViewCosts ? value : null });
+        let unsoldCount = 0, unsoldValue = 0;
         let orderedUnits = 0, orderedValue = 0, overorderUnits = 0, overorderValue = 0, deadValue = 0, overstockValue = 0, deadCount = 0, overstockCount = 0, comparisonLines = 0, unmeasuredLines = 0;
         for (const o of input.orders) {
             const p = products.get(o.productId);
@@ -120,6 +124,10 @@ export function periodInventory(input: {
             // Missing end-of-period observations cannot establish period-end stock.
             if (+s.date !== +end - DAY)
                 continue;
+            if (historicalUnsoldStock(s.onHand, p.firstSale, s.date)) {
+                unsoldCount++; unsoldValue += s.onHand * p.costKes;
+                add(p, "unsold", s.onHand, s.onHand * p.costKes);
+            }
             if (s.onHand > 0 && p.firstSale && p.firstSale < end && !recent.has(id)) {
                 deadCount++;
                 deadValue += s.onHand * p.costKes;
@@ -134,7 +142,7 @@ export function periodInventory(input: {
         }
         const endObservedProducts = [...latest.values()].filter(s => +s.date === +end - DAY).length;
         const endObserved = endObservedProducts > 0;
-        result.push({ week: week.toISOString().slice(0, 10), from: from.toISOString().slice(0, 10), through: new Date(+end - DAY).toISOString().slice(0, 10), days, snapshotDays: observed.size, endObservedProducts, eligibleProducts: products.size, orderedUnits, orderedValueKes: input.canViewCosts ? orderedValue : null, overorderUnits: comparisonLines ? overorderUnits : null, overorderValueKes: comparisonLines && input.canViewCosts ? overorderValue : null, comparisonLines, unmeasuredLines, deadCount: endObserved ? deadCount : null, deadValueKes: endObserved && input.canViewCosts ? deadValue : null, overstockCount: endObserved ? overstockCount : null, overstockValueKes: endObserved && input.canViewCosts ? overstockValue : null, details });
+        result.push({ week: week.toISOString().slice(0, 10), from: from.toISOString().slice(0, 10), through: new Date(+end - DAY).toISOString().slice(0, 10), days, snapshotDays: observed.size, endObservedProducts, eligibleProducts: products.size, orderedUnits, orderedValueKes: input.canViewCosts ? orderedValue : null, overorderUnits: comparisonLines ? overorderUnits : null, overorderValueKes: comparisonLines && input.canViewCosts ? overorderValue : null, comparisonLines, unmeasuredLines, deadCount: endObserved ? deadCount : null, unsoldCount: endObserved ? unsoldCount : null, unsoldValueKes: endObserved && input.canViewCosts ? unsoldValue : null, deadValueKes: endObserved && input.canViewCosts ? deadValue : null, overstockCount: endObserved ? overstockCount : null, overstockValueKes: endObserved && input.canViewCosts ? overstockValue : null, details });
     }
     return result.reverse();
 }

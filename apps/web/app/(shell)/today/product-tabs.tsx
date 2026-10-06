@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { AbcBadge } from "@/components/ui/abc-badge";
 import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Input } from "@/components/ui/input";
 import { BoxIcon } from "@/components/icons";
 import {
   Table,
@@ -21,6 +22,8 @@ import { formatNumber, formatRunRate } from "@/lib/money";
 import type { CatalogueRow } from "@/lib/data/stock";
 import type { DashboardTab, DashboardTable } from "@/lib/data/today";
 import { DeadStockExportBar } from "./dead-stock-export";
+import { UnsoldStockExport } from "@/components/inventory/unsold-export";
+import { UNSOLD_STATUS_LABELS } from "@/lib/inventory/unsold-labels";
 
 /**
  * The morning's products, in the five piles worth looking at, with the four
@@ -40,6 +43,7 @@ const TABS: { key: DashboardTab; label: string }[] = [
   // Their label, and the clearer one: "Dead" alone reads as a verdict on the
   // product rather than on the money sitting in it.
   { key: "dead", label: "Dead stock" },
+  { key: "unsold", label: "Unsold" },
   { key: "all", label: "All" },
 ];
 
@@ -47,9 +51,12 @@ const EMPTY: Record<DashboardTab, string> = {
   stockout: "Nothing is out of stock.",
   reorder: "Nothing needs reordering right now.",
   onway: "Nothing is on its way in.",
-  dead: "No stock is sitting unsold.",
+  dead: "No stock currently meets the dead-stock rules.",
+  unsold: "Every stocked product has a recorded sale.",
   all: "No products yet.",
 };
+
+export const UNSOLD_REASON_LABELS = UNSOLD_STATUS_LABELS;
 
 function eta(date: Date | null): string {
   if (!date) return "no ETA";
@@ -132,10 +139,13 @@ export function ProductTabs({
   trend: ReactNode;
 }) {
   const [tab, setTab] = useState<DashboardTab>("stockout");
-  const rows = data.rows[tab];
+  const [unsoldSearch, setUnsoldSearch] = useState("");
+  const rows = tab === "unsold" && unsoldSearch.trim()
+    ? data.rows.unsold.filter(row => `${row.title} ${row.sku} ${row.vendor ?? ""}`.toLowerCase().includes(unsoldSearch.trim().toLowerCase()))
+    : data.rows[tab];
 
   const health: { label: string; count: number; key: DashboardTab; tone: string }[] = [
-    { label: "Healthy cover", count: data.healthy, key: "all", tone: "text-positive" },
+    { label: "Other stocked products", count: data.healthy, key: "all", tone: "text-ink-muted" },
     { label: "Stockouts", count: data.counts.stockout, key: "stockout", tone: "text-negative" },
     { label: "Reorder needed", count: data.counts.reorder, key: "reorder", tone: "text-warning" },
     { label: "On the way", count: data.counts.onway, key: "onway", tone: "text-accent-ink" },
@@ -145,6 +155,7 @@ export function ProductTabs({
       key: "dead",
       tone: "text-ink-muted",
     },
+    { label: "Unsold · no recorded sales", count: data.counts.unsold, key: "unsold", tone: "text-ink-muted" },
   ];
 
   return (
@@ -193,6 +204,21 @@ export function ProductTabs({
           onSelect={() => setTab("dead")}
         />
       </div>
+
+      <Card className="p-4 sm:p-5">
+        <button type="button" aria-pressed={tab === "unsold"} onClick={() => setTab("unsold")}
+          className="flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded text-left hover:text-accent-ink">
+          <span className="min-w-0">
+            <span className="block font-semibold">Unsold · {formatNumber(data.counts.unsold)} stocked products</span>
+            <span className="mt-1 block text-sm text-ink-muted">No recorded positive sales. View the full list →</span>
+          </span>
+          {canViewCosts && <span className="text-right font-mono text-xl font-semibold">
+            <CostValue amount={data.unsoldSummary.costKes} canViewCosts={canViewCosts} compact />
+            <span className="block font-sans text-xs font-normal text-ink-muted">stock value at cost</span>
+          </span>}
+        </button>
+        <p className="mt-3 text-sm text-ink-muted">Recent product records, including recently imported records, may still be in the 60-day grace period. Others need more stock history or a known age before they qualify as dead stock. This list includes any products already counted as dead stock; the two values should not be added together.</p>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
         {trend}
@@ -256,15 +282,49 @@ export function ProductTabs({
               <DeadStockExportBar rows={data.deadStockExport} canViewCosts={canViewCosts} />
             </div>
           )}
+          {tab === "unsold" && <div className="ml-auto">
+            <UnsoldStockExport rows={rows} reasons={data.unsoldReasons} canViewCosts={canViewCosts} />
+          </div>}
         </div>
+
+        {tab === "unsold" && <div className="space-y-2 px-5 pt-4">
+          <Input aria-label="Search unsold products" placeholder="Search unsold products by name, SKU or brand" value={unsoldSearch} onChange={event => setUnsoldSearch(event.target.value)} className="w-full sm:max-w-md" />
+          <p className="text-sm text-ink-muted">Showing {formatNumber(rows.length)} of {formatNumber(data.counts.unsold)} stocked products with no recorded sale. Every matching product is included; scroll within the table to see the full list.</p>
+        </div>}
+
+        {/* The run sizes these too — never held back for a missing supplier,
+            only for unit economics it can't reason about. Shown on Reorder so
+            "why isn't this stockout here" has an answer instead of a silent
+            omission; fix the cost on the product, not the supplier. */}
+        {tab === "reorder" && data.missingCostCount > 0 && (
+          <div className="mx-5 mt-4 rounded-lg border border-warning bg-warning-soft p-4 text-sm">
+            <p className="font-semibold text-warning">
+              {formatNumber(data.missingCostCount)} more product{data.missingCostCount === 1 ? "" : "s"} need{data.missingCostCount === 1 ? "s" : ""} a cost before they can be forecasted
+            </p>
+            <p className="mt-1 text-ink-muted">Missing or broken cost data — these are not on this list until the number is fixed, whether or not a supplier is set.</p>
+            <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              {data.missingCostRows.slice(0, 6).map(row => (
+                <li key={row.productId}>
+                  <Link href={`/products/${row.productId}`} className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+                    {row.title}
+                  </Link>
+                  <span className="ml-1.5 font-mono text-xs text-ink-muted">{row.sku}</span>
+                </li>
+              ))}
+              {data.missingCostCount > 6 && (
+                <li className="text-ink-muted">+{formatNumber(data.missingCostCount - 6)} more</li>
+              )}
+            </ul>
+          </div>
+        )}
 
         <div className="mt-3 pb-2">
           {rows.length === 0 ? (
             <div className="px-5 pb-4">
-              <EmptyState icon={<BoxIcon />} title={EMPTY[tab]} />
+              <EmptyState icon={<BoxIcon />} title={tab === "unsold" && unsoldSearch.trim() ? "No unsold products match this search." : EMPTY[tab]} />
             </div>
           ) : (
-            <Table>
+            <Table boxed={tab === "unsold"}>
               <TableHeader>
                 <TableHead>Product</TableHead>
                 {tab === "onway" ? (
@@ -274,10 +334,10 @@ export function ProductTabs({
                     <TableHead numeric>Stock now</TableHead>
                     <TableHead numeric>Sells/day</TableHead>
                   </>
-                ) : tab === "dead" ? (
+                ) : tab === "dead" || tab === "unsold" ? (
                   <>
                     <TableHead numeric>Stock</TableHead>
-                    <TableHead numeric>Sells/day</TableHead>
+                    {tab === "unsold" ? <TableHead>Dead-stock status</TableHead> : <TableHead numeric>Sells/day</TableHead>}
                     <TableHead numeric>Cost / unit</TableHead>
                     <TableHead numeric>Capital tied up</TableHead>
                   </>
@@ -293,7 +353,7 @@ export function ProductTabs({
               <TableBody>
                 {rows.map((row) => (
                   <TableRow key={row.productId}>
-                    <TableCell>
+                    <TableCell className={tab === "unsold" ? "min-w-48 max-w-80 whitespace-normal wrap-break-word" : undefined}>
                       <Link
                         href={`/products/${row.productId}`}
                         className="font-medium text-ink hover:underline"
@@ -324,10 +384,10 @@ export function ProductTabs({
                         <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
                         <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
                       </>
-                    ) : tab === "dead" ? (
+                    ) : tab === "dead" || tab === "unsold" ? (
                       <>
                         <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
-                        <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
+                        {tab === "unsold" ? <TableCell className="max-w-64 whitespace-normal">{UNSOLD_REASON_LABELS[data.unsoldReasons[row.productId]]}</TableCell> : <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>}
                         <TableCell numeric>
                           <CostValue amount={row.costKes} canViewCosts={canViewCosts} />
                         </TableCell>

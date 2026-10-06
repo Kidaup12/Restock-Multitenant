@@ -15,15 +15,18 @@ import type { DashboardTable } from "../lib/data/today";
  */
 
 const table: DashboardTable = {
-  counts: { stockout: 3, reorder: 9, onway: 2, dead: 1, all: 47 },
+  unsoldSummary: {skus:0,costKes:null}, unsoldReasons: {},
+  counts: { unsold: 0, stockout: 3, reorder: 9, onway: 2, dead: 1, all: 47 },
   healthy: 40,
-  rows: { stockout: [], reorder: [], onway: [], dead: [], all: [] },
+  rows: { unsold: [], stockout: [], reorder: [], onway: [], dead: [], all: [] },
   deadWindowDays: 60,
   deadCostKes: 1000,
   criticalCount: 4,
   criticalCostKes: 0,
-  capped: { stockout: false, reorder: false, onway: false, dead: false, all: false },
+  capped: { unsold: false, stockout: false, reorder: false, onway: false, dead: false, all: false },
   deadStockExport: [],
+  missingCostCount: 0,
+  missingCostRows: [],
 };
 
 const html = () =>

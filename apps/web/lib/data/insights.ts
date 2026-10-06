@@ -1,3 +1,4 @@
+import { historicalDeadStock, historicalUnsoldStock } from "../inventory/historical-dead-stock";
 import { observedInStockDays } from "./stock-observation";
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { AS_SHOWN_TAG } from "@wezesha/forecast-run";
@@ -619,6 +620,7 @@ export type Impact = {
   since: Date | null;
   emptyShelfPct: ImpactMeasure | null;
   deadStockSkus: ImpactMeasure | null;
+  unsoldSkus: ImpactMeasure | null;
   deadStockWindowDays: number;
   /** First nightly snapshot on record — what limits how far back we can look. */
   trackingSince: Date | null;
@@ -657,6 +659,7 @@ export async function getImpact(tenantId: string): Promise<Impact> {
     since: firstPo?.createdAt ?? null,
     emptyShelfPct: null,
     deadStockSkus: null,
+    unsoldSkus: null,
     deadStockWindowDays: windowDays,
     trackingSince: trend.trackingSince,
   };
@@ -681,8 +684,8 @@ export async function getImpact(tenantId: string): Promise<Impact> {
     [first.weekStart, last.weekStart],
     windowDays
   );
-  const startDead = deadCounts.get(first.weekStart.getTime());
-  const nowDead = deadCounts.get(last.weekStart.getTime());
+  const startDead = deadCounts.get(first.weekStart.getTime())?.dead;
+  const nowDead = deadCounts.get(last.weekStart.getTime())?.dead;
   const deadStockSkus: ImpactMeasure | null =
     startDead == null || nowDead == null
       ? null
@@ -694,7 +697,10 @@ export async function getImpact(tenantId: string): Promise<Impact> {
           nowWeek: last.weekStart,
         };
 
-  return { ...base, emptyShelfPct, deadStockSkus, reason: null };
+  const startUnsold = deadCounts.get(first.weekStart.getTime())?.unsold;
+  const nowUnsold = deadCounts.get(last.weekStart.getTime())?.unsold;
+  const unsoldSkus: ImpactMeasure | null = startUnsold == null || nowUnsold == null ? null : {start:startUnsold,now:nowUnsold,change:nowUnsold-startUnsold,startWeek:first.weekStart,nowWeek:last.weekStart};
+  return { ...base, emptyShelfPct, deadStockSkus, unsoldSkus, reason: null };
 }
 
 /**
@@ -707,18 +713,20 @@ async function deadStockByWeek(
   tenantId: string,
   weekStarts: Date[],
   windowDays: number
-): Promise<Map<number, number>> {
+): Promise<Map<number, {dead:number;unsold:number}>> {
   const db = prismaForTenant(tenantId);
   const earliest = Math.min(...weekStarts.map((w) => w.getTime()));
-  const [snapshots, sales] = await Promise.all([
+  const [snapshots, sales, products, firstSales] = await Promise.all([
     db.inventorySnapshot.findMany({
-      where: { date: { gte: new Date(earliest) } },
+      where: { date: { gte: new Date(earliest - windowDays * DAY_MS) } },
       select: { date: true, productId: true, onHand: true },
     }),
     db.salesHistory.findMany({
       where: { date: { gte: new Date(earliest - windowDays * DAY_MS) } },
       select: { date: true, productId: true, quantity: true },
     }),
+    db.product.findMany({ select: { id: true, shopifyCreatedAt: true, receivedAt: true } }),
+    db.salesHistory.groupBy({ by: ["productId"], where: { quantity: { gt: 0 } }, _min: { date: true } }),
   ]);
 
   const soldDates = new Map<string, number[]>();
@@ -729,7 +737,11 @@ async function deadStockByWeek(
     else soldDates.set(s.productId, [s.date.getTime()]);
   }
 
-  const out = new Map<number, number>();
+  const productById = new Map(products.map(p => [p.id, p]));
+  const firstById = new Map(firstSales.map(p => [p.productId, p._min.date]));
+  const observations = new Map<string, typeof snapshots>();
+  for (const row of snapshots) { const list = observations.get(row.productId) ?? []; list.push(row); observations.set(row.productId, list); }
+  const out = new Map<number, {dead:number;unsold:number}>();
   for (const weekStart of weekStarts) {
     const weekEnd = weekStart.getTime() + 7 * DAY_MS;
     // The week's most recent nightly snapshot is the shelf as it stood then.
@@ -740,15 +752,18 @@ async function deadStockByWeek(
     }
     if (asOf === 0) continue;
 
-    const cutoff = asOf - windowDays * DAY_MS;
-    let dead = 0;
+    let dead = 0, unsold = 0;
     for (const row of snapshots) {
       if (row.date.getTime() !== asOf || row.onHand <= 0) continue;
-      const dates = soldDates.get(row.productId);
-      const lastSold = dates ? Math.max(...dates.filter((d) => d <= asOf)) : Number.NEGATIVE_INFINITY;
-      if (!Number.isFinite(lastSold) || lastSold < cutoff) dead += 1;
+      const product = productById.get(row.productId);
+      if (historicalUnsoldStock(row.onHand, firstById.get(row.productId) ?? null, new Date(asOf))) unsold += 1;
+      if (historicalDeadStock({ onHand: row.onHand, asOf: new Date(asOf), windowDays,
+        firstSeenAt: product?.shopifyCreatedAt ?? product?.receivedAt ?? null,
+        firstSaleAt: firstById.get(row.productId) ?? null,
+        sales: (soldDates.get(row.productId) ?? []).map(d => new Date(d)),
+        observations: observations.get(row.productId) ?? [] })) dead += 1;
     }
-    out.set(weekStart.getTime(), dead);
+    out.set(weekStart.getTime(), {dead,unsold});
   }
   return out;
 }
@@ -906,6 +921,8 @@ export type DeadStockMonth = {
   monthStart: Date;
   /** Products held with no sale inside the window. */
   skus: number;
+  unsoldSkus: number;
+  unsoldCostKes: number | null;
   /** What that stock cost to buy. Null for a money-blind caller. */
   costKes: number | null;
   /** The same count split by class, so "dead A-class" is visible at a glance. */
@@ -946,17 +963,18 @@ export async function getDeadStockByMonth(
   const now = new Date();
   const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1), 1));
 
-  const [snapshots, sales, products, earliest] = await Promise.all([
+  const [snapshots, sales, products, earliest, firstSales] = await Promise.all([
     db.inventorySnapshot.findMany({
-      where: { date: { gte: from } },
+      where: { date: { gte: new Date(+from - windowDays * DAY_MS) } },
       select: { date: true, productId: true, onHand: true },
     }),
     db.salesHistory.findMany({
       where: { date: { gte: new Date(from.getTime() - windowDays * DAY_MS) }, quantity: { gt: 0 } },
       select: { date: true, productId: true },
     }),
-    db.product.findMany({ select: { id: true, costKes: true, abcCategory: true } }),
+    db.product.findMany({ select: { id: true, costKes: true, abcCategory: true, shopifyCreatedAt: true, receivedAt: true } }),
     db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
+    db.salesHistory.groupBy({ by: ["productId"], where: { quantity: { gt: 0 } }, _min: { date: true } }),
   ]);
 
   const soldDates = new Map<string, number[]>();
@@ -967,9 +985,14 @@ export async function getDeadStockByMonth(
   }
   const productById = new Map(products.map((p) => [p.id, p]));
 
+  const firstById = new Map(firstSales.map(p => [p.productId, p._min.date]));
+  const observations = new Map<string, typeof snapshots>();
+  for (const row of snapshots) { const list = observations.get(row.productId) ?? []; list.push(row); observations.set(row.productId, list); }
+
   // The last snapshot date in each month is that month's shelf.
   const lastDayOfMonth = new Map<number, number>();
   for (const row of snapshots) {
+    if (row.date < from) continue;
     const key = monthStartOf(row.date).getTime();
     const t = row.date.getTime();
     if (t > (lastDayOfMonth.get(key) ?? 0)) lastDayOfMonth.set(key, t);
@@ -977,21 +1000,20 @@ export async function getDeadStockByMonth(
 
   const out: DeadStockMonth[] = [];
   for (const [monthKey, asOf] of [...lastDayOfMonth.entries()].sort((a, b) => a[0] - b[0])) {
-    const cutoff = asOf - windowDays * DAY_MS;
-    let skus = 0;
+    let skus = 0, unsoldSkus = 0, unsoldCost = 0;
     let costKes = 0;
     const byClass = { a: 0, b: 0, c: 0, unrated: 0 };
 
     for (const row of snapshots) {
       if (row.date.getTime() !== asOf || row.onHand <= 0) continue;
-      const dates = soldDates.get(row.productId);
-      const lastSold = dates
-        ? Math.max(...dates.filter((d) => d <= asOf))
-        : Number.NEGATIVE_INFINITY;
-      if (Number.isFinite(lastSold) && lastSold >= cutoff) continue;
-
-      skus += 1;
       const product = productById.get(row.productId);
+      if (historicalUnsoldStock(row.onHand, firstById.get(row.productId) ?? null, new Date(asOf))) { unsoldSkus++; unsoldCost += (product?.costKes ?? 0) * row.onHand; }
+      if (!historicalDeadStock({ onHand: row.onHand, asOf: new Date(asOf), windowDays,
+        firstSeenAt: product?.shopifyCreatedAt ?? product?.receivedAt ?? null,
+        firstSaleAt: firstById.get(row.productId) ?? null,
+        sales: (soldDates.get(row.productId) ?? []).map(d => new Date(d)),
+        observations: observations.get(row.productId) ?? [] })) continue;
+      skus += 1;
       costKes += (product?.costKes ?? 0) * row.onHand;
       const abc = product?.abcCategory;
       if (abc === "A") byClass.a += 1;
@@ -1003,6 +1025,8 @@ export async function getDeadStockByMonth(
     out.push({
       monthStart: new Date(monthKey),
       skus,
+      unsoldSkus,
+      unsoldCostKes: canViewCosts ? unsoldCost : null,
       costKes: canViewCosts ? costKes : null,
       byClass,
     });
@@ -1381,6 +1405,9 @@ export type LeakageGroup = {
   stockoutSkus: number;
   stockoutPct: number | null;
   deadStockSkus: number;
+  unsoldSkus: number;
+  /** Held with no recorded positive sale, divided by the same total-SKU denominator. */
+  unsoldPct: number | null;
   deadStockPct: number | null;
   /** Estimated missed sales over the range — a sales figure, shown to all. */
   missedRevenueKes: number;
@@ -1420,10 +1447,11 @@ export async function getLeakageMatrix(
     skuCount: number;
     stockoutSkus: number;
     deadStockSkus: number;
+    unsoldSkus: number;
     missedRevenueKes: number;
     capitalKes: number;
   };
-  const fresh = (): Acc => ({ skuCount: 0, stockoutSkus: 0, deadStockSkus: 0, missedRevenueKes: 0, capitalKes: 0 });
+  const fresh = (): Acc => ({ skuCount: 0, stockoutSkus: 0, deadStockSkus: 0, unsoldSkus: 0, missedRevenueKes: 0, capitalKes: 0 });
   const catAgg = new Map<string, Acc>();
   const abcAgg = new Map<string, Acc>();
   const bump = (agg: Map<string, Acc>, key: string, p: (typeof products)[number]) => {
@@ -1431,6 +1459,7 @@ export async function getLeakageMatrix(
     a.skuCount += 1;
     const onHand = p.currentStock;
     const sold = lastSale.get(p.id) ?? null;
+    if (onHand > 0 && sold == null) a.unsoldSkus += 1;
     if (onHand <= 0) {
       a.stockoutSkus += 1;
     } else if (pileFor({ onHandUnits: onHand, lastSaleAt: sold == null ? null : new Date(sold),
@@ -1459,6 +1488,8 @@ export async function getLeakageMatrix(
         stockoutSkus: a.stockoutSkus,
         stockoutPct: a.skuCount > 0 ? Math.round((a.stockoutSkus / a.skuCount) * 1000) / 10 : null,
         deadStockSkus: a.deadStockSkus,
+        unsoldSkus: a.unsoldSkus,
+        unsoldPct: a.skuCount > 0 ? Math.round((a.unsoldSkus / a.skuCount) * 1000) / 10 : null,
         deadStockPct: a.skuCount > 0 ? Math.round((a.deadStockSkus / a.skuCount) * 1000) / 10 : null,
         missedRevenueKes: Math.round(a.missedRevenueKes),
         capitalKes: canViewCosts ? Math.round(a.capitalKes) : null,

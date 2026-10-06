@@ -21,7 +21,8 @@ export type ReportPdfData = {
   capitalCost: number | null;
   abc: { A: number; B: number; C: number };
   topMovers: { title: string; sku: string; qty: number; rev: number }[];
-  deadStock: { count: number; valueKes: number | null };
+  deadStock: { count: number; valueKes: number | null; windowDays: number };
+  unsoldStock: { count: number; valueKes: number | null; rows: { title: string; sku: string; units: number; valueKes: number | null; reason: string }[] };
   stockoutCount: number;
 };
 
@@ -84,6 +85,7 @@ function ReportDocument({ data, brand }: { data: ReportPdfData; brand: string })
   const currency = data.shop.currency || DEFAULT_CURRENCY;
   const kes = (n: number) => money(n, currency);
   const dead = `${data.deadStock.count}${data.canSeeCosts && data.deadStock.valueKes != null ? ` · ${kes(data.deadStock.valueKes)}` : ""}`;
+  const unsold = `${data.unsoldStock.count}${data.canSeeCosts && data.unsoldStock.valueKes != null ? ` · ${kes(data.unsoldStock.valueKes)}` : ""}`;
   return (
     <Document title={`${brand} performance report`}>
       <Page size="A4" style={s.page}>
@@ -104,7 +106,8 @@ function ReportDocument({ data, brand }: { data: ReportPdfData; brand: string })
           <Kpi label="ABC mix" value={`${data.abc.A} · ${data.abc.B} · ${data.abc.C}`} />
         </View>
         <View style={s.kpiRow}>
-          <Kpi label="Dead stock (no 90d sale)" value={dead} />
+          <Kpi label={`Dead stock (no ${data.deadStock.windowDays}d sale)`} value={dead} />
+          <Kpi label="Unsold stock" value={unsold} />
           <Kpi label="Stockouts (all buyable products)" value={String(data.stockoutCount)} />
         </View>
 
@@ -126,6 +129,20 @@ function ReportDocument({ data, brand }: { data: ReportPdfData; brand: string })
           ))}
         </View>
 
+        <View style={s.section}>
+          <Text style={s.label}>Unsold stock — products held with no recorded positive sale</Text>
+          <Text style={{ color: MUTE, marginBottom: 10 }}>Includes new products and products with limited history. Unsold does not by itself mean dead stock; available sales history may be incomplete.</Text>
+          <View style={s.tableHead}>
+            <Text style={s.cProd}>Product / history</Text>
+            <Text style={s.cSold}>Held units</Text>
+            {data.canSeeCosts && <Text style={s.cRev}>Stock cost</Text>}
+          </View>
+          {data.unsoldStock.rows.length === 0 ? <Text style={{ color: MUTE, marginTop: 10 }}>No unsold products with stock held.</Text> : data.unsoldStock.rows.map((row, index) => <View key={index} style={s.tableRow} wrap={false}>
+            <View style={s.cProd}><Text>{row.title}</Text><Text style={s.sub}>{row.sku} · {row.reason}</Text></View>
+            <Text style={s.cSold}>{row.units}</Text>
+            {data.canSeeCosts && <Text style={s.cRev}>{row.valueKes == null ? "—" : kes(row.valueKes)}</Text>}
+          </View>)}
+        </View>
         <Text style={s.footer}>{brand} · figures reflect the last-synced data{data.canSeeCosts ? "" : " · cost figures hidden for your role"}</Text>
       </Page>
     </Document>
