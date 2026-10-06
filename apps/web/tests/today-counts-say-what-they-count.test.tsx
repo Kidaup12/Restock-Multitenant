@@ -25,6 +25,8 @@ const table: DashboardTable = {
   criticalCostKes: 0,
   capped: { unsold: false, stockout: false, reorder: false, onway: false, dead: false, all: false },
   deadStockExport: [],
+  missingCostCount: 0,
+  missingCostRows: [],
 };
 
 const html = () =>

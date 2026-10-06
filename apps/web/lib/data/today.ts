@@ -277,6 +277,13 @@ export type DashboardTable = {
   /** True when a pile had more rows than the cap, so the screen can say so
    *  rather than quietly showing a prefix. */
   capped: Record<DashboardTab, boolean>;
+  /** Products the run sized to reorder but held off the Reorder tab because the
+   *  cost is missing or broken (plannable !== "ok") — never gated on having a
+   *  supplier, only on having usable unit economics. Surfaced so "why isn't
+   *  this stockout on the list" has an answer instead of a silent omission;
+   *  the owner fixes the cost on the product, not the supplier. */
+  missingCostCount: number;
+  missingCostRows: CatalogueRow[];
   /** The FULL dead pile for the CSV — every dead row, not the capped page the
    *  `dead` tab renders — ranked by frozen cash (cost when visible, else
    *  retail) so the file leads with the most capital sitting still. */
@@ -349,6 +356,14 @@ export async function getDashboardTable(
   // getBuyList, and this only maps it back onto catalogue rows in that same
   // sequence — so this tab reads in the exact order of the plan a person acts on.
   const reorder = (buyList?.rows ?? [])
+    .map((r) => byId.get(r.productId))
+    .filter((r): r is CatalogueRow => r != null);
+
+  // The run sized these too, but held them off the Reorder tab because the
+  // cost is missing or broken — never because there is no supplier. Mapped
+  // back onto CatalogueRow the same way `reorder` is, so the tab can name them.
+  const missingCostRows = (buyList?.excluded ?? [])
+    .filter((r) => r.reason === "unplannable")
     .map((r) => byId.get(r.productId))
     .filter((r): r is CatalogueRow => r != null);
 
@@ -428,5 +443,7 @@ export async function getDashboardTable(
       : null,
     capped,
     deadStockExport,
+    missingCostCount: missingCostRows.length,
+    missingCostRows,
   };
 }

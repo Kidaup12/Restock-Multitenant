@@ -292,6 +292,32 @@ export function ProductTabs({
           <p className="text-sm text-ink-muted">Showing {formatNumber(rows.length)} of {formatNumber(data.counts.unsold)} stocked products with no recorded sale. Every matching product is included; scroll within the table to see the full list.</p>
         </div>}
 
+        {/* The run sizes these too — never held back for a missing supplier,
+            only for unit economics it can't reason about. Shown on Reorder so
+            "why isn't this stockout here" has an answer instead of a silent
+            omission; fix the cost on the product, not the supplier. */}
+        {tab === "reorder" && data.missingCostCount > 0 && (
+          <div className="mx-5 mt-4 rounded-lg border border-warning bg-warning-soft p-4 text-sm">
+            <p className="font-semibold text-warning">
+              {formatNumber(data.missingCostCount)} more product{data.missingCostCount === 1 ? "" : "s"} need{data.missingCostCount === 1 ? "s" : ""} a cost before they can be forecasted
+            </p>
+            <p className="mt-1 text-ink-muted">Missing or broken cost data — these are not on this list until the number is fixed, whether or not a supplier is set.</p>
+            <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              {data.missingCostRows.slice(0, 6).map(row => (
+                <li key={row.productId}>
+                  <Link href={`/products/${row.productId}`} className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+                    {row.title}
+                  </Link>
+                  <span className="ml-1.5 font-mono text-xs text-ink-muted">{row.sku}</span>
+                </li>
+              ))}
+              {data.missingCostCount > 6 && (
+                <li className="text-ink-muted">+{formatNumber(data.missingCostCount - 6)} more</li>
+              )}
+            </ul>
+          </div>
+        )}
+
         <div className="mt-3 pb-2">
           {rows.length === 0 ? (
             <div className="px-5 pb-4">

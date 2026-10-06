@@ -27,6 +27,7 @@ const data: DashboardTable = {
   capped: { all: true, stockout: false, reorder: false, onway: false, dead: false, unsold: false },
   healthy: 237, deadCostKes: 156000, deadWindowDays: 90, criticalCount: 0, criticalCostKes: 0, deadStockExport: [],
   unsoldSummary: { skus: 238, costKes: 1980000 }, unsoldReasons: Object.fromEntries(rows.map((row, index) => [row.productId, reasons[index % 4]!])),
+  missingCostCount: 0, missingCostRows: [],
 };
 const tree = (canViewCosts = true) => { hooks.cursor = 0; return ProductTabs({ data, canViewCosts, trend: null }); };
 const selectUnsold = () => {
