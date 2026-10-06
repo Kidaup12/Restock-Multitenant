@@ -8,10 +8,12 @@ import { publishEvent } from "@wezesha/realtime";
 /**
  * Forecast crons — the freshness + accuracy backbone (spec §6).
  *
- *   twice an hour:  runForecast per tenant, at :07 and :37 (FORECAST_PATTERN), so
- *             every screen opens on a current buy list instead of a manual
- *             re-run. It reads as "nightly" in places because it once was —
- *             believe the pattern, not the prose.
+ *   every 6h:  runForecast per tenant, at :07 past 00/06/12/18 (FORECAST_PATTERN),
+ *             so a screen opens on a plan refreshed within the trading day
+ *             instead of a manual re-run — without re-reading a year of history
+ *             every half hour (see FORECAST_PATTERN for why that mattered). It
+ *             reads as "nightly" in places because it once was — believe the
+ *             pattern, not the prose.
  *   monthly:  the walk-forward backtest per tenant — accuracy tracking, the
  *             champion/challenger audit, and the degradation alert.
  *
@@ -27,23 +29,29 @@ export const FORECAST_CRON_QUEUE = "forecast-crons";
 
 export const NIGHTLY_FORECAST_SCHEDULER = "nightly-forecast";
 /**
- * Every half hour, at :07 and :37.
+ * Every six hours, at :07 past 00/06/12/18 UTC.
  *
  * It ran once at 02:07 and the shop saw a buy list built before the day it was
  * trading in — sell out at 9am and the plan still said you were covered until
- * the next night. The offsets keep it clear of the Shopify sync on :00/:15/:30/
- * :45, so a run reads a catalogue pull that has finished rather than one in
+ * the next night. Four runs a day keep the plan current through the trading day
+ * (morning, midday, evening, overnight) without re-reading a YEAR of sales and
+ * snapshots every half hour: at twice-hourly, each tenant's run pulled its full
+ * 365-day history 48 times a day, and across the fleet that full-history read
+ * was the single largest source of database egress — enough to blow the quota.
+ * A restock plan is a daily-cadence decision; six-hourly keeps it fresh for a
+ * fraction of the reads. The :07 offset still lands clear of the hourly Shopify
+ * sync on :00, so a run reads a catalogue pull that has finished, not one in
  * flight.
  *
- * Safe to run this often because of two decisions already in place: the enqueue
- * guard gives one tenant at most one running forecast (no overlap), and the
- * append-only ForecastRecommendation history is keyed on the run DAY with
- * skipDuplicates — so re-running refines the live plan while the day's first ask
- * stands, and adherence figures computed last week cannot shift. The name stays
- * "nightly" only where it is a BullMQ scheduler id: changing that would orphan
- * the registered scheduler rather than replace it.
+ * Safe to change the pattern: registration uses upsertJobScheduler on a stable
+ * id, so a redeploy re-times the existing schedule rather than orphaning it. The
+ * enqueue guard still gives one tenant at most one running forecast (no
+ * overlap), and the append-only ForecastRecommendation history is keyed on the
+ * run DAY with skipDuplicates — so re-running refines the live plan while the
+ * day's first ask stands, and adherence figures computed last week cannot shift.
+ * The name stays "nightly" only where it is a BullMQ scheduler id.
  */
-export const FORECAST_PATTERN = "7,37 * * * *";
+export const FORECAST_PATTERN = "7 */6 * * *";
 
 export const MONTHLY_BACKTEST_SCHEDULER = "monthly-backtest";
 /** After the nightly run and clear of the 03:00 full-sync cursor clear, which it
