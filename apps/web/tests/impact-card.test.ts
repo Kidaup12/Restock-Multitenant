@@ -50,7 +50,7 @@ describe.skipIf(!runnable)("impact figures (local db)", () => {
     productIds = [];
     for (const sku of ["P1", "P2", "P3", "P4"]) {
       const p = await prismaService.product.create({
-        data: { tenantId, sku, title: `Product ${sku}`, vendor: "House" },
+        data: { tenantId, sku, title: `Product ${sku}`, vendor: "House", shopifyCreatedAt: new Date(Date.now() - 180 * DAY) },
       });
       productIds.push(p.id);
     }
@@ -59,6 +59,9 @@ describe.skipIf(!runnable)("impact figures (local db)", () => {
     const thisWeek = weekStartOf(new Date());
     weekB = new Date(thisWeek.getTime() - 7 * DAY);
     weekA = new Date(thisWeek.getTime() - 14 * DAY);
+    // Prior shelf evidence lets these mature products qualify without changing
+    // the measured weeks after the first order.
+    await prismaService.inventorySnapshot.createMany({ data: Array.from({ length: 14 }, (_, day) => productIds.map(productId => ({ tenantId, productId, date: new Date(+weekA - (day + 1) * DAY), onHand: 5 }))).flat() });
   });
 
   /** Five nightly snapshots (Mon–Fri) for one week; onHand per product index. */

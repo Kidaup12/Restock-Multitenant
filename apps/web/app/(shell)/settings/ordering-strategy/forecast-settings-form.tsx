@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { saveForecastSettings } from "./actions";
 import { ABC_WINDOWS, type ForecastSettings } from "./forecast-settings";
+import { RunForecastButton } from "../../today/run-forecast-button";
 
 export function ForecastSettingsForm({ initial, canManage }: { initial: ForecastSettings; canManage: boolean }) {
   const router = useRouter();
@@ -63,7 +64,10 @@ export function ForecastSettingsForm({ initial, canManage }: { initial: Forecast
           </label>
         </fieldset>
         {error && <p role="alert" className="text-sm text-negative">{error}</p>}
-        {message && <p role="status" className="text-sm text-positive">{message}</p>}
+        {message && <div className="space-y-2">
+          <p role="status" className="text-sm text-positive">{message}</p>
+          {canManage && <RunForecastButton />}
+        </div>}
         {canManage && <Button type="submit" disabled={!dirty || pending} loading={pending}>Save forecast settings</Button>}
       </form>
     </CardContent>

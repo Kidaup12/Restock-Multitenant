@@ -60,13 +60,12 @@ describe.skipIf(!runnable)("dead stock by month (local db)", () => {
       },
     });
 
-    // Both held on the shelf on the same recent day.
-    const asOf = daysAgo(2);
+    // Fourteen observed in-stock days establish a fair chance to sell.
     await prismaService.inventorySnapshot.createMany({
-      data: [
-        { tenantId, productId: stale.id, date: asOf, onHand: 7 },
-        { tenantId, productId: selling.id, date: asOf, onHand: 3 },
-      ],
+      data: Array.from({ length: 14 }, (_, i) => [
+        { tenantId, productId: stale.id, date: daysAgo(2 + i), onHand: 7 },
+        { tenantId, productId: selling.id, date: daysAgo(2 + i), onHand: 3 },
+      ]).flat(),
     });
     // One sold last week; the other not for half a year.
     await prismaService.salesHistory.createMany({

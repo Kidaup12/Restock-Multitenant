@@ -75,9 +75,10 @@ it("hidden selected order rows cannot survive checklist scope or urgency changes
 });
 
 it("each Dashboard KPI and tab selects its advertised product group", () => {
-  const empty = { stockout: [], reorder: [], onway: [], dead: [], all: [] };
+  const empty = { stockout: [], reorder: [], onway: [], dead: [], unsold: [], all: [] };
   const tree = nodes(ProductTabs({ canViewCosts: false, trend: null, data: {
-    rows: empty, counts: { stockout: 1, reorder: 2, onway: 3, dead: 4, all: 10 },
+    rows: empty, counts: { stockout: 1, reorder: 2, onway: 3, dead: 4, unsold: 0, all: 10 },
+    unsoldSummary: { skus: 0, costKes: null }, unsoldReasons: {},
     capped: {}, healthy: 4, deadWindowDays: 90, deadStockExport: [], deadCostKes: null,
   } as never }));
   const cards = tree.filter(n => typeof n.props.onSelect === "function");

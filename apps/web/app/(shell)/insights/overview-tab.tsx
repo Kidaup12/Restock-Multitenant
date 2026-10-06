@@ -9,6 +9,7 @@ import { OverviewKpis } from "./overview-kpis-section";
 import { ClassFilter } from "./class-filter";
 import { TopEarners } from "./top-earners";
 import { DeadStockSection } from "./dead-stock-section";
+import { UnsoldSection } from "./unsold-section";
 import { OnOrderSection } from "./on-order-section";
 import { OverstockSection } from "./overstock-section";
 import { RevenueBreakdownSection } from "./revenue-breakdown";
@@ -84,6 +85,13 @@ export function OverviewTab({
           canViewCosts={canViewCosts}
           abc={abc}
         />
+      </Suspense>
+
+      {/* Unsold — held with no recorded sale EVER, a narrower and starker group
+          than dead stock's "no sale in the window". Its own section so it is
+          never folded into (and lost inside) the dead-stock count. */}
+      <Suspense fallback={<SkeletonCard />}>
+        <UnsoldSection tenantId={tenantId} canViewCosts={canViewCosts} abc={abc} />
       </Suspense>
 
       {/* On the way — what is already inbound, so an owner does not double-order. */}

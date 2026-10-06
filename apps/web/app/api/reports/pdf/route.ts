@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { activeMembership, getSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
-import { getTodayMetrics } from "@/lib/data/today";
+import { getTodayMetrics, getUnsoldStock } from "@/lib/data/today";
 import { moneyAtRest } from "@/lib/metrics/calc";
 import { renderReportPdf, type ReportPdfData } from "@/lib/reports/report-pdf";
 import { withCapture } from "@/lib/observability/wrap";
@@ -14,7 +14,7 @@ export const maxDuration = 30;
 const DAY_MS = 86_400_000;
 
 /**
- * GET /api/reports/pdf — a one-page shop performance report.
+ * GET /api/reports/pdf — shop performance and unsold-stock detail report.
  *
  * Session-guarded and scoped to the caller's active membership; any authenticated
  * member may export (there is no separate export permission). Cost figures —
@@ -42,7 +42,7 @@ export const GET = withCapture(
     const db = prismaForTenant(tenantId);
     const since30 = new Date(Date.now() - 30 * DAY_MS);
 
-    const [today, products, sales30] = await Promise.all([
+    const [today, products, sales30, unsold] = await Promise.all([
       getTodayMetrics(tenantId, { canViewCosts: canSeeCosts }),
       db.product.findMany({
         where: { ...BUYABLE_PRODUCT_WHERE },
@@ -53,6 +53,7 @@ export const GET = withCapture(
         where: { date: { gte: since30 } },
         _sum: { quantity: true, revenueKes: true },
       }),
+      getUnsoldStock(tenantId, { canViewCosts: canSeeCosts }),
     ]);
 
     // ABC mix + capital tied up, walked once over the buyable catalogue.
@@ -87,7 +88,15 @@ export const GET = withCapture(
       capitalCost: canSeeCosts ? capital : null,
       abc,
       topMovers,
-      deadStock: { count: today.deadStock.skus, valueKes: today.deadStock.costKes },
+      deadStock: { count: today.deadStock.skus, valueKes: canSeeCosts ? today.deadStock.costKes : null, windowDays: today.deadStock.windowDays },
+      unsoldStock: {
+        count: unsold.skus,
+        valueKes: canSeeCosts ? unsold.costKes : null,
+        rows: unsold.rows.map(row => ({ title: row.title, sku: row.sku, units: row.onHandUnits,
+          valueKes: canSeeCosts ? row.stockValueKes : null,
+          reason: unsold.reasons[row.productId] ?? "unknown_age",
+        })),
+      },
       stockoutCount: today.stockedOutProducts,
     };
 

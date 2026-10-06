@@ -68,14 +68,15 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow =>
   }) as CatalogueRow;
 
 const table = (rows: CatalogueRow[]): DashboardTable => ({
-  counts: { stockout: rows.length, reorder: 0, onway: 0, dead: 0, all: rows.length },
+  unsoldSummary: {skus:0,costKes:null}, unsoldReasons: {},
+  counts: { unsold: 0, stockout: rows.length, reorder: 0, onway: 0, dead: 0, all: rows.length },
   healthy: 0,
-  rows: { stockout: rows, reorder: [], onway: [], dead: [], all: rows },
+  rows: { unsold: [], stockout: rows, reorder: [], onway: [], dead: [], all: rows },
   deadWindowDays: 90,
   deadCostKes: 0,
   criticalCount: 0,
   criticalCostKes: 0,
-  capped: { stockout: false, reorder: false, onway: false, dead: false, all: false },
+  capped: { unsold: false, stockout: false, reorder: false, onway: false, dead: false, all: false },
   deadStockExport: [],
 });
 
