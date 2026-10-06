@@ -29,7 +29,7 @@ export function Table({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn("w-full overflow-x-auto", boxed && "max-h-[70vh] overflow-y-auto")}>
+    <div className={cn("min-w-0 w-full max-w-full overflow-x-auto", boxed && "max-h-[70vh] overflow-y-auto")}>
       <table
         className={cn(
           "w-full min-w-[560px] text-sm",

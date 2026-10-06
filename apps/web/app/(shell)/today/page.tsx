@@ -78,59 +78,17 @@ export default async function TodayPage() {
       />
       <RealtimeRefresh />
       <Suspense fallback={null}>
-        <SalesReviewSection tenantId={tenantId} canManage={canManageShop} />
-      </Suspense>
-
-      <GuideBox id="today" scope={tenantId} title="This is your daily home base">
-        The four figures at the top are what needs attention right now — what is
-        out of stock, what to reorder, what is on its way, and what is not
-        selling. Tap any of them to see that list. When you are ready to buy,
-        open the Restock planner.
-      </GuideBox>
-
-      {/* What to buy this week to protect sales — the latest run's must-restock
-          essentials. Its own fetch, so it streams behind its own Suspense and
-          renders nothing when there is nothing urgent to buy. */}
-      <Suspense fallback={null}>
         <BuyThisWeek tenantId={tenantId} canViewCosts={canViewCosts} />
       </Suspense>
-
-      <Suspense
-        fallback={
-          <Card className="px-5 py-4">
-            {/* The shared skeleton, not a bare pulse: this sat beside four
-                shimmering tiles and read as a different kind of loading. */}
-            <Skeleton className="h-6 w-full" />
-          </Card>
-        }
-      >
-        <TodaySetupStrip
-          tenantId={tenantId}
-          displayName={session.user.name}
-          canManageShop={canManageShop}
-          canViewCosts={canViewCosts}
-        />
-      </Suspense>
-
-      {canManageTeam ? (
-        <Suspense fallback={null}>
-          <TodayLimitNotice tenantId={tenantId} />
-        </Suspense>
-      ) : null}
-
-      <Suspense fallback={null}>
-        <CostGapBar tenantId={tenantId} canViewCosts={canViewCosts} />
-      </Suspense>
-
-      {/* "Move stock, don't buy it" — nudges the owner toward a transfer before
-          the buy list. No-shows for a single-location shop or when every branch
-          is already covered. Placed after the buy-this-week banner would land. */}
       <Suspense fallback={null}>
         <RedistributionCard
           tenantId={tenantId}
           canViewCosts={canViewCosts}
           currency={membership.tenant.currency}
         />
+      </Suspense>
+      <Suspense fallback={null}>
+        <SalesReviewSection tenantId={tenantId} canManage={canManageShop} />
       </Suspense>
 
       <div data-tour="today-metrics">
@@ -166,6 +124,35 @@ export default async function TodayPage() {
         </Suspense>
       </div>
 
+      <details className="rounded-lg border border-edge bg-surface">
+        <summary className="cursor-pointer px-5 py-4 text-sm font-medium text-ink">
+          Setup and shop checks
+        </summary>
+        <div className="space-y-4 border-t border-edge p-4 sm:p-5">
+          <GuideBox id="today" scope={tenantId} title="This is your daily home base">
+            The four figures at the top are what needs attention right now — what is
+            out of stock, what to reorder, what is on its way, and what is not
+            selling. Tap any of them to see that list. When you are ready to buy,
+            open the Restock planner.
+          </GuideBox>
+          <Suspense fallback={<Skeleton className="h-6 w-full" />}>
+            <TodaySetupStrip
+              tenantId={tenantId}
+              displayName={session.user.name}
+              canManageShop={canManageShop}
+              canViewCosts={canViewCosts}
+            />
+          </Suspense>
+          {canManageTeam ? (
+            <Suspense fallback={null}>
+              <TodayLimitNotice tenantId={tenantId} />
+            </Suspense>
+          ) : null}
+          <Suspense fallback={null}>
+            <CostGapBar tenantId={tenantId} canViewCosts={canViewCosts} />
+          </Suspense>
+        </div>
+      </details>
     </div>
   );
 }

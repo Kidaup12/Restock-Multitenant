@@ -63,6 +63,13 @@ export default async function InventoryPage({
         actions={<><Link href="/inventory/position" className="rounded border border-line px-3 py-2 text-sm">Inventory position</Link><RefreshButton /></>}
       />
 
+      <p className="text-sm text-ink-muted">
+        Check shelf quantities with a{" "}
+        <Link href="/spot-check" className="font-medium text-accent-ink hover:underline">
+          weekly count
+        </Link>.
+      </p>
+
       <GuideBox id="inventory" scope={membership.tenantId} title="Where your stock actually sits">
         One line per product per branch. Units and value are that
         branch&rsquo;s own. Cover and en-route stock are the whole shop&rsquo;s. Branch cover is unavailable because sales are

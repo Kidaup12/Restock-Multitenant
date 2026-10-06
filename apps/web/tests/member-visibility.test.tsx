@@ -974,6 +974,8 @@ describe("export column gating", () => {
       "Product",
       "SKU",
       "To",
+      "Source stock",
+      "Destination stock",
       "Move",
       "Sells/day",
       "Cover before",

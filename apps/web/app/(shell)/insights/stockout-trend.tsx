@@ -68,9 +68,9 @@ export async function StockoutTrend({
       <CardContent>
         <div className="flex h-32 items-end gap-2">
           {weeks.map((week) => (
-            <div key={week.weekStart.getTime()} className="flex flex-1 flex-col items-center gap-1.5">
+            <div key={week.weekStart.getTime()} className="grid h-full min-w-0 flex-1 grid-rows-[1rem_minmax(0,1fr)_2rem] gap-1.5 text-center">
               <span className="font-mono text-xs tabular-nums text-ink-muted">{week.ratePct}%</span>
-              <div className="flex h-full w-full items-end">
+              <div className="flex h-full min-h-0 w-full items-end">
                 <div
                   className="w-full rounded-t bg-accent"
                   style={{ height: `${Math.max(2, (week.ratePct / peak) * 100)}%` }}

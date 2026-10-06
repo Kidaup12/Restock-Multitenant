@@ -46,12 +46,14 @@ export async function ProposalView({
   tenantId,
   fromLocationId,
   coverDays,
+  windowDays,
   canViewCosts,
   canPlan,
 }: {
   tenantId: string;
   fromLocationId: string;
   coverDays: number;
+  windowDays?: number;
   canViewCosts: boolean;
   canPlan: boolean;
 }) {
@@ -60,6 +62,7 @@ export async function ProposalView({
   const proposal = await getDistributionProposal(tenantId, {
     fromLocationId,
     coverDays,
+    windowDays,
     canViewCosts,
   });
 
@@ -136,11 +139,13 @@ export async function ProposalView({
         )}
 
         <div className="pb-2">
-          <Table dense>
+          <Table dense boxed>
             <TableHeader>
               <TableHead>Product</TableHead>
               <TableHead>SKU</TableHead>
               <TableHead>To</TableHead>
+              <TableHead numeric>Source stock</TableHead>
+              <TableHead numeric>Branch stock</TableHead>
               <TableHead numeric>Move</TableHead>
               <TableHead numeric>Sells/day</TableHead>
               <TableHead numeric>Cover</TableHead>
@@ -152,6 +157,8 @@ export async function ProposalView({
                   <TableCell className="font-medium text-ink">{line.title}</TableCell>
                   <TableCell className="font-mono text-xs">{line.sku}</TableCell>
                   <TableCell>{line.toLocationName}</TableCell>
+                  <TableCell numeric>{formatNumber(line.fromOnHand)}</TableCell>
+                  <TableCell numeric>{formatNumber(line.toOnHand)}</TableCell>
                   <TableCell numeric>{formatNumber(line.qty)}</TableCell>
                   <TableCell numeric>{line.toRunRate.toFixed(2)}</TableCell>
                   <TableCell numeric>
@@ -180,6 +187,7 @@ export async function ProposalView({
             fromLocationName={proposal.fromLocationName}
             coverDays={proposal.coverDays}
             canPlan={canPlan}
+            windowDays={proposal.windowDays}
           />
         </div>
       </Card>

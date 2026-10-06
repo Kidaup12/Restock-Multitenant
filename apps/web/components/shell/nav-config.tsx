@@ -76,13 +76,6 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     tourKey: "nav-transfers",
     section: "stock",
   },
-  {
-    href: "/spot-check",
-    label: "Weekly count",
-    icon: <ClipboardIcon />,
-    tourKey: "nav-spot-check",
-    section: "stock",
-  },
 
   { href: "/products", label: "Products", icon: <BoxIcon />, tourKey: "nav-products", section: "catalogue" },
   {

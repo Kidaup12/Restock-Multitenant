@@ -2,7 +2,9 @@
 
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import { useCurrency } from "@/components/currency-provider";
-import type { TransferLine } from "@/lib/data/transfers";
+import type { SavedPlanLine } from "@/lib/data/transfers";
+
+export type TransferExportRow = Pick<SavedPlanLine, "title" | "sku" | "toLocationName" | "qty" | "fromOnHand" | "toOnHand" | "toRunRate" | "toDaysCoverBefore" | "toDaysCoverAfter" | "valueKes">;
 
 /**
  * The pick list leaving the app. The store is read-only to Shopify, so this CSV
@@ -14,17 +16,19 @@ import type { TransferLine } from "@/lib/data/transfers";
 export function transferExportColumns(
   canViewCosts: boolean,
   currency: string
-): ExportColumn<TransferLine>[] {
+): ExportColumn<TransferExportRow>[] {
   return [
     { header: "Product", cell: (r) => r.title },
     { header: "SKU", cell: (r) => r.sku },
     { header: "To", cell: (r) => r.toLocationName },
+    { header: "Source stock", cell: (r) => r.fromOnHand },
+    { header: "Destination stock", cell: (r) => r.toOnHand },
     { header: "Move", cell: (r) => r.qty },
     { header: "Sells/day", cell: (r) => r.toRunRate.toFixed(2) },
     { header: "Cover before", cell: (r) => r.toDaysCoverBefore },
     { header: "Cover after", cell: (r) => r.toDaysCoverAfter },
     ...(canViewCosts
-      ? ([{ header: `Value (${currency})`, cell: (r) => r.valueKes }] satisfies ExportColumn<TransferLine>[])
+      ? ([{ header: `Value (${currency})`, cell: (r) => r.valueKes }] satisfies ExportColumn<TransferExportRow>[])
       : []),
   ];
 }
@@ -35,7 +39,7 @@ export function TransfersExportBar({
   fromLocationName,
   coverDays,
 }: {
-  rows: TransferLine[];
+  rows: TransferExportRow[];
   canViewCosts: boolean;
   fromLocationName: string;
   coverDays: number;

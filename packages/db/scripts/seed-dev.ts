@@ -569,6 +569,35 @@ export async function seedOrdersDemo(tenantId: string): Promise<OrdersDemoResult
 const invokedDirectly =
   typeof process.argv[1] === "string" && import.meta.url === pathToFileURL(process.argv[1]).href;
 
+/** A saved pick list makes the Transfers detail route discoverable by smoke.
+ * Opt-in with the other demo extras, so seedDev's test fixtures stay stable. */
+export async function seedTransfersDemo(tenantId: string): Promise<string | null> {
+  const locations = await prismaService.location.findMany({ where: { tenantId } });
+  const source = locations.find(location => location.locationType === "warehouse");
+  const branch = locations.find(location => location.locationType === "branch");
+  if (!source || !branch) return null;
+  const level = await prismaService.inventoryLevel.findFirst({
+    where: { tenantId, locationId: source.id, onHand: { gt: 0 } },
+    orderBy: { productId: "asc" }, include: { product: true },
+  });
+  if (!level) return null;
+  const destination = await prismaService.inventoryLevel.findFirst({ where: { tenantId, locationId: branch.id, productId: level.productId } });
+  const available = Math.max(0, level.available ?? level.onHand);
+  const atBranch = Math.max(0, destination?.available ?? destination?.onHand ?? 0);
+  const qty = Math.min(5, available);
+  const id = `seed-transfer-${tenantId}`;
+  await prismaService.distributionPlan.upsert({
+    where: { id }, update: { deletedAt: null },
+    create: { id, tenantId, name: "Demo warehouse pick list", fromLocationId: source.id,
+      status: "draft", coverDays: 14, windowDays: 30, createdByName: "Amara Owner",
+      lines: { create: [{ tenantId, productId: level.productId, sku: level.product.sku, title: level.product.title,
+        toLocationId: branch.id, qty, fromOnHand: available, toOnHand: atBranch,
+        toRunRate: 0, toDaysCoverBefore: null, toDaysCoverAfter: null }] },
+    },
+  });
+  return id;
+}
+
 if (invokedDirectly) {
   seedDev()
     .then(async (r) => {
@@ -576,6 +605,7 @@ if (invokedDirectly) {
         `seeded tenant ${DEV_TENANT_SLUG} (${r.tenantId}): ${r.productCount} products, ${r.salesRows} sales rows`
       );
       const demo = await seedOrdersDemo(r.tenantId);
+      await seedTransfersDemo(r.tenantId);
       console.log(
         `orders demo: ${demo.historicalPos} delivered POs, ${demo.pendingOrders} queued orders`
       );

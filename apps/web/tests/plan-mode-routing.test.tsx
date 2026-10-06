@@ -69,13 +69,13 @@ const buyList: BuyList = {
   totalCostKes: 2000,
 };
 
-function render(params: string, canBudget = true) {
+function render(params: string, canBudget = true, canViewCosts = true) {
   search = new URLSearchParams(params);
   return renderToStaticMarkup(
     <CurrencyProvider currency="KES">
       <PlanView
         buyList={buyList}
-        canViewCosts
+        canViewCosts={canViewCosts}
         canBudget={canBudget}
         canOverride
         freshness={planFreshnessLabel(buyList.runDate, Date.UTC(2026, 7, 10, 9, 0, 0))}
@@ -121,4 +121,18 @@ describe("plan modes live in the URL", () => {
     const html = render("mode=nonsense");
     expect(html).toContain("See recommended purchase");
   });
+});
+
+it.each(["", "mode=budget"])("explains unavailable budget access before opening the form (%s)", (params) => {
+  const html = render(params, true, false);
+  expect(html).toContain("Budget planning needs cost access");
+  expect(html).toContain('aria-disabled="true"');
+  expect(html).toContain("See recommended purchase");
+  expect(html).not.toContain('id="budget-kes"');
+});
+
+it("keeps the recommended purchase list available without cost access", () => {
+  const html = render("mode=list", true, false);
+  expect(html).toContain("All plan options");
+  expect(html).not.toContain("Budget planning needs cost access");
 });

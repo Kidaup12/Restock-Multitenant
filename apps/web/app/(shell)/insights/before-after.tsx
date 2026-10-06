@@ -1,8 +1,6 @@
 import { getImpact, type ImpactMeasure } from "@/lib/data/insights";
 
-import { BulbIcon } from "@/components/icons";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/empty-state";
 import {
   Table,
   TableBody,
@@ -55,11 +53,7 @@ export async function BeforeAfter({ tenantId }: { tenantId: string }) {
       <Card>
         <CardHeader title="Before and after" />
         <CardContent>
-          <EmptyState
-            icon={<BulbIcon />}
-            title="Nothing to compare yet"
-            description="We start measuring from your first purchase order — before that there's no 'before'. Send one and this fills in."
-          />
+          <div className="space-y-1 text-sm"><p className="font-medium text-ink">Nothing to compare yet</p><p className="text-ink-muted">We start measuring from your first purchase order — before that there&apos;s no &apos;before&apos;. Send one and this fills in.</p></div>
         </CardContent>
       </Card>
     );
@@ -70,15 +64,11 @@ export async function BeforeAfter({ tenantId }: { tenantId: string }) {
       <Card>
         <CardHeader title="Before and after" />
         <CardContent>
-          <EmptyState
-            icon={<BulbIcon />}
-            title="Still building the picture"
-            description={
+          <div className="space-y-1 text-sm"><p className="font-medium text-ink">Still building the picture</p><p className="text-ink-muted">{
               impact.trackingSince
                 ? `We've been recording shelf levels since ${monthLabel(impact.trackingSince)}. Two full measurable weeks is what a before-and-after needs.`
                 : "We record what's on the shelf once a night. Two full measurable weeks is what a before-and-after needs."
-            }
-          />
+            }</p></div>
         </CardContent>
       </Card>
     );
