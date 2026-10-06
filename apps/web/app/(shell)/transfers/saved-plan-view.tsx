@@ -1,18 +1,14 @@
 import type { SavedPlan } from "@/lib/data/transfers";
-import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from "@/components/ui/table";
-import { PlanRowActions } from "./plan-row-actions";
 import { TransfersExportBar } from "./transfers-export";
 import { LineQuantityEditor } from "./line-quantity-editor";
 
 export function SavedPlanView({ plan, canViewCosts, canPlan }: { plan: SavedPlan; canViewCosts: boolean; canPlan: boolean }) {
   const destinations = [...new Set(plan.lines.map(line => line.toLocationId))];
+  // The page renders the PageHeader (with breadcrumbs + actions); this is the body.
   return <div className="space-y-6">
-    <PageHeader title={plan.name ?? "Transfer plan"} breadcrumbs={[{ label: "Transfers", href: "/transfers" }, { label: "Saved plan" }]}
-      description={`${plan.status} · From ${plan.fromLocationName} · ${plan.units} units · ${plan.coverDays}d cover · ${plan.windowDays}d branch sales window`}
-      actions={canPlan ? <PlanRowActions planId={plan.id} status={plan.status} /> : undefined} />
     <p className="text-sm text-ink-muted">Quantities and stock positions were saved with this plan. Confirm current stock before picking. Finalising records the plan; it does not move stock in Shopify. Values use current product costs.</p>
     {canPlan && plan.status === "draft" && <p className="text-sm text-ink-muted">Adjust a move quantity and save it before finalising. Zero means no move. Edits check current source availability across all branches in this plan; separate plans do not reserve stock.</p>}
     <TransfersExportBar rows={plan.lines} canViewCosts={canViewCosts} fromLocationName={plan.fromLocationName} coverDays={plan.coverDays} />
