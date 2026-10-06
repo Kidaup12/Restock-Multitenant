@@ -9,6 +9,7 @@ import { StatTile } from "@/components/ui/stat-tile";
 import { formatMoney, formatNumber } from "@/lib/money";
 import { cols } from "@/lib/export/print-pdf";
 import { ExportPdfButton } from "./export-pdf-button";
+import { MissedRevenueExportBar } from "./missed-revenue-export";
 import {
   Table,
   TableBody,
@@ -100,13 +101,16 @@ export async function MissedRevenueSection({
         subtitle="What stockouts cost in sales over the report window, worst products first"
         action={
           culprits.length > 0 ? (
-            <ExportPdfButton
-              title="Sales missed to empty shelves"
-              subtitle="Worst products first"
-              columns={pdf.columns}
-              rows={pdf.rows}
-              note="An estimate: a product's normal run rate × its price × the days its shelf was empty."
-            />
+            <div className="flex items-center gap-3">
+              <MissedRevenueExportBar rows={culprits} />
+              <ExportPdfButton
+                title="Sales missed to empty shelves"
+                subtitle="Worst products first"
+                columns={pdf.columns}
+                rows={pdf.rows}
+                note="An estimate: a product's normal run rate × its price × the days its shelf was empty."
+              />
+            </div>
           ) : undefined
         }
       />

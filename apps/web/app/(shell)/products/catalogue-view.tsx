@@ -547,22 +547,32 @@ export function RowGroup({
       {open && (
         <tr>
           <td colSpan={catalogueColCount(canManage)} className="p-0">
-            <RowEditor
-              row={row}
-              categories={categoryNames}
-              flags={flags}
-              canViewCosts={canViewCosts}
-              canManage={canManage}
-            />
-            {/* The editor fixes this row; the product page explains it — a year
-                of months, the supplier's lead time, and what the run decided. */}
-            <div className="px-4 pb-4">
-              <Link
-                href={`/products/${row.productId}`}
-                className="text-sm font-medium text-accent-ink hover:underline"
-              >
-                See this product in full →
-              </Link>
+            {/* The table's own content width (14 columns) is far wider than any
+                viewport, and this cell spans all of them — so without pinning,
+                the editor's 4-column grid inherits that width and its last
+                column sits past the visible scroll area instead of wrapping.
+                Sticking it to the scroll container's left edge and capping its
+                width to the viewport makes the grid reflow like a normal card
+                regardless of how far right the table itself is scrolled. */}
+            <div className="sticky left-0 w-[calc(100vw-3rem)] max-w-3xl">
+              <RowEditor
+                row={row}
+                categories={categoryNames}
+                flags={flags}
+                canViewCosts={canViewCosts}
+                canManage={canManage}
+              />
+              {/* The editor fixes this row; the product page explains it — a
+                  year of months, the supplier's lead time, and what the run
+                  decided. */}
+              <div className="px-4 pb-4">
+                <Link
+                  href={`/products/${row.productId}`}
+                  className="text-sm font-medium text-accent-ink hover:underline"
+                >
+                  See this product in full →
+                </Link>
+              </div>
             </div>
           </td>
         </tr>

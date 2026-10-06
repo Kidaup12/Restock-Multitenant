@@ -169,7 +169,8 @@ export async function ShelfHealth({
               description="Every tracked product has something on the shelf. This is the number to keep at zero."
             />
           ) : (
-            <Table>
+            // Unbounded — every stocked-out product, not a capped page.
+            <Table boxed>
               <TableHeader>
                 <TableHead>Product</TableHead>
                 <TableHead>Class</TableHead>
@@ -238,7 +239,8 @@ export async function ShelfHealth({
               description={`Nothing has sat unsold for ${deadStock.windowDays} days, and nothing is carrying more than ${overview.overstockCoverDays} days of cover.`}
             />
           ) : (
-            <Table>
+            // Unbounded — every idle-cash product, not a capped page.
+            <Table boxed>
               <TableHeader>
                 <TableHead>Product</TableHead>
                 <TableHead>Class</TableHead>

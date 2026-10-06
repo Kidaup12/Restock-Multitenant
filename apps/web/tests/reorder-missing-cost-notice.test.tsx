@@ -45,8 +45,9 @@ const reorderRow: CatalogueRow = {
   },
 };
 
-const missingCostRow = (id: string, title: string): CatalogueRow => ({
+const missingCostRow = (id: string, title: string): CatalogueRow & { plannable: "missing-cost" } => ({
   ...reorderRow, productId: id, sku: id.toUpperCase(), title, costKes: null, stockValueKes: null, moneyAtRestKes: null,
+  plannable: "missing-cost",
 });
 
 const data: DashboardTable = {
@@ -62,13 +63,13 @@ const data: DashboardTable = {
   missingCostRows: Array.from({ length: 8 }, (_, i) => missingCostRow(`mc-${i}`, `Uncosted Product ${i}`)),
 };
 
-const tree = () => { hooks.cursor = 0; return ProductTabs({ data, canViewCosts: true, trend: null }); };
-const selectReorder = () => {
-  const button = elements(tree()).find(
+const tree = (canOverride = false) => { hooks.cursor = 0; return ProductTabs({ data, canViewCosts: true, canOverride, trend: null }); };
+const selectReorder = (canOverride = false) => {
+  const button = elements(tree(canOverride)).find(
     (el) => el.type === "button" && elements(el).some((child) => child.props?.children === "Reorder")
   );
   // The health-pill and the tab-strip both route to the same tab key.
-  const target = button ?? elements(tree()).find((el) => el.type === "button" && String(el.props.children).includes("Reorder"));
+  const target = button ?? elements(tree(canOverride)).find((el) => el.type === "button" && String(el.props.children).includes("Reorder"));
   (target!.props.onClick as () => void)();
 };
 
@@ -104,5 +105,21 @@ describe("Reorder tab: missing-cost notice", () => {
     selectReorder();
     const html = renderToStaticMarkup(tree());
     expect(html).toContain('href="/products/mc-0"');
+  });
+
+  it("offers the inline cost fixer instead of a link when the caller can act on cost", () => {
+    selectReorder(true);
+    const html = renderToStaticMarkup(tree(true));
+    // CostFixer's closed state is a "Fix (...)" button, replacing the old
+    // "Fix cost →" link that non-override callers still get (asserted below).
+    expect(html).toContain("Fix (no cost on file)");
+    expect(html).not.toContain("Fix cost →");
+  });
+
+  it("falls back to a link-only fix when the caller cannot act on cost, even with view access", () => {
+    selectReorder(false);
+    const html = renderToStaticMarkup(tree(false));
+    expect(html).toContain("Fix cost →");
+    expect(html).not.toContain("Fix (no cost on file)");
   });
 });

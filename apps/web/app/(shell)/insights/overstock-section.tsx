@@ -110,7 +110,10 @@ export async function OverstockSection({
               description="Nothing overstocked — your cover levels are healthy."
             />
           ) : (
-            <Table>
+            // Unbounded — every overstocked product, not a capped page — so a
+            // big tenant gets the same bounded scroll region as the buy list
+            // and unsold-stock tables.
+            <Table boxed>
               <TableHeader>
                 <TableHead>Product</TableHead>
                 <TableHead>Class</TableHead>

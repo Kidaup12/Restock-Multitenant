@@ -238,7 +238,7 @@ export default async function AdminTenantPage({
 
         <Card>
           <CardHeader title="Members" subtitle={`${detail.members.length} in this workspace`} />
-          <Table className="min-w-0">
+          <Table>
             <TableHeader>
               <TableHead>Member</TableHead>
               <TableHead>Role</TableHead>
@@ -247,9 +247,9 @@ export default async function AdminTenantPage({
             <TableBody>
               {detail.members.map((m) => (
                 <TableRow key={m.membershipId}>
-                  <TableCell>
-                    <div className="font-medium text-ink">{m.displayName ?? m.userName}</div>
-                    <div className="text-xs text-ink-muted">{m.email}</div>
+                  <TableCell className="max-w-56">
+                    <div className="truncate font-medium text-ink">{m.displayName ?? m.userName}</div>
+                    <div className="truncate text-xs text-ink-muted">{m.email}</div>
                   </TableCell>
                   <TableCell>
                     <Badge tone={m.role === "MEMBER" ? "neutral" : "accent"}>{m.role}</Badge>
