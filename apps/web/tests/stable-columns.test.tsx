@@ -70,6 +70,7 @@ const catalogueRow = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   syncErrorAt: null,
   leadDays: 14,
   leadSource: "supplier",
+  supplierId: null,
   supplierName: null,
   verdict: "healthy",
   marginPct: 50,
@@ -113,6 +114,7 @@ const renderCatalogue = (rows: CatalogueRow[], canManage = false) =>
         screen={screenFor(rows)}
         query={DEFAULT_QUERY}
         categories={[]}
+        suppliers={[]}
         ownerFlags={{}}
         canViewCosts
         canManage={canManage}
@@ -158,6 +160,7 @@ describe("catalogue columns do not come and go with the data", () => {
                 canViewCosts
                 canManage={canManage}
                 categoryNames={[]}
+                suppliers={[]}
                 flags={{ active: true, activeOverride: false }}
                 picked={false}
                 onPick={canManage ? () => {} : undefined}

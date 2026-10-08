@@ -327,6 +327,52 @@ export async function assignProductsToSupplierAction(input: {
 }
 
 /**
+ * Take a chosen set of products OFF this supplier.
+ *
+ * The counterpart to assigning: the picker now shows a supplier's own products
+ * by default, so unticking one has to actually remove it rather than being a
+ * disabled, always-on checkbox. Scoped to `supplierId` in the where clause —
+ * not just the product ids — so a stale or tampered id list can only ever
+ * clear products that genuinely belong to the supplier being edited; a product
+ * someone moved to a different supplier in the meantime is left alone.
+ */
+export async function unassignProductsFromSupplierAction(input: {
+  supplierId: string;
+  productIds: string[];
+}): Promise<SupplierActionResult> {
+  const ctx = await actorContext();
+  if (!ctx) return err("You don't have settings access in this workspace.");
+
+  const ids = [...new Set((input.productIds ?? []).filter((id) => typeof id === "string" && id))];
+  if (ids.length === 0) return { ok: true };
+
+  const db = prismaForTenant(ctx.tenantId);
+  const supplier = await db.supplier.findFirst({
+    where: { id: input.supplierId, deletedAt: null },
+    select: { id: true, name: true },
+  });
+  if (!supplier) return err("Pick a supplier that still exists.");
+
+  const result = await db.product.updateMany({
+    where: { id: { in: ids }, supplierId: supplier.id },
+    data: { supplierId: null },
+  });
+  if (result.count === 0) return { ok: true };
+
+  await audit(ctx.tenantId, supplier.id, "edited", ctx.actor, {
+    action: "unassign_products",
+    supplierName: supplier.name,
+    products: result.count,
+  });
+  revalidatePath("/suppliers");
+  revalidatePath("/products");
+  return {
+    ok: true,
+    message: `Removed ${result.count} product${result.count === 1 ? "" : "s"} from ${supplier.name}.`,
+  };
+}
+
+/**
  * Set (or clear) one product's own lead time.
  *
  * Lead time is what actually decides when to order, and it does not always

@@ -2,6 +2,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { BoxIcon } from "@/components/icons";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getCatalogueScreen, getCustomCategories } from "@/lib/data/stock";
+import { getSupplierOptions } from "@/lib/data/suppliers";
 import type { CatalogueQuery } from "@/lib/catalogue";
 import { CatalogueView } from "./catalogue-view";
 import { forProducts, getOwnerFlags } from "./owner-flags";
@@ -22,9 +23,10 @@ export async function CatalogueTable({
   // The screen counts and filters the whole catalogue server-side and returns
   // one page of rows — the chips still read across everything, only the table
   // travels.
-  const [screen, categories, allOwnerFlags] = await Promise.all([
+  const [screen, categories, suppliers, allOwnerFlags] = await Promise.all([
     getCatalogueScreen(tenantId, { canViewCosts, query }),
     getCustomCategories(tenantId),
+    getSupplierOptions(tenantId),
     getOwnerFlags(tenantId),
   ]);
 
@@ -55,6 +57,7 @@ export async function CatalogueTable({
       screen={screen}
       query={query}
       categories={categories}
+      suppliers={suppliers}
       ownerFlags={ownerFlags}
       canViewCosts={canViewCosts}
       canManage={canManage}

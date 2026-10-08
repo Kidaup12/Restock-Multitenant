@@ -50,6 +50,7 @@ const row = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   syncErrorAt: null,
   leadDays: 14,
   leadSource: "supplier",
+  supplierId: "sup1",
   supplierName: "Nairobi Beauty",
   verdict: "healthy",
   marginPct: 50,
@@ -167,6 +168,7 @@ const renderRow = (over: Partial<CatalogueRow>, canManage = true) =>
           canViewCosts
           canManage={canManage}
           categoryNames={[]}
+          suppliers={[]}
           flags={{ active: true, activeOverride: false }}
           picked={false}
         />

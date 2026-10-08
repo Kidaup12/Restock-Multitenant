@@ -37,7 +37,7 @@ const reorderRow: CatalogueRow = {
   runRate: 0.7, revenue30dKes: 2100, costKes: 300, stockValueKes: 600, moneyAtRestKes: 600, abc: "A",
   customCategory: null, costSource: "manual", notForSale: false, lifecycle: "active", lifecycleLabel: "Active",
   buyable: true, lifecycleReason: null, onOrderUnits: 0, expectedArrivalAt: null, syncError: null,
-  syncErrorAt: null, leadDays: 14, leadSource: "assumed", supplierName: null, verdict: "order_now", marginPct: 40,
+  syncErrorAt: null, leadDays: 14, leadSource: "assumed", supplierId: null, supplierName: null, verdict: "order_now", marginPct: 40,
   missingCost: false, suspectCost: false, heldOffBuyList: false, costMovedPct: null, costMovedAt: null,
   facet: {
     productId: "ok-1", brand: "House", productType: null, category: null, supplier: null,

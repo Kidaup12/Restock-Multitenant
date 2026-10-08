@@ -314,6 +314,59 @@ export async function setNotForSaleAction(input: {
   };
 }
 
+// ── Supplier ─────────────────────────────────────────────────────────────────
+
+/**
+ * Set (or clear) one product's supplier, from the product side.
+ *
+ * The supplier screen could already move a product onto a supplier (ticking it
+ * in that supplier's picker); nothing let you do it from the product's own row,
+ * where an owner fixing one wrong-supplier product one at a time actually
+ * works. `supplierId: null` clears it back to none — a product can sit with
+ * at most one supplier, so a product row doesn't need the supplier picker's
+ * "moved from elsewhere" accounting, just a plain set.
+ */
+export async function setProductSupplierAction(input: {
+  productId: string;
+  supplierId: string | null;
+}): Promise<CatalogueActionResult> {
+  const ctx = await actorContext(["manage_settings"]);
+  if (!ctx) return err("You don't have settings access in this workspace.");
+
+  const db = prismaForTenant(ctx.tenantId);
+  const product = await db.product.findFirst({
+    where: { id: input.productId },
+    select: { id: true, title: true, supplierId: true },
+  });
+  if (!product) return err("That product no longer exists.");
+
+  let supplierName: string | null = null;
+  if (input.supplierId != null) {
+    const supplier = await db.supplier.findFirst({
+      where: { id: input.supplierId, deletedAt: null },
+      select: { id: true, name: true },
+    });
+    if (!supplier) return err("Pick a supplier that still exists.");
+    supplierName = supplier.name;
+  }
+  if (product.supplierId === input.supplierId) {
+    return { ok: true, message: supplierName ? `Already ${supplierName}.` : "Already no supplier." };
+  }
+
+  await db.product.update({ where: { id: product.id }, data: { supplierId: input.supplierId } });
+  await audit(ctx.tenantId, product.id, "edited", ctx.actor, {
+    field: "supplierId",
+    from: product.supplierId,
+    to: input.supplierId,
+  });
+  revalidateCatalogue();
+  revalidatePath("/suppliers");
+  return {
+    ok: true,
+    message: supplierName ? `${product.title} → ${supplierName}.` : `${product.title} has no supplier now.`,
+  };
+}
+
 // ── Categories (owner-defined; live on Product.customCategory, no table) ──────
 
 const MAX_CATEGORY = 60;

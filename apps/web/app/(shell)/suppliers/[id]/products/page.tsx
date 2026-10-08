@@ -47,7 +47,7 @@ export default async function SupplierProductsPage({
           { label: picker.supplierName },
         ]}
         title={picker.supplierName}
-        description="Tick everything you buy from them. A product can only sit with one supplier, so ticking moves it."
+        description="Everything you buy from them is ticked. Untick to remove a product, or search the catalogue to add one — a product can only sit with one supplier, so ticking one here moves it from wherever it was."
       />
       {canManage ? (
         <ProductPicker

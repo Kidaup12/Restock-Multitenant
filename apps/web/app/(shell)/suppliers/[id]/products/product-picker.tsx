@@ -15,16 +15,21 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { PickerProduct } from "@/lib/data/suppliers";
-import { assignProductsToSupplierAction, setProductLeadTimeAction } from "../../actions";
+import {
+  assignProductsToSupplierAction,
+  setProductLeadTimeAction,
+  unassignProductsFromSupplierAction,
+} from "../../actions";
 
 /**
- * Tick products, assign them to this supplier in one write.
+ * Tick to assign, untick to remove — one Save writes both in the same pass.
  *
- * Products already with this supplier start ticked, so the list reads as "here
- * is what they supply" and un-ticking is not offered as a way to unassign —
- * that would be a second, quieter mutation hiding inside a save. Moving a
- * product off a supplier means ticking it under a different one, which is the
- * only way it can end up in exactly one place.
+ * The default (no search) list is just this supplier's own products, so
+ * ticking/unticking here reads as directly editing "what they supply" rather
+ * than adding to an unrelated full catalogue. Searching reveals the rest of
+ * the catalogue to pull a product in from nobody (or from someone else) —
+ * ticking one of those still only ADDS; moving one already on screen (already
+ * ticked, from this supplier) off is what unticking now does.
  */
 export function ProductPicker({
   supplierId,
@@ -43,12 +48,26 @@ export function ProductPicker({
     () => new Set(products.filter((p) => p.supplierId === supplierId).map((p) => p.id)),
     [products, supplierId],
   );
-  const [picked, setPicked] = useState<Set<string>>(new Set());
+  // Ticked state starts seeded with what's already theirs, so an untick is a
+  // real, visible change from the moment someone clicks it — not a disabled
+  // box that silently can't move. `products` changes after a save's
+  // router.refresh() or a new search, and the ticks must follow that fresh
+  // list rather than keep showing what used to be true. Reconciled during
+  // render (not an effect) against a key of the incoming product ids, so a
+  // stale tick never paints even for one frame.
+  const productsKey = products.map((p) => p.id).join(",");
+  const [picked, setPicked] = useState<Set<string>>(() => new Set(alreadyMine));
+  const [seededFor, setSeededFor] = useState(productsKey);
+  if (productsKey !== seededFor) {
+    setSeededFor(productsKey);
+    setPicked(new Set(alreadyMine));
+  }
   const [pending, startTransition] = useTransition();
   const [note, setNote] = useState<{ tone: "positive" | "negative"; text: string } | null>(null);
   const router = useRouter();
 
   const toAssign = useMemo(() => [...picked].filter((id) => !alreadyMine.has(id)), [picked, alreadyMine]);
+  const toUnassign = useMemo(() => [...alreadyMine].filter((id) => !picked.has(id)), [picked, alreadyMine]);
   const movingFromOther = useMemo(() => {
     const byId = new Map(products.map((p) => [p.id, p]));
     return toAssign.filter((id) => byId.get(id)?.supplierId != null).length;
@@ -66,14 +85,28 @@ export function ProductPicker({
   function save() {
     setNote(null);
     startTransition(async () => {
-      const result = await assignProductsToSupplierAction({ supplierId, productIds: toAssign });
-      if (result.ok) {
-        setPicked(new Set());
-        setNote({ tone: "positive", text: result.message ?? "Saved." });
-        router.refresh();
-      } else {
-        setNote({ tone: "negative", text: result.error });
+      const [assignResult, unassignResult] = await Promise.all([
+        toAssign.length > 0
+          ? assignProductsToSupplierAction({ supplierId, productIds: toAssign })
+          : Promise.resolve({ ok: true as const }),
+        toUnassign.length > 0
+          ? unassignProductsFromSupplierAction({ supplierId, productIds: toUnassign })
+          : Promise.resolve({ ok: true as const }),
+      ]);
+      if (!assignResult.ok) {
+        setNote({ tone: "negative", text: assignResult.error });
+        return;
       }
+      if (!unassignResult.ok) {
+        setNote({ tone: "negative", text: unassignResult.error });
+        return;
+      }
+      const parts = [
+        "message" in assignResult ? assignResult.message : null,
+        "message" in unassignResult ? unassignResult.message : null,
+      ].filter((m): m is string => Boolean(m));
+      setNote({ tone: "positive", text: parts.length > 0 ? parts.join(" ") : "Saved." });
+      router.refresh();
     });
   }
 
@@ -94,7 +127,7 @@ export function ProductPicker({
         <input
           name="q"
           defaultValue={search}
-          placeholder="Search by product, SKU or brand"
+          placeholder="Search the whole catalogue to add more"
           className="peer w-72 rounded-md border border-edge bg-surface px-3 py-2 text-sm text-ink"
           aria-label="Search products"
         />
@@ -121,8 +154,12 @@ export function ProductPicker({
 
       {products.length === 0 ? (
         <EmptyState
-          title="Nothing matches"
-          description="Try a different product name, SKU or brand."
+          title={search ? "Nothing matches" : "Nothing from this supplier yet"}
+          description={
+            search
+              ? "Try a different product name, SKU or brand."
+              : "Search above to find products to add — the whole catalogue is searchable, not just what's already theirs."
+          }
         />
       ) : (
         <Card>
@@ -144,10 +181,13 @@ export function ProductPicker({
                           <input
                             type="checkbox"
                             className="mt-1 size-4 accent-(--accent)"
-                            checked={mine || picked.has(p.id)}
-                            disabled={mine}
+                            checked={picked.has(p.id)}
                             onChange={() => toggle(p.id)}
-                            aria-label={`Buy ${p.title} from ${supplierName}`}
+                            aria-label={
+                              mine
+                                ? `Stop buying ${p.title} from ${supplierName}`
+                                : `Buy ${p.title} from ${supplierName}`
+                            }
                           />
                           <span>
                             <span className="block text-ink">{p.title}</span>
@@ -208,10 +248,12 @@ export function ProductPicker({
         </p>
       )}
 
-      {toAssign.length > 0 && (
+      {(toAssign.length > 0 || toUnassign.length > 0) && (
         <ActionBar>
           <span className="text-sm text-ink">
-            {toAssign.length} to add
+            {toAssign.length > 0 && `${toAssign.length} to add`}
+            {toAssign.length > 0 && toUnassign.length > 0 && " · "}
+            {toUnassign.length > 0 && `${toUnassign.length} to remove`}
             {movingFromOther > 0 && (
               <span className="text-ink-muted">
                 {" "}
@@ -220,7 +262,7 @@ export function ProductPicker({
             )}
           </span>
           <Button size="sm" onClick={save} loading={pending} className="ml-auto">
-            Assign to {supplierName}
+            Save changes
           </Button>
         </ActionBar>
       )}
