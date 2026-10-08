@@ -12,17 +12,15 @@ import { ignorePosSkuAction, matchPosSkuAction } from "./actions";
 
 /**
  * One unmatched till-SKU row: match it to a catalogue product (defaulting to the
- * suggested match) or mark it "not a product". Admin-only actions — a non-admin
- * sees the row but the controls are replaced with a hint.
+ * suggested match) or mark it "not a product". Open to every role — the person
+ * at the till is the one who knows what an unrecognized SKU actually is.
  */
 export function UnmatchedRow({
   row,
   products,
-  canFix,
 }: {
   row: UnmatchedPosSku;
   products: PosMatchProduct[];
-  canFix: boolean;
 }) {
   const currency = useCurrency();
   const [productId, setProductId] = useState(row.suggestion?.productId ?? "");
@@ -70,36 +68,32 @@ export function UnmatchedRow({
         <p>{formatMoney(row.revenueKes, currency)}</p>
       </div>
 
-      {canFix ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <Select
-              size="sm"
-              className="max-w-52"
-              value={productId}
-              onChange={(e) => setProductId(e.target.value)}
-            >
-              <option value="">Pick a product…</option>
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.title} ({p.sku})
-                </option>
-              ))}
-            </Select>
-            {row.suggestion && productId === row.suggestion.productId && (
-              <Badge tone="accent">Suggested</Badge>
-            )}
-          </div>
-          <Button size="sm" onClick={match} loading={matching} disabled={!productId}>
-            Match
-          </Button>
-          <Button size="sm" variant="ghost" onClick={ignore} loading={ignoring}>
-            Not a product
-          </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <Select
+            size="sm"
+            className="max-w-52"
+            value={productId}
+            onChange={(e) => setProductId(e.target.value)}
+          >
+            <option value="">Pick a product…</option>
+            {products.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.title} ({p.sku})
+              </option>
+            ))}
+          </Select>
+          {row.suggestion && productId === row.suggestion.productId && (
+            <Badge tone="accent">Suggested</Badge>
+          )}
         </div>
-      ) : (
-        <Badge tone="neutral">Ask an admin to match</Badge>
-      )}
+        <Button size="sm" onClick={match} loading={matching} disabled={!productId}>
+          Match
+        </Button>
+        <Button size="sm" variant="ghost" onClick={ignore} loading={ignoring}>
+          Not a product
+        </Button>
+      </div>
 
       {message && (
         <p className="w-full text-xs text-positive" role="status">
