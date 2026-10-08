@@ -3,8 +3,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 /**
  * POS fix-queue reads + the Match/Ignore/close-gap write core against the local
  * database. Exercises the RLS-scoped lib layer the Sales-screen actions wrap
- * (admin-gating is a thin check in actions.ts). Uses its own fixture tenant;
- * skips without a local database.
+ * (role-gating — open to every role for matching, OWNER/ADMIN-only for sales
+ * gaps — is a thin check in actions.ts). Uses its own fixture tenant; skips
+ * without a local database.
  */
 
 const localDb = /localhost|127\.0\.0\.1/.test(process.env.SERVICE_DATABASE_URL ?? "");

@@ -45,6 +45,10 @@ export default async function SalesPage() {
 
   const tenantId = membership.tenantId;
   const currency = membership.tenant.currency;
+  // Sales-gap resolution (confirm a branch was closed, re-pull the feed) is a
+  // data-integrity call about the sync itself, so it stays OWNER/ADMIN. Matching
+  // a till SKU to a product is shop-floor work instead — the person at the till
+  // knows what the SKU is — so PosFixQueue has no role gate of its own.
   const canFix = membership.role === "OWNER" || membership.role === "ADMIN";
 
   return (
@@ -60,7 +64,7 @@ export default async function SalesPage() {
       {/* POS data-health surfaces (spec §3). Each hides itself when clean, so a
           healthy tenant sees only the metrics below. */}
       <Suspense fallback={null}>
-        <PosFixQueue tenantId={tenantId} canFix={canFix} />
+        <PosFixQueue tenantId={tenantId} />
       </Suspense>
       <Suspense fallback={null}>
         <SalesGaps tenantId={tenantId} canFix={canFix} />
