@@ -89,6 +89,10 @@ export type TransferLine = {
   productId: string;
   sku: string;
   title: string;
+  /** The product's nightly-run class and shop-assigned category — carried onto
+   *  the line so the screen can filter and group without a second fetch. */
+  abc: string | null;
+  category: string | null;
   toLocationId: string;
   toLocationName: string;
   qty: number;
@@ -103,6 +107,64 @@ export type TransferLine = {
   /** qty x unit cost — the value on the move. Null when costs aren't viewable. */
   valueKes: number | null;
 };
+
+/** ABC class / category narrowing for the live proposal. Empty = no filter.
+ *  Mirrors the plan scope bar's semantics (OR within a dimension) but stays a
+ *  plain pair — a proposal line has none of a BuyListRow's other facets, so
+ *  pulling in the plan's full ScopeSelection machinery would be a type fit
+ *  for a shape this screen doesn't have. */
+export type TransferScope = { abc: string[]; category: string[] };
+
+export const EMPTY_TRANSFER_SCOPE: TransferScope = { abc: [], category: [] };
+
+function oneTransferParam(value: string | string[] | undefined): string[] {
+  const raw = Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+  return raw
+    .split(",")
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
+
+/** Rebuild a TransferScope from the URL — `?class=A,B&category=Serums`. */
+export function parseTransferScope(params: Record<string, string | string[] | undefined>): TransferScope {
+  return { abc: oneTransferParam(params.class), category: oneTransferParam(params.category) };
+}
+
+export function transferScopeActive(scope: TransferScope): boolean {
+  return scope.abc.length > 0 || scope.category.length > 0;
+}
+
+export type TransferScopeOption = { value: string; label: string; count: number };
+export type TransferScopeFacets = { abc: TransferScopeOption[]; category: TransferScopeOption[] };
+
+const ABC_ORDER = ["A", "B", "C"];
+
+/** Options (with live counts) for the filter chips, derived from whichever
+ *  products are candidates for THIS source — so a chip never offers a class
+ *  or category the source holds none of. */
+function deriveTransferScopeFacets(
+  products: { abcCategory: string | null; customCategory: string | null }[]
+): TransferScopeFacets {
+  function bucket(valueOf: (p: (typeof products)[number]) => string | null): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const p of products) {
+      const v = valueOf(p);
+      if (v == null) continue; // unrated/uncategorised products stay unfiltered, not a "none" bucket
+      counts.set(v, (counts.get(v) ?? 0) + 1);
+    }
+    return counts;
+  }
+  const abcCounts = bucket((p) => p.abcCategory);
+  const categoryCounts = bucket((p) => p.customCategory);
+  return {
+    abc: [...abcCounts.entries()]
+      .map(([value, count]) => ({ value, label: value, count }))
+      .sort((a, b) => ABC_ORDER.indexOf(a.value) - ABC_ORDER.indexOf(b.value)),
+    category: [...categoryCounts.entries()]
+      .map(([value, count]) => ({ value, label: value, count }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  };
+}
 
 export type TransferDestinationSummary = {
   locationId: string;
@@ -120,12 +182,23 @@ export type SkippedDestination = {
   reason: "no-demand-signal";
 };
 
+/** Rows on one page of the live proposal. Twenty keeps a page scannable
+ *  without the horizontal scrollbar sitting 700 rows below the fold. */
+export const PROPOSAL_PAGE_SIZE = 20;
+
 export type DistributionProposal = {
   fromLocationId: string;
   fromLocationName: string;
   coverDays: number;
   windowDays: number;
+  /** ONE page of lines, for the table. Stat tiles and destination summaries
+   *  are computed from the full (unpaged) list, never this slice — see
+   *  `allMatchedLines` for the export, which must carry every matching line. */
   lines: TransferLine[];
+  /** Every line matching the current scope, unpaged — what the pick-list
+   *  export sends. An export truncated to one page would silently drop the
+   *  rest of the plan the person is meant to carry. */
+  allMatchedLines: TransferLine[];
   destinations: TransferDestinationSummary[];
   skipped: SkippedDestination[];
   totalUnits: number;
@@ -135,6 +208,14 @@ export type DistributionProposal = {
   skuCount: number;
   /** True when at least one line rests on measured per-branch sales. */
   hasAttributedDemand: boolean;
+  /** Filter-chip options (with counts) for the products this source can
+   *  actually ship — not scoped by the caller's current selection, so a
+   *  chosen chip never vanishes once applied. */
+  scopeFacets: TransferScopeFacets;
+  /** Lines matching the current scope, before paging — what the pager counts. */
+  matchedCount: number;
+  page: number;
+  pageCount: number;
 };
 
 /**
@@ -181,11 +262,21 @@ export async function getDistributionProposal(
     coverDays = DEFAULT_COVER_DAYS,
     windowDays = DEFAULT_WINDOW_DAYS,
     canViewCosts,
+    scope = EMPTY_TRANSFER_SCOPE,
+    page = 0,
   }: {
     fromLocationId?: string;
     coverDays?: number;
     windowDays?: number;
     canViewCosts: boolean;
+    /** Narrow which products are sized, by ABC class and/or category — applied
+     *  BEFORE sizing, not after: the source's available units are divided
+     *  across whichever products qualify, so filtering after sizing would
+     *  report a move computed against a different (unfiltered) product set. */
+    scope?: TransferScope;
+    /** 0-based. Clamped to a real page — a stale link past the end shows the
+     *  last page rather than nothing. */
+    page?: number;
   }
 ): Promise<DistributionProposal | null> {
   const db = prismaForTenant(tenantId);
@@ -208,7 +299,7 @@ export async function getDistributionProposal(
   const [products, levels, attributed, metrics] = await Promise.all([
     db.product.findMany({
       where: { ...BUYABLE_PRODUCT_WHERE },
-      select: { id: true, sku: true, title: true, costKes: true },
+      select: { id: true, sku: true, title: true, costKes: true, abcCategory: true, customCategory: true },
       orderBy: { title: "asc" },
     }),
     // findMany + fold, not groupBy/_sum: SQL SUM skips NULLs, so a nullable
@@ -235,16 +326,35 @@ export async function getDistributionProposal(
   );
   const nameByLocation = new Map(destinations.map((l) => [l.id, l.name]));
 
+  // What the source actually holds and has a rate for — the same two gates
+  // the sizing loop below checks. Facet options and counts come from THIS
+  // set, not every buyable product tenant-wide, or the filter bar would offer
+  // (and count) categories the source doesn't stock a unit of.
+  const sourceable = products.filter((p) => {
+    const blended = metrics.get(p.id)?.runRate ?? 0;
+    if (blended <= NO_RATE_EPSILON) return false;
+    return (onHandAt.get(`${p.id}:${source.id}`) ?? 0) > 0;
+  });
+  const scopeFacets = deriveTransferScopeFacets(sourceable);
+
+  const scoped = transferScopeActive(scope)
+    ? sourceable.filter(
+        (p) =>
+          (scope.abc.length === 0 || scope.abc.includes(p.abcCategory ?? "")) &&
+          (scope.category.length === 0 || scope.category.includes(p.customCategory ?? ""))
+      )
+    : sourceable;
+
   const lines: TransferLine[] = [];
   const destinationsWithSignal = new Set<string>();
   let hasAttributedDemand = false;
 
-  for (const product of products) {
+  for (const product of scoped) {
+    // Both gates below were already checked building `sourceable` — scoped is
+    // a subset of it, so neither can fail here. The lookups stay (cheap Map
+    // reads) because `blended`/`available` are needed for sizing regardless.
     const blended = metrics.get(product.id)?.runRate ?? 0;
-    if (blended <= NO_RATE_EPSILON) continue; // nothing sells it — nothing to cover
-
     const available = onHandAt.get(`${product.id}:${source.id}`) ?? 0;
-    if (available <= 0) continue; // the source holds none of it
 
     const positions = destinations.map((d) => ({
       locationId: d.id,
@@ -272,6 +382,8 @@ export async function getDistributionProposal(
         productId: product.id,
         sku: product.sku,
         title: product.title,
+        abc: product.abcCategory,
+        category: product.customCategory,
         toLocationId: line.toLocationId,
         toLocationName: nameByLocation.get(line.toLocationId) ?? "A branch",
         qty: line.qty,
@@ -292,12 +404,20 @@ export async function getDistributionProposal(
     (a, b) => b.qty - a.qty || a.title.localeCompare(b.title) || a.toLocationName.localeCompare(b.toLocationName)
   );
 
+  // Stat tiles, destination summaries and totals below all read the FULL
+  // (unpaged) list — paging changes what is on screen and nothing else.
+  const matchedCount = lines.length;
+  const pageCount = Math.max(1, Math.ceil(matchedCount / PROPOSAL_PAGE_SIZE));
+  const currentPage = Math.min(Math.max(0, page), pageCount - 1);
+  const pageLines = lines.slice(currentPage * PROPOSAL_PAGE_SIZE, currentPage * PROPOSAL_PAGE_SIZE + PROPOSAL_PAGE_SIZE);
+
   return {
     fromLocationId: source.id,
     fromLocationName: source.name,
     coverDays: cover,
     windowDays: window,
-    lines,
+    lines: pageLines,
+    allMatchedLines: lines,
     destinations: summariseDestinations(lines, destinations, canViewCosts),
     skipped: destinations
       .filter((d) => !destinationsWithSignal.has(d.id))
@@ -306,6 +426,10 @@ export async function getDistributionProposal(
     totalValueKes: canViewCosts ? lines.reduce((sum, l) => sum + (l.valueKes ?? 0), 0) : null,
     skuCount: new Set(lines.map((l) => l.productId)).size,
     hasAttributedDemand,
+    scopeFacets,
+    matchedCount,
+    page: currentPage,
+    pageCount,
   };
 }
 
@@ -624,7 +748,10 @@ export async function saveDistributionPlan(
       windowDays: proposal.windowDays,
       createdByName: createdByName ?? null,
       lines: {
-        create: proposal.lines.map((line) => ({
+        // The FULL matched proposal, never the one page the screen happened to
+        // be showing — a save must capture the whole plan whatever page the
+        // person who clicked Save was looking at.
+        create: proposal.allMatchedLines.map((line) => ({
           tenantId,
           productId: line.productId,
           sku: line.sku,
@@ -671,7 +798,9 @@ export async function updateDistributionPlan(
             coverDays: proposal.coverDays,
             windowDays: proposal.windowDays,
             lines: {
-              create: proposal.lines.map((line) => ({
+              // Full matched list, not whichever page was last rendered — see
+              // the same note on saveDistributionPlan.
+              create: proposal.allMatchedLines.map((line) => ({
                 tenantId,
                 productId: line.productId,
                 sku: line.sku,

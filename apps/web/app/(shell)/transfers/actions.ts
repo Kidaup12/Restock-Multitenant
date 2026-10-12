@@ -132,7 +132,7 @@ export async function createTransferPlan(input: {
     canViewCosts: true,
   });
   if (!proposal) return err("Pick a location to move stock from — this workspace has nowhere to send it.");
-  if (proposal.lines.length === 0) return err("Nothing needs moving at this cover target.");
+  if (proposal.allMatchedLines.length === 0) return err("Nothing needs moving at this cover target.");
 
   const planId = await saveDistributionPlan(ctx.actor.tenantId, proposal, {
     name: cleanName(input.name),
@@ -141,12 +141,12 @@ export async function createTransferPlan(input: {
   await audit(ctx.actor, planId, "created", {
     fromLocationId: proposal.fromLocationId,
     coverDays: proposal.coverDays,
-    lines: proposal.lines.length,
+    lines: proposal.allMatchedLines.length,
     units: proposal.totalUnits,
   });
 
   revalidatePath("/transfers");
-  return { ok: true, data: { planId, lineCount: proposal.lines.length } };
+  return { ok: true, data: { planId, lineCount: proposal.allMatchedLines.length } };
 }
 
 /** Rename a draft, and optionally re-size it against today's stock. */

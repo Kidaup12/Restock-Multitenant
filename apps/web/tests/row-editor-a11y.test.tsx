@@ -65,6 +65,7 @@ function render(canViewCosts = true, canManage = true) {
       <RowEditor
         row={row}
         categories={["Haircare"]}
+        suppliers={[{ id: "sup-1", name: "Nairobi Beauty" }]}
         flags={{ active: true, activeOverride: false } as never}
         canViewCosts={canViewCosts}
         canManage={canManage}
@@ -74,10 +75,10 @@ function render(canViewCosts = true, canManage = true) {
 }
 
 describe("product row editor accessibility", () => {
-  it("names the cost, price and category fields, and the product they belong to", () => {
+  it("names the cost, price, category and supplier fields, and the product they belong to", () => {
     const labels = labelsIn(render());
     expect(labels.length).toBeGreaterThan(0); // vacuity guard
-    for (const field of ["Unit cost", "Selling price", "Category"]) {
+    for (const field of ["Unit cost", "Selling price", "Category", "Supplier"]) {
       const match = labels.find((l) => l.startsWith(field));
       expect(match, `no accessible name starting "${field}"`).toBeDefined();
       expect(match, match).toContain(TITLE);
@@ -86,11 +87,12 @@ describe("product row editor accessibility", () => {
 
   it("leaves no editable field in the editor unnamed", () => {
     const html = render();
-    // Every <input> must carry an aria-label, or sit inside a <label> that names
-    // it. The not-for-sale checkbox is the second kind and is already fine.
-    const inputs = [...html.matchAll(/<input\b[^>]*>/g)].map((m) => m[0]!);
-    expect(inputs.length).toBeGreaterThan(0);
-    const unnamed = inputs.filter(
+    // Every <input> and <select> must carry an aria-label, or sit inside a
+    // <label> that names it. The not-for-sale checkbox is the second kind and
+    // is already fine.
+    const fields = [...html.matchAll(/<(?:input|select)\b[^>]*>/g)].map((m) => m[0]!);
+    expect(fields.length).toBeGreaterThan(0);
+    const unnamed = fields.filter(
       (tag) => !/aria-label=/.test(tag) && !/type="checkbox"/.test(tag)
     );
     expect(unnamed, unnamed.join("\n")).toHaveLength(0);

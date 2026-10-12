@@ -138,6 +138,7 @@ export type CatalogueRow = {
    *  amounts of trust — so the origin travels with the number. */
   leadSource: "product" | "supplier" | "assumed";
   /** The supplier this product is bought from; null when none is assigned. */
+  supplierId: string | null;
   supplierName: string | null;
   /** Cover verdict pill; null for a not-for-sale row (no sellable judgement). */
   verdict: VerdictKind | null;
@@ -321,6 +322,7 @@ export async function getStockCatalogue(
       syncErrorAt: p.syncErrorAt,
       leadDays,
       leadSource,
+      supplierId: p.supplierId,
       supplierName: p.supplier?.name ?? null,
       verdict: buyable ? coverVerdict(sellable, daysCover, leadDays) : null,
       marginPct: canViewCosts && cost.costKes > 0 ? marginPct(cost.costKes, p.priceKes) : null,

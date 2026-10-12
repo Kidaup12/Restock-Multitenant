@@ -166,7 +166,7 @@ export async function DeadStockSection({
               ))}
             </div>
 
-            <Table>
+            <Table boxed>
               <TableHeader>
                 <TableHead>Product</TableHead>
                 <TableHead>Class</TableHead>

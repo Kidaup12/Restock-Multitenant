@@ -10,6 +10,7 @@ import { formatMoney } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
 import { formatMovePct, VERDICT_LABELS, VERDICT_TONES } from "@/lib/cost";
 import type { CatalogueRow } from "@/lib/data/stock";
+import type { SupplierOption } from "@/lib/data/suppliers";
 import {
   assignCategoryAction,
   clearCostPinAction,
@@ -17,6 +18,7 @@ import {
   setNotForSaleAction,
   setPriceAction,
   setProductActiveAction,
+  setProductSupplierAction,
   type CatalogueActionResult,
 } from "./actions";
 import type { OwnerFlags } from "./owner-flags";
@@ -39,12 +41,14 @@ const SOURCE_LABEL: Record<string, string> = {
 export function RowEditor({
   row,
   categories,
+  suppliers,
   flags,
   canViewCosts,
   canManage,
 }: {
   row: CatalogueRow;
   categories: string[];
+  suppliers: SupplierOption[];
   flags: OwnerFlags;
   canViewCosts: boolean;
   canManage: boolean;
@@ -56,6 +60,7 @@ export function RowEditor({
   const [costInput, setCostInput] = useState("");
   const [priceInput, setPriceInput] = useState("");
   const [category, setCategory] = useState(row.customCategory ?? "");
+  const [supplierId, setSupplierId] = useState(row.supplierId ?? "");
 
   function run(action: () => Promise<CatalogueActionResult>) {
     setMsg(null);
@@ -203,6 +208,45 @@ export function RowEditor({
             </div>
           ) : (
             <div className="text-sm text-ink">{row.customCategory ?? "Uncategorised"}</div>
+          )}
+        </div>
+
+        {/* ── Supplier ─────────────────────────────────────────────────────── */}
+        <div className="space-y-2">
+          <div className="text-xs font-medium tracking-wider text-ink-muted uppercase">Supplier</div>
+          {canManage ? (
+            <div className="space-y-2">
+              <select
+                aria-label={`Supplier for ${row.title}`}
+                value={supplierId}
+                onChange={(e) => setSupplierId(e.target.value)}
+                className="min-h-9 w-full rounded-md border border-edge bg-surface px-2 text-sm text-ink"
+              >
+                <option value="">No supplier</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                loading={pending}
+                disabled={supplierId === (row.supplierId ?? "")}
+                onClick={() =>
+                  run(() =>
+                    setProductSupplierAction({ productId: row.productId, supplierId: supplierId || null }),
+                  )
+                }
+              >
+                Save supplier
+              </Button>
+              <p className="text-xs text-ink-faint">
+                A product sits with one supplier — picking a new one moves it from wherever it was.
+              </p>
+            </div>
+          ) : (
+            <div className="text-sm text-ink">{row.supplierName ?? "No supplier"}</div>
           )}
         </div>
 

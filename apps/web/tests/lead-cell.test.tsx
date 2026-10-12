@@ -41,7 +41,7 @@ const render = (canManage = true) =>
     <table>
       <tbody>
         <RowGroup row={row()} open={false} onToggle={() => {}} canViewCosts canManage={canManage}
-          categoryNames={[]} flags={{ active: true, activeOverride: false }} picked={false} />
+          categoryNames={[]} suppliers={[]} flags={{ active: true, activeOverride: false }} picked={false} />
       </tbody>
     </table>,
   );
@@ -81,7 +81,7 @@ describe("an unclassified product", () => {
       <table>
         <tbody>
           <RowGroup row={row({ abc: "A" })} open={false} onToggle={() => {}} canViewCosts canManage
-            categoryNames={[]} flags={{ active: true, activeOverride: false }} picked={false} />
+            categoryNames={[]} suppliers={[]} flags={{ active: true, activeOverride: false }} picked={false} />
         </tbody>
       </table>,
     );

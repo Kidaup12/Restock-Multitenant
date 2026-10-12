@@ -36,8 +36,11 @@ export async function RedistributionCard({
 
   // No source / nowhere sellable to send to (a single-location shop) → null.
   // Nothing worth moving (every branch already covered) → null. Either way the
-  // owner sees no card rather than an empty prompt.
-  if (!proposal || proposal.lines.length === 0) return null;
+  // owner sees no card rather than an empty prompt. matchedCount, not
+  // lines.length — lines is one page of the full proposal; this card only
+  // ever needs the first 3 for its preview, but the emptiness check must read
+  // the true total.
+  if (!proposal || proposal.matchedCount === 0) return null;
 
   const { skuCount, totalUnits, totalValueKes, lines, fromLocationName } = proposal;
   // A compact nudge, not the full table — the top few moves only.
