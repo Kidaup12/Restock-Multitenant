@@ -1,5 +1,6 @@
 import { EmptyState } from "@/components/ui/empty-state";
 import { getPeriodMetrics } from "@/lib/data/insights";
+import type { ReportRange } from "@/lib/data/report-range";
 import type { AbcKey } from "@/lib/data/abc-lens";
 import { PeriodTableView, type PeriodRowView } from "./period-table-view";
 
@@ -21,13 +22,15 @@ export async function PeriodTable({
   tenantId,
   weeks,
   abc,
+  period,
 }: {
   tenantId: string;
   weeks: number;
   /** The class lens, applied to every column so they cannot disagree. */
   abc: AbcKey;
+  period?: ReportRange;
 }) {
-  const metrics = await getPeriodMetrics(tenantId, { weeks, abc });
+  const metrics = await getPeriodMetrics(tenantId, { weeks, abc, period });
 
   if (metrics.weeks.length === 0) {
     return (

@@ -71,11 +71,21 @@ export const COST_SURFACES: CostSurface[] = [
   { module: "lib/data/costs", getter: "getCostMovedAlerts", provenBy: "tests/member-visibility.test.tsx" },
   { module: "lib/data/insights", getter: "getInsightsOverview", provenBy: "tests/member-visibility.test.tsx" },
   { module: "lib/data/insights", getter: "getDeadStockByMonth", provenBy: "tests/dead-stock-by-month.test.ts" },
+  { module: "lib/data/insights", getter: "getOverstock", provenBy: "tests/member-visibility.test.tsx" },
+  { module: "lib/data/insights", getter: "getOnOrder", provenBy: "tests/member-visibility.test.tsx" },
+  // getLeakageMatrix is deliberately NOT here. It carries a cost — capital tied
+  // up — but derives it from getCatalogueMetrics.moneyAtRestKes and nulls it via
+  // canViewCosts; its body names no cost COLUMN, so the manifest scan does not
+  // (and must not) flag it. That is the "leak by derivation" the scan is blind
+  // to on purpose — its money-blindness is proven by a hand-written test in
+  // member-visibility.test.tsx ("the leakage matrix carries no capital figure"),
+  // the same way a ranked-by-cost surface is.
   { module: "lib/data/orders", getter: "getOrderQueue", provenBy: "tests/orders-money-blind.test.ts" },
   { module: "lib/data/orders", getter: "getPurchaseOrders", provenBy: "tests/orders-money-blind.test.ts" },
   { module: "lib/data/orders", getter: "getPoDetail", provenBy: "tests/orders-money-blind.test.ts" },
   { module: "lib/data/orders", getter: "getPoDocument", provenBy: "tests/orders-money-blind.test.ts" },
   { module: "lib/data/orders", getter: "getManualPoOptions", provenBy: "tests/orders-money-blind.test.ts" },
+  { module: "lib/data/period-inventory", getter: "getPeriodInventory", provenBy: "tests/period-inventory-visibility.test.ts" },
   { module: "lib/data/plan-calendar", getter: "getSupplyCalendar", provenBy: "tests/plan-calendar.test.ts" },
   { module: "lib/data/plan", getter: "getBuyList", provenBy: "tests/member-visibility.test.tsx" },
   { module: "lib/data/plan", getter: "splitByBudget", provenBy: "tests/member-visibility.test.tsx" },

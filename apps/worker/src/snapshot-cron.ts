@@ -41,6 +41,16 @@ export const SNAPSHOT_JOB_OPTIONS = {
  *  against, and the table stays bounded at ~400 rows per product. */
 export const SNAPSHOT_RETENTION_DAYS = 400;
 
+/**
+ * SalesHistory retention. The engine's history window is 365 days (run.ts
+ * HISTORY_DAYS), the backtest reads a year, ABC sums 90 — so nothing reads sales
+ * older than ~a year. Keep 450 (a year plus a ~3-month buffer) so every reader
+ * has its full window with margin, and the unbounded tail — which only grew the
+ * table and the egress of every full-history read — is dropped. SalesHistory
+ * had no pruning before; it grew forever.
+ */
+export const SALES_HISTORY_RETENTION_DAYS = 450;
+
 /** Rows per createMany — same batching as the sales writer. */
 const SNAPSHOT_CHUNK = 500;
 const DAY_MS = 86_400_000;
@@ -94,7 +104,7 @@ export async function dispatchInventorySnapshots(
   return tenants.length;
 }
 
-export type SnapshotResult = { written: number; pruned: number };
+export type SnapshotResult = { written: number; pruned: number; salesPruned: number };
 
 /**
  * Snapshot one tenant's on-hand for the UTC day `now` falls in, then drop rows
@@ -132,7 +142,16 @@ export async function snapshotTenantInventory(
     where: { tenantId, date: { lt: cutoff } },
   });
 
-  return { written: rows.length, pruned };
+  // Same daily pass drops the dead tail of SalesHistory — the unbounded table
+  // behind the largest full-history reads. Beyond every reader's window (see
+  // SALES_HISTORY_RETENTION_DAYS), so nothing the forecast, backtest or ABC asks
+  // for is touched.
+  const salesCutoff = new Date(date.getTime() - SALES_HISTORY_RETENTION_DAYS * DAY_MS);
+  const { count: salesPruned } = await prismaService.salesHistory.deleteMany({
+    where: { tenantId, date: { lt: salesCutoff } },
+  });
+
+  return { written: rows.length, pruned, salesPruned };
 }
 
 export interface SnapshotCronWorkerOptions {

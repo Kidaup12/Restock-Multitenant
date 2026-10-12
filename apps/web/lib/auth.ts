@@ -21,7 +21,13 @@ export const auth = betterAuth({
       await sendEmail({
         to: user.email,
         subject: "Reset your Wezesha Restock password",
-        text: `Follow this link to choose a new password:\n\n${url}\n\nIf you didn't request this, ignore this email — your password is unchanged.`,
+        text: `Follow this link to choose a new password:\n\n${url}\n\nIf you didn't request this, ignore this email. Your password is unchanged.`,
+        html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;color:#1a1a1a">
+  <h1 style="font-size:18px;font-weight:700;margin:0 0 12px">Reset your Wezesha Restock password</h1>
+  <p style="font-size:14px;line-height:1.5;margin:0 0 16px">Follow this link to choose a new password:</p>
+  <p style="margin:0 0 16px"><a href="${url}" style="font-size:14px;color:#a62f5c;word-break:break-all">${url}</a></p>
+  <p style="font-size:13px;line-height:1.5;color:#666;margin:0">If you didn't request this, ignore this email. Your password is unchanged.</p>
+</div>`,
         // No tenant: the reset is addressed to an account, which may belong to
         // several workspaces or none. Naming one here would be a guess.
         kind: "password_reset",
@@ -40,6 +46,12 @@ export const auth = betterAuth({
           to: email,
           subject: "Your Wezesha Restock sign-in code",
           text: `Your sign-in code is ${otp}. It expires in 5 minutes.`,
+          html: `<div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;color:#1a1a1a">
+  <h1 style="font-size:18px;font-weight:700;margin:0 0 12px">Your Wezesha Restock sign-in code</h1>
+  <p style="font-size:14px;line-height:1.5;margin:0 0 12px">Use this code to sign in:</p>
+  <p style="font-size:28px;font-weight:700;letter-spacing:4px;margin:0 0 12px">${otp}</p>
+  <p style="font-size:13px;line-height:1.5;color:#666;margin:0">It expires in 5 minutes.</p>
+</div>`,
           // No tenant: the code is mailed before any session, so no workspace
           // has been resolved yet.
           kind: "sign_in_code",

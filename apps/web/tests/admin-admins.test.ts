@@ -100,6 +100,26 @@ describe.skipIf(!runnable)("platform admin grant/revoke (local db)", () => {
     expect(await prismaService.platformAdmin.count()).toBe(1);
   });
 
+  it("says a mistyped address is mistyped, not that they never signed in", async () => {
+    // A real address typed without its ".com" came back as "they need to sign
+    // in once before you can grant access" — true of nobody, because the
+    // account existed. The operator went looking for an onboarding problem that
+    // was a missing three characters.
+    const result = await grantPlatformAdmin(actorA(), `${IDS[1]}@wezesha`);
+
+    expect(result).toMatchObject({ ok: false });
+    expect((result as { error: string }).error).toContain("is not an email address");
+    expect((result as { error: string }).error).not.toContain("sign in");
+    expect(await prismaService.platformAdmin.count()).toBe(1);
+  });
+
+  it("still tells the truth when the address is fine and the account is not", async () => {
+    // The other side of the same line: a well-formed address with nobody behind
+    // it must keep saying so, or the fix has just moved the confusion.
+    const result = await grantPlatformAdmin(actorA(), "nobody@wezesha.test");
+    expect((result as { error: string }).error).toContain("sign in");
+  });
+
   it("refuses to grant twice", async () => {
     await grantPlatformAdmin(actorA(), `${IDS[1]}@wezesha.test`);
     const again = await grantPlatformAdmin(actorA(), `${IDS[1]}@wezesha.test`);

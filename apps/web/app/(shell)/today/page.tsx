@@ -21,6 +21,9 @@ import { TodayLimitNotice } from "./today-limit-notice";
 import { TodaySetupStrip } from "./today-setup-strip";
 import { CostGapBar } from "./setup-gap-bars";
 import { ProductBoard } from "./product-board";
+import { RedistributionCard } from "./redistribution-card";
+import { BuyThisWeek } from "./buy-this-week";
+import { SalesReviewSection } from "@/components/sales-review-section";
 
 export const metadata: Metadata = {
   title: "Today",
@@ -58,6 +61,9 @@ export default async function TodayPage() {
   // (connections, costs, plan) gate management on this same permission, so an
   // offered CTA never dead-ends on a permission error.
   const canManageShop = hasPermission(membership, "manage_settings");
+  // Same gate the Plan page's CostFixer uses — without it the missing-cost
+  // notice can only link out to the product page, never edit inline.
+  const canOverride = hasPermission(membership, "approve_orders");
 
   return (
     <div className="space-y-6">
@@ -74,39 +80,18 @@ export default async function TodayPage() {
         actions={<AdvancedMenu />}
       />
       <RealtimeRefresh />
-
-      <GuideBox id="today" scope={tenantId} title="This is your daily home base">
-        The four figures at the top are what needs attention right now — what is
-        out of stock, what to reorder, what is on its way, and what is not
-        selling. Tap any of them to see that list. When you are ready to buy,
-        open the Restock planner.
-      </GuideBox>
-
-      <Suspense
-        fallback={
-          <Card className="px-5 py-4">
-            {/* The shared skeleton, not a bare pulse: this sat beside four
-                shimmering tiles and read as a different kind of loading. */}
-            <Skeleton className="h-6 w-full" />
-          </Card>
-        }
-      >
-        <TodaySetupStrip
+      <Suspense fallback={null}>
+        <BuyThisWeek tenantId={tenantId} canViewCosts={canViewCosts} />
+      </Suspense>
+      <Suspense fallback={null}>
+        <RedistributionCard
           tenantId={tenantId}
-          displayName={session.user.name}
-          canManageShop={canManageShop}
           canViewCosts={canViewCosts}
+          currency={membership.tenant.currency}
         />
       </Suspense>
-
-      {canManageTeam ? (
-        <Suspense fallback={null}>
-          <TodayLimitNotice tenantId={tenantId} />
-        </Suspense>
-      ) : null}
-
       <Suspense fallback={null}>
-        <CostGapBar tenantId={tenantId} canViewCosts={canViewCosts} />
+        <SalesReviewSection tenantId={tenantId} canManage={canManageShop} />
       </Suspense>
 
       <div data-tour="today-metrics">
@@ -134,6 +119,7 @@ export default async function TodayPage() {
           <ProductBoard
             tenantId={tenantId}
             canViewCosts={canViewCosts}
+            canOverride={canOverride}
             currency={membership.tenant.currency}
             trend={
               <RevenueTrend tenantId={tenantId} currency={membership.tenant.currency} />
@@ -142,6 +128,35 @@ export default async function TodayPage() {
         </Suspense>
       </div>
 
+      <details className="rounded-lg border border-edge bg-surface">
+        <summary className="cursor-pointer px-5 py-4 text-sm font-medium text-ink">
+          Setup and shop checks
+        </summary>
+        <div className="space-y-4 border-t border-edge p-4 sm:p-5">
+          <GuideBox id="today" scope={tenantId} title="This is your daily home base">
+            The four figures at the top are what needs attention right now — what is
+            out of stock, what to reorder, what is on its way, and what is not
+            selling. Tap any of them to see that list. When you are ready to buy,
+            open the Restock planner.
+          </GuideBox>
+          <Suspense fallback={<Skeleton className="h-6 w-full" />}>
+            <TodaySetupStrip
+              tenantId={tenantId}
+              displayName={session.user.name}
+              canManageShop={canManageShop}
+              canViewCosts={canViewCosts}
+            />
+          </Suspense>
+          {canManageTeam ? (
+            <Suspense fallback={null}>
+              <TodayLimitNotice tenantId={tenantId} />
+            </Suspense>
+          ) : null}
+          <Suspense fallback={null}>
+            <CostGapBar tenantId={tenantId} canViewCosts={canViewCosts} />
+          </Suspense>
+        </div>
+      </details>
     </div>
   );
 }

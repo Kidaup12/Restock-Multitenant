@@ -1,8 +1,13 @@
 // Demand rates + inventory primitives
+export { applyMoq } from "./order-quantity";
+export { debulkSeries, hasBulkBuy, BULK_MULT, BULK_ABS_FLOOR, BULK_CAP_MULT, type BulkCap, type DebulkOptions, type DebulkResult } from "./big-buyer";
 export {
   weightedDailyRate,
   weightedDailyRateAdjusted,
   weightedDailyRateCensored,
+  weightedDailyRateMedian,
+  weightedDailyRateMedianCensored,
+  MEDIAN_BUCKET_DAYS,
   dampedWindow,
   median,
   SPIKE_CAP_MULTIPLE,
@@ -19,6 +24,7 @@ export {
   zForServiceLevel,
   SERVICE_Z_DEFAULTS,
   type SalesPoint,
+  type BaselineMethod,
   type Urgency,
 } from "./baseline";
 
@@ -92,6 +98,7 @@ export {
   guardrailCap,
   guardForecastResult,
   GUARDRAIL_MULTIPLIER,
+  THIN_DATA_ABSOLUTE_CAP_30D,
   type GuardrailDecision,
 } from "./guardrail";
 
@@ -116,7 +123,19 @@ export {
 } from "./lead-time";
 
 // ABC classification
-export { assignAbc, dailySalesValue, type AbcInput, type AbcCategory } from "./abc";
+export {
+  assignAbc,
+  saleSpanDays,
+  MIN_SALE_SPAN_DAYS_FOR_A,
+  dailySalesValue,
+  trailingRevenue,
+  resolveAbcWindowDays,
+  MIN_RUN_RATE_FOR_A,
+  MIN_RUN_RATE_FOR_B,
+  ABC_WINDOW_DAYS,
+  type AbcInput,
+  type AbcCategory,
+} from "./abc";
 
 // ABC-class minimum serving rate
 export {
@@ -126,6 +145,9 @@ export {
   shelfWasMostlyEmpty,
   ABC_RATE_FLOORS,
 } from "./rate-floor";
+
+// Weekly spot-check picker (shelf-vs-system drift)
+export { selectSpotChecks, SPOT_CHECK_COUNT, type SpotCandidate } from "./spot-check";
 
 // Ingest-health gate ("no data ≠ no demand")
 export {
@@ -206,3 +228,5 @@ export {
   SEASONAL_MIN,
   type MonthlyExpectation,
 } from "./seasonality";
+
+export { pickBestRun } from "./latest-run";

@@ -36,6 +36,8 @@ const lines = [
     unitCostKes: 1050,
     lineCostKes: 63_000,
     onHandUnits: 20,
+    abc: "A",
+    runRatePerDay: 2.5,
   },
   {
     orderId: "o-2",
@@ -46,6 +48,8 @@ const lines = [
     unitCostKes: 700,
     lineCostKes: 21_000,
     onHandUnits: 0,
+    abc: "B",
+    runRatePerDay: 0.8,
   },
 ];
 
@@ -73,8 +77,10 @@ function orderQtyCells(html: string): number[] {
   const rows = html.split("<tr").slice(2); // skip the header row
   return rows.map((row) => {
     const cells = row.split("<td");
-    // 0 is the fragment before the first cell; cells are tick, product, stock, qty…
-    const qty = cells[4] ?? "";
+    // 0 is the fragment before the first cell; cells are: tick, product, In stock,
+    // Sells/day, Order qty… — so Order qty is cell 5 (the class/run-rate columns
+    // pushed it right by one).
+    const qty = cells[5] ?? "";
     const shown = qty.match(/>(\d[\d,]*)</g)?.[0] ?? "";
     return Number(shown.replace(/[^\d]/g, ""));
   });

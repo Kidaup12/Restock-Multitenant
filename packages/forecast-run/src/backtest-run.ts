@@ -1,7 +1,10 @@
 import { prismaForTenant, prismaForTenantTx } from "@wezesha/db";
 import {
   assignAbc,
-  dailySalesValue,
+  saleSpanDays,
+  resolveAbcWindowDays,
+  trailingRevenue,
+  weightedDailyRateAdjusted,
   walkForwardBacktest,
   walkForwardCutoffs,
   championsByClass,
@@ -91,7 +94,7 @@ export async function runBacktest(
 
   // One connection for both reads — see the note in packages/db on why a batch
   // through the per-operation client asks the pool for one connection per query.
-  const { products, sales } = await prismaForTenantTx(
+  const { products, sales, config } = await prismaForTenantTx(
     tenantId,
     async (tx) => ({
       products: await tx.product.findMany({
@@ -100,8 +103,9 @@ export async function runBacktest(
       }),
       sales: await tx.salesHistory.findMany({
         where: { date: { gte: historySince } },
-        select: { productId: true, date: true, quantity: true },
+        select: { productId: true, date: true, quantity: true, revenueKes: true },
       }),
+      config: await tx.tenantConfig.findFirst({ select: { abcWindowDays: true, baselineMethod: true, bigBuyerDamping: true } }),
     }),
     { maxWait: 30_000, timeout: 120_000 }
   );
@@ -119,10 +123,17 @@ export async function runBacktest(
   // letter, written by the nightly run). Nothing user-facing reads these — they
   // only bucket accuracy scores inside BacktestRun.
   const abcByProduct = assignAbc(
-    products.map((p) => ({
-      id: p.id,
-      revenue: dailySalesValue(historyByProduct.get(p.id) ?? [], p.priceKes),
-    }))
+    products.map((p) => {
+      const history = historyByProduct.get(p.id) ?? [];
+      return {
+        id: p.id,
+        // Same ranking the live run uses (trailing revenue + velocity floor), so
+        // the audition buckets accuracy by the classes production actually sizes.
+        revenue: trailingRevenue(history, now, resolveAbcWindowDays(config?.abcWindowDays)),
+        saleSpanDays: saleSpanDays(history, now, resolveAbcWindowDays(config?.abcWindowDays)),
+        runRate: weightedDailyRateAdjusted(history, now),
+      };
+    })
   );
 
   const backtestProducts: BacktestProduct[] = products.map((p) => ({
@@ -138,7 +149,9 @@ export async function runBacktest(
     return { rowsWritten: 0, champions: null, degraded: false, methodChanged: false, result: null };
   }
 
-  const result = walkForwardBacktest(backtestProducts, cutoffs, horizonDays);
+  // Unset (null) means the tenant has never visited the Settings toggle, not
+  // that they chose it off — damping now defaults ON, same as the live run.
+  const result = walkForwardBacktest(backtestProducts, cutoffs, horizonDays, { baselineMethod: config?.baselineMethod === "median" ? "median" : "mean", bigBuyerDamping: config?.bigBuyerDamping !== false });
   const runDate = now;
 
   // Persist every scored (class × method) row, sharing one runDate.

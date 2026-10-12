@@ -1,7 +1,7 @@
 import { UnrecoverableError, type Job } from "bullmq";
 import type { Redis } from "ioredis";
 import { prismaService } from "@wezesha/db";
-import { fetchPosFeed, ingestPosSales, type PosSaleInput } from "@wezesha/pos";
+import { fetchPosFeed, ingestPosSales, healPosRollup, type PosSaleInput } from "@wezesha/pos";
 import { publishEvent } from "@wezesha/realtime";
 import type { SyncJobData } from "@wezesha/queue";
 import type { SendEmail } from "./email";
@@ -54,6 +54,8 @@ export function createPosSyncProcessor(options: PosSyncOptions) {
 
     const result = await ingestPosSales({ tenantId, sales });
     if (!result) throw new UnrecoverableError(`tenant ${tenantId} not found for POS ingest`);
+    // Converge recent rollups even after an empty or partial feed response.
+    await healPosRollup(tenantId);
 
     await publishEvent(options.publisher, {
       type: "pos.ingested",

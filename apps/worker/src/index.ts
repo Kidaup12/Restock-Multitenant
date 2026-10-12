@@ -17,6 +17,13 @@ import {
   type OpsCronQueue,
 } from "./limits-cron";
 import {
+  BILLING_CRON_QUEUE,
+  createBillingCronQueue,
+  createBillingCronWorker,
+  registerBillingCronSchedules,
+  type BillingCronQueue,
+} from "./billing-cron";
+import {
   POS_CRON_QUEUE,
   createPosCronQueue,
   createPosCronWorker,
@@ -53,6 +60,13 @@ import {
   type SnapshotCronQueue,
 } from "./snapshot-cron";
 import {
+  SPOT_CHECK_QUEUE,
+  createSpotCheckQueue,
+  createSpotCheckWorker,
+  registerSpotCheckSchedules,
+  type SpotCheckQueue,
+} from "./spot-check-cron";
+import {
   SYNC_SCHEDULE_QUEUE,
   createSyncScheduleQueue,
   createSyncScheduleWorker,
@@ -70,15 +84,20 @@ import { createSyncWorker } from "./worker";
  *   SERVICE_DATABASE_URL  — BYPASSRLS connection: the sync's writes
  *   TOKEN_ENCRYPTION_KEY  — decrypts stored Shopify tokens (32 bytes, base64)
  *   SHOPIFY_APP_URL       — public web origin; registers webhook callbacks when set
- *   RESEND_API_KEY         — Resend API key; unset logs mail to the
+ *   BREVO_SMTP_KEY        — Brevo SMTP key; unset logs mail to the
  *                           console instead of sending (see src/email.ts)
+ *   BREVO_SMTP_LOGIN      — Brevo SMTP login; required alongside the key
+ *   BREVO_SMTP_HOST/PORT  — optional; default smtp-relay.brevo.com / 587
  *   EMAIL_FROM            — outbound sender ("Name <address>" or bare address);
- *                           required once RESEND_API_KEY is set
+ *                           required once BREVO_SMTP_KEY is set
  *   EMAIL_CRONS           — "1" registers + runs the email cron schedules
  *                           (weekly summaries + monthly owner reports); unset
  *                           keeps dev/CI quiet
  *   OPS_CRONS             — "1" registers + runs the ops cron schedules
  *                           (daily plan-limit checks); unset keeps dev/CI quiet
+ *   BILLING_CRONS         — "1" registers + runs the billing enforcement cron
+ *                           (daily: soften a lapsed workspace to past_due past a
+ *                           grace window — soft, no lockout); unset keeps dev/CI quiet
  *   POS_CRONS             — "1" registers + runs the POS cron schedules
  *                           (daily sales-gap checks); unset keeps dev/CI quiet
  *   FORECAST_CRON         — "1" registers + runs the forecast crons (nightly
@@ -88,6 +107,9 @@ import { createSyncWorker } from "./worker";
  *                           (nightly cost-moved checks); unset keeps dev/CI quiet
  *   SNAPSHOT_CRON         — "1" registers + runs the inventory-snapshot cron
  *                           (nightly on-hand history); unset keeps dev/CI quiet
+ *   SPOT_CHECK_CRON       — "1" registers + runs the weekly spot-check cron
+ *                           (Monday prompts of SKUs to physically count); unset
+ *                           keeps dev/CI quiet
  *   SHOPIFY_SYNC_CRON     — "1" registers + runs the recurring Shopify sync
  *                           (every SHOPIFY_SYNC_PATTERN, plus a daily full pull
  *                           so removed products are noticed); unset keeps
@@ -158,6 +180,19 @@ async function main(): Promise<void> {
     console.log("worker: ops crons registered (limits check)");
   }
 
+  let billingQueue: BillingCronQueue | null = null;
+  let billingWorker: Worker | null = null;
+  if (process.env.BILLING_CRONS === "1") {
+    billingQueue = createBillingCronQueue(connection);
+    await registerBillingCronSchedules(billingQueue);
+    billingWorker = createBillingCronWorker({ connection, queue: billingQueue });
+    billingWorker.on("failed", (job, err) => {
+      console.error(`worker: billing cron ${job?.id} failed`, err);
+      captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: BILLING_CRON_QUEUE });
+    });
+    console.log("worker: billing crons registered (period enforcement)");
+  }
+
   let posQueue: PosCronQueue | null = null;
   let posWorker: Worker | null = null;
   if (process.env.POS_CRONS === "1") {
@@ -226,6 +261,19 @@ async function main(): Promise<void> {
     console.log("worker: snapshot cron registered (nightly inventory snapshot)");
   }
 
+  let spotCheckQueue: SpotCheckQueue | null = null;
+  let spotCheckWorker: Worker | null = null;
+  if (process.env.SPOT_CHECK_CRON === "1") {
+    spotCheckQueue = createSpotCheckQueue(connection);
+    await registerSpotCheckSchedules(spotCheckQueue);
+    spotCheckWorker = createSpotCheckWorker({ connection, queue: spotCheckQueue });
+    spotCheckWorker.on("failed", (job, err) => {
+      console.error(`worker: spot-check cron ${job?.id} failed`, err);
+      captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: SPOT_CHECK_QUEUE });
+    });
+    console.log("worker: spot-check cron registered (weekly count prompts)");
+  }
+
   let syncScheduleQueue: SyncScheduleQueue | null = null;
   let syncScheduleWorker: Worker | null = null;
   let syncProducerQueue: SyncQueue | null = null;
@@ -259,6 +307,8 @@ async function main(): Promise<void> {
       cronQueue?.close(),
       opsWorker?.close(),
       opsQueue?.close(),
+      billingWorker?.close(),
+      billingQueue?.close(),
       posWorker?.close(),
       posQueue?.close(),
       forecastWorker?.close(),
@@ -267,6 +317,8 @@ async function main(): Promise<void> {
       costQueue?.close(),
       snapshotWorker?.close(),
       snapshotQueue?.close(),
+      spotCheckWorker?.close(),
+      spotCheckQueue?.close(),
       syncScheduleWorker?.close(),
       syncScheduleQueue?.close(),
       syncProducerQueue?.close(),

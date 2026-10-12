@@ -28,10 +28,8 @@ export type PoLinePlan = {
 };
 
 /** Raise a quantity to the supplier's minimum order quantity. */
-export function applyMoq(qty: number, moq: number): number {
-  const wanted = Math.max(1, Math.ceil(qty));
-  return Math.max(wanted, Math.max(1, Math.floor(moq) || 1));
-}
+import { applyMoq } from "@wezesha/forecast";
+export { applyMoq };
 
 /** Build the line set for one supplier's PO. Duplicate products merge first
  *  (summed quantities), then the MOQ floor applies per line. */

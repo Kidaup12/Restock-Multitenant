@@ -451,10 +451,16 @@ const PICKER_LIMIT = 300;
 /**
  * The candidate list behind "which products do I buy from this supplier?".
  *
- * Deliberately NOT restricted to buyable products: a shop assigning a supplier
- * is tidying its catalogue, and hiding the drafts and deactivated rows would
- * leave items it could never fix. Ordered so the supplier's current products
- * come first — the question is usually "what else", not "what at all".
+ * Two modes, chosen by whether a search term is present:
+ *  - No search (the page someone lands on): just THIS supplier's own products —
+ *    "what do I buy from them", not "every product that exists". Ticking here
+ *    is unassign-only (handled by the caller).
+ *  - A search term: the full catalogue, so a product that belongs to nobody
+ *    (or to someone else) can be found and added. Deliberately NOT restricted
+ *    to buyable products even in this mode: a shop assigning a supplier is
+ *    tidying its catalogue, and hiding drafts/deactivated rows would leave
+ *    items it could never fix. The supplier's own products still sort first
+ *    here too, so a search doesn't bury what's already theirs.
  */
 export async function getSupplierProductPicker(
   tenantId: string,
@@ -478,7 +484,7 @@ export async function getSupplierProductPicker(
             { vendor: { contains: term, mode: "insensitive" } },
           ],
         }
-      : {},
+      : { supplierId: supplier.id },
     select: {
       id: true,
       title: true,

@@ -19,7 +19,8 @@ import {
   type BuyList,
   type BuyListRow,
 } from "../lib/data/plan";
-import { getInsightsOverview } from "../lib/data/insights";
+import { getInsightsOverview, getOverstock, getOnOrder, getLeakageMatrix } from "../lib/data/insights";
+import { getOverviewKpis } from "../lib/data/overview-kpis";
 import { getCostCoverage, getCostMovedAlerts } from "../lib/data/costs";
 import { getUnreadCount, listNotifications } from "../lib/notifications/data";
 import {
@@ -85,6 +86,10 @@ const REVENUE_KEYS = new Set([
   "budgetKes",
   // price x run rate — what an empty shelf costs in sales, not a cost figure.
   "missedSalesKes",
+  // The same estimate under the leakage matrix's name (units missed x retail
+  // price). A sales figure priced at retail, shown to every role; the group's
+  // cost figure is capitalKes, which is nulled for a member.
+  "missedRevenueKes",
 ]);
 
 /** Every numeric non-revenue `*Kes` leaf in a payload, as "path=value". For a
@@ -316,7 +321,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     // that no KES reaches them at all — not that something masks. (The trend
     // chart carries the revenue and is passed in separately; it is not a cost.)
     const member = renderToStaticMarkup(
-      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: false, currency: "KES", trend: null })
+      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: false, canOverride: false, currency: "KES", trend: null })
     );
     expect(kesDigits(member)).toHaveLength(0);
     // And not even a masked one. The data layer nulls the figure, so a card that
@@ -326,7 +331,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     expect(member).not.toContain(MASK);
 
     const owner = renderToStaticMarkup(
-      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: true, currency: "KES", trend: null })
+      await ProductBoard({ tenantId: seeded.tenantId, canViewCosts: true, canOverride: true, currency: "KES", trend: null })
     );
     // The owner sees what the dead stock is costing — the figure this shop
     // judges the product by.
@@ -342,7 +347,7 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     // all; that is the assertion above, not this one.
     for (const canViewCosts of [false, true]) {
       const html = renderToStaticMarkup(
-        await ProductBoard({ tenantId: seeded.tenantId, canViewCosts, currency: "KES", trend: null })
+        await ProductBoard({ tenantId: seeded.tenantId, canViewCosts, canOverride: canViewCosts, currency: "KES", trend: null })
       );
       expect(html).not.toContain("Order cost");
       expect(html).not.toContain("Reorder qty");
@@ -417,6 +422,59 @@ describe.skipIf(!runnable)("member cost-blindness on live screens (seeded db)", 
     // And the owner still gets real numbers — redaction must not blank everyone.
     const owner = await getDashboardTable(seeded.tenantId, { canViewCosts: true });
     expect(owner.criticalCostKes).not.toBeNull();
+  });
+
+  it("the overstock report carries no cost numbers for a member", async () => {
+    const member = await getOverstock(seeded.tenantId, { canViewCosts: false });
+    expect(member.totalExcessKes).toBeNull();
+    for (const row of member.rows) expect(row.excessValueKes).toBeNull();
+    // Excess UNITS is not money — it stays, so the report still says something.
+    // (No assertion that rows exist: a healthy shop may have none.)
+
+    // Owner keeps real excess-cash figures — redaction must not blank everyone.
+    const owner = await getOverstock(seeded.tenantId, { canViewCosts: true });
+    for (const row of owner.rows) expect(row.excessValueKes).not.toBeNull();
+  });
+
+  it("the on-order report carries no cost numbers for a member", async () => {
+    const member = await getOnOrder(seeded.tenantId, { canViewCosts: false });
+    expect(member.totalValueKes).toBeNull();
+    for (const row of member.rows) expect(row.valueKes).toBeNull();
+    // Units on the way is not money — it stays.
+
+    const owner = await getOnOrder(seeded.tenantId, { canViewCosts: true });
+    for (const row of owner.rows) expect(row.valueKes).not.toBeNull();
+  });
+
+  it("the overview KPI row carries no capital-at-cost figure for a member", async () => {
+    // Capital tied up is derived (getCatalogueMetrics.moneyAtRestKes) so it names
+    // no cost column and the manifest scan can't see it — this is its money-blind
+    // proof, the same as the leakage matrix. Revenue / at-risk / capital-at-retail
+    // are sales figures and stay.
+    const member = await getOverviewKpis(seeded.tenantId, { canViewCosts: false });
+    expect(member.capitalAtCostKes).toBeNull();
+    expect(member.capitalAtRetailKes).not.toBeNull(); // sales figure, visible
+    expect(typeof member.revenueAtRisk7dKes).toBe("number");
+    expect(typeof member.lastMonthRevenueKes).toBe("number");
+
+    const owner = await getOverviewKpis(seeded.tenantId, { canViewCosts: true });
+    expect(owner.capitalAtCostKes).not.toBeNull();
+  });
+
+  it("the leakage matrix carries no capital figure for a member, but keeps missed sales", async () => {
+    // Capital tied up is a cost — nulled for a member in every group, on both
+    // the category and the ABC cut. Missed revenue is a sales estimate (price x
+    // run rate x empty days), so it stays a number for both roles.
+    const member = await getLeakageMatrix(seeded.tenantId, { canViewCosts: false });
+    for (const group of [...member.byCategory, ...member.byAbc]) {
+      expect(group.capitalKes).toBeNull();
+      expect(typeof group.missedRevenueKes).toBe("number");
+    }
+    expect(costNumbers(member)).toEqual([]);
+
+    // Owner keeps real capital figures — redaction must not blank everyone.
+    const owner = await getLeakageMatrix(seeded.tenantId, { canViewCosts: true });
+    for (const group of [...owner.byCategory, ...owner.byAbc]) expect(group.capitalKes).not.toBeNull();
   });
 
   it("stock payloads carry no cost numbers for a member", async () => {
@@ -916,6 +974,8 @@ describe("export column gating", () => {
       "Product",
       "SKU",
       "To",
+      "Source stock",
+      "Destination stock",
       "Move",
       "Sells/day",
       "Cover before",

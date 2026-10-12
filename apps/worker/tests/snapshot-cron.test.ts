@@ -123,6 +123,26 @@ describe.skipIf(!localDb)("inventory snapshot writer (local db)", () => {
     expect(dates).toContain(DAY.getTime());
   });
 
+  it("prunes SalesHistory past its retention window and keeps the rest", async () => {
+    const stale = daysBefore(cron.SALES_HISTORY_RETENTION_DAYS + 1);
+    const keep = daysBefore(cron.SALES_HISTORY_RETENTION_DAYS - 1);
+    await prismaService.salesHistory.createMany({
+      data: [
+        { tenantId, productId: ids.ON, date: stale, quantity: 3, revenueKes: 300 },
+        { tenantId, productId: ids.ON, date: keep, quantity: 2, revenueKes: 200 },
+      ],
+    });
+
+    const res = await cron.snapshotTenantInventory(tenantId, NOW);
+    expect(res.salesPruned).toBe(1);
+
+    const dates = (await prismaService.salesHistory.findMany({ where: { tenantId } })).map((r) =>
+      r.date.getTime()
+    );
+    expect(dates).not.toContain(stale.getTime()); // the dead tail is gone
+    expect(dates).toContain(keep.getTime()); // a year-and-a-bit is kept for the engine
+  });
+
   it("writes and prunes inside one tenant only", async () => {
     // The neighbour holds a row on the same day and one far past the window.
     const ancient = daysBefore(cron.SNAPSHOT_RETENTION_DAYS + 100);

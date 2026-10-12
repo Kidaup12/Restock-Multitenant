@@ -64,7 +64,7 @@ describe.skipIf(!runnable)("unexplained sales spikes (seeded local db)", () => {
     const mine = spikes.find((s) => s.productId === productId);
     expect(mine, "the seeded 15x day must be raised").toBeDefined();
     expect(mine!.dayKey).toBe(keyOf(spikeDay));
-    expect(mine!.quantity).toBe(30);
+    expect(mine!.quantity).toBe(32); // 30-unit line plus the day's ordinary 2 units
     expect(mine!.multiple).toBeGreaterThanOrEqual(3);
   }, 120_000);
 

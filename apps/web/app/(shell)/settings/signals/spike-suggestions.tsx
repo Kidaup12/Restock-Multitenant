@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import type { SpikeSuggestion } from "@/lib/data/signals";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -10,17 +11,20 @@ import { dismissSpike, logSpikeAsPromo, type SignalActionResult } from "./action
  * "Was this a promo?" — the days the shop sold far above its own normal with
  * nothing logged to explain them.
  *
- * Asked, never assumed: only the owner knows whether a 3× day was a promotion
- * or a single bulk buyer, and the two want opposite treatment. Answering keeps
- * the day out of the normal sales rate; declining is remembered so the same day
- * isn't raised again.
+ * Asked, never assumed: only the owner can explain whether unusual sales came
+ * from an offer or a bulk buyer. A dismissal acknowledges evidence without
+ * changing demand; recorded promotions follow the shop's forecast settings.
  */
 export function SpikeSuggestions({
   suggestions,
   canManage,
+  reviewLink = true,
+  limit = 5,
 }: {
   suggestions: SpikeSuggestion[];
   canManage: boolean;
+  reviewLink?: boolean;
+  limit?: number;
 }) {
   const [pending, start] = useTransition();
   const [note, setNote] = useState<SignalActionResult | null>(null);
@@ -34,25 +38,31 @@ export function SpikeSuggestions({
   function answer(s: SpikeSuggestion, asPromo: boolean) {
     setNote(null);
     start(async () => {
-      const input = { productId: s.productId, dayKey: s.dayKey };
-      const result = asPromo ? await logSpikeAsPromo(input) : await dismissSpike(input);
-      setNote(result);
-      if (result.ok) setAnswered((prev) => new Set(prev).add(`${s.productId}:${s.dayKey}`));
+      try {
+        const input = { productId: s.productId, dayKey: s.dayKey };
+        const result = asPromo ? await logSpikeAsPromo(input) : await dismissSpike(input);
+        setNote(result);
+        if (result.ok) setAnswered((prev) => new Set(prev).add(`${s.productId}:${s.dayKey}`));
+      } catch {
+        setNote({ ok: false, error: "Couldn't save your review. Please try again." });
+      }
     });
   }
 
   return (
     <Card>
       <CardHeader
-        title="Was this a promotion?"
-        subtitle={`${open.length} unusual sales ${open.length === 1 ? "day" : "days"} with nothing logged against ${open.length === 1 ? "it" : "them"}`}
+        title="Unusual sales to review"
+        subtitle={`${open.length} unreviewed ${open.length === 1 ? "day" : "days"} · showing up to ${limit} most recent flags from the last year`}
+        action={reviewLink ? <Link href="/sales#unusual-sales" className="text-sm underline">Review sales flags</Link> : undefined}
       />
       <CardContent className="space-y-3 pt-0">
         <p className="text-sm text-ink-secondary">
-          These days sold far above what the product normally does. If it was an offer, saying so
-          takes the day out of your normal sales rate — otherwise it quietly inflates every order
-          for that product from now on.
+          A large daily total may be a bulk purchase, an offer, or several ordinary orders.
+          These flags do not identify a single buyer. Record a real promotion or dismiss a reviewed
+          flag. Dismissing only clears the prompt; it does not change sales or forecast demand.
         </p>
+        <p className="text-sm text-ink-muted">Possible bulk days exceed both six units and five times the median positive sales day. Broader unusual-day flags use the existing three-times baseline rule. {canManage && <Link href="/settings/ordering-strategy" className="underline">Review bulk-purchase protection in forecast settings.</Link>}</p>
         {note && (
           <p
             role={note.ok ? "status" : "alert"}
@@ -68,16 +78,16 @@ export function SpikeSuggestions({
               className="flex flex-wrap items-center justify-between gap-3 py-3"
             >
               <span className="min-w-0">
-                <span className="block truncate font-medium text-ink">{s.title}</span>
+                <Link href={`/products/${encodeURIComponent(s.productId)}`} className="block truncate font-medium text-ink hover:underline">{s.title}</Link>
+                <span className="block text-xs font-medium text-ink">{s.kind === "possible_bulk" ? "Possible bulk purchase" : "Unusual sales day"}</span>
                 <span className="block text-sm text-ink-muted">
-                  {s.dayLabel} · sold {s.quantity} against about {s.baseline} a day · {s.multiple}×
-                  normal
+                  {s.dayLabel}{s.inProgress ? " (today so far)" : ""} · {s.quantity} units across all channels · typical selling day {s.baseline} units · {s.multiple}×
                 </span>
               </span>
               {canManage && (
                 <span className="flex shrink-0 items-center gap-2">
                   <Button size="sm" loading={pending} disabled={pending} onClick={() => answer(s, true)}>
-                    Yes, it was an offer
+                    Record promotion
                   </Button>
                   <Button
                     size="sm"
@@ -85,7 +95,7 @@ export function SpikeSuggestions({
                     disabled={pending}
                     onClick={() => answer(s, false)}
                   >
-                    No, one-off
+                    Dismiss flag
                   </Button>
                 </span>
               )}

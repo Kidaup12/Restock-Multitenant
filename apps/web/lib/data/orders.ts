@@ -7,6 +7,7 @@ import {
 } from "@wezesha/db";
 import { buildPoDocument, isPoLate, type PoDocumentData } from "@/lib/po/po-model";
 import { computeSupplierScore, type SupplierScore } from "@/lib/po/supplier-stats";
+import { getCatalogueMetrics } from "@/lib/metrics";
 
 /**
  * Orders-screen data. Server-only: every function takes an explicit tenantId
@@ -173,6 +174,11 @@ export type OrderQueueLine = {
   /** qty x unit cost. Null when the caller can't view costs. */
   lineCostKes: number | null;
   onHandUnits: number;
+  /** ABC class — so a buyer can tell an A-class fast mover from a C-class dud
+   *  before turning the queue into a PO. */
+  abc: string | null;
+  /** Blended run rate (units/day) — the velocity behind the recommendation. */
+  runRatePerDay: number;
 };
 
 export type OrderQueueGroup = {
@@ -205,13 +211,16 @@ export async function getOrderQueue(
   { canViewCosts }: { canViewCosts: boolean }
 ): Promise<OrderQueueGroup[]> {
   const db = prismaForTenant(tenantId);
-  const [orders, scores] = await Promise.all([
+  const [orders, scores, metrics] = await Promise.all([
     db.order.findMany({
       where: { status: "pending", productId: { not: null } },
       orderBy: { createdAt: "asc" },
       select: { id: true, orderedQty: true, productId: true },
     }),
     getSupplierScores(tenantId),
+    // The one blended engine rate + class, so the queue shows the same velocity
+    // and class the buy list and stock screens do.
+    getCatalogueMetrics(tenantId),
   ]);
   // Order.productId is a bare column (no FK) — resolve the products separately.
   const products = await db.product.findMany({
@@ -222,6 +231,7 @@ export async function getOrderQueue(
       title: true,
       costKes: true,
       currentStock: true,
+      abcCategory: true,
       supplierId: true,
       supplier: { select: { id: true, name: true, moq: true, leadTimeAvgDays: true } },
     },
@@ -258,6 +268,8 @@ export async function getOrderQueue(
       unitCostKes: product.costKes,
       lineCostKes,
       onHandUnits: product.currentStock,
+      abc: product.abcCategory ?? null,
+      runRatePerDay: metrics.get(product.id)?.runRate ?? 0,
     });
     group.totalUnits += qty;
     group.totalCostKes += lineCostKes;

@@ -1,9 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma, prismaForTenant, prismaService } from "@wezesha/db";
 import { activeMembership, requireSession } from "@/lib/auth";
 import { hasPermission } from "@/lib/auth/permissions";
 import {
+  getTenantFeatureOverrides,
   getTenantPlan,
   planAllows,
   planFeatureTier,
@@ -25,6 +27,8 @@ import {
 // Sanity cap on the cover-days horizon — a year of cover is already well past
 // any real ordering decision. Shared with the steppers that offer it.
 import { MAX_COVER_DAYS } from "./cover";
+// Shared pure filtering must stay outside the client component boundary.
+import { filterBuyListRows, LEAD_BANDS, type LeadBand, type ScopeSelection } from "./scope";
 
 /**
  * Plan-screen actions. Each re-resolves the caller's session and active
@@ -46,6 +50,32 @@ const MAX_OVERRIDE_QTY = 1_000_000;
 /** Sanity cap on the sales-push what-if (whole percent). 500% is 6x demand —
  *  well past any real promotion, and the guard against a runaway order size. */
 const MAX_UPLIFT_PCT = 500;
+
+/** Keep only the string members of an unknown value — the scope arrives from the
+ *  client, so nothing is trusted on the way in. Mirrors scope-actions' guard. */
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
+}
+
+/**
+ * Reconstruct a clean ScopeSelection from whatever the client sent. Same
+ * defensive shape as scope-actions' parseSelection: unknown values become empty
+ * dimensions and an unknown lead band is dropped, so the applied scope is always
+ * one the filter can reason about. A missing/empty scope means "no filter" —
+ * `filterBuyListRows` then returns the input list unchanged (whole shop).
+ */
+function parseScope(raw: unknown): ScopeSelection {
+  const rec = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const leadBand = asStringArray(rec.leadBand).filter((v): v is LeadBand =>
+    (LEAD_BANDS as readonly string[]).includes(v)
+  );
+  return {
+    abc: asStringArray(rec.abc),
+    category: asStringArray(rec.category),
+    supplier: asStringArray(rec.supplier),
+    leadBand,
+  };
+}
 
 export async function addToOrder(input: {
   predictionIds: string[];
@@ -78,6 +108,15 @@ export async function addToOrder(input: {
  * re-sized list — which is what "spend this cash, but stock to this horizon"
  * means. Note the screen itself opens with a target already set, so the common
  * call carries one; absent is the unticked case, not the default view.
+ *
+ * `scope` is the screen's ABC/category/supplier/lead filter (the ScopeBar). When
+ * present it narrows the re-read buy list to the SAME set list mode shows before
+ * the budget is spread, so the split funds the filtered rows — "spend this cash
+ * over this slice of the shop". An absent or empty scope imposes nothing:
+ * `filterBuyListRows` returns the list unchanged, so a shop that sets no filter
+ * budgets the whole shop exactly as before. This deliberately replaces the old
+ * whole-shop-only behaviour to match the reference app, which filters the budget
+ * screen. The scope is validated defensively — it comes from the client.
  */
 export async function planBudget(input: {
   budgetKes: number;
@@ -85,6 +124,9 @@ export async function planBudget(input: {
   /** The shop's own decision to let must-restock lines push past the cap.
    *  Absent means cap — a budget is a cap unless someone says otherwise. */
   allowOverflow?: boolean;
+  /** The screen's ABC/category/supplier/lead filter. Absent/empty = whole shop
+   *  (unchanged). Parsed defensively — it comes from the client. */
+  scope?: ScopeSelection;
 }): Promise<PlanActionResult<BudgetSplit>> {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
@@ -101,8 +143,13 @@ export async function planBudget(input: {
 
   // Gate 2 (plan) re-checked server-side: the budget allocator is a Growth
   // feature, so a crafted call from a Starter tenant can't bypass the UI lock.
-  const plan = await getTenantPlan(membership.tenantId);
-  if (!planAllows(plan, "budget_planner")) {
+  // Overrides ride alongside the plan so an operator grant is honoured and a
+  // deny cannot be bypassed.
+  const [plan, overrides] = await Promise.all([
+    getTenantPlan(membership.tenantId),
+    getTenantFeatureOverrides(membership.tenantId),
+  ]);
+  if (!planAllows(plan, "budget_planner", overrides)) {
     return err(`Budget planner is on the ${PLAN_TIER_LABEL[planFeatureTier("budget_planner")]} plan.`);
   }
 
@@ -124,7 +171,16 @@ export async function planBudget(input: {
   const buyList = await getBuyList(membership.tenantId, { canViewCosts: true, coverDays });
   if (!buyList) return err("Run a forecast first — there's nothing to plan yet.");
 
-  const split = splitByBudget(buyList.rows, budget, {
+  // Narrow to the screen's filter before spreading the budget, so the split funds
+  // the SAME set list mode shows. An absent/empty scope returns the input list
+  // unchanged (whole shop) — so an unfiltered plan is identical to before.
+  // `heldBackCount` stays the whole-shop excluded count on purpose: the "N
+  // products held back — open the buy list to see why" hint is about products
+  // the allocator never saw, a shop-wide data problem, not the current slice.
+  const scope = parseScope(input.scope);
+  const rows = filterBuyListRows(buyList.rows, scope);
+
+  const split = splitByBudget(rows, budget, {
     strict: !input.allowOverflow,
     heldBackCount: buyList.excluded.length,
   });
@@ -253,4 +309,90 @@ export async function clearPlanOverride(input: {
   await removePlanOverride(membership.tenantId, productId);
   revalidatePath("/plan");
   return { ok: true, data: { productId } };
+}
+
+/** Sanity cap on an edited cost/price — a real unit figure never approaches it. */
+const MAX_UNIT_MONEY = 100_000_000;
+
+/**
+ * Fix a product's cost (and, when relevant, its selling price) straight from the
+ * plan — the inline "check these costs" fixer on the excluded/held-back rows and
+ * in the budget planner's "check these costs" card. A blank or broken cost is the
+ * only reason those rows are held off the buy list; setting one folds them back
+ * in on the next re-plan.
+ *
+ * Gated on `view_costs` (you cannot fix a cost you may not see) AND
+ * `approve_orders` (the same ordering permission the plan's overrides check — a
+ * fixer that puts a real number on a real order belongs behind it). Tenant and
+ * actor resolve server-side; the write runs on the RLS-scoped tenant client so a
+ * foreign productId resolves to nothing, and the change is audited on the service
+ * client. The cost is pinned (`costSource: "manual"`) so the next sync can't
+ * quietly overwrite the owner's fix.
+ */
+export async function fixProductCost(input: {
+  productId: string;
+  costKes?: number | null;
+  priceKes?: number | null;
+}): Promise<PlanActionResult<{ productId: string }>> {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+  if (!membership) return err("You're not in a workspace.");
+  if (!hasPermission(membership, "view_costs")) return err("Fixing costs needs cost access.");
+  if (!hasPermission(membership, "approve_orders")) return err("You don't have ordering access.");
+
+  const productId = typeof input.productId === "string" ? input.productId.trim() : "";
+  if (!productId) return err("Pick a product to fix.");
+
+  // Only the figures actually supplied are written; each is validated on its own.
+  const data: Prisma.ProductUpdateInput = {};
+  const meta: Record<string, unknown> = { productId, source: "plan_fixer" };
+
+  if (input.costKes != null) {
+    const cost = Number(input.costKes);
+    if (!Number.isFinite(cost) || cost <= 0) return err("Enter a cost greater than zero.");
+    if (cost > MAX_UNIT_MONEY) return err("That cost is too large.");
+    const rounded = Math.round(cost * 100) / 100;
+    data.costKes = rounded;
+    data.costSource = "manual";
+    data.costUpdatedAt = new Date();
+    data.costMovedPct = null;
+    data.costMovedAt = null;
+    meta.costKes = rounded;
+  }
+
+  if (input.priceKes != null) {
+    const price = Number(input.priceKes);
+    if (!Number.isFinite(price) || price < 0) return err("Enter a price of zero or more.");
+    if (price > MAX_UNIT_MONEY) return err("That price is too large.");
+    const rounded = Math.round(price * 100) / 100;
+    data.priceKes = rounded;
+    meta.priceKes = rounded;
+  }
+
+  if (Object.keys(data).length === 0) return err("Enter a cost.");
+
+  const db = prismaForTenant(membership.tenantId);
+  const product = await db.product.findFirst({
+    where: { id: productId },
+    select: { id: true },
+  });
+  if (!product) return err("That product isn't in this workspace.");
+
+  await db.product.update({ where: { id: product.id }, data });
+  await prismaService.auditEvent.create({
+    data: {
+      tenantId: membership.tenantId,
+      entity: "Product",
+      entityId: product.id,
+      action: "cost_changed",
+      actorUserId: session.user.id,
+      actorName: membership.displayName ?? session.user.name ?? session.user.email,
+      meta: meta as Prisma.InputJsonObject,
+    },
+  });
+  // Fixing a cost changes what the buy list contains and what the budget can plan.
+  revalidatePath("/plan");
+  revalidatePath("/products");
+  revalidatePath("/costs");
+  return { ok: true, data: { productId: product.id } };
 }

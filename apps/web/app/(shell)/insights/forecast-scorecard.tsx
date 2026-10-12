@@ -5,11 +5,9 @@ import {
   getPlanAdherence,
   type AccuracyCheck,
 } from "@/lib/data/insights";
-import { BulbIcon, ClipboardIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { formatNumber } from "@/lib/money";
-import { EmptyState } from "@/components/ui/empty-state";
 import { RunBacktestButton } from "./run-backtest-button";
 import { OnboardingAuditButton } from "./onboarding-audit-button";
 
@@ -100,6 +98,7 @@ export async function ForecastScorecard({
   tenantId,
   canRunCheck,
   windowDays,
+  period,
 }: {
   tenantId: string;
   /** Whether this reader may trigger the check. It writes a grade row, so it
@@ -110,11 +109,12 @@ export async function ForecastScorecard({
    *  horizons and the other replays fixed history, so a period control would
    *  change nothing on either. */
   windowDays: number;
+  period?: import("@/lib/data/report-range").ReportRange;
 }) {
   const [scorecard, asShown, adherence] = await Promise.all([
     getAccuracyScorecard(tenantId),
     getAsShownScorecard(tenantId),
-    getPlanAdherence(tenantId, { windowDays }),
+    getPlanAdherence(tenantId, { windowDays, period }),
   ]);
   const latest = scorecard.latest;
   const asShownLatest = asShown.latest;
@@ -136,11 +136,7 @@ export async function ForecastScorecard({
         />
         <CardContent>
           {!latest ? (
-            <EmptyState
-              icon={<BulbIcon />}
-              title="We haven't graded ourselves yet"
-              description={noGradeYet(scorecard.firstSaleAt, scorecard.lastSaleAt)}
-            />
+            <div className="space-y-1 text-sm"><p className="font-medium text-ink">We haven&apos;t graded ourselves yet</p><p className="text-ink-muted">{noGradeYet(scorecard.firstSaleAt, scorecard.lastSaleAt)}</p></div>
           ) : (
             <>
               <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3">
@@ -182,11 +178,7 @@ export async function ForecastScorecard({
         />
         <CardContent>
           {!asShownLatest ? (
-            <EmptyState
-              icon={<BulbIcon />}
-              title="Nothing has finished its month yet"
-              description="Each day's buy list is scored once the 30 days it covered have passed, so the first result appears a month after your first one. Unlike the check above, this one never changes afterwards — it grades the advice you were given, not what we would say now."
-            />
+            <div className="space-y-1 text-sm"><p className="font-medium text-ink">Nothing has finished its month yet</p><p className="text-ink-muted">Each day&apos;s buy list is scored once the 30 days it covered have passed, so the first result appears a month after your first one. Unlike the check above, this one never changes afterwards — it grades the advice you were given, not what we would say now.</p></div>
           ) : (
             <>
               <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3">
@@ -226,15 +218,11 @@ export async function ForecastScorecard({
       <Card data-tour="insights-adherence">
         <CardHeader
           title="Did you act on it?"
-          subtitle={`Recommendations from the last ${adherence.windowDays} days`}
+          subtitle={period ? `Recommendations · ${period.label}` : `Recommendations from the last ${adherence.windowDays} days`}
         />
         <CardContent>
           {!adherence.hasHistory ? (
-            <EmptyState
-              icon={<ClipboardIcon />}
-              title="Nothing to compare yet"
-              description="Once the forecast has asked you to buy something and you have raised an order, this shows how closely the two matched."
-            />
+            <div className="space-y-1 text-sm"><p className="font-medium text-ink">Nothing to compare yet</p><p className="text-ink-muted">Once the forecast has asked you to buy something and you have raised an order, this shows how closely the two matched.</p></div>
           ) : (
             <>
               <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3">

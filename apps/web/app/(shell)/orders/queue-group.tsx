@@ -1,10 +1,14 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { CostValue } from "@/components/ui/cost-value";
+import { formatRunRate } from "@/lib/money";
+import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
+import { useCurrency } from "@/components/currency-provider";
 import {
   Table,
   TableBody,
@@ -13,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { OrderQueueGroup } from "@/lib/data/orders";
+import type { OrderQueueGroup, OrderQueueLine } from "@/lib/data/orders";
 import { buildPoLines, subtotal, type PoLinePlan } from "@/lib/po/po-math";
 import { createPoAction, removeFromQueueAction } from "./actions";
 import { SupplierScoreBadges } from "./supplier-score-badges";
@@ -43,6 +47,24 @@ function QueueQty({ line, planned }: { line: { qty: number }; planned?: PoLinePl
   );
 }
 
+/** Exported for tests: money-blind members get no cost columns. */
+function queueExportColumns(canViewCosts: boolean, currency: string): ExportColumn<OrderQueueLine>[] {
+  return [
+    { header: "Product", cell: (r) => r.title },
+    { header: "SKU", cell: (r) => r.sku },
+    { header: "Class", cell: (r) => r.abc ?? "" },
+    { header: "In stock", cell: (r) => r.onHandUnits },
+    { header: "Sells/day", cell: (r) => Math.round(r.runRatePerDay * 10) / 10 },
+    { header: "Order qty", cell: (r) => r.qty },
+    ...(canViewCosts
+      ? ([
+          { header: `Unit cost (${currency})`, cell: (r) => r.unitCostKes },
+          { header: `Line cost (${currency})`, cell: (r) => r.lineCostKes },
+        ] satisfies ExportColumn<OrderQueueLine>[])
+      : []),
+  ];
+}
+
 /**
  * One supplier's slice of the order queue: pick lines, see the running total,
  * turn the selection into a purchase order. Everything is re-validated
@@ -61,6 +83,7 @@ export function QueueGroup({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const { confirm, dialog } = useConfirm();
+  const currency = useCurrency();
   const [removing, startRemoving] = useTransition();
   /** Which line is being taken off, so only its own button shows the wait. */
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -163,6 +186,12 @@ export function QueueGroup({
         }${group.leadTimeAvgDays != null ? ` · lead ${group.leadTimeAvgDays}d` : ""}`}
         action={
           <div className="flex flex-col items-end gap-2">
+            <ExportBar
+              rows={group.lines}
+              columns={queueExportColumns(canViewCosts, currency)}
+              filename={`order-queue-${(group.supplierName ?? "no-supplier").toLowerCase().replaceAll(/\s+/g, "-")}`}
+              size="sm"
+            />
             <SupplierScoreBadges score={group.score} />
             {group.supplierId ? (
               <Button
@@ -201,7 +230,8 @@ export function QueueGroup({
         </p>
       )}
       <div className="mt-2 pb-2">
-        <Table>
+        {/* Unbounded — every product queued for this supplier, not a capped page. */}
+        <Table boxed>
           <TableHeader>
             <TableHead className="w-10">
               <input
@@ -218,6 +248,9 @@ export function QueueGroup({
             </TableHead>
             <TableHead>Product</TableHead>
             <TableHead numeric>In stock</TableHead>
+            {/* Demand context, not a cost figure — visible to a money-blind
+                member alongside stock, before the gated money columns. */}
+            <TableHead numeric>Sells/day</TableHead>
             <TableHead numeric>Order qty</TableHead>
             <TableHead numeric>Unit cost</TableHead>
             <TableHead numeric>Line cost</TableHead>
@@ -240,10 +273,14 @@ export function QueueGroup({
                   />
                 </TableCell>
                 <TableCell className="font-medium text-ink">
-                  {line.title}
+                  <span className="inline-flex items-center gap-2">
+                    <AbcBadge value={line.abc} />
+                    {line.title}
+                  </span>
                   <span className="ml-2 font-mono text-xs text-ink-faint">{line.sku}</span>
                 </TableCell>
                 <TableCell numeric>{line.onHandUnits}</TableCell>
+                <TableCell numeric>{formatRunRate(line.runRatePerDay)}</TableCell>
                 <TableCell numeric>
                   <QueueQty line={line} planned={plannedByProduct.get(line.productId)} />
                 </TableCell>

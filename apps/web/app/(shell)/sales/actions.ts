@@ -6,16 +6,34 @@ import { dismissGapAsClosure, ignorePosSku, matchPosSku } from "@/lib/pos/match"
 import { enqueuePosSync } from "@/lib/pos/queue";
 
 /**
- * POS fix-queue actions. Admin-only (repair tools per spec §3): each action
- * re-resolves the caller's membership server-side and requires OWNER/ADMIN — a
- * money-blind MEMBER can see the queue but not rewrite sales attribution. The
- * tenant id always comes from the membership, never the client. Logic lives in
- * lib/pos/* so it stays testable without a request context.
+ * POS fix-queue actions. Each re-resolves the caller's membership
+ * server-side so the tenant id always comes from the membership, never the
+ * client. Logic lives in lib/pos/* so it stays testable without a request
+ * context.
+ *
+ * Matching a till SKU to a product (or marking it not-a-product) is shop-floor
+ * work — the person at the till is the one who knows what the SKU actually is
+ * — so it's open to every role, MEMBER included. Sales-gap resolution
+ * (confirming a branch was closed, re-pulling the feed) stays OWNER/ADMIN:
+ * that's a data-integrity call about the sync itself, not product identity.
  */
 
 export type PosActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
 const err = (error: string): PosActionResult => ({ ok: false, error });
+
+async function memberContext() {
+  const session = await requireSession();
+  const membership = await activeMembership(session.user.id);
+  if (!membership) return null;
+  return {
+    tenantId: membership.tenantId,
+    actor: {
+      userId: session.user.id,
+      name: membership.displayName ?? session.user.name ?? session.user.email,
+    },
+  };
+}
 
 async function adminContext() {
   const session = await requireSession();
@@ -32,8 +50,8 @@ async function adminContext() {
 }
 
 export async function matchPosSkuAction(input: { sku: string; productId: string }): Promise<PosActionResult> {
-  const ctx = await adminContext();
-  if (!ctx) return err("You need admin access to fix POS sales.");
+  const ctx = await memberContext();
+  if (!ctx) return err("Sign in to fix POS sales.");
   if (!input.productId) return err("Pick a product to match this till SKU to.");
 
   const result = await matchPosSku(ctx.tenantId, input, ctx.actor);
@@ -53,8 +71,8 @@ export async function matchPosSkuAction(input: { sku: string; productId: string 
 }
 
 export async function ignorePosSkuAction(input: { sku: string }): Promise<PosActionResult> {
-  const ctx = await adminContext();
-  if (!ctx) return err("You need admin access to fix POS sales.");
+  const ctx = await memberContext();
+  if (!ctx) return err("Sign in to fix POS sales.");
 
   const result = await ignorePosSku(ctx.tenantId, input, ctx.actor);
   if (!result.ok) return err("Pick a till SKU to ignore.");

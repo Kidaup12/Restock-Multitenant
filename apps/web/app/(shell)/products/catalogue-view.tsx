@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { Badge } from "@/components/ui/badge";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { Pager } from "@/components/ui/pager";
-import { formatNumber } from "@/lib/money";
+import { formatNumber, formatRunRate } from "@/lib/money";
 import { formatEta } from "@/lib/dates";
 import { useCurrency } from "@/components/currency-provider";
 import { ChevronDownIcon, ChevronRightIcon } from "@/components/icons";
@@ -32,6 +33,7 @@ import {
   type SortKey,
 } from "@/lib/catalogue";
 import type { CatalogueRow, CatalogueScreen, CategoryUsage } from "@/lib/data/stock";
+import type { SupplierOption } from "@/lib/data/suppliers";
 import { TableSearch } from "@/components/ui/table-search";
 import { validateLeadDays, MAX_LEAD_DAYS } from "@/lib/catalogue/lead-time";
 import { BulkLeadTimeBar } from "./bulk-lead-time-bar";
@@ -64,10 +66,10 @@ import type { OwnerFlags } from "./owner-flags";
  */
 
 /** How many columns the table has, for the colSpan an expanded row must reach.
- *  The data columns are fixed — Product · ABC · Supplier · Lead · Cost · Margin ·
- *  On hand · In warehouse · En route · Sells/day · Cover · Cash tied up ·
- *  Revenue · Verdict — and only the tick column an editor sees varies. Derived
- *  in one place so the count cannot drift from the header. */
+ *  The data columns are fixed — Product · Supplier · Lead · Sells/day ·
+ *  Revenue · Cost · Margin · ABC · On hand · In warehouse · En route · Cover ·
+ *  Cash tied up · Verdict — and only the tick column an editor sees varies.
+ *  Derived in one place so the count cannot drift from the header. */
 export function catalogueColCount(canManage: boolean): number {
   return 14 + (canManage ? 1 : 0);
 }
@@ -76,6 +78,7 @@ export function CatalogueView({
   screen,
   query,
   categories,
+  suppliers,
   ownerFlags,
   canViewCosts,
   canManage,
@@ -83,6 +86,7 @@ export function CatalogueView({
   screen: CatalogueScreen;
   query: CatalogueQuery;
   categories: CategoryUsage[];
+  suppliers: SupplierOption[];
   ownerFlags: Record<string, OwnerFlags>;
   canViewCosts: boolean;
   canManage: boolean;
@@ -241,18 +245,18 @@ export function CatalogueView({
                 </TableHead>
               )}
               <SortableHead label="Product" sortKey="title" startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
-              <SortableHead label="ABC" sortKey="abc" startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
               <SortableHead label="Supplier" sortKey="supplierName" startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
               <SortableHead label="Lead" sortKey="leadDays" numeric startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="Sells/day" sortKey="runRate" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label={`Rev · 30d (${currency})`} sortKey="revenue30dKes" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
               <SortableHead label="Cost" sortKey="costKes" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
               <SortableHead label="Margin" sortKey="marginPct" numeric startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
+              <SortableHead label="ABC" sortKey="abc" startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
               <SortableHead label="On hand" sortKey="onHandUnits" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
               <SortableHead label="In warehouse" sortKey="warehouseUnits" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
               <SortableHead label="En route" sortKey="onOrderUnits" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
-              <SortableHead label="Sells/day" sortKey="runRate" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
               <SortableHead label="Cover" sortKey="daysCover" numeric startAsc activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
               <SortableHead label="Cash tied up" sortKey="moneyAtRestKes" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
-              <SortableHead label={`Rev · 30d (${currency})`} sortKey="revenue30dKes" numeric activeKey={query.sortKey} desc={query.desc} hrefFor={sortHref} />
               <TableHead>Verdict</TableHead>
             </TableHeader>
             <TableBody>
@@ -267,6 +271,7 @@ export function CatalogueView({
                     canViewCosts={canViewCosts}
                     canManage={canManage}
                     categoryNames={categoryNames}
+                    suppliers={suppliers}
                     flags={ownerFlags[row.productId] ?? { active: true, activeOverride: false }}
                     picked={allMatching || picked.has(row.productId)}
                     onPick={canManage ? () => togglePicked(row.productId) : undefined}
@@ -403,6 +408,7 @@ export function RowGroup({
   canViewCosts,
   canManage,
   categoryNames,
+  suppliers,
   flags,
   picked,
   onPick,
@@ -416,6 +422,7 @@ export function RowGroup({
   canViewCosts: boolean;
   canManage: boolean;
   categoryNames: string[];
+  suppliers: SupplierOption[];
   flags: OwnerFlags;
 }) {
   // Margin reveals cost, so it masks for a money-blind member — as a bare dot
@@ -436,17 +443,16 @@ export function RowGroup({
           </TableCell>
         )}
         <TableCell className="max-w-[22rem]">
-          {/* w-full and min-w-0 all the way down, or the truncate below never
+          {/* w-full and min-w-0 all the way down, or the wrapping below never
               engages: a flex item will not shrink under its content width
               without min-width:0, and the button sizes to its content unless
-              told to take the cell. The cell's own max-width bounds the cell
-              and not what is painted inside it, so a long product name ran
-              145px past its column and over the class beside it. */}
+              told to take the cell. The name wraps (never truncates) so a long
+              product reads in full rather than being cut off mid-word. */}
           <button type="button" onClick={onToggle} className="flex w-full min-w-0 items-center gap-2 text-left">
             <span className="text-ink-faint">{open ? <ChevronDownIcon className="size-4" /> : <ChevronRightIcon className="size-4" />}</span>
             <span className="min-w-0">
-              <span className="flex min-w-0 items-center gap-1.5">
-                <span className="min-w-0 truncate font-medium text-ink">{row.title}</span>
+              <span className="flex min-w-0 items-start gap-1.5">
+                <span className="min-w-0 wrap-break-word whitespace-normal font-medium text-ink">{row.title}</span>
                 <RowDots row={row} />
               </span>
               <span className="block truncate font-mono text-xs text-ink-faint">
@@ -467,22 +473,22 @@ export function RowGroup({
             </span>
           </button>
         </TableCell>
-        <TableCell className="text-ink-muted">
-          {/* A bare dash on every row reads as a broken column. It is not: the
-              class comes from the nightly run, and a product with no sales
-              history has not earned one. Saying WHY keeps the honesty — the
-              reference labels everything "C", which is tidier and untrue. */}
-          {row.abc ?? (
-            <span className="text-ink-faint" title="Classified on the nightly run, once this product has sales to rank">
-              No sales yet
-            </span>
-          )}
-        </TableCell>
         <TableCell className="max-w-[10rem] truncate text-ink-muted">
           {row.supplierName ?? "—"}
         </TableCell>
         <TableCell numeric>
           <LeadCell row={row} canManage={canManage} />
+        </TableCell>
+        <TableCell numeric className="text-ink-muted">
+          {/* One shared run-rate format across every table; it floors a slow
+              mover to "<0.1/day" rather than letting it round to zero. */}
+          {formatRunRate(row.runRate)}
+        </TableCell>
+        <TableCell numeric className="text-ink-muted">
+          {/* Revenue is a sales figure (visible to every role); rendered as a
+              plain amount whose unit lives in the header, so it never collides
+              with the cost mask a money-blind member sees. */}
+          {row.revenue30dKes > 0 ? formatNumber(row.revenue30dKes) : "—"}
         </TableCell>
         <TableCell numeric>
           <span className="inline-flex flex-col items-end">
@@ -492,6 +498,20 @@ export function RowGroup({
         </TableCell>
         <TableCell numeric className={canViewCosts && row.marginPct != null && row.marginPct < 0 ? "font-semibold text-negative" : undefined}>
           {marginCell}
+        </TableCell>
+        <TableCell className="text-ink-muted">
+          {/* The shared class chip, so an A here looks and means the same as an A
+              on Today or the plan. A bare dash on every unrated row reads as a
+              broken column, though — the class comes from the nightly run, and a
+              product with no sales history has not earned one — so a null keeps
+              the honest "No sales yet" hint instead of the badge's plain dash. */}
+          {row.abc ? (
+            <AbcBadge value={row.abc} />
+          ) : (
+            <span className="text-ink-faint" title="Classified on the nightly run, once this product has sales to rank">
+              No sales yet
+            </span>
+          )}
         </TableCell>
         <TableCell numeric>{row.onHandUnits}</TableCell>
         <TableCell numeric className="text-ink-muted">
@@ -512,20 +532,10 @@ export function RowGroup({
           )}
         </TableCell>
         <TableCell numeric className="text-ink-muted">
-          {/* Two decimals: a slow mover at 0.03/day must not read as zero. */}
-          {row.runRate > 0 ? row.runRate.toFixed(2) : "—"}
-        </TableCell>
-        <TableCell numeric className="text-ink-muted">
           {row.daysCover != null ? `${row.daysCover}d` : "—"}
         </TableCell>
         <TableCell numeric>
           <CostValue amount={row.moneyAtRestKes} canViewCosts={canViewCosts} compact />
-        </TableCell>
-        <TableCell numeric className="text-ink-muted">
-          {/* Revenue is a sales figure (visible to every role); rendered as a
-              plain amount whose unit lives in the header, so it never collides
-              with the cost mask a money-blind member sees. */}
-          {row.revenue30dKes > 0 ? formatNumber(row.revenue30dKes) : "—"}
         </TableCell>
         <TableCell>
           <span className="flex flex-wrap items-center gap-1">
@@ -542,22 +552,33 @@ export function RowGroup({
       {open && (
         <tr>
           <td colSpan={catalogueColCount(canManage)} className="p-0">
-            <RowEditor
-              row={row}
-              categories={categoryNames}
-              flags={flags}
-              canViewCosts={canViewCosts}
-              canManage={canManage}
-            />
-            {/* The editor fixes this row; the product page explains it — a year
-                of months, the supplier's lead time, and what the run decided. */}
-            <div className="px-4 pb-4">
-              <Link
-                href={`/products/${row.productId}`}
-                className="text-sm font-medium text-accent-ink hover:underline"
-              >
-                See this product in full →
-              </Link>
+            {/* The table's own content width (14 columns) is far wider than any
+                viewport, and this cell spans all of them — so without pinning,
+                the editor's 4-column grid inherits that width and its last
+                column sits past the visible scroll area instead of wrapping.
+                Sticking it to the scroll container's left edge and capping its
+                width to the viewport makes the grid reflow like a normal card
+                regardless of how far right the table itself is scrolled. */}
+            <div className="sticky left-0 w-[calc(100vw-3rem)] max-w-3xl">
+              <RowEditor
+                row={row}
+                categories={categoryNames}
+                suppliers={suppliers}
+                flags={flags}
+                canViewCosts={canViewCosts}
+                canManage={canManage}
+              />
+              {/* The editor fixes this row; the product page explains it — a
+                  year of months, the supplier's lead time, and what the run
+                  decided. */}
+              <div className="px-4 pb-4">
+                <Link
+                  href={`/products/${row.productId}`}
+                  className="text-sm font-medium text-accent-ink hover:underline"
+                >
+                  See this product in full →
+                </Link>
+              </div>
             </div>
           </td>
         </tr>

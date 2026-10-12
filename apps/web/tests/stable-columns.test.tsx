@@ -28,7 +28,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { CatalogueView, RowGroup } = await import("../app/(shell)/products/catalogue-view");
-const { BudgetTable } = await import("../app/(shell)/plan/budget-planner");
+const { BuyTable } = await import("../app/(shell)/plan/buy-table");
 
 const headerCells = (html: string) => html.match(/<th\b/g) ?? [];
 
@@ -70,6 +70,7 @@ const catalogueRow = (over: Partial<CatalogueRow> = {}): CatalogueRow => ({
   syncErrorAt: null,
   leadDays: 14,
   leadSource: "supplier",
+  supplierId: null,
   supplierName: null,
   verdict: "healthy",
   marginPct: 50,
@@ -113,6 +114,7 @@ const renderCatalogue = (rows: CatalogueRow[], canManage = false) =>
         screen={screenFor(rows)}
         query={DEFAULT_QUERY}
         categories={[]}
+        suppliers={[]}
         ownerFlags={{}}
         canViewCosts
         canManage={canManage}
@@ -158,6 +160,7 @@ describe("catalogue columns do not come and go with the data", () => {
                 canViewCosts
                 canManage={canManage}
                 categoryNames={[]}
+                suppliers={[]}
                 flags={{ active: true, activeOverride: false }}
                 picked={false}
                 onPick={canManage ? () => {} : undefined}
@@ -231,26 +234,39 @@ const buyRow = (over: Partial<BuyListRow> = {}): BuyListRow => ({
 const renderBudget = (rows: BuyListRow[]) =>
   renderToStaticMarkup(
     <CurrencyProvider currency="KES">
-      <BudgetTable rows={rows} canViewCosts />
+      <BuyTable
+        rows={rows}
+        canViewCosts
+        canOverride={false}
+        picked={new Set()}
+        onToggle={() => {}}
+        sort="plan"
+        onSortChange={() => {}}
+        footerTotalKes={rows.reduce((s, r) => s + (r.lineTotalKes ?? 0), 0)}
+      />
     </CurrencyProvider>
   );
 
 describe("budget planner columns do not come and go with the data", () => {
-  it("keeps the at-risk column on a list with nothing at risk", () => {
-    const html = renderBudget([buyRow()]);
-    expect(html).toContain("At risk (30d)");
+  // Budget mode renders the SAME BuyTable list mode does, so this is really
+  // "the shared table's revenue column doesn't come and go" — its header reads
+  // "Rev 30d (KES)". The invariant is unchanged: the column is a fixed part of
+  // the table, present whether or not the row has a figure to put in it.
+  it("keeps the revenue column on a list with no revenue", () => {
+    const html = renderBudget([buyRow({ revenue30dKes: 0 })]);
+    expect(html).toContain("Rev 30d (KES)");
     expect(html).toContain("—");
   });
 
-  it("still carries the figure when something IS at risk", () => {
-    const html = renderBudget([buyRow({ atRiskKes: 9100 })]);
-    expect(html).toContain("At risk (30d)");
+  it("still carries the figure when there IS revenue", () => {
+    const html = renderBudget([buyRow({ revenue30dKes: 9100 })]);
+    expect(html).toContain("Rev 30d (KES)");
     expect(html).toContain("9,100");
   });
 
   it("shows the same columns either way", () => {
-    expect(headerCells(renderBudget([buyRow()]))).toHaveLength(
-      headerCells(renderBudget([buyRow({ atRiskKes: 9100 })])).length
+    expect(headerCells(renderBudget([buyRow({ revenue30dKes: 0 })]))).toHaveLength(
+      headerCells(renderBudget([buyRow({ revenue30dKes: 9100 })])).length
     );
   });
 });

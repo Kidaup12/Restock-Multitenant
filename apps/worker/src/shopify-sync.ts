@@ -433,21 +433,25 @@ async function syncLocationsAndInventory(
       // one of the two that answers "how much can we actually sell". Absent only
       // in a fixture that forgot it, and null is the honest record of that.
       const available = level.quantities?.find((q) => q.name === "available")?.quantity ?? null;
-      // eslint-disable-next-line tenant-safety/require-tenant-scope -- the unique key is (locationId, productId) and both ids were resolved inside this tenant's sync, so the lookup cannot reach another tenant's row; the created row carries tenantId.
-      await prismaService.inventoryLevel.upsert({
-        where: { locationId_productId: { locationId: row.id, productId } },
-        create: { tenantId, locationId: row.id, productId, onHand, available, incoming },
-        update: { onHand, available, incoming },
-      });
       // A level we have never seen is news by definition; one we have seen is
-      // news only if a number moved.
+      // news only if a number moved. Decide this BEFORE writing: an unchanged
+      // level is the overwhelming common case every fifteen minutes, and writing
+      // it back anyway rewrote the whole table each pass — millions of no-op
+      // upserts whose WAL and read-back dominated egress. Skip the write when
+      // nothing moved; only new or changed levels touch the row.
       const prior = priorLevels.get(`${row.id}|${productId}`);
-      if (
+      const moved =
         !prior ||
         prior.onHand !== onHand ||
         prior.available !== available ||
-        prior.incoming !== incoming
-      ) {
+        prior.incoming !== incoming;
+      if (moved) {
+        // eslint-disable-next-line tenant-safety/require-tenant-scope -- the unique key is (locationId, productId) and both ids were resolved inside this tenant's sync, so the lookup cannot reach another tenant's row; the created row carries tenantId.
+        await prismaService.inventoryLevel.upsert({
+          where: { locationId_productId: { locationId: row.id, productId } },
+          create: { tenantId, locationId: row.id, productId, onHand, available, incoming },
+          update: { onHand, available, incoming },
+        });
         changed++;
       }
       seenProducts.add(productId);
@@ -472,21 +476,35 @@ async function syncLocationsAndInventory(
     }
   }
 
-  // Full-snapshot semantics: every product seen this sync gets both figures
-  // rewritten (0 when it has no Sells / En-route stock), so stock that moved out
-  // of a selling location drops out of sellable on-hand instead of lingering —
-  // and stock that has arrived drops out of on-order the same way.
+  // Full-snapshot semantics: every product seen this sync should hold the
+  // freshly computed figures (0 when it has no Sells / En-route stock), so stock
+  // that moved out of a selling location drops out of sellable on-hand instead
+  // of lingering — and stock that has arrived drops out of on-order the same way.
+  //
+  // But "should hold" is not "must be rewritten": on a steady shop almost every
+  // product's two figures are unchanged pass-to-pass, and rewriting all of them
+  // every fifteen minutes was ~4M no-op UPDATEs. One bulk read of the current
+  // pair lets us write only the products whose stock actually moved — identical
+  // end state, a fraction of the writes.
+  const current = new Map<string, { currentStock: number; onOrder: number }>();
+  for (const p of await prismaService.product.findMany({
+    where: { id: { in: [...seenProducts] }, tenantId },
+    select: { id: true, currentStock: true, onOrder: true },
+  })) {
+    current.set(p.id, { currentStock: p.currentStock, onOrder: p.onOrder });
+  }
   for (const productId of seenProducts) {
+    const nextStock = sellsByProduct.get(productId) ?? 0;
+    // Both conventions, because a shop uses one or the other: Shopify's
+    // `incoming`, and stock parked at a location the owner typed En route. A
+    // shop doing both would briefly double-count a transfer into that location,
+    // which resolves itself the moment the stock is received.
+    const nextOnOrder = (enrouteByProduct.get(productId) ?? 0) + (incomingByProduct.get(productId) ?? 0);
+    const now = current.get(productId);
+    if (now && now.currentStock === nextStock && now.onOrder === nextOnOrder) continue;
     await prismaService.product.updateMany({
       where: { id: productId, tenantId },
-      data: {
-        currentStock: sellsByProduct.get(productId) ?? 0,
-        // Both conventions, because a shop uses one or the other: Shopify's
-        // `incoming`, and stock parked at a location the owner typed En route.
-        // A shop doing both would briefly double-count a transfer into that
-        // location, which resolves itself the moment the stock is received.
-        onOrder: (enrouteByProduct.get(productId) ?? 0) + (incomingByProduct.get(productId) ?? 0),
-      },
+      data: { currentStock: nextStock, onOrder: nextOnOrder },
     });
   }
   return { locations: locations.length, levels, changed };

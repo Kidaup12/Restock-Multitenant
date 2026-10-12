@@ -158,12 +158,15 @@ export type TopProduct = {
    *  classified yet (too new, or no run). Lets Reports show top earners per
    *  class without a second query. */
   abc: AbcCategory | null;
+  /** Sellable on-hand right now — so a ranked best-seller list can answer the
+   *  obvious next question, "…and are we about to run out?". */
+  onHandUnits: number;
 };
 
 /** Best sellers by revenue over the trailing `days` days. */
 export async function getTopProducts(
   tenantId: string,
-  { days = 30, limit = 10 }: { days?: number; limit?: number } = {}
+  { days = 30, limit = 10, period }: { days?: number; limit?: number; period?: import("./report-range").ReportRange } = {}
 ): Promise<TopProduct[]> {
   const db = prismaForTenant(tenantId);
   const now = new Date();
@@ -172,7 +175,7 @@ export async function getTopProducts(
   const { start: since } = trailingWindow(days, now);
   const grouped = await db.salesHistory.groupBy({
     by: ["productId"],
-    where: { date: { gte: since } },
+    where: { date: { gte: period?.start ?? since, lt: period?.endExclusive ?? now } },
     _sum: { quantity: true, revenueKes: true },
     orderBy: { _sum: { revenueKes: "desc" } },
     take: limit,
@@ -186,10 +189,10 @@ export async function getTopProducts(
   const [products, history] = await Promise.all([
     db.product.findMany({
       where: { id: { in: productIds } },
-      select: { id: true, sku: true, title: true, abcCategory: true },
+      select: { id: true, sku: true, title: true, abcCategory: true, currentStock: true },
     }),
     db.salesHistory.findMany({
-      where: { productId: { in: productIds }, date: { gte: runRateSince } },
+      where: { productId: { in: productIds }, date: { gte: runRateSince, lt: now } },
       select: { productId: true, date: true, quantity: true, revenueKes: true, channel: true },
     }),
   ]);
@@ -211,6 +214,7 @@ export async function getTopProducts(
       revenueKes: g._sum.revenueKes ?? 0,
       runRate: runRate(historyByProduct.get(g.productId) ?? [], now),
       abc: (product?.abcCategory as AbcCategory | null) ?? null,
+      onHandUnits: product?.currentStock ?? 0,
     };
   });
 }

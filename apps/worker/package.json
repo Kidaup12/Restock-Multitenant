@@ -22,7 +22,8 @@
     "@wezesha/shopify": "*",
     "bullmq": "^5.80.11",
     "ioredis": "^5.11.1",
-    "tsx": "^4.23.1"
+    "tsx": "^4.23.1",
+    "nodemailer": "^6.9.16"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
@@ -32,6 +33,7 @@
     "typescript": "^5",
     "typescript-eslint": "^8.65.0",
     "vitest": "^4.1.7",
-    "ws": "^8.21.1"
+    "ws": "^8.21.1",
+    "@types/nodemailer": "^6.4.17"
   }
 }

@@ -31,8 +31,25 @@ export const DEFAULT_BUDGET_COVER_DAYS = 21;
 
 /** The widest horizon the server will accept from any caller. */
 export const MAX_COVER_DAYS = 365;
+/** The narrowest a typed horizon may go — a step button can't reach below
+ *  COVER_MIN, but someone typing a number is answering a different question
+ *  ("one day of cover") and nothing stops that being a real, if unusual, plan. */
+export const MIN_TYPED_COVER_DAYS = 1;
 
-/** Hold a stepped horizon inside the range the buttons can offer. */
+/** Hold a stepped horizon inside the range the +/- buttons can offer. */
 export function clampCoverDays(days: number) {
   return Math.max(COVER_MIN, Math.min(COVER_MAX, Math.round(days)));
+}
+
+/**
+ * Hold a TYPED horizon inside the server's own ceiling, not the stepper's.
+ *
+ * The +/- buttons can only ever reach 7–120 (clampCoverDays), but typing was
+ * routed through that same clamp, so a shop that typed 200 silently got 120
+ * back with no explanation. A typed figure answers to the server's actual
+ * limit (MAX_COVER_DAYS) instead — the one thing it still can't be is a
+ * horizon the engine would reject outright.
+ */
+export function clampTypedCoverDays(days: number) {
+  return Math.max(MIN_TYPED_COVER_DAYS, Math.min(MAX_COVER_DAYS, Math.round(days)));
 }

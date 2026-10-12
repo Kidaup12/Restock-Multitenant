@@ -7,13 +7,9 @@
  * range now travels in the URL, so a period is shareable and survives a reload,
  * the same way the view tabs already work.
  *
- * ROLLING windows only, deliberately. Calendar-anchored ranges ("this month",
- * "year to date") are only correct in the shop's own timezone — a tenant carries
- * one (`Tenant.timezone`, default Africa/Nairobi) and it is not currently
- * threaded into this layer, so anchoring on UTC month boundaries would quietly
- * report the wrong day's takings at both ends. Rolling counts of days have no
- * such boundary and answer the question that was actually being asked. Calendar
- * ranges are worth adding once the timezone is plumbed through.
+ * Presets and explicit inclusive date ranges resolve in the tenant timezone.
+ * Day-labelled sales/snapshots and actual event timestamps use different
+ * boundary representations so both describe the same trading-date selection.
  */
 
 export const RANGE_KEYS = ["7d", "30d", "90d", "180d", "365d"] as const;
@@ -62,4 +58,79 @@ export function rangeShortLabel(key: RangeKey): string {
  *  short range asks for a week rather than for nothing. */
 export function rangeWeeks(key: RangeKey): number {
   return Math.max(1, Math.round(rangeDays(key) / 7));
+}
+
+/** Sales/snapshot dates are tenant-day labels stored at UTC midnight. Order
+ * and recommendation timestamps are real instants, hence the separate pair. */
+export type ReportRange = {
+  start: Date;
+  endExclusive: Date;
+  startInstant: Date;
+  endInstant: Date;
+  from: string;
+  to: string;
+  days: number;
+  label: string;
+  custom: boolean;
+  error?: string;
+};
+
+const DAY_MS = 86400000;
+function validDay(value: string | undefined): Date | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(+date) && date.toISOString().slice(0, 10) === value ? date : null;
+}
+
+function tenantToday(timezone: string, now: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now);
+  const get = (type: string) => parts.find((p) => p.type === type)!.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+/** Resolve local midnight independently at either end (DST days need not be
+ * 24 hours long). Never use the execution host's local timezone. */
+function midnightInstant(marker: Date, timezone: string): Date {
+  const format = new Intl.DateTimeFormat("en-GB", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
+  let instant = +marker;
+  for (let i = 0; i < 4; i++) {
+    const parts = format.formatToParts(new Date(instant));
+    const get = (name: string) => Number(parts.find((p) => p.type === name)!.value);
+    const local = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+    const next = instant + (+marker - local);
+    if (next === instant) break;
+    instant = next;
+  }
+  return new Date(instant);
+}
+
+export function resolveReportRange(
+  params: { range?: string; from?: string; to?: string },
+  timezone: string,
+  now: Date = new Date()
+): ReportRange {
+  const todayKey = tenantToday(timezone, now);
+  const today = validDay(todayKey)!;
+  let from = validDay(params.from);
+  let to = validDay(params.to);
+  let error: string | undefined;
+  const requested = !!(params.from || params.to);
+  if (requested) {
+    if (!from || !to) error = "Enter a valid start and end date.";
+    else if (from > to) error = "The start date must be on or before the end date.";
+    else if (to > today) error = "The end date cannot be after today in your shop's timezone.";
+    else if ((+to - +from) / DAY_MS + 1 > 366) error = "Choose a date range of up to 366 days.";
+  }
+  const custom = requested && !error;
+  if (!custom) {
+    to = today;
+    from = new Date(+today - (rangeDays(parseRangeKey(params.range)) - 1) * DAY_MS);
+  }
+  const start = from!;
+  const endExclusive = new Date(+to! + DAY_MS);
+  const fromKey = start.toISOString().slice(0, 10);
+  const toKey = to!.toISOString().slice(0, 10);
+  return { start, endExclusive, startInstant: midnightInstant(start, timezone), endInstant: midnightInstant(endExclusive, timezone),
+    from: fromKey, to: toKey, days: Math.round((+endExclusive - +start) / DAY_MS),
+    label: `${fromKey} to ${toKey}`, custom, ...(error ? { error } : {}) };
 }

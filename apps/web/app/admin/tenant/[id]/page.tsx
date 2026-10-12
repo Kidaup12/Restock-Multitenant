@@ -23,10 +23,14 @@ import { getTenantDetail, isStale, SYNC_RESOURCES } from "@/lib/admin/fleet";
 import { listAuditEvents } from "@/lib/admin/audit";
 import { getTodayMetrics, getReorderNeeded } from "@/lib/data/today";
 import { relativeTime } from "@/lib/notifications/format";
+import { parseFeatureOverrides } from "@/lib/capabilities/plan-features";
+import { resolveFeatureFlags } from "@/lib/capabilities/feature-flags";
 import { enterWorkspace, exitWorkspace } from "../../actions";
 import { SyncButton } from "../../sync-button";
 import { OwnerControl } from "./owner-control";
 import { PlanControl } from "./plan-control";
+import { FeatureAccessControl } from "./feature-access-control";
+import { BillingControl } from "./billing-control";
 
 export const metadata: Metadata = {
   title: "Workspace",
@@ -86,14 +90,19 @@ export default async function AdminTenantPage({
   }
 
   const db = prismaForTenant(id);
-  const [metrics, reorder, connection, cursors, audit] = await Promise.all([
+  const [metrics, reorder, connection, cursors, config, audit] = await Promise.all([
     getTodayMetrics(id, { canViewCosts: true }),
     getReorderNeeded(id, { canViewCosts: true, limit: 6 }),
     db.shopifyConnection.findFirst(),
     db.ingestCursor.findMany({ where: { source: "shopify" } }),
+    db.tenantConfig.findFirst({ select: { featureFlags: true } }),
     listAuditEvents({ tenantId: id, limit: 12 }),
   ]);
   const cursorByResource = new Map(cursors.map((c) => [c.resource, c.cursor]));
+  // Feature access, resolved for the two operator cards: grants/denies over the
+  // tier, and the tenant switches (stored-or-default).
+  const featureOverrides = parseFeatureOverrides(detail.tenant.featureOverrides);
+  const featureFlags = resolveFeatureFlags(config ?? null);
 
   return (
     <div className="space-y-6">
@@ -182,6 +191,43 @@ export default async function AdminTenantPage({
 
         <Card>
           <CardHeader
+            title="Billing"
+            subtitle={
+              detail.tenant.planStatus
+                ? `${detail.tenant.planStatus}${
+                    detail.tenant.planPeriodEnd
+                      ? ` · paid to ${detail.tenant.planPeriodEnd.toISOString().slice(0, 10)}`
+                      : ""
+                  }`
+                : "No billing record kept yet"
+            }
+          />
+          <CardContent>
+            <BillingControl
+              tenantId={id}
+              periodEnd={detail.tenant.planPeriodEnd?.toISOString() ?? null}
+              status={detail.tenant.planStatus}
+              note={detail.tenant.billingNote}
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="Feature access"
+            subtitle="Grants and switches finer than the tier"
+          />
+          <CardContent>
+            <FeatureAccessControl
+              tenantId={id}
+              overrides={featureOverrides}
+              flags={featureFlags}
+            />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader
             title="Add an owner"
             subtitle="The workspace's own team screen can only invite staff"
           />
@@ -192,7 +238,7 @@ export default async function AdminTenantPage({
 
         <Card>
           <CardHeader title="Members" subtitle={`${detail.members.length} in this workspace`} />
-          <Table className="min-w-0">
+          <Table>
             <TableHeader>
               <TableHead>Member</TableHead>
               <TableHead>Role</TableHead>
@@ -201,9 +247,9 @@ export default async function AdminTenantPage({
             <TableBody>
               {detail.members.map((m) => (
                 <TableRow key={m.membershipId}>
-                  <TableCell>
-                    <div className="font-medium text-ink">{m.displayName ?? m.userName}</div>
-                    <div className="text-xs text-ink-muted">{m.email}</div>
+                  <TableCell className="max-w-56">
+                    <div className="truncate font-medium text-ink">{m.displayName ?? m.userName}</div>
+                    <div className="truncate text-xs text-ink-muted">{m.email}</div>
                   </TableCell>
                   <TableCell>
                     <Badge tone={m.role === "MEMBER" ? "neutral" : "accent"}>{m.role}</Badge>

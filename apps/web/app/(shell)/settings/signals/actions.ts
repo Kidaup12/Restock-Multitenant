@@ -377,7 +377,10 @@ export async function logSpikeAsPromo(input: {
   });
 
   revalidatePath("/settings/signals");
-  return { ok: true, message: `Logged — ${product.title} on that day is out of your normal sales rate.` };
+  revalidatePath("/today");
+  revalidatePath("/sales");
+  revalidatePath(`/products/${product.id}`);
+  return { ok: true, message: `Logged — ${product.title} will be treated as a promotion on the next forecast, using your forecast settings.` };
 }
 
 /** No → remember the answer, so the same day stops being raised. */
@@ -408,5 +411,8 @@ export async function dismissSpike(input: {
   });
 
   revalidatePath("/settings/signals");
-  return { ok: true, message: "Noted — we won't ask about that day again." };
+  revalidatePath("/today");
+  revalidatePath("/sales");
+  revalidatePath(`/products/${product.id}`);
+  return { ok: true, message: "Flag dismissed. Sales and forecast demand were not changed." };
 }

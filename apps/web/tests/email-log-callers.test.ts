@@ -37,7 +37,7 @@ describe.skipIf(!runnable)("outbound mail names its tenant and kind (local db)",
   let prismaService: typeof import("@wezesha/db").prismaService;
   let tenantId: string;
 
-  const original = { key: process.env.RESEND_API_KEY, from: process.env.EMAIL_FROM };
+  const original = { key: process.env.BREVO_SMTP_KEY, from: process.env.EMAIL_FROM };
 
   beforeAll(async () => {
     ({ prismaService } = await import("@wezesha/db"));
@@ -66,13 +66,13 @@ describe.skipIf(!runnable)("outbound mail names its tenant and kind (local db)",
   beforeEach(async () => {
     // No provider key: the send takes the console fallback, which still writes
     // the envelope. The row is what these assert on, not the delivery.
-    delete process.env.RESEND_API_KEY;
+    delete process.env.BREVO_SMTP_KEY;
     delete process.env.EMAIL_FROM;
     await prismaService.emailLog.deleteMany({ where: { to: { in: [OWNER, INVITEE] } } });
   });
 
   afterEach(() => {
-    process.env.RESEND_API_KEY = original.key;
+    process.env.BREVO_SMTP_KEY = original.key;
     process.env.EMAIL_FROM = original.from;
   });
 

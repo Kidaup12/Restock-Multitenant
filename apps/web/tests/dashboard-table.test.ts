@@ -26,8 +26,16 @@ describe("pileFor (pure)", () => {
     expect(pileFor({ onHandUnits: -4, lastSaleAt: null }, cutoff)).toBe("stockout");
   });
 
-  it("stock that has never sold is dead", () => {
-    expect(pileFor({ onHandUnits: 10, lastSaleAt: null }, cutoff)).toBe("dead");
+  it("never-sold stock of unknown age has not yet earned a dead-stock label", () => {
+    expect(pileFor({ onHandUnits: 10, lastSaleAt: null }, cutoff)).toBe("healthy");
+  });
+
+  it("requires fourteen observed in-stock days before quiet stock is dead", () => {
+    for (const inStockDays of [0, 1, 13]) {
+      expect(pileFor({ onHandUnits: 10, lastSaleAt: null, inStockDays }, cutoff)).toBe("healthy");
+    }
+    expect(pileFor({ onHandUnits: 10, lastSaleAt: null, firstSeenAt: new Date("2025-01-01"), inStockDays: 14 }, cutoff)).toBe("dead");
+    expect(pileFor({ onHandUnits: 0, lastSaleAt: null, inStockDays: 0 }, cutoff)).toBe("stockout");
   });
 
   it("stock whose last sale predates the window is dead", () => {

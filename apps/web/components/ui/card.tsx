@@ -10,7 +10,7 @@ export function Card({
   return (
     <div
       className={cn(
-        "rounded-lg border border-edge bg-surface shadow-card",
+        "min-w-0 rounded-lg border border-edge bg-surface shadow-card",
         className,
       )}
     >
@@ -37,13 +37,13 @@ export function CardHeader({
         className,
       )}
     >
-      <div>
+      <div className="min-w-0 max-w-full wrap-break-word">
         <h2 className="text-base font-semibold tracking-tight text-ink">
           {title}
         </h2>
         {subtitle && <p className="mt-0.5 text-sm text-ink-muted">{subtitle}</p>}
       </div>
-      {action && <div className="flex items-center gap-2">{action}</div>}
+      {action && <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">{action}</div>}
     </div>
   );
 }

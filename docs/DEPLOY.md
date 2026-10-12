@@ -117,7 +117,8 @@ DIRECT_URL             from step 1
 REDIS_URL              from Railway Redis
 TOKEN_ENCRYPTION_KEY   openssl rand -base64 32   (must decode to exactly 32 bytes)
 POS_FEED_SECRET        bearer token for the POS feed the worker fetches
-RESEND_API_KEY         from Resend
+BREVO_SMTP_KEY         from Brevo (SMTP & API > SMTP)
+BREVO_SMTP_LOGIN       from Brevo (the SMTP login, e.g. xxxx@smtp-brevo.com)
 EMAIL_FROM             e.g. Wezesha Restock <no-reply@yourdomain>
 SENTRY_DSN             optional
 
@@ -168,7 +169,8 @@ ADMIN_EMAILS           comma-separated; bootstrap only — who reaches the
                        operator console until the first PlatformAdmin row
 SHOPIFY_APP_URL        the deployment's own public URL
 TOKEN_ENCRYPTION_KEY   the SAME value as the worker
-RESEND_API_KEY         from Resend
+BREVO_SMTP_KEY         the SAME value as the worker
+BREVO_SMTP_LOGIN       the SAME value as the worker
 EMAIL_FROM             as above
 ```
 

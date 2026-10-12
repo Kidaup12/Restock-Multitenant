@@ -12,7 +12,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/cn";
-import { formatNumber } from "@/lib/money";
+import { AbcBadge } from "@/components/ui/abc-badge";
+import { formatNumber, formatRunRate } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
 import type { TopProduct } from "@/lib/data/sales";
@@ -45,25 +46,30 @@ const columns = (currency: string): ExportColumn<TopProduct>[] => [
   { header: "ABC", cell: (r) => r.abc ?? "" },
   { header: "Units", cell: (r) => r.unitsSold },
   { header: `Revenue (${currency})`, cell: (r) => r.revenueKes },
+  { header: "Stock", cell: (r) => r.onHandUnits },
   { header: "Run rate (units/day)", cell: (r) => Math.round(r.runRate * 10) / 10 },
 ];
 
-export function TopEarnersView({ rows, currency }: { rows: TopProduct[]; currency: string }) {
+export function TopEarnersView({ rows, currency, periodLabel = "30 days" }: { rows: TopProduct[]; currency: string; periodLabel?: string }) {
   const [cls, setCls] = useState<ClassKey>("all");
   const ctxCurrency = useCurrency();
 
-  const filtered = useMemo(
-    () => (cls === "all" ? rows : rows.filter((r) => r.abc === cls)).slice(0, SHOWN),
+  // The export must carry every matching row, not just the page shown on
+  // screen — a class with more than SHOWN matches used to export the same
+  // truncated 10 the table displayed, silently dropping the rest.
+  const matching = useMemo(
+    () => (cls === "all" ? rows : rows.filter((r) => r.abc === cls)),
     [rows, cls],
   );
+  const filtered = useMemo(() => matching.slice(0, SHOWN), [matching]);
 
   if (rows.length === 0) {
     return (
       <Card>
-        <CardHeader title="Top earners, 30 days" />
+        <CardHeader title={`Top earners · ${periodLabel}`} />
         <CardContent>
           <EmptyState
-            title="No sales in the last 30 days"
+            title="No sales in the selected period"
             description="Your best sellers rank here once sales land."
           />
         </CardContent>
@@ -74,16 +80,16 @@ export function TopEarnersView({ rows, currency }: { rows: TopProduct[]; currenc
   return (
     <Card>
       <CardHeader
-        title="Top earners, 30 days"
-        subtitle="Ranked by revenue, all channels"
+        title={`Top earners · ${periodLabel}`}
+        subtitle="Revenue in the selected period, all channels. Stock and run rate are current."
         action={
           <ExportBar
-            rows={filtered}
+            rows={matching}
             columns={columns(ctxCurrency)}
-            filename="top-earners"
+            filename={`top-earners-${periodLabel.replaceAll(" ", "-")}`}
             document={{
-              title: "Top earners, 30 days",
-              subtitle: `Ranked by revenue · ${cls === "all" ? "all classes" : `class ${cls}`} · ${filtered.length} products`,
+              title: `Top earners · ${periodLabel}`,
+              subtitle: `Ranked by revenue · ${cls === "all" ? "all classes" : `class ${cls}`} · ${matching.length} products`,
             }}
           />
         }
@@ -115,32 +121,43 @@ export function TopEarnersView({ rows, currency }: { rows: TopProduct[]; currenc
       <div className="mt-1 pb-2">
         {filtered.length === 0 ? (
           <p className="px-4 py-6 text-sm text-ink-muted">
-            No products in this class earned anything in the last 30 days.
+            No products in this class earned anything in the selected period.
           </p>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableHead>Product</TableHead>
-              <TableHead>ABC</TableHead>
-              <TableHead numeric>Units</TableHead>
-              <TableHead numeric>Revenue ({currency})</TableHead>
-              <TableHead numeric>Run rate</TableHead>
-            </TableHeader>
-            <TableBody>
-              {filtered.map((row) => (
-                <TableRow key={row.productId}>
-                  <TableCell>
-                    <span className="font-medium text-ink">{row.title}</span>
-                    <span className="block font-mono text-xs text-ink-faint">{row.sku}</span>
-                  </TableCell>
-                  <TableCell className="text-ink-muted">{row.abc ?? "—"}</TableCell>
-                  <TableCell numeric>{formatNumber(row.unitsSold)}</TableCell>
-                  <TableCell numeric>{formatNumber(row.revenueKes)}</TableCell>
-                  <TableCell numeric>{row.runRate.toFixed(1)}/day</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <>
+            {matching.length > filtered.length && (
+              <p className="px-4 pb-2 text-xs text-ink-muted">
+                Showing top {formatNumber(filtered.length)} of {formatNumber(matching.length)} — export above has the full list.
+              </p>
+            )}
+            <Table>
+              <TableHeader>
+                <TableHead>Product</TableHead>
+                <TableHead numeric>Run rate</TableHead>
+                <TableHead numeric>Revenue ({currency})</TableHead>
+                <TableHead>ABC</TableHead>
+                <TableHead numeric>Stock</TableHead>
+                <TableHead numeric>Units</TableHead>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((row) => (
+                  <TableRow key={row.productId}>
+                    <TableCell className="min-w-48 max-w-80 whitespace-normal wrap-break-word">
+                      <span className="font-medium text-ink">{row.title}</span>
+                      <span className="block font-mono text-xs text-ink-faint">{row.sku}</span>
+                    </TableCell>
+                    <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
+                    <TableCell numeric>{formatNumber(row.revenueKes)}</TableCell>
+                    <TableCell>
+                      <AbcBadge value={row.abc} />
+                    </TableCell>
+                    <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
+                    <TableCell numeric>{formatNumber(row.unitsSold)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </>
         )}
       </div>
     </Card>

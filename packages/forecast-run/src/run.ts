@@ -11,7 +11,10 @@ import {
 } from "@wezesha/db";
 import {
   assignAbc,
-  dailySalesValue,
+  saleSpanDays,
+  resolveAbcWindowDays,
+  trailingRevenue,
+  weightedDailyRateAdjusted,
   forecastProduct,
   historySpanDays,
   anchorToday,
@@ -423,15 +426,26 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
   const knobs = resolveForecastKnobs(config);
   // The method each class earned in the last audition; run rate until audited.
   const champions = resolveChampions(config?.forecastChampions);
+  const abcWindowDays = resolveAbcWindowDays(config?.abcWindowDays);
+  const baselineMethod = config?.baselineMethod === "median" ? "median" : "mean";
   // This is the ONE place a product's current ABC class is decided; the column
   // it writes is what every screen reads. `now` is passed explicitly rather than
   // left to default: a run replayed with a fixed clock must rank against the
   // run's own date, not against whenever it happens to be executed.
   const abcByProduct = assignAbc(
-    products.map((p) => ({
-      id: p.id,
-      revenue: dailySalesValue(historyByProduct.get(p.id) ?? [], p.priceKes, now),
-    }))
+    products.map((p) => {
+      const history = historyByProduct.get(p.id) ?? [];
+      return {
+        id: p.id,
+        // Rank on real money earned over the trailing window, not an
+        // instantaneous rate×price — "expensive, not revenue" can't ride a
+        // price tag into A on a handful of sales.
+        revenue: trailingRevenue(history, now, abcWindowDays),
+        saleSpanDays: saleSpanDays(history, now, abcWindowDays),
+        // Velocity floor: a slow mover can't be A/B however much it earned.
+        runRate: weightedDailyRateAdjusted(history, now),
+      };
+    })
   );
   const activePromos: ActivePromo[] = promos;
   // Stated seasonality, bounded here so a slipped decimal in the database can
@@ -508,6 +522,10 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
       excludedDates: excludedByProduct.get(product.id),
       policy: policyForClass(knobs.methods, abcCategory),
       demandMethod: championForClass(champions, abcCategory),
+      baselineMethod,
+      // Unset (null) means the tenant has never visited the Settings toggle,
+      // not that they chose it off — damping now defaults ON.
+      bigBuyerDamping: config?.bigBuyerDamping !== false,
       serviceZ: knobs.serviceZ,
       capMultiple: knobs.capMultiple,
       runDateKey,
@@ -611,6 +629,8 @@ export async function runForecast(tenantId: string): Promise<ForecastRunResult> 
             excludedDates: excludedByProduct.get(product.id),
             policy: policyForClass(knobs.methods, abcCategory),
             demandMethod: championForClass(champions, abcCategory),
+            baselineMethod,
+            bigBuyerDamping: config?.bigBuyerDamping !== false,
             serviceZ: knobs.serviceZ,
             capMultiple: knobs.capMultiple,
             runDateKey,

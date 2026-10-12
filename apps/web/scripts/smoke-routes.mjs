@@ -18,6 +18,8 @@ export const ROUTES = [
   ["/plan", "Buy List"],
   ["/products", "Every product you sell"],
   ["/inventory", "Where your stock sits, branch by branch"],
+  ["/inventory/position", "Inventory position"],
+  ["/spot-check", "shelf-vs-app drift is caught before it costs you"],
   ["/insights", "Reports"],
   ["/orders", "every purchase order from draft to delivered"],
   ["/receiving", "Stock on its way in"],
@@ -74,6 +76,12 @@ export const REDIRECTS = [
  * hand-written id would rot with the seed; a missing link is itself a defect.
  */
 export const DYNAMIC = [
+  {
+    route: "/transfers/[id]",
+    from: "/transfers",
+    pattern: /href="(\/transfers\/[A-Za-z0-9_-]{8,})"/,
+    marker: "Quantities and stock positions were saved with this plan",
+  },
   {
     // From the dashboard, not the catalogue: /products only links a product to
     // its own page from inside an expanded row, so a server-rendered catalogue

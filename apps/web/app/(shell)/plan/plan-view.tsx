@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { cn } from "@/lib/cn";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { BanknoteIcon, CalendarIcon, ClipboardIcon } from "@/components/icons";
+import { BanknoteIcon, ClipboardIcon } from "@/components/icons";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { PLAN_TIER_LABEL, planFeatureTier } from "@/lib/capabilities/plan-features";
 import type { PlanFreshness as Freshness } from "@/lib/data/forecast-freshness";
@@ -15,10 +15,12 @@ import { PlanFreshness } from "./plan-freshness";
 import { PreflightStrip } from "./preflight-strip";
 import { deleteScope, listScopes, saveScope, type SavedScope } from "./scope-actions";
 import {
-  EMPTY_SCOPE,
   filterBuyListRows,
   isUrgentRow,
+  parseScopeFromParams,
   ScopeBar,
+  SCOPE_PARAM_NAMES,
+  scopeToParams,
   type ScopeSelection,
 } from "./scope-bar";
 import { SupplyCalendarMode } from "./supply-calendar";
@@ -41,6 +43,7 @@ function ModeCard({
   onClick,
   busy = false,
   disabled = false,
+  highlighted = false,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -50,6 +53,9 @@ function ModeCard({
   busy?: boolean;
   /** Another card is being opened. */
   disabled?: boolean;
+  /** The recommended default — tinted and accent-bordered so the eye lands here
+   *  first. Only one card should carry it. */
+  highlighted?: boolean;
 }) {
   return (
     <button
@@ -58,7 +64,10 @@ function ModeCard({
       disabled={busy || disabled}
       aria-busy={busy || undefined}
       className={cn(
-        "rounded-lg border border-edge bg-surface p-5 text-left shadow-card transition-colors hover:border-edge-strong hover:bg-surface-2/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        "rounded-lg border p-5 text-left shadow-card transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
+        highlighted
+          ? "border-accent bg-accent-soft/40 hover:bg-accent-soft/60"
+          : "border-edge bg-surface hover:border-edge-strong hover:bg-surface-2/60",
         (busy || disabled) && "cursor-wait opacity-60"
       )}
     >
@@ -125,10 +134,17 @@ export function PlanView({
   // the cards, and a mode could be neither linked nor reloaded into.
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
+  // `useSearchParams()` is null while the route renders on the server — and this
+  // component reads it unconditionally (mode, scope, urgent) on every render, so
+  // a null would take the whole page down before it hydrates. Coalesce once here
+  // and every reader below is safe; an empty set reads exactly like no params.
+  // Memoised on the raw hook value so the fallback object is stable across
+  // renders and doesn't churn the useCallback that depends on it.
+  const rawSearchParams = useSearchParams();
+  const searchParams = useMemo(() => rawSearchParams ?? new URLSearchParams(), [rawSearchParams]);
   const requested = searchParams.get("mode") as Mode | null;
   const mode: Mode =
-    requested && MODES.includes(requested) && !(requested === "budget" && !canBudget)
+    requested && MODES.includes(requested) && !(requested === "budget" && (!canBudget || !canViewCosts))
       ? requested
       : "choose";
 
@@ -138,25 +154,76 @@ export function PlanView({
   const [switching, startSwitching] = useTransition();
   const [opening, setOpening] = useState<Mode | null>(null);
 
-  const setMode = useCallback(
-    (next: Mode) => {
+  // One way to write the URL — start from the current params so every write
+  // preserves the others (?mode, ?urgent, the scope's class/category/supplier/
+  // lead), mutate, then push without scrolling. Both the mode switch and the
+  // scope writer go through here, so neither clobbers the other's params.
+  const pushParams = useCallback(
+    (mutate: (params: URLSearchParams) => void, inTransition = false) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (next === "choose") params.delete("mode");
-      else params.set("mode", next);
+      mutate(params);
       const query = params.toString();
-      setOpening(next);
-      startSwitching(() => {
-        router.push(query ? `${pathname}?${query}` : pathname, { scroll: false });
-      });
+      const href = query ? `${pathname}?${query}` : pathname;
+      if (inTransition) startSwitching(() => router.push(href, { scroll: false }));
+      else router.push(href, { scroll: false });
     },
     [pathname, router, searchParams]
+  );
+
+  const setMode = useCallback(
+    (next: Mode) => {
+      setOpening(next);
+      // In a transition: opening a mode is a server round-trip, so the press
+      // needs something to show for itself while it happens.
+      pushParams((params) => {
+        if (next === "choose") params.delete("mode");
+        else params.set("mode", next);
+      }, true);
+    },
+    [pushParams]
+  );
+
+  // Reflect a scope change into the URL: drop the four scope params, then set
+  // the active ones. ?mode / ?urgent and anything else on the query survive
+  // because pushParams starts from the current params. Not a server round-trip
+  // (filtering is client-side), so no transition — the chips respond at once.
+  const writeScope = useCallback(
+    (next: ScopeSelection) => {
+      pushParams((params) => {
+        for (const name of SCOPE_PARAM_NAMES) params.delete(name);
+        for (const [name, value] of Object.entries(scopeToParams(next))) params.set(name, value);
+      });
+    },
+    [pushParams]
   );
 
   // Derived, not synced: `opening` only means anything while the transition is
   // in flight, so there is nothing to clear and no effect to write.
   const openingNow = switching ? opening : null;
 
-  const [scope, setScope] = useState<ScopeSelection>(EMPTY_SCOPE);
+  // Initialised from the URL (like ?mode / ?urgent), so a refreshed or shared
+  // link reproduces the filter instead of resetting to nothing. The URL is the
+  // authority: every change writes there and mirrors here in one handler, so
+  // the chips and the address bar stay one truth.
+  const [scope, setScope] = useState<ScopeSelection>(() => parseScopeFromParams(searchParams));
+  // Back/forward (and any other write) change the URL without going through
+  // handleScopeChange, so reconcile the local scope with the address bar during
+  // render — the React-blessed "adjust state when a prop changes" pattern, no
+  // effect. The key is the serialised scope, so this fires only when the scope
+  // params actually move, not on every ?mode / ?urgent write.
+  const urlScopeKey = new URLSearchParams(scopeToParams(parseScopeFromParams(searchParams))).toString();
+  const [lastScopeKey, setLastScopeKey] = useState(urlScopeKey);
+  if (urlScopeKey !== lastScopeKey) {
+    setLastScopeKey(urlScopeKey);
+    setScope(parseScopeFromParams(searchParams));
+  }
+  const handleScopeChange = useCallback(
+    (next: ScopeSelection) => {
+      setScope(next);
+      writeScope(next);
+    },
+    [writeScope]
+  );
   /**
    * The two lenses that change WHICH rows the list shows, held here rather than
    * inside the checklist.
@@ -168,9 +235,14 @@ export function PlanView({
    * KES 1.21M, and the saved PDF was headed with the unfiltered count. One list
    * is derived here and handed to both, so there is nothing left to disagree.
    */
-  const [urgentOnly, setUrgentOnly] = useState(searchParams.get("urgent") === "1");
+  const urgentOnly = searchParams.get("urgent") === "1";
+  const setUrgentOnly = (next: boolean) => pushParams((params) => {
+    if (next) params.set("urgent", "1");
+    else params.delete("urgent");
+  });
   const [whatIf, setWhatIf] = useState<BuyList | null>(null);
   const [savedScopes, setSavedScopes] = useState<SavedScope[]>([]);
+  const [scopeError, setScopeError] = useState<string | null>(null);
   const { confirm, dialog } = useConfirm();
   const [scopesBusy, startScopes] = useTransition();
   const budgetTier = PLAN_TIER_LABEL[planFeatureTier("budget_planner")];
@@ -181,6 +253,9 @@ export function PlanView({
     let active = true;
     listScopes().then((res) => {
       if (active && res.ok) setSavedScopes(res.data);
+      else if (active && !res.ok) setScopeError(res.error);
+    }).catch(() => {
+      if (active) setScopeError("Could not load saved scopes. Reload to try again.");
     });
     return () => {
       active = false;
@@ -188,9 +263,15 @@ export function PlanView({
   }, []);
 
   function handleSaveScope(name: string) {
+    setScopeError(null);
     startScopes(async () => {
-      const res = await saveScope({ name, selection: scope });
-      if (res.ok) setSavedScopes((prev) => [...prev, res.data]);
+      try {
+        const res = await saveScope({ name, selection: scope });
+        if (res.ok) setSavedScopes((prev) => [...prev, res.data]);
+        else setScopeError(res.error);
+      } catch {
+        setScopeError("Could not save this scope. Try again.");
+      }
     });
   }
 
@@ -202,9 +283,15 @@ export function PlanView({
       confirmLabel: "Delete list",
     });
     if (!ok) return;
+    setScopeError(null);
     startScopes(async () => {
-      const res = await deleteScope({ id });
-      if (res.ok) setSavedScopes((prev) => prev.filter((s) => s.id !== id));
+      try {
+        const res = await deleteScope({ id });
+        if (res.ok) setSavedScopes((prev) => prev.filter((s) => s.id !== id));
+        else setScopeError(res.error);
+      } catch {
+        setScopeError("Could not delete this scope. Try again.");
+      }
     });
   }
 
@@ -232,40 +319,33 @@ export function PlanView({
             </>
           )}
         </p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <ModeCard
-            icon={<ClipboardIcon />}
-            title="Show me what to order, and why"
-            description="Every product that needs restocking, tiered by its last safe day to order. Each quantity comes with its arithmetic. You tick, we total."
-            onClick={() => setMode("list")}
-            busy={openingNow === "list"}
-            disabled={openingNow !== null && openingNow !== "list"}
-          />
-          <ModeCard
-            icon={<CalendarIcon />}
-            title="See my ordering calendar"
-            description="The next three months of order-by dates, grouped by supplier, with the cash each month needs — your upcoming ordering commitments at a glance."
-            onClick={() => setMode("calendar")}
-            busy={openingNow === "calendar"}
-            disabled={openingNow !== null && openingNow !== "calendar"}
-          />
-          {canBudget ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {canBudget && canViewCosts ? (
             <ModeCard
               icon={<BanknoteIcon />}
-              title="I have a budget to keep"
-              description="Tell us the cash you can spend. We put it where it earns most, and show you, in money and days, what the items you defer will cost."
+              title="Start with a budget"
+              description="Set what you can spend and get the best list that fits — criticals first, a suggested figure pre-filled."
               onClick={() => setMode("budget")}
               busy={openingNow === "budget"}
               disabled={openingNow !== null && openingNow !== "budget"}
+              highlighted
             />
           ) : (
             <LockedModeCard
               icon={<BanknoteIcon />}
-              title="I have a budget to keep"
-              description="Tell us the cash you can spend. We put it where it earns most, and show you, in money and days, what the items you defer will cost."
-              upsell={`Budget planner is on the ${budgetTier} plan.`}
+              title="Start with a budget"
+              description="Set what you can spend and get the best list that fits — criticals first, a suggested figure pre-filled."
+              upsell={!canViewCosts ? "Budget planning needs cost access. Ask an owner to grant it; you can still use the recommended purchase list." : `Budget planner is on the ${budgetTier} plan.`}
             />
           )}
+          <ModeCard
+            icon={<ClipboardIcon />}
+            title="See recommended purchase"
+            description="Everything the model says to reorder this week — ranked by urgency, each line with its order-by date, no cap."
+            onClick={() => setMode("list")}
+            busy={openingNow === "list"}
+            disabled={openingNow !== null && openingNow !== "list"}
+          />
         </div>
       </div>
     );
@@ -316,10 +396,11 @@ export function PlanView({
             disappears when you narrow the list is one you order straight past. */}
         <PreflightStrip rows={buyList.rows} />
         <PlanDecisionHeader rows={filteredRows} canViewCosts={canViewCosts} />
+        {scopeError && <p role="alert" className="text-sm text-negative">{scopeError}</p>}
         <ScopeBar
           rows={buyList.rows}
           selection={scope}
-          onChange={setScope}
+          onChange={handleScopeChange}
           showing={filteredRows.length}
           savedScopes={savedScopes}
           onSaveScope={handleSaveScope}
@@ -327,6 +408,7 @@ export function PlanView({
           scopesBusy={scopesBusy}
         />
         <BuyChecklist
+          key={`${source.forecastRunId}:${urlScopeKey}:${urgentOnly}`}
           buyList={filteredBuyList}
           canViewCosts={canViewCosts}
           canOverride={canOverride}
@@ -354,18 +436,37 @@ export function PlanView({
       </div>
     );
   }
+  // Budget mode now honours the same filter list mode does: the budget spreads
+  // over the scoped rows, and the opening figure prices the SCOPED criticals —
+  // so "plan KES X across my Korean A-lines" works. An empty scope leaves the
+  // whole shop, identical to the old unscoped behaviour.
+  const budgetRows = filterBuyListRows(buyList.rows, scope);
+  const budgetSummary = planDecisionSummary(budgetRows);
   return (
     <div className="space-y-4">
       {backToOptions}
       {freshness}
-      <BudgetPlanner
-        canViewCosts={canViewCosts}
-        /* The unscoped list on purpose: the budget allocator plans the whole
-           shop, so the opening figure has to price every critical line, not
-           only the ones the current filter happens to show. */
-        criticalsCashKes={planDecisionSummary(buyList.rows).criticalsCashKes}
-        orderTodayCashKes={planDecisionSummary(buyList.rows).tiers.order_today.cashKes}
+      {scopeError && <p role="alert" className="text-sm text-negative">{scopeError}</p>}
+      <ScopeBar
+        rows={buyList.rows}
+        selection={scope}
+        onChange={handleScopeChange}
+        showing={budgetRows.length}
+        savedScopes={savedScopes}
+        onSaveScope={handleSaveScope}
+        onDeleteScope={handleDeleteScope}
+        scopesBusy={scopesBusy}
       />
+      <BudgetPlanner
+        key={`${buyList.forecastRunId}:${urlScopeKey}`}
+        canViewCosts={canViewCosts}
+        canOverride={canOverride}
+        criticalsCashKes={budgetSummary.criticalsCashKes}
+        orderTodayCashKes={budgetSummary.tiers.order_today.cashKes}
+        scope={scope}
+      />
+      {/* The saved-scope dialog lives wherever the ScopeBar renders. */}
+      {dialog}
     </div>
   );
 }

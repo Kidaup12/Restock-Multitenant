@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { guardrailCap, guardForecastResult, GUARDRAIL_MULTIPLIER } from "../src/guardrail";
+import {
+  guardrailCap,
+  guardForecastResult,
+  GUARDRAIL_MULTIPLIER,
+  THIN_DATA_ABSOLUTE_CAP_30D,
+} from "../src/guardrail";
 import type { ForecastResult } from "../src/layered";
 
 const day = (daysAgo: number, today = new Date("2026-07-21T00:00:00Z")) =>
@@ -44,9 +49,22 @@ describe("guardrailCap", () => {
     expect(d.finalForecast30d).toBe(25);
   });
 
-  it("never clamps items younger than 30 days — cold-start estimates are all we have", () => {
+  it("thin history (<30d): caps at the thin-data ceiling, not uncapped", () => {
+    // Was uncapped; now a cold-start 40 on a 2-seller is held to max(3×2, 12) = 12.
     const d = guardrailCap({ finalForecast30d: 40, sold30: 2, historySpanDays: 10, currentStock: 5 });
+    expect(d).toEqual({ finalForecast30d: THIN_DATA_ABSOLUTE_CAP_30D, capped: true });
+  });
+
+  it("thin history: 3× recent sales wins when it exceeds the ceiling", () => {
+    // sold 8 in a short window → 3×8 = 24 > 12, so a real breakout keeps its room.
+    const d = guardrailCap({ finalForecast30d: 40, sold30: 8, historySpanDays: 10, currentStock: 5 });
+    expect(d).toEqual({ finalForecast30d: 24, capped: true });
+  });
+
+  it("thin history: a forecast already under the ceiling is left alone", () => {
+    const d = guardrailCap({ finalForecast30d: 9, sold30: 1, historySpanDays: 10, currentStock: 5 });
     expect(d.capped).toBe(false);
+    expect(d.finalForecast30d).toBe(9);
   });
 
   it("in stock + zero sales → token cap, not a big buy", () => {
@@ -54,19 +72,28 @@ describe("guardrailCap", () => {
     expect(d).toEqual({ finalForecast30d: 3, capped: true });
   });
 
-  it("OUT of stock + zero sales is censored demand — never clamped", () => {
+  it("OUT of stock + zero sales: censored, but held to the thin-data ceiling (not fantasy)", () => {
     const d = guardrailCap({ finalForecast30d: 46, sold30: 0, historySpanDays: 300, currentStock: 0 });
-    expect(d.capped).toBe(false);
+    expect(d).toEqual({ finalForecast30d: THIN_DATA_ABSOLUTE_CAP_30D, capped: true });
   });
 
-  it("skips the cap when the item was out >7 of the last 30 days", () => {
+  it("heavily censored (out >7 of 30): capped at max(3×sold, ceiling), not uncapped", () => {
+    // sold 10 despite being out 12 days → 3×10 = 30 > 12, so cap at 30.
     const d = guardrailCap({ finalForecast30d: 60, sold30: 10, historySpanDays: 300, currentStock: 2, stockoutDays30: 12 });
-    expect(d.capped).toBe(false); // sold30 understates true demand — not a fair cap
+    expect(d).toEqual({ finalForecast30d: 30, capped: true });
   });
 
-  it("still caps when the shelf was full all month", () => {
+  it("still caps a full-shelf item at 3× recent sales", () => {
     const d = guardrailCap({ finalForecast30d: 60, sold30: 10, historySpanDays: 300, currentStock: 2, stockoutDays30: 0 });
     expect(d).toEqual({ finalForecast30d: 30, capped: true });
+  });
+
+  it("does not clip a legitimately floored Class-A item below its floor (12/30d)", () => {
+    // A starved bestseller floored to 0.4/day → 12/30d; a thin window must not
+    // cut it below that (max(3×sold, 12) === 12 here).
+    const d = guardrailCap({ finalForecast30d: 12, sold30: 0, historySpanDays: 10, currentStock: 0 });
+    expect(d.finalForecast30d).toBe(THIN_DATA_ABSOLUTE_CAP_30D);
+    expect(d.capped).toBe(false);
   });
 });
 
@@ -93,14 +120,17 @@ describe("guardForecastResult", () => {
     expect(r.signals).toHaveLength(0);
   });
 
-  it("a heavily censored window passes through uncapped", () => {
+  it("a heavily censored window is held to max(3×recent sales, ceiling)", () => {
+    // sold 10 recently despite being out 12 days → cap at 3×10 = 30 (> ceiling 12),
+    // instead of the old uncapped 60.
     const history = [
       { date: day(400), quantity: 5 },
       { date: day(5), quantity: 10 },
     ];
     const stockoutDates = Array.from({ length: 12 }, (_, i) => day(i + 10));
     const r = guardForecastResult(baseResult(60), { history, currentStock: 2, today: day(0), stockoutDates });
-    expect(r.finalForecast30d).toBe(60);
+    expect(r.finalForecast30d).toBe(30);
+    expect(r.signals.some((s) => s.emoji === "🛡️")).toBe(true);
   });
 
   it("multiplier stays generous enough for real spikes (3×)", () => {

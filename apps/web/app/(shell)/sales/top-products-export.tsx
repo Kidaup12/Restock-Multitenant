@@ -14,7 +14,9 @@ import { useCurrency } from "@/components/currency-provider";
 const columns = (currency: string): ExportColumn<TopProduct>[] => [
   { header: "Product", cell: (r) => r.title },
   { header: "SKU", cell: (r) => r.sku },
+  { header: "Class", cell: (r) => r.abc ?? "" },
   { header: "Units", cell: (r) => r.unitsSold },
+  { header: "Stock", cell: (r) => r.onHandUnits },
   { header: `Revenue (${currency})`, cell: (r) => r.revenueKes },
   { header: "Run rate (units/day)", cell: (r) => Math.round(r.runRate * 10) / 10 },
 ];

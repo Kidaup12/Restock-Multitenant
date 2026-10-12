@@ -1,8 +1,13 @@
+import { historicalDeadStock, historicalUnsoldStock } from "../inventory/historical-dead-stock";
+import { observedInStockDays } from "./stock-observation";
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { AS_SHOWN_TAG } from "@wezesha/forecast-run";
+import { overstockExcess } from "@wezesha/forecast";
 import { matchesAbc, type AbcKey } from "@/lib/data/abc-lens";
 import { getCatalogueMetrics } from "@/lib/metrics";
-import { DEFAULT_DEAD_STOCK_DAYS, getTodayMetrics } from "./today";
+import { DEFAULT_DEAD_STOCK_DAYS, getTodayMetrics, pileFor } from "./today";
+import { getStockCatalogue } from "./stock";
+import type { ReportRange } from "./report-range";
 
 /**
  * Insights-screen queries. Server-only: every function takes an explicit tenantId
@@ -55,6 +60,9 @@ export type CashAsleepRow = {
    *  but carrying more cover than OVERSTOCK_COVER_DAYS. */
   reason: "not_selling" | "too_much";
   onHandUnits: number;
+  /** Blended run rate (units/day) — the velocity that tells "dead" from "slow".
+   *  A sales figure, shown to every role. */
+  runRatePerDay: number;
   /** Null when the run rate is ~zero (no cover to measure) — never the sentinel. */
   coverDays: number | null;
   /** Cost × on-hand. Null when the caller can't view costs. */
@@ -158,14 +166,15 @@ export async function getInsightsOverview(
     getCatalogueMetrics(tenantId),
     db.product.findMany({
       where: { ...BUYABLE_PRODUCT_WHERE },
-      select: { id: true, sku: true, title: true, vendor: true, priceKes: true, costKes: true, currentStock: true, abcCategory: true },
+      select: { id: true, sku: true, title: true, vendor: true, priceKes: true, costKes: true, currentStock: true, abcCategory: true, shopifyCreatedAt: true, receivedAt: true },
     }),
-    db.salesHistory.groupBy({ by: ["productId"], _max: { date: true } }),
+    db.salesHistory.groupBy({ by: ["productId"], where: { quantity: { gt: 0 } }, _max: { date: true } }),
   ]);
 
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date]));
   const vendorById = new Map(products.map((p) => [p.id, p.vendor]));
   const deadCutoff = Date.now() - today.deadStock.windowDays * 86_400_000;
+  const observed = await observedInStockDays(tenantId, new Date(deadCutoff));
 
   const shelfRows: EmptyShelfRow[] = [];
   const cashRows: CashAsleepRow[] = [];
@@ -193,7 +202,8 @@ export async function getInsightsOverview(
     }
 
     const last = lastSale.get(p.id);
-    const idle = !last || last.getTime() < deadCutoff;
+    const idle = pileFor({ onHandUnits: onHand, lastSaleAt: last ?? null,
+      firstSeenAt: p.shopifyCreatedAt ?? p.receivedAt, inStockDays: observed.get(p.id) }, deadCutoff) === "dead";
     const overBought = !idle && rate > NO_RATE_EPSILON && (m?.coverDays ?? 0) > OVERSTOCK_COVER_DAYS;
     if (!idle && !overBought) continue;
 
@@ -205,6 +215,7 @@ export async function getInsightsOverview(
       title: p.title,
       reason: idle ? "not_selling" : "too_much",
       onHandUnits: onHand,
+      runRatePerDay: rate,
       coverDays: rate > NO_RATE_EPSILON ? (m?.coverDays ?? null) : null,
       cashKes: cash,
       costKnown: p.costKes > 0,
@@ -438,22 +449,23 @@ export type PlanAdherence = {
  */
 export async function getPlanAdherence(
   tenantId: string,
-  { windowDays = 60 }: { windowDays?: number } = {}
+  { windowDays = 60, period }: { windowDays?: number; period?: ReportRange } = {}
 ): Promise<PlanAdherence> {
   const db = prismaForTenant(tenantId);
-  const since = new Date(Date.now() - windowDays * 86_400_000);
+  const since = period?.startInstant ?? new Date(Date.now() - windowDays * 86_400_000);
+  const until = period?.endInstant ?? new Date();
 
   const [asks, orders, poLines] = await Promise.all([
     db.forecastRecommendation.findMany({
-      where: { runDate: { gte: since }, recommendedQty: { gt: 0 } },
+      where: { runDate: { gte: since, lt: until }, recommendedQty: { gt: 0 } },
       select: { productId: true, runDate: true },
     }),
     db.order.findMany({
-      where: { createdAt: { gte: since }, status: { in: ["ordered", "completed"] } },
+      where: { createdAt: { gte: since, lt: until }, status: { in: ["ordered", "completed"] } },
       select: { productId: true, createdAt: true },
     }),
     db.purchaseOrderLine.findMany({
-      where: { recommendedQty: { not: null }, purchaseOrder: { createdAt: { gte: since } } },
+      where: { recommendedQty: { not: null }, purchaseOrder: { createdAt: { gte: since, lt: until } } },
       select: { productId: true, quantity: true, recommendedQty: true },
     }),
   ]);
@@ -489,7 +501,7 @@ export async function getPlanAdherence(
   }
 
   return {
-    windowDays,
+    windowDays: period?.days ?? windowDays,
     askedProducts: firstAsk.size,
     actedProducts: acted.size,
     linesCompared: boughtLess + boughtAsAsked + boughtMore,
@@ -543,10 +555,11 @@ function weekStartOf(d: Date): Date {
  */
 export async function getStockoutTrend(
   tenantId: string,
-  { weeks = 8, abc = "all" }: { weeks?: number; abc?: AbcKey } = {}
+  { weeks = 8, abc = "all", period }: { weeks?: number; abc?: AbcKey; period?: ReportRange } = {}
 ): Promise<StockoutTrend> {
   const db = prismaForTenant(tenantId);
-  const since = weekStartOf(new Date(Date.now() - weeks * 7 * 86_400_000));
+  const since = period?.start ?? weekStartOf(new Date(Date.now() - weeks * 7 * 86_400_000));
+  const until = period?.endExclusive ?? new Date();
 
   // The class lens belongs HERE, not in each caller. The week-by-week table
   // reads this rate rather than computing its own, so filtering downstream
@@ -554,7 +567,7 @@ export async function getStockoutTrend(
   // codebase has shipped more than once.
   const [rows, earliest, classified] = await Promise.all([
     db.inventorySnapshot.findMany({
-      where: { date: { gte: since } },
+      where: { date: { gte: since, lt: until } },
       select: { date: true, onHand: true, productId: true },
     }),
     db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
@@ -607,6 +620,7 @@ export type Impact = {
   since: Date | null;
   emptyShelfPct: ImpactMeasure | null;
   deadStockSkus: ImpactMeasure | null;
+  unsoldSkus: ImpactMeasure | null;
   deadStockWindowDays: number;
   /** First nightly snapshot on record — what limits how far back we can look. */
   trackingSince: Date | null;
@@ -645,6 +659,7 @@ export async function getImpact(tenantId: string): Promise<Impact> {
     since: firstPo?.createdAt ?? null,
     emptyShelfPct: null,
     deadStockSkus: null,
+    unsoldSkus: null,
     deadStockWindowDays: windowDays,
     trackingSince: trend.trackingSince,
   };
@@ -669,8 +684,8 @@ export async function getImpact(tenantId: string): Promise<Impact> {
     [first.weekStart, last.weekStart],
     windowDays
   );
-  const startDead = deadCounts.get(first.weekStart.getTime());
-  const nowDead = deadCounts.get(last.weekStart.getTime());
+  const startDead = deadCounts.get(first.weekStart.getTime())?.dead;
+  const nowDead = deadCounts.get(last.weekStart.getTime())?.dead;
   const deadStockSkus: ImpactMeasure | null =
     startDead == null || nowDead == null
       ? null
@@ -682,7 +697,10 @@ export async function getImpact(tenantId: string): Promise<Impact> {
           nowWeek: last.weekStart,
         };
 
-  return { ...base, emptyShelfPct, deadStockSkus, reason: null };
+  const startUnsold = deadCounts.get(first.weekStart.getTime())?.unsold;
+  const nowUnsold = deadCounts.get(last.weekStart.getTime())?.unsold;
+  const unsoldSkus: ImpactMeasure | null = startUnsold == null || nowUnsold == null ? null : {start:startUnsold,now:nowUnsold,change:nowUnsold-startUnsold,startWeek:first.weekStart,nowWeek:last.weekStart};
+  return { ...base, emptyShelfPct, deadStockSkus, unsoldSkus, reason: null };
 }
 
 /**
@@ -695,18 +713,20 @@ async function deadStockByWeek(
   tenantId: string,
   weekStarts: Date[],
   windowDays: number
-): Promise<Map<number, number>> {
+): Promise<Map<number, {dead:number;unsold:number}>> {
   const db = prismaForTenant(tenantId);
   const earliest = Math.min(...weekStarts.map((w) => w.getTime()));
-  const [snapshots, sales] = await Promise.all([
+  const [snapshots, sales, products, firstSales] = await Promise.all([
     db.inventorySnapshot.findMany({
-      where: { date: { gte: new Date(earliest) } },
+      where: { date: { gte: new Date(earliest - windowDays * DAY_MS) } },
       select: { date: true, productId: true, onHand: true },
     }),
     db.salesHistory.findMany({
       where: { date: { gte: new Date(earliest - windowDays * DAY_MS) } },
       select: { date: true, productId: true, quantity: true },
     }),
+    db.product.findMany({ select: { id: true, shopifyCreatedAt: true, receivedAt: true } }),
+    db.salesHistory.groupBy({ by: ["productId"], where: { quantity: { gt: 0 } }, _min: { date: true } }),
   ]);
 
   const soldDates = new Map<string, number[]>();
@@ -717,7 +737,11 @@ async function deadStockByWeek(
     else soldDates.set(s.productId, [s.date.getTime()]);
   }
 
-  const out = new Map<number, number>();
+  const productById = new Map(products.map(p => [p.id, p]));
+  const firstById = new Map(firstSales.map(p => [p.productId, p._min.date]));
+  const observations = new Map<string, typeof snapshots>();
+  for (const row of snapshots) { const list = observations.get(row.productId) ?? []; list.push(row); observations.set(row.productId, list); }
+  const out = new Map<number, {dead:number;unsold:number}>();
   for (const weekStart of weekStarts) {
     const weekEnd = weekStart.getTime() + 7 * DAY_MS;
     // The week's most recent nightly snapshot is the shelf as it stood then.
@@ -728,15 +752,18 @@ async function deadStockByWeek(
     }
     if (asOf === 0) continue;
 
-    const cutoff = asOf - windowDays * DAY_MS;
-    let dead = 0;
+    let dead = 0, unsold = 0;
     for (const row of snapshots) {
       if (row.date.getTime() !== asOf || row.onHand <= 0) continue;
-      const dates = soldDates.get(row.productId);
-      const lastSold = dates ? Math.max(...dates.filter((d) => d <= asOf)) : Number.NEGATIVE_INFINITY;
-      if (!Number.isFinite(lastSold) || lastSold < cutoff) dead += 1;
+      const product = productById.get(row.productId);
+      if (historicalUnsoldStock(row.onHand, firstById.get(row.productId) ?? null, new Date(asOf))) unsold += 1;
+      if (historicalDeadStock({ onHand: row.onHand, asOf: new Date(asOf), windowDays,
+        firstSeenAt: product?.shopifyCreatedAt ?? product?.receivedAt ?? null,
+        firstSaleAt: firstById.get(row.productId) ?? null,
+        sales: (soldDates.get(row.productId) ?? []).map(d => new Date(d)),
+        observations: observations.get(row.productId) ?? [] })) dead += 1;
     }
-    out.set(weekStart.getTime(), dead);
+    out.set(weekStart.getTime(), {dead,unsold});
   }
   return out;
 }
@@ -791,12 +818,12 @@ const CULPRITS_PER_WEEK = 5;
  */
 export async function getPeriodMetrics(
   tenantId: string,
-  { weeks = 8, abc = "all" }: { weeks?: number; abc?: AbcKey } = {}
+  { weeks = 8, abc = "all", period }: { weeks?: number; abc?: AbcKey; period?: ReportRange } = {}
 ): Promise<PeriodMetrics> {
   const db = prismaForTenant(tenantId);
   // The rate comes from the trend loader with the SAME lens applied, so the
   // table and the chart cannot disagree about a filtered week either.
-  const trend = await getStockoutTrend(tenantId, { weeks, abc });
+  const trend = await getStockoutTrend(tenantId, { weeks, abc, period });
   const config = await db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } });
   const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
 
@@ -810,11 +837,11 @@ export async function getPeriodMetrics(
 
   const [snapshots, salesRows, classified] = await Promise.all([
     db.inventorySnapshot.findMany({
-      where: { date: { gte: earliest } },
+      where: { date: { gte: period?.start ?? earliest, lt: period?.endExclusive ?? new Date() } },
       select: { date: true, productId: true, onHand: true },
     }),
     db.salesHistory.findMany({
-      where: { date: { gte: earliest } },
+      where: { date: { gte: period?.start ?? earliest, lt: period?.endExclusive ?? new Date() } },
       select: { date: true, quantity: true, productId: true },
     }),
     abc === "all"
@@ -894,6 +921,8 @@ export type DeadStockMonth = {
   monthStart: Date;
   /** Products held with no sale inside the window. */
   skus: number;
+  unsoldSkus: number;
+  unsoldCostKes: number | null;
   /** What that stock cost to buy. Null for a money-blind caller. */
   costKes: number | null;
   /** The same count split by class, so "dead A-class" is visible at a glance. */
@@ -934,17 +963,18 @@ export async function getDeadStockByMonth(
   const now = new Date();
   const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (months - 1), 1));
 
-  const [snapshots, sales, products, earliest] = await Promise.all([
+  const [snapshots, sales, products, earliest, firstSales] = await Promise.all([
     db.inventorySnapshot.findMany({
-      where: { date: { gte: from } },
+      where: { date: { gte: new Date(+from - windowDays * DAY_MS) } },
       select: { date: true, productId: true, onHand: true },
     }),
     db.salesHistory.findMany({
       where: { date: { gte: new Date(from.getTime() - windowDays * DAY_MS) }, quantity: { gt: 0 } },
       select: { date: true, productId: true },
     }),
-    db.product.findMany({ select: { id: true, costKes: true, abcCategory: true } }),
+    db.product.findMany({ select: { id: true, costKes: true, abcCategory: true, shopifyCreatedAt: true, receivedAt: true } }),
     db.inventorySnapshot.findFirst({ orderBy: { date: "asc" }, select: { date: true } }),
+    db.salesHistory.groupBy({ by: ["productId"], where: { quantity: { gt: 0 } }, _min: { date: true } }),
   ]);
 
   const soldDates = new Map<string, number[]>();
@@ -955,9 +985,14 @@ export async function getDeadStockByMonth(
   }
   const productById = new Map(products.map((p) => [p.id, p]));
 
+  const firstById = new Map(firstSales.map(p => [p.productId, p._min.date]));
+  const observations = new Map<string, typeof snapshots>();
+  for (const row of snapshots) { const list = observations.get(row.productId) ?? []; list.push(row); observations.set(row.productId, list); }
+
   // The last snapshot date in each month is that month's shelf.
   const lastDayOfMonth = new Map<number, number>();
   for (const row of snapshots) {
+    if (row.date < from) continue;
     const key = monthStartOf(row.date).getTime();
     const t = row.date.getTime();
     if (t > (lastDayOfMonth.get(key) ?? 0)) lastDayOfMonth.set(key, t);
@@ -965,21 +1000,20 @@ export async function getDeadStockByMonth(
 
   const out: DeadStockMonth[] = [];
   for (const [monthKey, asOf] of [...lastDayOfMonth.entries()].sort((a, b) => a[0] - b[0])) {
-    const cutoff = asOf - windowDays * DAY_MS;
-    let skus = 0;
+    let skus = 0, unsoldSkus = 0, unsoldCost = 0;
     let costKes = 0;
     const byClass = { a: 0, b: 0, c: 0, unrated: 0 };
 
     for (const row of snapshots) {
       if (row.date.getTime() !== asOf || row.onHand <= 0) continue;
-      const dates = soldDates.get(row.productId);
-      const lastSold = dates
-        ? Math.max(...dates.filter((d) => d <= asOf))
-        : Number.NEGATIVE_INFINITY;
-      if (Number.isFinite(lastSold) && lastSold >= cutoff) continue;
-
-      skus += 1;
       const product = productById.get(row.productId);
+      if (historicalUnsoldStock(row.onHand, firstById.get(row.productId) ?? null, new Date(asOf))) { unsoldSkus++; unsoldCost += (product?.costKes ?? 0) * row.onHand; }
+      if (!historicalDeadStock({ onHand: row.onHand, asOf: new Date(asOf), windowDays,
+        firstSeenAt: product?.shopifyCreatedAt ?? product?.receivedAt ?? null,
+        firstSaleAt: firstById.get(row.productId) ?? null,
+        sales: (soldDates.get(row.productId) ?? []).map(d => new Date(d)),
+        observations: observations.get(row.productId) ?? [] })) continue;
+      skus += 1;
       costKes += (product?.costKes ?? 0) * row.onHand;
       const abc = product?.abcCategory;
       if (abc === "A") byClass.a += 1;
@@ -991,10 +1025,517 @@ export async function getDeadStockByMonth(
     out.push({
       monthStart: new Date(monthKey),
       skus,
+      unsoldSkus,
+      unsoldCostKes: canViewCosts ? unsoldCost : null,
       costKes: canViewCosts ? costKes : null,
       byClass,
     });
   }
 
   return { months: out, windowDays, trackingSince: earliest?.date ?? null };
+}
+
+// ── Overstock section (report #7) ─────────────────────────────────────────────
+// The "cash asleep" table shows total capital at rest; this report isolates the
+// EXCESS above a healthy cover — units and cash you could have kept liquid. Uses
+// the shared overstockExcess primitive so the definition matches the engine.
+
+export type OverstockRow = {
+  productId: string;
+  sku: string;
+  title: string;
+  abc: string | null;
+  onHandUnits: number;
+  /** Blended run rate (units/day) — how fast the over-bought stock is moving. */
+  runRatePerDay: number;
+  coverDays: number | null;
+  /** Units over the healthy-cover threshold. */
+  excessUnits: number;
+  /** Excess × cost — capital that could be liquid. Null for money-blind. */
+  excessValueKes: number | null;
+};
+
+export type OverstockReport = {
+  rows: OverstockRow[];
+  /** Total excess value across ALL overstocked rows (not just the shown page). */
+  totalExcessKes: number | null;
+  thresholdDays: number;
+};
+
+export async function getOverstock(
+  tenantId: string,
+  { canViewCosts, abc = "all", limit = 50 }: { canViewCosts: boolean; abc?: AbcKey; limit?: number }
+): Promise<OverstockReport> {
+  const db = prismaForTenant(tenantId);
+  const [metrics, products] = await Promise.all([
+    getCatalogueMetrics(tenantId),
+    db.product.findMany({
+      where: { ...BUYABLE_PRODUCT_WHERE },
+      select: { id: true, sku: true, title: true, costKes: true, currentStock: true, abcCategory: true },
+    }),
+  ]);
+
+  const rows: OverstockRow[] = [];
+  let totalExcess = 0;
+  for (const p of products) {
+    const m = metrics.get(p.id);
+    const rate = m?.runRate ?? 0;
+    if (rate <= NO_RATE_EPSILON) continue; // zero-rate is dead stock, not overstock
+    const ex = overstockExcess({
+      currentStock: p.currentStock,
+      dailyRate: rate,
+      costKes: p.costKes,
+      thresholdDays: OVERSTOCK_COVER_DAYS,
+    });
+    if (!ex.isOverstock) continue;
+    const cls = p.abcCategory ?? null;
+    if (!matchesAbc({ abc: cls }, abc)) continue;
+    totalExcess += ex.excessValueKes;
+    rows.push({
+      productId: p.id,
+      sku: p.sku,
+      title: p.title,
+      abc: cls,
+      onHandUnits: p.currentStock,
+      runRatePerDay: rate,
+      coverDays: ex.coverDays,
+      excessUnits: Math.round(ex.excessUnits),
+      excessValueKes: canViewCosts ? Math.round(ex.excessValueKes) : null,
+    });
+  }
+
+  // Rank by excess value when costs are visible; otherwise by excess units, so a
+  // money-blind ordering never leaks a cost signal (same rule as cash-asleep).
+  rows.sort((a, b) =>
+    canViewCosts
+      ? (b.excessValueKes ?? 0) - (a.excessValueKes ?? 0)
+      : b.excessUnits - a.excessUnits
+  );
+
+  return {
+    rows: rows.slice(0, limit),
+    totalExcessKes: canViewCosts ? Math.round(totalExcess) : null,
+    thresholdDays: OVERSTOCK_COVER_DAYS,
+  };
+}
+
+// ── Revenue by category & brand (report #5) ───────────────────────────────────
+// Two ranked rollups of real revenue over the window — where the money actually
+// comes from. Revenue is a sales figure (price already earned), visible to every
+// role; no cost redaction here.
+
+export type RevenueGroup = { name: string; revenueKes: number; skuCount: number };
+export type RevenueBreakdown = { byCategory: RevenueGroup[]; byBrand: RevenueGroup[]; windowDays: number };
+
+export async function getRevenueBreakdown(
+  tenantId: string,
+  { days = 30, limit = 8, period }: { days?: number; limit?: number; period?: ReportRange } = {}
+): Promise<RevenueBreakdown> {
+  const db = prismaForTenant(tenantId);
+  const since = period?.start ?? new Date(Date.now() - days * 86_400_000);
+  const [rev, products] = await Promise.all([
+    db.salesHistory.groupBy({
+      by: ["productId"],
+      where: { date: { gte: since, lt: period?.endExclusive ?? new Date() } },
+      _sum: { revenueKes: true },
+    }),
+    db.product.findMany({
+      where: { ...BUYABLE_PRODUCT_WHERE },
+      select: { id: true, customCategory: true, productType: true, vendor: true },
+    }),
+  ]);
+
+  const revById = new Map(rev.map((r) => [r.productId, r._sum.revenueKes ?? 0]));
+  const catAgg = new Map<string, { revenueKes: number; skuCount: number }>();
+  const brandAgg = new Map<string, { revenueKes: number; skuCount: number }>();
+  const bump = (agg: Map<string, { revenueKes: number; skuCount: number }>, key: string, rev: number) => {
+    const cur = agg.get(key) ?? { revenueKes: 0, skuCount: 0 };
+    cur.revenueKes += rev;
+    cur.skuCount += 1;
+    agg.set(key, cur);
+  };
+
+  for (const p of products) {
+    const r = revById.get(p.id) ?? 0;
+    if (r <= 0) continue; // only products that actually sold in the window
+    bump(catAgg, p.customCategory ?? p.productType ?? "Uncategorised", r);
+    bump(brandAgg, p.vendor ?? "Unbranded", r);
+  }
+
+  const rank = (agg: Map<string, { revenueKes: number; skuCount: number }>): RevenueGroup[] =>
+    [...agg.entries()]
+      .map(([name, v]) => ({ name, revenueKes: Math.round(v.revenueKes), skuCount: v.skuCount }))
+      .sort((a, b) => b.revenueKes - a.revenueKes || a.name.localeCompare(b.name))
+      .slice(0, limit);
+
+  return { byCategory: rank(catAgg), byBrand: rank(brandAgg), windowDays: period?.days ?? days };
+}
+
+// ── On order & in transit (report #6) ─────────────────────────────────────────
+// What's already on the way, so an owner doesn't double-order. Reuses the stock
+// catalogue, which applies the canonical inbound rules (effectiveOnOrder / earliest
+// ETA) — this is a read of that, never a second on-order calculation.
+
+export type OnOrderRow = {
+  productId: string;
+  sku: string;
+  title: string;
+  abc: string | null;
+  onOrderUnits: number;
+  /** Sellable on-hand right now — an inbound order to a full shelf reads very
+   *  differently from one to an empty one, so the decision needs both. */
+  onHandUnits: number;
+  expectedArrivalAt: Date | null;
+  leadDays: number;
+  supplierName: string | null;
+  /** Units × cost — capital in transit. Null for money-blind. */
+  valueKes: number | null;
+};
+
+export type OnOrderReport = {
+  rows: OnOrderRow[];
+  totalUnits: number;
+  totalValueKes: number | null;
+};
+
+export async function getOnOrder(
+  tenantId: string,
+  { canViewCosts }: { canViewCosts: boolean }
+): Promise<OnOrderReport> {
+  const catalogue = await getStockCatalogue(tenantId, { canViewCosts });
+  const rows: OnOrderRow[] = [];
+  let totalUnits = 0;
+  let totalValue = 0;
+  for (const c of catalogue) {
+    if (c.onOrderUnits <= 0) continue;
+    const value = c.costKes != null ? c.onOrderUnits * c.costKes : null;
+    totalUnits += c.onOrderUnits;
+    if (value != null) totalValue += value;
+    rows.push({
+      productId: c.productId,
+      sku: c.sku,
+      title: c.title,
+      abc: c.abc,
+      onOrderUnits: c.onOrderUnits,
+      onHandUnits: c.onHandUnits,
+      expectedArrivalAt: c.expectedArrivalAt,
+      leadDays: c.leadDays,
+      supplierName: c.supplierName,
+      valueKes: canViewCosts ? Math.round(value ?? 0) : null,
+    });
+  }
+  // Soonest arrivals first; unknown ETAs sink to the bottom.
+  rows.sort((a, b) => {
+    const at = a.expectedArrivalAt?.getTime() ?? Infinity;
+    const bt = b.expectedArrivalAt?.getTime() ?? Infinity;
+    return at - bt;
+  });
+  return {
+    rows,
+    totalUnits,
+    totalValueKes: canViewCosts ? Math.round(totalValue) : null,
+  };
+}
+
+// ── Revenue missed to stockouts (report #1, phase 2) ─────────────────────────
+// The money an empty shelf cost: for every product-day the nightly snapshot
+// shows onHand<=0, the shop lost roughly (that product's normal run rate ×
+// price) in sales. Summed per week it is a trend; summed per ABC class it says
+// where the loss concentrates. An ESTIMATE, and labelled as one — a stockout's
+// true lost demand is unknowable, so run-rate × empty-days is the honest proxy,
+// the same rate the buy list already sizes on.
+//
+// Reuses getStockoutTrend for the weekly gate (a week with too few snapshot days
+// is dropped, never counted as loss-free) and getCatalogueMetrics for the run
+// rate, so this can't disagree with the trend chart or the buy list.
+
+/** One product's total missed sales across the range. */
+export type MissedCulprit = {
+  productId: string;
+  sku: string;
+  title: string;
+  abc: string | null;
+  emptyDays: number;
+  unitsMissed: number;
+  /** Revenue is price already-would-have-earned — a sales figure, shown to all. */
+  missedRevenueKes: number;
+};
+
+/** Missed sales in one week. */
+export type MissedPeriodPoint = { weekStart: Date; missedRevenueKes: number };
+
+/** Missed sales rolled up by ABC class. */
+export type MissedClassRow = {
+  cls: "A" | "B" | "C" | "unrated";
+  skuCount: number;
+  emptyDays: number;
+  unitsMissed: number;
+  missedRevenueKes: number;
+};
+
+export type MissedRevenue = {
+  totalMissedKes: number;
+  totalEmptyProductDays: number;
+  trend: MissedPeriodPoint[]; // oldest → newest
+  byClass: MissedClassRow[];
+  culprits: MissedCulprit[]; // worst first
+  trackingSince: Date | null;
+};
+
+const MISSED_CULPRITS = 8;
+
+export async function getMissedRevenue(
+  tenantId: string,
+  { weeks = 12, abc = "all", period }: { weeks?: number; abc?: AbcKey; period?: ReportRange } = {}
+): Promise<MissedRevenue> {
+  const db = prismaForTenant(tenantId);
+  const trend = await getStockoutTrend(tenantId, { weeks, abc, period });
+  if (trend.weeks.length === 0) {
+    return {
+      totalMissedKes: 0,
+      totalEmptyProductDays: 0,
+      trend: [],
+      byClass: [],
+      culprits: [],
+      trackingSince: trend.trackingSince,
+    };
+  }
+
+  const weekStarts = trend.weeks.map((w) => w.weekStart);
+  const kept = new Set(weekStarts.map((w) => w.getTime()));
+  const earliest = new Date(Math.min(...weekStarts.map((w) => w.getTime())));
+
+  const [metrics, snapshots, products] = await Promise.all([
+    getCatalogueMetrics(tenantId),
+    db.inventorySnapshot.findMany({
+      where: { date: { gte: period?.start ?? earliest, lt: period?.endExclusive ?? new Date() }, onHand: { lte: 0 } },
+      select: { date: true, productId: true },
+    }),
+    db.product.findMany({
+      where: { ...BUYABLE_PRODUCT_WHERE },
+      select: { id: true, sku: true, title: true, priceKes: true, abcCategory: true },
+    }),
+  ]);
+  const productById = new Map(products.map((p) => [p.id, p]));
+  const classKey = (c: string | null): MissedClassRow["cls"] =>
+    c === "A" || c === "B" || c === "C" ? c : "unrated";
+
+  // Empty product-days per week (snapshot onHand<=0), ABC-lens filtered.
+  const trendMap = new Map<number, number>(); // weekStart → missed KES
+  const perProduct = new Map<string, { emptyDays: number }>();
+  for (const row of snapshots) {
+    const p = productById.get(row.productId);
+    if (!p) continue; // not a buyable product
+    if (!matchesAbc({ abc: p.abcCategory ?? null }, abc)) continue;
+    const wk = weekStartOf(row.date).getTime();
+    if (!kept.has(wk)) continue;
+    const rate = metrics.get(row.productId)?.runRate ?? 0;
+    if (rate <= NO_RATE_EPSILON) continue; // a shelf that never sells loses nothing
+    const missed = rate * p.priceKes; // one day's missed sales
+    trendMap.set(wk, (trendMap.get(wk) ?? 0) + missed);
+    const cur = perProduct.get(row.productId) ?? { emptyDays: 0 };
+    cur.emptyDays += 1;
+    perProduct.set(row.productId, cur);
+  }
+
+  const trendPts: MissedPeriodPoint[] = weekStarts.map((w) => ({
+    weekStart: w,
+    missedRevenueKes: Math.round(trendMap.get(w.getTime()) ?? 0),
+  }));
+
+  // Per-product totals + per-class rollup.
+  const classAgg = new Map<MissedClassRow["cls"], MissedClassRow>();
+  const culpritsAll: MissedCulprit[] = [];
+  let totalMissed = 0;
+  let totalEmptyDays = 0;
+  for (const [productId, { emptyDays }] of perProduct) {
+    const p = productById.get(productId)!;
+    const rate = metrics.get(productId)?.runRate ?? 0;
+    const unitsMissed = rate * emptyDays;
+    const missedRevenueKes = unitsMissed * p.priceKes;
+    totalMissed += missedRevenueKes;
+    totalEmptyDays += emptyDays;
+    const cls = classKey(p.abcCategory ?? null);
+    const row = classAgg.get(cls) ?? { cls, skuCount: 0, emptyDays: 0, unitsMissed: 0, missedRevenueKes: 0 };
+    row.skuCount += 1;
+    row.emptyDays += emptyDays;
+    row.unitsMissed += unitsMissed;
+    row.missedRevenueKes += missedRevenueKes;
+    classAgg.set(cls, row);
+    culpritsAll.push({
+      productId,
+      sku: p.sku,
+      title: p.title,
+      abc: p.abcCategory ?? null,
+      emptyDays,
+      unitsMissed: Math.round(unitsMissed),
+      missedRevenueKes: Math.round(missedRevenueKes),
+    });
+  }
+
+  const classOrder: MissedClassRow["cls"][] = ["A", "B", "C", "unrated"];
+  const byClass = classOrder
+    .map((c) => classAgg.get(c))
+    .filter((r): r is MissedClassRow => r != null)
+    .map((r) => ({ ...r, unitsMissed: Math.round(r.unitsMissed), missedRevenueKes: Math.round(r.missedRevenueKes) }));
+
+  culpritsAll.sort((a, b) => b.missedRevenueKes - a.missedRevenueKes || b.emptyDays - a.emptyDays);
+
+  return {
+    totalMissedKes: Math.round(totalMissed),
+    totalEmptyProductDays: totalEmptyDays,
+    trend: trendPts,
+    byClass,
+    culprits: culpritsAll.slice(0, MISSED_CULPRITS),
+    trackingSince: trend.trackingSince,
+  };
+}
+
+// ── Category / ABC leakage matrix (report #2, phase 2) ───────────────────────
+// "Where is it happening?" — stockout %, dead-stock %, missed revenue and
+// capital tied up, rolled up by product category OR by ABC class over the range,
+// worst first. One row per group, so an owner sees which shelf leaks most.
+// Reuses the same snapshot empty-days machinery and getCatalogueMetrics; the
+// dead-stock test mirrors getInsightsOverview (held, past the dead window).
+
+export type LeakageGroup = {
+  group: string;
+  skuCount: number;
+  /** SKUs empty at the latest snapshot. */
+  stockoutSkus: number;
+  stockoutPct: number | null;
+  deadStockSkus: number;
+  unsoldSkus: number;
+  /** Held with no recorded positive sale, divided by the same total-SKU denominator. */
+  unsoldPct: number | null;
+  deadStockPct: number | null;
+  /** Estimated missed sales over the range — a sales figure, shown to all. */
+  missedRevenueKes: number;
+  /** Capital tied up in this group's stock right now. Null for money-blind. */
+  capitalKes: number | null;
+};
+
+export type LeakageMatrix = {
+  byCategory: LeakageGroup[];
+  byAbc: LeakageGroup[];
+  windowDays: number;
+  trackingSince: Date | null;
+};
+
+export async function getLeakageMatrix(
+  tenantId: string,
+  { weeks = 12, canViewCosts, period }: { weeks?: number; canViewCosts: boolean; period?: ReportRange }
+): Promise<LeakageMatrix> {
+  const db = prismaForTenant(tenantId);
+  const [trend, missedByProduct, metrics, products, lastSales, config] = await Promise.all([
+    getStockoutTrend(tenantId, { weeks, period }),
+    missedByProductOverWeeks(tenantId, weeks, period),
+    getCatalogueMetrics(tenantId),
+    db.product.findMany({
+      where: { ...BUYABLE_PRODUCT_WHERE },
+      select: { id: true, customCategory: true, productType: true, currentStock: true, abcCategory: true, shopifyCreatedAt: true, receivedAt: true },
+    }),
+    db.salesHistory.groupBy({ by: ["productId"], where: { quantity: { gt: 0 } }, _max: { date: true } }),
+    db.tenantConfig.findFirst({ select: { deadStockWindowDays: true } }),
+  ]);
+  const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
+  const deadCutoff = Date.now() - windowDays * 86_400_000;
+  const observed = await observedInStockDays(tenantId, new Date(deadCutoff));
+  const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date?.getTime() ?? null]));
+
+  type Acc = {
+    skuCount: number;
+    stockoutSkus: number;
+    deadStockSkus: number;
+    unsoldSkus: number;
+    missedRevenueKes: number;
+    capitalKes: number;
+  };
+  const fresh = (): Acc => ({ skuCount: 0, stockoutSkus: 0, deadStockSkus: 0, unsoldSkus: 0, missedRevenueKes: 0, capitalKes: 0 });
+  const catAgg = new Map<string, Acc>();
+  const abcAgg = new Map<string, Acc>();
+  const bump = (agg: Map<string, Acc>, key: string, p: (typeof products)[number]) => {
+    const a = agg.get(key) ?? fresh();
+    a.skuCount += 1;
+    const onHand = p.currentStock;
+    const sold = lastSale.get(p.id) ?? null;
+    if (onHand > 0 && sold == null) a.unsoldSkus += 1;
+    if (onHand <= 0) {
+      a.stockoutSkus += 1;
+    } else if (pileFor({ onHandUnits: onHand, lastSaleAt: sold == null ? null : new Date(sold),
+      firstSeenAt: p.shopifyCreatedAt ?? p.receivedAt, inStockDays: observed.get(p.id) }, deadCutoff) === "dead") {
+      // Dead stock = held with no sale inside the window. Deliberately NOT
+      // folding in overstock (over-bought but still selling) — that is a
+      // different condition, and counting it here would inflate "dead-stock %"
+      // past what the rest of the app reports.
+      a.deadStockSkus += 1;
+    }
+    a.missedRevenueKes += missedByProduct.get(p.id) ?? 0;
+    a.capitalKes += metrics.get(p.id)?.moneyAtRestKes ?? 0;
+    agg.set(key, a);
+  };
+
+  for (const p of products) {
+    bump(catAgg, p.customCategory ?? p.productType ?? "Uncategorised", p);
+    bump(abcAgg, p.abcCategory ?? "Unrated", p);
+  }
+
+  const toGroups = (agg: Map<string, Acc>): LeakageGroup[] =>
+    [...agg.entries()]
+      .map(([group, a]) => ({
+        group,
+        skuCount: a.skuCount,
+        stockoutSkus: a.stockoutSkus,
+        stockoutPct: a.skuCount > 0 ? Math.round((a.stockoutSkus / a.skuCount) * 1000) / 10 : null,
+        deadStockSkus: a.deadStockSkus,
+        unsoldSkus: a.unsoldSkus,
+        unsoldPct: a.skuCount > 0 ? Math.round((a.unsoldSkus / a.skuCount) * 1000) / 10 : null,
+        deadStockPct: a.skuCount > 0 ? Math.round((a.deadStockSkus / a.skuCount) * 1000) / 10 : null,
+        missedRevenueKes: Math.round(a.missedRevenueKes),
+        capitalKes: canViewCosts ? Math.round(a.capitalKes) : null,
+      }))
+      .sort((x, y) => y.missedRevenueKes - x.missedRevenueKes || (y.stockoutPct ?? 0) - (x.stockoutPct ?? 0));
+
+  // ABC groups in class order rather than by leak, so the lens reads A→B→C.
+  const abcRank = (g: string) => (g === "A" ? 0 : g === "B" ? 1 : g === "C" ? 2 : 3);
+  const byAbc = toGroups(abcAgg).sort((a, b) => abcRank(a.group) - abcRank(b.group));
+
+  return { byCategory: toGroups(catAgg), byAbc, windowDays, trackingSince: trend.trackingSince };
+}
+
+/**
+ * Per-product estimated missed revenue over the gated weeks — the shared engine
+ * behind both report #1 (missed-revenue) and report #2 (leakage matrix), so the
+ * two can never quote different totals. Returns a Map<productId, missedKes>
+ * covering EVERY product (not just top culprits), keyed off the same weekly gate
+ * and run rate as getStockoutTrend / getCatalogueMetrics.
+ */
+async function missedByProductOverWeeks(tenantId: string, weeks: number, period?: ReportRange): Promise<Map<string, number>> {
+  const db = prismaForTenant(tenantId);
+  const trend = await getStockoutTrend(tenantId, { weeks, period });
+  const out = new Map<string, number>();
+  if (trend.weeks.length === 0) return out;
+  const weekStarts = trend.weeks.map((w) => w.weekStart);
+  const kept = new Set(weekStarts.map((w) => w.getTime()));
+  const earliest = new Date(Math.min(...weekStarts.map((w) => w.getTime())));
+
+  const [metrics, snapshots, products] = await Promise.all([
+    getCatalogueMetrics(tenantId),
+    db.inventorySnapshot.findMany({
+      where: { date: { gte: period?.start ?? earliest, lt: period?.endExclusive ?? new Date() }, onHand: { lte: 0 } },
+      select: { date: true, productId: true },
+    }),
+    db.product.findMany({ where: { ...BUYABLE_PRODUCT_WHERE }, select: { id: true, priceKes: true } }),
+  ]);
+  const priceById = new Map(products.map((p) => [p.id, p.priceKes]));
+  for (const row of snapshots) {
+    const price = priceById.get(row.productId);
+    if (price == null) continue;
+    const wk = weekStartOf(row.date).getTime();
+    if (!kept.has(wk)) continue;
+    const rate = metrics.get(row.productId)?.runRate ?? 0;
+    if (rate <= NO_RATE_EPSILON) continue;
+    out.set(row.productId, (out.get(row.productId) ?? 0) + rate * price);
+  }
+  return out;
 }

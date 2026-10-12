@@ -139,6 +139,31 @@ describe("ingestPosSales", () => {
     expect(sh[0]!.revenueKes).toBe(6600);
   });
 
+  it("rebuilds a partial receipt correction from the full stored day", async () => {
+    await ingestPosSales({ tenantId, sales: payload() });
+    const corrected = payload()[0]!;
+    corrected.lines[0] = { sku: "CAN-SHE-340", qty: 1, subtotal: 1650 };
+    await ingestPosSales({ tenantId, sales: [corrected] });
+    const rows = await prismaService.salesHistory.findMany({ where: { tenantId, channel: "pos" } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.quantity).toBe(3);
+    expect(rows[0]!.revenueKes).toBe(4950);
+    expect(await prismaService.posSale.count({ where: { tenantId } })).toBe(3);
+  });
+
+  it("serializes concurrent partial receipts into one complete day", async () => {
+    const first = payload()[0]!;
+    const second = payload()[1]!;
+    await Promise.all([
+      ingestPosSales({ tenantId, sales: [first] }),
+      ingestPosSales({ tenantId, sales: [second] }),
+    ]);
+    const rows = await prismaService.salesHistory.findMany({ where: { tenantId, channel: "pos" } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.quantity).toBe(3);
+    expect(rows[0]!.revenueKes).toBe(4950);
+  });
+
   it("applies an IgnoreRule: the junk SKU stops counting as unmatched and stays out of SalesHistory", async () => {
     await prismaService.ignoreRule.create({
       data: { tenantId, kind: "till_sku", value: "CARRIER-BAG" },

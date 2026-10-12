@@ -14,6 +14,8 @@ export const ADMIN_AUDIT_ACTIONS = [
   "impersonation_end",
   "admin_sync_trigger",
   "plan_changed",
+  "feature_override_changed",
+  "billing_adjusted",
   "workspace_provisioned",
   "owner_invited",
   "step_up_granted",
@@ -30,6 +32,8 @@ const ENTITY_BY_ACTION: Record<AdminAuditAction, string> = {
   impersonation_end: "AdminSession",
   admin_sync_trigger: "AdminSync",
   plan_changed: "Tenant",
+  feature_override_changed: "Tenant",
+  billing_adjusted: "Tenant",
   workspace_provisioned: "Tenant",
   owner_invited: "Membership",
   // Step-up is about the admin, not any customer, so these key on the platform

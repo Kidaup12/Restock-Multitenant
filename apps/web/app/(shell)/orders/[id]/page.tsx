@@ -209,12 +209,29 @@ export default async function PoDetailPage({
               : undefined
           }
           action={
-            <Link
-              href={`/orders/${po.id}/print`}
-              className="text-sm font-medium text-accent-ink hover:underline"
-            >
-              Print view
-            </Link>
+            <div className="flex items-center gap-4">
+              <Link
+                href={`/orders/${po.id}/print`}
+                className="text-sm font-medium text-accent-ink hover:underline"
+              >
+                Print view
+              </Link>
+              {/* Plain download links (GET routes serving attachments), the same
+                  idiom as Print view — costs are redacted per view_costs inside
+                  the route, so the link is safe to show every member. */}
+              <a
+                href={`/orders/${po.id}/csv?format=quickbooks`}
+                className="text-sm font-medium text-accent-ink hover:underline"
+              >
+                Export CSV (QuickBooks)
+              </a>
+              <a
+                href={`/orders/${po.id}/xlsx`}
+                className="text-sm font-medium text-accent-ink hover:underline"
+              >
+                Export XLSX
+              </a>
+            </div>
           }
         />
         <div className="mt-2 pb-2">

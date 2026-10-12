@@ -8,8 +8,11 @@ import { UnmatchedRow } from "./unmatched-row";
  * The unmatched-POS fix queue: till SKUs that matched no product, with units +
  * revenue that would otherwise be invisible (spec §3 — dropped till lines make a
  * branch look slower than it is). Hidden entirely when there is nothing to fix.
+ *
+ * Open to every role: matching a till SKU to a product is shop-floor work, not
+ * an admin judgment call — the person at the till is the one who knows what it is.
  */
-export async function PosFixQueue({ tenantId, canFix }: { tenantId: string; canFix: boolean }) {
+export async function PosFixQueue({ tenantId }: { tenantId: string }) {
   const rows = await getUnmatchedPosSkus(tenantId);
   if (rows.length === 0) return null;
 
@@ -29,7 +32,7 @@ export async function PosFixQueue({ tenantId, canFix }: { tenantId: string; canF
       />
       <ul className="mt-3 pb-1">
         {rows.map((row) => (
-          <UnmatchedRow key={row.sku} row={row} products={products} canFix={canFix} />
+          <UnmatchedRow key={row.sku} row={row} products={products} />
         ))}
       </ul>
     </Card>

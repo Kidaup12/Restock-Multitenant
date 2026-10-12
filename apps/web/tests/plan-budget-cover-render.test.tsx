@@ -28,11 +28,17 @@ vi.mock("next/navigation", () => ({
 }));
 
 const { BudgetPlanner } = await import("../app/(shell)/plan/budget-planner");
+const { EMPTY_SCOPE } = await import("../app/(shell)/plan/scope-bar");
 
 const markup = (criticalsCashKes: number | null = null) =>
   renderToStaticMarkup(
     <CurrencyProvider currency="KES">
-      <BudgetPlanner canViewCosts criticalsCashKes={criticalsCashKes} orderTodayCashKes={null} />
+      <BudgetPlanner
+        canViewCosts
+        criticalsCashKes={criticalsCashKes}
+        orderTodayCashKes={null}
+        scope={EMPTY_SCOPE}
+      />
     </CurrencyProvider>
   );
 

@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { assignAbc, dailySalesValue } from "../src/abc";
+import {
+  assignAbc,
+  dailySalesValue,
+  trailingRevenue,
+  MIN_RUN_RATE_FOR_A,
+  MIN_RUN_RATE_FOR_B,
+} from "../src/abc";
 import { weightedDailyRate, type SalesPoint } from "../src/baseline";
 
 /**
@@ -101,6 +107,71 @@ describe("assignAbc", () => {
     expect(out.x).toBe("A");
     expect(out.y).toBe("A");
     expect(out.z).toBe("B");
+  });
+});
+
+describe("assignAbc velocity floor", () => {
+  it("demotes a high-revenue but slow item out of A", () => {
+    // hero earns the most but sells < 0.4/day → floored to B.
+    const out = assignAbc([
+      { id: "hero", revenue: 1000, runRate: 0.1 },
+      { id: "mover", revenue: 400, runRate: 5 },
+      { id: "tail", revenue: 50, runRate: 2 },
+    ]);
+    expect(out.hero).toBe("B"); // value said A, velocity floor said no
+    expect(out.mover).toBe("A"); // value put it below hero; with hero demoted the cut still lands it A
+  });
+
+  it("demotes a barely-selling item all the way to C", () => {
+    const out = assignAbc([
+      { id: "hero", revenue: 1000, runRate: 0.05 }, // below B floor too
+      { id: "b", revenue: 400, runRate: 5 },
+    ]);
+    expect(out.hero).toBe("C");
+  });
+
+  it("leaves a genuine fast mover in A", () => {
+    const out = assignAbc([
+      { id: "hero", revenue: 1000, runRate: 8 },
+      { id: "b", revenue: 50, runRate: 1 },
+    ]);
+    expect(out.hero).toBe("A");
+  });
+
+  it("without runRate, no floor is applied (back-compat)", () => {
+    const out = assignAbc([{ id: "hero", revenue: 1000 }, { id: "b", revenue: 50 }]);
+    expect(out.hero).toBe("A");
+  });
+
+  it("floor thresholds are the documented values", () => {
+    expect(MIN_RUN_RATE_FOR_A).toBe(0.4);
+    expect(MIN_RUN_RATE_FOR_B).toBe(0.1);
+  });
+});
+
+describe("trailingRevenue", () => {
+  const TODAY = new Date("2026-07-21T00:00:00Z");
+  const day = (daysAgo: number) => new Date(+TODAY - daysAgo * 864e5);
+
+  it("sums revenueKes inside the window and ignores older sales", () => {
+    const history: SalesPoint[] = [
+      { date: day(10), quantity: 2, revenueKes: 200 }, // in 90d window
+      { date: day(80), quantity: 1, revenueKes: 100 }, // in window
+      { date: day(120), quantity: 5, revenueKes: 999 }, // OUTSIDE 90d window
+    ];
+    expect(trailingRevenue(history, TODAY, 90)).toBe(300);
+  });
+
+  it("respects a custom window", () => {
+    const history: SalesPoint[] = [
+      { date: day(5), quantity: 1, revenueKes: 100 },
+      { date: day(40), quantity: 1, revenueKes: 100 },
+    ];
+    expect(trailingRevenue(history, TODAY, 30)).toBe(100); // 40d-ago sale excluded
+  });
+
+  it("is zero with no sales", () => {
+    expect(trailingRevenue([], TODAY)).toBe(0);
   });
 });
 

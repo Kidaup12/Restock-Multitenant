@@ -1,5 +1,7 @@
-import { prismaService, roleOf } from "@wezesha/db";
+import { pickBestRun } from "@wezesha/forecast";
+import { prismaService, roleOf, BUYABLE_PRODUCT_WHERE, OUTSTANDING_PO_STATUSES, effectiveOnOrder, outstandingByProduct } from "@wezesha/db";
 import { sizeTransfers, destinationShares, type DestinationPosition } from "@wezesha/forecast";
+import { reportOrderQuantity } from "./owner-report-planning";
 
 /**
  * Owner report — a WEEK-BY-WEEK (or month-by-month) health TREND ("am I
@@ -50,12 +52,27 @@ export type AttentionLine = {
 export type RestockLine = {
   title: string; sku: string; abc: "A" | "B" | "C" | null;
   qty: number; costKes: number; daysLeft: number;
+  runRate: number; onHand: number; enRoute: number;
 };
 
 /** A warehouse→branch transfer suggestion. */
 export type TransferLine = {
   title: string; abc: "A" | "B" | "C" | null; qty: number; toBranch: string;
 };
+
+/** One of last period's best-selling products. */
+export type TopSellerLine = {
+  title: string; abc: "A" | "B" | "C" | null; qty: number; revenueKes: number;
+};
+
+/** A-class (bestseller) health snapshot for the report header section. */
+export type BestsellerSummary = {
+  total: number;    // active A-class products
+  healthy: number;  // > lowDays of cover (incl. en route)
+  low: number;      // 0 < cover <= lowDays
+  out: number;      // effective stock <= 0
+};
+
 
 export type OwnerReport = {
   tenantName: string;
@@ -65,6 +82,21 @@ export type OwnerReport = {
   trend: TrendRow[];         // newest first
   needsAttention: AttentionLine[];
   restock: RestockLine[];    // top items to reorder next period
+  bestsellers: BestsellerSummary;
+  topSellers: TopSellerLine[];   // best sellers of the latest completed period
+  oosCount: number;              // FULL bucket size (lists are capped at 12)
+  criticalsCount: number;
+  upcomingCount: number;
+  upcomingBudgetKes: number;
+  oosBudgetKes: number;          // full-bucket cost, not just the shown rows
+  criticalsBudgetKes: number;
+  othersBudgetKes: number;
+  // Restock, planner-parity, split the way the owner reads it:
+  criticals: RestockLine[];  // high run rate + running low (still has stock)
+  upcoming: RestockLine[];   // fast movers with >7d cover: order soon, not urgent
+  others: RestockLine[];     // TRUE slow/medium movers (rate < fast threshold)
+  oos: RestockLine[];        // completely out of stock right now
+  othersCount: number;       // total slow/medium lines (list is capped)
   restockBudgetKes: number;  // total cost of the full restock
   restockCount: number;      // total number of items to restock
   transfers: TransferLine[]; // top warehouse→branch moves
@@ -178,18 +210,6 @@ const AI_REGIMES = ["sarima", "tsb", "cold_start"];
 
 /** Choose the winning run id from same-day candidates: AI run → most complete →
  *  id (stable). Ported from apps/web latest-run resolution. */
-function pickBestRun(runs: { forecastRunId: string; count: number }[], aiRunIds: Set<string>): string | null {
-  if (runs.length === 0) return null;
-  const sorted = [...runs].sort((a, b) => {
-    const aAi = aiRunIds.has(a.forecastRunId) ? 1 : 0;
-    const bAi = aiRunIds.has(b.forecastRunId) ? 1 : 0;
-    if (aAi !== bAi) return bAi - aAi; // AI run wins
-    if (b.count !== a.count) return b.count - a.count; // then most complete
-    return a.forecastRunId.localeCompare(b.forecastRunId); // stable
-  });
-  return sorted[0]?.forecastRunId ?? null;
-}
-
 /** The latest, most trustworthy forecast run for a tenant (same rule the app
  *  uses: latest runDate → AI engine → most complete → id). null when none. */
 async function latestForecastRunId(tenantId: string): Promise<string | null> {
@@ -471,16 +491,43 @@ export async function buildOwnerReport(
 
   // ── Needs attention + restock: from the latest forecast run's predictions ──
   const runId = await latestForecastRunId(tenantId);
-  const preds = runId
+  const storedPreds = runId
      
     ? await prismaService.prediction.findMany({
-        where: { tenantId, forecastRunId: runId },
+        where: { tenantId, forecastRunId: runId, product: { tenantId, ...BUYABLE_PRODUCT_WHERE } },
         select: {
+          productId: true,
           finalForecast30d: true, daysUntilStockout: true, recommendedQty: true, urgency: true,
-          product: { select: { title: true, sku: true, active: true, currentStock: true, onOrder: true, costKes: true, priceKes: true, abcCategory: true } },
+          product: { select: { title: true, sku: true, active: true, currentStock: true, onOrder: true, costKes: true, priceKes: true, abcCategory: true, supplier: { select: { moq: true } } } },
         },
       })
     : [];
+
+  const productIds = storedPreds.map(p => p.productId);
+  const [overrides, openOrders, sentLines] = productIds.length ? await Promise.all([
+    prismaService.productPlanOverride.findMany({ where: { tenantId, productId: { in: productIds } }, select: { productId: true, qty: true } }),
+    prismaService.order.findMany({
+      where: { tenantId, productId: { in: productIds }, receivedAt: null, OR: [
+        { status: "pending" },
+        { status: "ordered", purchaseOrder: { tenantId, status: { in: [...OUTSTANDING_PO_STATUSES] }, deletedAt: null } },
+      ] },
+      select: { productId: true },
+    }),
+    prismaService.purchaseOrderLine.findMany({
+      where: { tenantId, productId: { in: productIds }, purchaseOrder: { tenantId, status: { in: [...OUTSTANDING_PO_STATUSES] }, deletedAt: null } },
+      select: { productId: true, quantity: true, receivedQty: true },
+    }),
+  ]) : [[], [], []];
+  const overrideByProduct = new Map(overrides.map(o => [o.productId, o.qty]));
+  const openProductIds = new Set(openOrders.map(o => o.productId));
+  const outstanding = outstandingByProduct(sentLines);
+  // Inventory alerts still see every buyable forecast. Only purchase quantities
+  // honor the planner's holdbacks, owner decisions and supplier minimum.
+  const preds = storedPreds.map(p => ({
+    ...p,
+    recommendedQty: reportOrderQuantity({ ...p, ...p.product, overrideQty: overrideByProduct.get(p.productId), moq: p.product.supplier?.moq, hasOpenOrder: openProductIds.has(p.productId) }),
+    product: { ...p.product, onOrder: effectiveOnOrder(p.product.onOrder, outstanding.get(p.productId) ?? 0) },
+  }));
 
   const classRank = (c: string | null) => (c === "A" ? 0 : c === "B" ? 1 : 2);
   const urgencyRank = (u: string) => (u === "critical" ? 0 : u === "high" ? 1 : u === "medium" ? 2 : 3);
@@ -504,19 +551,95 @@ export async function buildOwnerReport(
 
   // Restock: plannable buy lines (valid cost/price), qty already nets on-hand +
   // en route. Ranked urgency → class → soonest out. Budget = full cost.
-  const isPlannable = (p: { costKes: number; priceKes: number }) => p.costKes > 0 && p.priceKes > 0 && p.costKes <= p.priceKes;
   const buy = preds
-    .filter((p) => p.product.active && p.recommendedQty > 0 && isPlannable(p.product))
+    .filter((p) => p.recommendedQty > 0)
     .sort((a, b) =>
       urgencyRank(a.urgency) - urgencyRank(b.urgency) ||
       classRank(a.product.abcCategory) - classRank(b.product.abcCategory) ||
       a.daysUntilStockout - b.daysUntilStockout);
   const restockBudgetKes = Math.round(buy.reduce((s, p) => s + Math.ceil(p.recommendedQty) * (p.product.costKes ?? 0), 0));
-  const restock: RestockLine[] = buy.slice(0, 12).map((p) => ({
+  // ── Segment the buy list the way the owner reads it (owner spec, Sep 2026):
+  //    1. Completely OOS — nothing on the shelf right now (en route shown, not hidden)
+  //    2. Criticals — HIGH run rate + running LOW (fast mover, short runway, has stock)
+  //    3. Others — slow/medium movers that still earned a reorder line
+  //    All three come from the SAME planner engine + ranking; only the grouping differs. ──
+  const FAST_RATE = 0.4;   // units/day — matches the Class-A velocity floor
+  const LOW_DAYS = 7;      // "running low" = a week or less of cover left
+  const toLine = (p: (typeof buy)[number]): RestockLine => ({
     title: p.product.title, sku: p.product.sku, abc: abcOf(p.product.abcCategory),
     qty: Math.ceil(p.recommendedQty), costKes: Math.round(Math.ceil(p.recommendedQty) * (p.product.costKes ?? 0)),
-    daysLeft: p.daysUntilStockout,
-  }));
+    daysLeft: p.daysUntilStockout, runRate: Math.round((p.finalForecast30d / 30) * 100) / 100,
+    onHand: Math.round(p.product.currentStock), enRoute: Math.round(p.product.onOrder),
+  });
+  const rateOf = (p: (typeof buy)[number]) => p.finalForecast30d / 30;
+  const isOos = (p: (typeof buy)[number]) => p.product.currentStock <= 0;
+  const isCritical = (p: (typeof buy)[number]) =>
+    !isOos(p) && rateOf(p) >= FAST_RATE && p.daysUntilStockout <= LOW_DAYS;
+  // Within each section, PLANNER-parity ordering (the planner's "priority"
+  // comparator): Class A -> B -> C (class = earned revenue), then fastest run
+  // rate first. Urgency lives in the SECTIONS (OOS -> critical -> other), so
+  // rows read exactly like the Restock planner's buy list.
+  const plannerOrder = (x: (typeof buy)[number], y: (typeof buy)[number]) =>
+    classRank(x.product.abcCategory) - classRank(y.product.abcCategory) || rateOf(y) - rateOf(x);
+  const lineCost = (p: (typeof buy)[number]) => Math.ceil(p.recommendedQty) * (p.product.costKes ?? 0);
+  const oosAll = buy.filter(isOos).sort(plannerOrder);
+  const criticalsAll = buy.filter(isCritical).sort(plannerOrder);
+  // Fast movers NOT yet urgent (>7d cover) are their own tier: calling them
+  // "slow" was false (a 4.7/day bestseller sat under that label). "Others" is
+  // now genuinely slow/medium (rate below the fast threshold).
+  const upcomingAll = buy.filter(p => !isOos(p) && !isCritical(p) && rateOf(p) >= FAST_RATE).sort(plannerOrder);
+  const othersAll = buy.filter(p => !isOos(p) && !isCritical(p) && rateOf(p) < FAST_RATE).sort(plannerOrder);
+  const oos = oosAll.slice(0, 12).map(toLine);
+  const criticals = criticalsAll.slice(0, 12).map(toLine);
+  const upcoming = upcomingAll.slice(0, 10).map(toLine);
+  const others = othersAll.slice(0, 8).map(toLine);
+  const oosBudgetKes = Math.round(oosAll.reduce((t, p) => t + lineCost(p), 0));
+  const criticalsBudgetKes = Math.round(criticalsAll.reduce((t, p) => t + lineCost(p), 0));
+  const upcomingBudgetKes = Math.round(upcomingAll.reduce((t, p) => t + lineCost(p), 0));
+  const othersBudgetKes = Math.round(othersAll.reduce((t, p) => t + lineCost(p), 0));
+
+  // ── Best sellers of the latest COMPLETED period (what actually sold). ──
+  let topSellers: TopSellerLine[] = [];
+  try {
+    const lastKey = periodKeys[periodKeys.length - 1];
+    if (lastKey) {
+      const from = periodStartDate(lastKey, granularity);
+      const until = new Date(from);
+      if (granularity === "week") until.setUTCDate(until.getUTCDate() + 7);
+      else until.setUTCMonth(until.getUTCMonth() + 1);
+      const sold = await prismaService.salesHistory.groupBy({
+        by: ["productId"],
+        where: { tenantId, date: { gte: from, lt: until }, quantity: { gt: 0 } },
+        _sum: { quantity: true, revenueKes: true },
+        orderBy: { _sum: { revenueKes: "desc" } },
+        take: 8,
+      });
+      const info = await prismaService.product.findMany({
+        where: { tenantId, id: { in: sold.map(r => r.productId) } },
+        select: { id: true, title: true, abcCategory: true },
+      });
+      const byId = new Map(info.map(i => [i.id, i]));
+      topSellers = sold.map(r => ({
+        title: byId.get(r.productId)?.title ?? "(deleted product)",
+        abc: abcOf(byId.get(r.productId)?.abcCategory ?? null),
+        qty: Math.round(r._sum.quantity ?? 0),
+        revenueKes: Math.round(r._sum.revenueKes ?? 0),
+      }));
+    }
+  } catch { /* best-effort */ }
+
+  // ── Bestseller (A-class) health snapshot: the daily-watch list, summarised. ──
+  const aPreds = preds.filter(p => p.product.active && p.product.abcCategory === "A");
+  const bestsellers: BestsellerSummary = { total: aPreds.length, healthy: 0, low: 0, out: 0 };
+  for (const p of aPreds) {
+    const eff = p.product.currentStock + p.product.onOrder;
+    const rate = p.finalForecast30d / 30;
+    if (eff <= 0) bestsellers.out++;
+    else if (rate > 0 && eff / rate <= LOW_DAYS) bestsellers.low++;
+    else bestsellers.healthy++;
+  }
+
+  const restock = buy.slice(0, 12).map(toLine);
 
   // ── Transfers (warehouse→branch) ──
   // Equalise days-of-cover across selling branches by moving stock out of the
@@ -544,6 +667,20 @@ export async function buildOwnerReport(
     trend,
     needsAttention,
     restock,
+    bestsellers,
+    topSellers,
+    oosCount: oosAll.length,
+    criticalsCount: criticalsAll.length,
+    upcomingCount: upcomingAll.length,
+    upcomingBudgetKes,
+    upcoming,
+    oosBudgetKes,
+    criticalsBudgetKes,
+    othersBudgetKes,
+    criticals,
+    others,
+    oos,
+    othersCount: othersAll.length,
     restockBudgetKes,
     restockCount: buy.length,
     transfers,

@@ -1,4 +1,5 @@
 import { getTopProducts } from "@/lib/data/sales";
+import type { ReportRange } from "@/lib/data/report-range";
 import { TopEarnersView } from "./top-earners-view";
 
 /**
@@ -15,14 +16,16 @@ export async function TopEarners({
   tenantId,
   currency,
   days,
+  period,
 }: {
   tenantId: string;
   currency: string;
   /** The period the report is set to. Was fixed at 30 with nothing saying so. */
   days: number;
+  period?: ReportRange;
 }) {
   // A few more than the ten shown, so filtering to one class still fills the
   // list rather than leaving three rows under an A-class chip.
-  const rows = await getTopProducts(tenantId, { days, limit: 24 });
-  return <TopEarnersView rows={rows} currency={currency} />;
+  const rows = await getTopProducts(tenantId, { days, limit: 24, period });
+  return <TopEarnersView rows={rows} currency={currency} periodLabel={period?.label ?? `${days} days`} />;
 }

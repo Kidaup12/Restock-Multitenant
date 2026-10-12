@@ -50,7 +50,7 @@ describe.skipIf(!runnable)("impact figures (local db)", () => {
     productIds = [];
     for (const sku of ["P1", "P2", "P3", "P4"]) {
       const p = await prismaService.product.create({
-        data: { tenantId, sku, title: `Product ${sku}`, vendor: "House" },
+        data: { tenantId, sku, title: `Product ${sku}`, vendor: "House", shopifyCreatedAt: new Date(Date.now() - 180 * DAY) },
       });
       productIds.push(p.id);
     }
@@ -60,6 +60,38 @@ describe.skipIf(!runnable)("impact figures (local db)", () => {
     weekB = new Date(thisWeek.getTime() - 7 * DAY);
     weekA = new Date(thisWeek.getTime() - 14 * DAY);
   });
+
+  /**
+   * Prior shelf evidence — MIN_OBSERVED_IN_STOCK_DAYS worth — so these products
+   * already satisfy the dead-stock eligibility gate (isDeadStock) once the
+   * measured weeks begin, without becoming a measured week themselves.
+   *
+   * getImpact's `sinceWeek` is weekStartOf(firstOrder), and firstOrder is
+   * weekA minus one day — a Sunday, which belongs to the week BEFORE weekA, not
+   * weekA's own week. So the window getStockoutTrend must leave untouched is
+   * [sinceWeek, weekA), not just "before weekA": seeding into sinceWeek's own
+   * week would hand getImpact an extra qualifying week there instead of weekA,
+   * shifting which week is "first measured" under it. Ending the block at
+   * sinceWeek clears that whole week, not just weekA's eve.
+   *
+   * Only the tests that assert a dead-stock COUNT need this: the no-order-yet
+   * and too-early tests are about having no measurable history at all, and this
+   * range would itself supply the second qualifying week getStockoutTrend
+   * needs — defeating exactly what those two tests check.
+   */
+  async function seedPriorShelfEvidence() {
+    const sinceWeek = weekStartOf(new Date(+weekA - DAY));
+    await prismaService.inventorySnapshot.createMany({
+      data: Array.from({ length: 14 }, (_, day) =>
+        productIds.map((productId) => ({
+          tenantId,
+          productId,
+          date: new Date(+sinceWeek - (day + 1) * DAY),
+          onHand: 5,
+        }))
+      ).flat(),
+    });
+  }
 
   /** Five nightly snapshots (Mon–Fri) for one week; onHand per product index. */
   async function snapshotWeek(weekStart: Date, onHand: number[]) {
@@ -100,6 +132,7 @@ describe.skipIf(!runnable)("impact figures (local db)", () => {
 
   it("compares the first measured week with the latest, and shows a regression as one", async () => {
     await firstOrder(new Date(weekA.getTime() - DAY));
+    await seedPriorShelfEvidence();
     // Week A: P1's shelf is empty all week — 5 of 20 product-days.
     await snapshotWeek(weekA, [0, 5, 5, 5]);
     // Week B: nothing empty, but P1 now sits there unsold.
@@ -128,6 +161,7 @@ describe.skipIf(!runnable)("impact figures (local db)", () => {
 
   it("ignores an empty shelf when counting dead stock — the same test Today applies", async () => {
     await firstOrder(new Date(weekA.getTime() - DAY));
+    await seedPriorShelfEvidence();
     await snapshotWeek(weekA, [0, 0, 5, 5]);
     await snapshotWeek(weekB, [0, 0, 5, 5]);
 
@@ -138,6 +172,7 @@ describe.skipIf(!runnable)("impact figures (local db)", () => {
 
   it("counts a product that sold inside the window as alive", async () => {
     await firstOrder(new Date(weekA.getTime() - DAY));
+    await seedPriorShelfEvidence();
     await snapshotWeek(weekA, [5, 5, 5, 5]);
     await snapshotWeek(weekB, [5, 5, 5, 5]);
     for (const id of productIds) {
@@ -159,6 +194,7 @@ describe.skipIf(!runnable)("impact figures (local db)", () => {
 
   it("treats a sale older than the window as no sale at all", async () => {
     await firstOrder(new Date(weekA.getTime() - DAY));
+    await seedPriorShelfEvidence();
     await snapshotWeek(weekA, [5, 5, 5, 5]);
     await snapshotWeek(weekB, [5, 5, 5, 5]);
     for (const id of productIds) {

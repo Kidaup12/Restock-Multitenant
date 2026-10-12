@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { SkeletonCard, SkeletonStatTile, SkeletonTableRows } from "@/components/ui/skeleton";
 import {
+  getTenantFeatureOverrides,
   getTenantPlan,
   planAllows,
   planFeatureTier,
@@ -16,13 +17,18 @@ import {
 } from "@/lib/capabilities";
 import {
   clampCoverDays,
+  clampWindowDays,
   COVER_DAY_CHOICES,
   DEFAULT_COVER_DAYS,
+  DEFAULT_WINDOW_DAYS,
   getTransferLocations,
   parseSavedPlansQuery,
+  parseTransferScope,
+  type TransferScope,
 } from "@/lib/data/transfers";
 import { ProposalView } from "./proposal-view";
 import { SavedPlans } from "./saved-plans";
+import { CustomCoverInput } from "./custom-cover-input";
 
 export const metadata: Metadata = {
   title: "Transfers",
@@ -57,15 +63,23 @@ async function TransfersContent({
   canPlan,
   from,
   coverDays,
+  windowDays,
+  scope,
 }: {
   tenantId: string;
   canViewCosts: boolean;
   canPlan: boolean;
   from?: string;
   coverDays: number;
+  windowDays: number;
+  scope: TransferScope;
 }) {
-  const [plan, locations] = await Promise.all([getTenantPlan(tenantId), getTransferLocations(tenantId)]);
-  if (!planAllows(plan, "transfers")) return <LockedTransfers />;
+  const [plan, overrides, locations] = await Promise.all([
+    getTenantPlan(tenantId),
+    getTenantFeatureOverrides(tenantId),
+    getTransferLocations(tenantId),
+  ]);
+  if (!planAllows(plan, "transfers", overrides)) return <LockedTransfers />;
 
   // One location can't distribute to anything — the whole idea needs a second.
   if (locations.length < 2) {
@@ -78,13 +92,23 @@ async function TransfersContent({
   }
 
   const source = locations.find((l) => l.locationId === from) ?? locations[0]!;
-  const query = (next: { from?: string; cover?: number }) =>
-    `/transfers?from=${next.from ?? source.locationId}&cover=${next.cover ?? coverDays}`;
+  const query = (next: { from?: string; cover?: number; window?: number; abc?: string[]; category?: string[] }) => {
+    const params = new URLSearchParams({
+      from: next.from ?? source.locationId,
+      cover: String(next.cover ?? coverDays),
+      window: String(next.window ?? windowDays),
+    });
+    const nextAbc = next.abc ?? scope.abc;
+    const nextCategory = next.category ?? scope.category;
+    if (nextAbc.length > 0) params.set("class", nextAbc.join(","));
+    if (nextCategory.length > 0) params.set("category", nextCategory.join(","));
+    return `/transfers?${params.toString()}`;
+  };
 
   return (
     <div className="space-y-6">
       <Card className="flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-4">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
           <span className="text-2xs font-medium tracking-wider text-ink-muted uppercase">Move from</span>
           <SegmentedNav
             label="Move stock from"
@@ -95,7 +119,7 @@ async function TransfersContent({
             }))}
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
           <span className="text-2xs font-medium tracking-wider text-ink-muted uppercase">Cover target</span>
           <SegmentedNav
             label="Cover target"
@@ -105,11 +129,16 @@ async function TransfersContent({
               active: days === coverDays,
             }))}
           />
+          <CustomCoverInput coverDays={coverDays} hrefFor={(days) => query({ cover: days })} />
+        </div>
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+          <span className="text-2xs font-medium tracking-wider text-ink-muted uppercase">Branch sales window</span>
+          <SegmentedNav label="Branch sales window" items={[30, 60, 90].map(days => ({ href: query({ window: days }), label: `${days}d`, active: days === windowDays }))} />
         </div>
       </Card>
 
       <Suspense
-        key={`${source.locationId}:${coverDays}`}
+        key={`${source.locationId}:${coverDays}:${windowDays}:${scope.abc.join(",")}:${scope.category.join(",")}`}
         fallback={
           <div className="space-y-6">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -128,8 +157,11 @@ async function TransfersContent({
           tenantId={tenantId}
           fromLocationId={source.locationId}
           coverDays={coverDays}
+          windowDays={windowDays}
           canViewCosts={canViewCosts}
           canPlan={canPlan}
+          scope={scope}
+          queryHref={query}
         />
       </Suspense>
     </div>
@@ -139,7 +171,15 @@ async function TransfersContent({
 export default async function TransfersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; cover?: string; q?: string; page?: string }>;
+  searchParams: Promise<{
+    from?: string;
+    cover?: string;
+    window?: string;
+    q?: string;
+    page?: string;
+    class?: string;
+    category?: string;
+  }>;
 }) {
   const session = await requireSession();
   const membership = await activeMembership(session.user.id);
@@ -164,10 +204,13 @@ export default async function TransfersPage({
   const canViewCosts = hasPermission(membership, "view_costs");
   const canPlan = hasPermission(membership, "approve_orders");
   const coverDays = clampCoverDays(params.cover ? Number(params.cover) : DEFAULT_COVER_DAYS);
+  const windowDays = clampWindowDays(params.window ? Number(params.window) : DEFAULT_WINDOW_DAYS);
+  const scope = parseTransferScope(params);
   // The proposal's own state, kept whole across a plan search or page turn.
   const carry = [
     ...(params.from ? [{ name: "from", value: params.from }] : []),
     { name: "cover", value: String(coverDays) },
+    { name: "window", value: String(windowDays) },
   ];
 
   return (
@@ -185,6 +228,8 @@ export default async function TransfersPage({
           canPlan={canPlan}
           from={params.from}
           coverDays={coverDays}
+          windowDays={windowDays}
+          scope={scope}
         />
       </Suspense>
 

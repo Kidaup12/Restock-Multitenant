@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { pathToFileURL } from "node:url";
 import { prismaService } from "../src/client";
+import { looksLikeEmail } from "../src/email";
 import { PLATFORM_TENANT_ID } from "../src/platform-tenant";
 
 /**
@@ -31,7 +32,7 @@ export type BootstrapOutcome =
 
 export async function bootstrapPlatformAdmin(rawEmail: string): Promise<BootstrapOutcome> {
   const email = rawEmail.trim().toLowerCase();
-  if (!/^\S+@\S+\.\S+$/.test(email)) {
+  if (!looksLikeEmail(email)) {
     return { ok: false, error: `"${rawEmail}" is not an email address.` };
   }
 

@@ -69,13 +69,13 @@ const buyList: BuyList = {
   totalCostKes: 2000,
 };
 
-function render(params: string, canBudget = true) {
+function render(params: string, canBudget = true, canViewCosts = true) {
   search = new URLSearchParams(params);
   return renderToStaticMarkup(
     <CurrencyProvider currency="KES">
       <PlanView
         buyList={buyList}
-        canViewCosts
+        canViewCosts={canViewCosts}
         canBudget={canBudget}
         canOverride
         freshness={planFreshnessLabel(buyList.runDate, Date.UTC(2026, 7, 10, 9, 0, 0))}
@@ -85,23 +85,27 @@ function render(params: string, canBudget = true) {
 }
 
 describe("plan modes live in the URL", () => {
-  it("shows the three ways in when no mode is asked for", () => {
+  it("shows exactly the two ways in (budget + recommended) when no mode is asked for", () => {
     const html = render("");
-    expect(html).toContain("Show me what to order");
-    expect(html).toContain("See my ordering calendar");
+    expect(html).toContain("Start with a budget");
+    expect(html).toContain("See recommended purchase");
+    // The ordering calendar is still reachable via ?mode=calendar, but it is no
+    // longer offered on the chooser — the two cards are the whole choice.
+    expect(html).not.toContain("See my ordering calendar");
     expect(html).not.toContain("All plan options");
   });
 
   it("opens the checklist straight from ?mode=list, with a way back", () => {
     const html = render("mode=list");
-    expect(html).not.toContain("Show me what to order, and why");
+    expect(html).not.toContain("See recommended purchase");
     expect(html).toContain("All plan options");
   });
 
   it("opens the calendar from ?mode=calendar", () => {
     const html = render("mode=calendar");
     expect(html).toContain("All plan options");
-    expect(html).not.toContain("See my ordering calendar");
+    // the chooser's calendar LINK is gone once the calendar view is open
+    expect(html).not.toContain("See recommended purchase");
   });
 
   it("ignores a mode the workspace's plan does not include", () => {
@@ -109,12 +113,26 @@ describe("plan modes live in the URL", () => {
     // way past the gate — the server action re-checks too, but the screen
     // should never have rendered it in the first place.
     const html = render("mode=budget", false);
-    expect(html).toContain("Show me what to order");
+    expect(html).toContain("See recommended purchase"); // back on the chooser
     expect(html).not.toContain("All plan options");
   });
 
   it("falls back to the cards for a mode that does not exist", () => {
     const html = render("mode=nonsense");
-    expect(html).toContain("Show me what to order");
+    expect(html).toContain("See recommended purchase");
   });
+});
+
+it.each(["", "mode=budget"])("explains unavailable budget access before opening the form (%s)", (params) => {
+  const html = render(params, true, false);
+  expect(html).toContain("Budget planning needs cost access");
+  expect(html).toContain('aria-disabled="true"');
+  expect(html).toContain("See recommended purchase");
+  expect(html).not.toContain('id="budget-kes"');
+});
+
+it("keeps the recommended purchase list available without cost access", () => {
+  const html = render("mode=list", true, false);
+  expect(html).toContain("All plan options");
+  expect(html).not.toContain("Budget planning needs cost access");
 });

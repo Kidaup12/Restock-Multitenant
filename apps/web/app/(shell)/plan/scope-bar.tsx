@@ -2,6 +2,8 @@
 
 import { Fragment, useMemo, useState } from "react";
 import { ChevronDownIcon } from "@/components/icons";
+import { InfoDot } from "@/components/ui/term";
+import { abcTone } from "@/components/ui/abc-badge";
 import { cn } from "@/lib/cn";
 import type { BuyListRow } from "@/lib/data/plan";
 // The "no value" sentinel is shared with the catalogue facets so scoping to a
@@ -22,83 +24,8 @@ import type { SavedScope } from "./scope-actions";
  * fewer than two values drops out of the bar — nothing to filter by.
  */
 
-/**
- * Lead-band buckets, keyed off the row's resolved lead days:
- * fast ≤7d · medium 8–28d · slow >28d. These are the plan's own restock-speed
- * bands, distinct from the catalogue's speed facet (which splits at 20d).
- */
-export type LeadBand = "fast" | "medium" | "slow";
-
-export const LEAD_BANDS: readonly LeadBand[] = ["fast", "medium", "slow"];
-
-export const LEAD_BAND_LABELS: Record<LeadBand, string> = {
-  fast: "Fast (≤7d)",
-  medium: "Medium (8–28d)",
-  slow: "Slow (>28d)",
-};
-
-export function leadBandFor(leadDays: number): LeadBand {
-  if (leadDays <= 7) return "fast";
-  if (leadDays <= 28) return "medium";
-  return "slow";
-}
-
-/** Active scope: for each dimension, the chosen values (OR within). An empty
- *  array imposes no constraint on that dimension. */
-export type ScopeSelection = {
-  abc: string[];
-  category: string[];
-  supplier: string[];
-  leadBand: LeadBand[];
-};
-
-export const EMPTY_SCOPE: ScopeSelection = {
-  abc: [],
-  category: [],
-  supplier: [],
-  leadBand: [],
-};
-
-export function isScopeActive(sel: ScopeSelection): boolean {
-  return sel.abc.length + sel.category.length + sel.supplier.length + sel.leadBand.length > 0;
-}
-
-/**
- * Does a row satisfy the selection? AND across the four dimensions, OR within
- * each. A dimension with no selection imposes nothing. Null abc/category/
- * supplier match the "none" sentinel, so an owner can scope TO the gaps.
- */
-export function matchesScope(row: BuyListRow, sel: ScopeSelection): boolean {
-  if (sel.abc.length > 0 && !sel.abc.includes(row.abc ?? NONE_VALUE)) return false;
-  if (sel.category.length > 0 && !sel.category.includes(row.category ?? NONE_VALUE)) return false;
-  if (sel.supplier.length > 0 && !sel.supplier.includes(row.supplierName ?? NONE_VALUE)) return false;
-  if (sel.leadBand.length > 0 && !sel.leadBand.includes(leadBandFor(row.leadDays))) return false;
-  return true;
-}
-
-/**
- * What the planner's "Urgent only" lens keeps.
- *
- * One predicate, so the checklist, the decision header above it and anything
- * exported from the screen cannot disagree about which rows are urgent.
- *
- * It lives here rather than in `lib/data/plan` because the planner is a client
- * component: importing a VALUE from that module pulls `prismaForTenant` — and
- * with it the Prisma clients, which throw on a missing SERVICE_DATABASE_URL —
- * into the browser bundle, and the page dies before it hydrates. Types are
- * erased and stay fine; values do not.
- */
-export function isUrgentRow(row: Pick<BuyListRow, "urgency">): boolean {
-  return row.urgency === "critical" || row.urgency === "high";
-}
-
-/** Pure row filter — the checklist renders the result. Extracted so the AND/OR
- *  logic is unit-tested without React. No selection short-circuits to the input
- *  list (same reference), so an unfiltered plan is untouched. */
-export function filterBuyListRows(rows: BuyListRow[], sel: ScopeSelection): BuyListRow[] {
-  if (!isScopeActive(sel)) return rows;
-  return rows.filter((row) => matchesScope(row, sel));
-}
+import { LEAD_BANDS, LEAD_BAND_LABELS, leadBandFor, EMPTY_SCOPE, isScopeActive, type LeadBand, type ScopeSelection } from "./scope";
+export { LEAD_BANDS, LEAD_BAND_LABELS, leadBandFor, EMPTY_SCOPE, isScopeActive, parseScopeFromParams, scopeToParams, SCOPE_PARAM_NAMES, matchesScope, isUrgentRow, filterBuyListRows, type LeadBand, type ScopeSelection } from "./scope";
 
 type ScopeDimension = keyof ScopeSelection;
 type Option = { value: string; label: string; count: number };
@@ -167,6 +94,62 @@ const DIMENSIONS: { key: ScopeDimension; label: string }[] = [
   { key: "supplier", label: "Supplier" },
   { key: "leadBand", label: "Lead time" },
 ];
+
+/**
+ * How a chip is tinted when it is NOT selected — a wash of its own colour so the
+ * dimension reads at a glance, matching the tinted `Badge`/`AbcBadge` chips the
+ * rest of the plan uses. The selected state stays the shared accent-soft "on"
+ * look for every dimension, so "which are chosen" is never ambiguous.
+ */
+type ChipTint = { off: string };
+
+/** ABC uses the same tone the AbcBadge does: A is what the shop leans on
+ *  (loudest), B the mid warning, C the quiet tail. */
+const ABC_TINT: Record<"critical" | "warning" | "neutral", string> = {
+  critical: "border-critical/20 bg-critical/10 text-critical hover:bg-critical/15",
+  warning: "border-warning/20 bg-warning/10 text-warning hover:bg-warning/15",
+  neutral: "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink",
+};
+
+/** Fast is good news (green), slow is the watch-item (amber) — the same
+ *  reading the rest of the app gives speed. Medium stays the plain accent
+ *  wash: neither a flag nor a reassurance, just the middle. Left un-tinted
+ *  before, this row was the one flat-grey band sitting next to ABC's colour,
+ *  which is what made the whole filter bar read unfinished. */
+const LEAD_BAND_TINT: Record<LeadBand, string> = {
+  fast: "border-positive/20 bg-positive/10 text-positive hover:bg-positive/15",
+  medium: "border-accent-200 bg-accent-soft text-accent-ink hover:bg-accent-soft/70",
+  slow: "border-warning/20 bg-warning/10 text-warning hover:bg-warning/15",
+};
+
+/** A small fixed palette for category chips — each value lands on a stable tint
+ *  (same value, same colour every render and everywhere it appears), with the
+ *  neutral accent-soft wash as the fallback when the hash lands there. */
+const CATEGORY_TINTS: string[] = [
+  "border-accent-200 bg-accent-soft text-accent-ink hover:bg-accent-soft/70",
+  "border-positive/20 bg-positive/10 text-positive hover:bg-positive/15",
+  "border-warning/20 bg-warning/10 text-warning hover:bg-warning/15",
+  "border-critical/20 bg-critical/10 text-critical hover:bg-critical/15",
+];
+
+/** Stable string hash → a category's tint index. Deterministic, so a category
+ *  keeps its colour across renders and screens. */
+function categoryTint(value: string): string {
+  let h = 0;
+  for (let i = 0; i < value.length; i += 1) h = (h * 31 + value.charCodeAt(i)) >>> 0;
+  return CATEGORY_TINTS[h % CATEGORY_TINTS.length]!;
+}
+
+/** The tint for one chip in a dimension. ABC keys off the class, category off a
+ *  stable hash, lead band off fast/medium/slow; supplier (the one dimension
+ *  with no fixed, small vocabulary) keeps the plain neutral chip. */
+function tintFor(key: ScopeDimension, value: string): ChipTint | undefined {
+  if (value === NONE_VALUE) return undefined; // the gap chips stay neutral
+  if (key === "abc") return { off: ABC_TINT[abcTone(value)] };
+  if (key === "category") return { off: categoryTint(value) };
+  if (key === "leadBand") return { off: LEAD_BAND_TINT[value as LeadBand] };
+  return undefined;
+}
 
 export function ScopeBar({
   rows,
@@ -244,6 +227,7 @@ export function ScopeBar({
               ? `· ${activeCount} on`
               : `(${activeDims.map((d) => d.label).join(" · ")})`}
           </span>
+          <InfoDot hint="Narrow the buy list by class, category, supplier and lead time. Filtering is AND across dimensions and OR within one — a row shows when it matches every dimension you've picked a value in." />
           <ChevronDownIcon className={cn("size-3.5 transition-transform", open && "rotate-180")} />
         </button>
 
@@ -353,6 +337,7 @@ export function ScopeBar({
                 label={key === "abc" && opt.value !== NONE_VALUE ? `Class ${opt.label}` : opt.label}
                 count={opt.count}
                 on={chosen.includes(opt.value)}
+                tint={tintFor(key, opt.value)}
                 onClick={() => toggle(key, opt.value)}
               />
             ))}
@@ -396,16 +381,20 @@ export function ScopeBar({
 }
 
 /** One filter value. Carries its count so a reader can see what narrowing costs
- *  before they click it. */
+ *  before they click it. A `tint` gives the unselected chip a wash of its own
+ *  colour (ABC class, category); selected always reads as the shared accent-soft
+ *  "on" so "which are chosen" stays unambiguous. */
 function ScopeChip({
   label,
   count,
   on,
+  tint,
   onClick,
 }: {
   label: string;
   count: number;
   on: boolean;
+  tint?: ChipTint;
   onClick: () => void;
 }) {
   return (
@@ -417,7 +406,7 @@ function ScopeChip({
         "rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
         on
           ? "border-accent-200 bg-accent-soft text-accent-ink"
-          : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink"
+          : (tint?.off ?? "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink")
       )}
     >
       {label}

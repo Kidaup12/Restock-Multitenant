@@ -2,9 +2,11 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { formatNumber } from "@/lib/money";
 import { EmptyState } from "@/components/ui/empty-state";
 import { StatTile } from "@/components/ui/stat-tile";
+import { Pager } from "@/components/ui/pager";
 import {
   Table,
   TableBody,
@@ -13,9 +15,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { getDistributionProposal, type RateBasis } from "@/lib/data/transfers";
+import {
+  EMPTY_TRANSFER_SCOPE,
+  getDistributionProposal,
+  PROPOSAL_PAGE_SIZE,
+  type RateBasis,
+  type TransferScope,
+} from "@/lib/data/transfers";
 import { SavePlanBar } from "./save-plan-bar";
 import { TransfersExportBar } from "./transfers-export";
+import { TransferScopeChips } from "./transfer-scope-chips";
 
 /**
  * The live proposal: what to move out of the chosen source today, and why. The
@@ -46,21 +55,37 @@ export async function ProposalView({
   tenantId,
   fromLocationId,
   coverDays,
+  windowDays,
   canViewCosts,
   canPlan,
+  scope = EMPTY_TRANSFER_SCOPE,
+  page = 0,
+  queryHref = () => "/transfers",
 }: {
   tenantId: string;
   fromLocationId: string;
   coverDays: number;
+  windowDays?: number;
   canViewCosts: boolean;
   canPlan: boolean;
+  scope?: TransferScope;
+  page?: number;
+  /** Builds a full /transfers URL for the given overrides, carrying the
+   *  screen's other state (source, cover, window) — the same href-builder the
+   *  page uses for its own pills. Omitted only by callers with no filter/page
+   *  UI of their own (e.g. a test rendering the view directly) — the chips and
+   *  pager still need SOME href, even if that caller never follows it. */
+  queryHref?: (next: { abc?: string[]; category?: string[]; page?: number }) => string;
 }) {
   // canViewCosts flows into the query, so the value figures come back null for a
   // money-blind member and never reach the payload the client bar serializes.
   const proposal = await getDistributionProposal(tenantId, {
     fromLocationId,
     coverDays,
+    windowDays,
     canViewCosts,
+    scope,
+    page,
   });
 
   if (!proposal) {
@@ -72,16 +97,34 @@ export async function ProposalView({
     );
   }
 
-  if (proposal.lines.length === 0) {
+  const scopeChips = (
+    <TransferScopeChips
+      facets={proposal.scopeFacets}
+      selection={scope}
+      hrefFor={(next) => queryHref({ ...next, page: 0 })}
+    />
+  );
+
+  if (proposal.matchedCount === 0) {
     return (
-      <EmptyState
-        title="Nothing to move"
-        description={`Every branch already has ${proposal.coverDays} days of cover on what ${proposal.fromLocationName} holds, or the branches that are short sell nothing yet.`}
-      />
+      <div className="space-y-4">
+        {scopeChips}
+        <EmptyState
+          title="Nothing to move"
+          description={
+            scope.abc.length > 0 || scope.category.length > 0
+              ? "No products in this filter need moving right now. Clear a filter to see the full proposal."
+              : `Every branch already has ${proposal.coverDays} days of cover on what ${proposal.fromLocationName} holds, or the branches that are short sell nothing yet.`
+          }
+        />
+      </div>
     );
   }
 
-  const bases = new Set(proposal.lines.map((l) => l.rateBasis));
+  // The basis badge describes the WHOLE plan's honesty, not just the page on
+  // screen — a plan that is "mixed" overall must not read as purely
+  // "measured" just because page 2 happens to be all-attributed lines.
+  const bases = new Set(proposal.allMatchedLines.map((l) => l.rateBasis));
   const basis: HeaderBasis = bases.size === 1 ? [...bases][0]! : "mixed";
 
   return (
@@ -95,7 +138,7 @@ export async function ProposalView({
         <StatTile
           label="Products"
           value={formatNumber(proposal.skuCount)}
-          delta={{ label: `${proposal.lines.length} lines to pick`, tone: "neutral" }}
+          delta={{ label: `${proposal.matchedCount} lines to pick`, tone: "neutral" }}
         />
         <StatTile
           label="Destinations"
@@ -108,6 +151,8 @@ export async function ProposalView({
           delta={{ label: "at unit cost", tone: "neutral" }}
         />
       </div>
+
+      {scopeChips}
 
       <Card>
         <CardHeader
@@ -136,23 +181,27 @@ export async function ProposalView({
         )}
 
         <div className="pb-2">
-          <Table dense>
+          <Table dense boxed>
             <TableHeader>
               <TableHead>Product</TableHead>
               <TableHead>SKU</TableHead>
               <TableHead>To</TableHead>
-              <TableHead numeric>Move</TableHead>
               <TableHead numeric>Sells/day</TableHead>
               <TableHead numeric>Cover</TableHead>
               <TableHead numeric>Value</TableHead>
+              <TableHead>Class</TableHead>
+              <TableHead numeric>Source stock</TableHead>
+              <TableHead numeric>Branch stock</TableHead>
+              <TableHead numeric>Move</TableHead>
             </TableHeader>
             <TableBody>
               {proposal.lines.map((line) => (
                 <TableRow key={`${line.productId}:${line.toLocationId}`}>
-                  <TableCell className="font-medium text-ink">{line.title}</TableCell>
+                  <TableCell className="max-w-80 font-medium whitespace-normal wrap-break-word text-ink">
+                    {line.title}
+                  </TableCell>
                   <TableCell className="font-mono text-xs">{line.sku}</TableCell>
                   <TableCell>{line.toLocationName}</TableCell>
-                  <TableCell numeric>{formatNumber(line.qty)}</TableCell>
                   <TableCell numeric>{line.toRunRate.toFixed(2)}</TableCell>
                   <TableCell numeric>
                     <span className="text-ink-muted">{line.toDaysCoverBefore}d</span>
@@ -162,15 +211,33 @@ export async function ProposalView({
                   <TableCell numeric>
                     <CostValue amount={line.valueKes} canViewCosts={canViewCosts} />
                   </TableCell>
+                  <TableCell>
+                    <AbcBadge value={line.abc} />
+                  </TableCell>
+                  <TableCell numeric>{formatNumber(line.fromOnHand)}</TableCell>
+                  <TableCell numeric>{formatNumber(line.toOnHand)}</TableCell>
+                  <TableCell numeric>{formatNumber(line.qty)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
+          {proposal.pageCount > 1 && (
+            <Pager
+              page={proposal.page}
+              pageCount={proposal.pageCount}
+              from={proposal.page * PROPOSAL_PAGE_SIZE + 1}
+              to={proposal.page * PROPOSAL_PAGE_SIZE + proposal.lines.length}
+              total={proposal.matchedCount}
+              pageHref={(next) => queryHref({ page: next })}
+              label="Transfer proposal pages"
+              unit="lines"
+            />
+          )}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-edge px-5 py-4">
           <TransfersExportBar
-            rows={proposal.lines}
+            rows={proposal.allMatchedLines}
             canViewCosts={canViewCosts}
             fromLocationName={proposal.fromLocationName}
             coverDays={proposal.coverDays}
@@ -180,6 +247,7 @@ export async function ProposalView({
             fromLocationName={proposal.fromLocationName}
             coverDays={proposal.coverDays}
             canPlan={canPlan}
+            windowDays={proposal.windowDays}
           />
         </div>
       </Card>

@@ -64,9 +64,9 @@ export const SUB_PROCESSORS = [
     region: "United States",
   },
   {
-    name: "Resend",
-    purpose: "Transactional email — invites, password resets, weekly summaries",
-    region: "United States",
+    name: "Brevo",
+    purpose: "Transactional email: invites, password resets, weekly summaries",
+    region: "European Union (France)",
   },
   {
     name: "Shopify",

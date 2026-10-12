@@ -4,8 +4,10 @@ import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Card, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { AbcBadge } from "@/components/ui/abc-badge";
 import { CostValue } from "@/components/ui/cost-value";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Input } from "@/components/ui/input";
 import { BoxIcon } from "@/components/icons";
 import {
   Table,
@@ -15,11 +17,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ClientPager } from "@/components/ui/pager";
 import { cn } from "@/lib/cn";
-import { formatNumber } from "@/lib/money";
+import { formatNumber, formatRunRate } from "@/lib/money";
 import type { CatalogueRow } from "@/lib/data/stock";
 import type { DashboardTab, DashboardTable } from "@/lib/data/today";
 import { DeadStockExportBar } from "./dead-stock-export";
+import { UnsoldStockExport } from "@/components/inventory/unsold-export";
+import { UNSOLD_STATUS_LABELS } from "@/lib/inventory/unsold-labels";
+import { CostFixer } from "../plan/cost-fixer";
 
 /**
  * The morning's products, in the five piles worth looking at, with the four
@@ -39,6 +45,7 @@ const TABS: { key: DashboardTab; label: string }[] = [
   // Their label, and the clearer one: "Dead" alone reads as a verdict on the
   // product rather than on the money sitting in it.
   { key: "dead", label: "Dead stock" },
+  { key: "unsold", label: "Unsold" },
   { key: "all", label: "All" },
 ];
 
@@ -46,9 +53,12 @@ const EMPTY: Record<DashboardTab, string> = {
   stockout: "Nothing is out of stock.",
   reorder: "Nothing needs reordering right now.",
   onway: "Nothing is on its way in.",
-  dead: "No stock is sitting unsold.",
+  dead: "No stock currently meets the dead-stock rules.",
+  unsold: "Every stocked product has a recorded sale.",
   all: "No products yet.",
 };
+
+export const UNSOLD_REASON_LABELS = UNSOLD_STATUS_LABELS;
 
 function eta(date: Date | null): string {
   if (!date) return "no ETA";
@@ -122,19 +132,43 @@ function KpiCard({
 export function ProductTabs({
   data,
   canViewCosts,
+  canOverride = false,
   trend,
 }: {
   data: DashboardTable;
   canViewCosts: boolean;
+  /** Whether this caller can act on cost/price (approve_orders), the same gate
+   *  the Plan page's CostFixer uses. Without it the missing-cost notice only
+   *  links out to the product page. Defaults false so every existing test
+   *  fixture that doesn't pass it keeps today's link-out behaviour. */
+  canOverride?: boolean;
   /** The revenue chart, rendered on the server and placed here so it can sit
    *  beside the health list without either needing the other's data. */
   trend: ReactNode;
 }) {
   const [tab, setTab] = useState<DashboardTab>("stockout");
-  const rows = data.rows[tab];
+  const [unsoldSearch, setUnsoldSearch] = useState("");
+  const [fixedIds, setFixedIds] = useState<Set<string>>(new Set());
+  // Twenty rows is the table's whole concern — the pager lives purely in this
+  // component's state, never the URL (nothing here is a page worth linking
+  // to). Reset to 0 whenever the underlying row set changes shape: a new tab,
+  // or a search that narrows (or widens) the unsold list — otherwise sitting
+  // on page 3 of "dead" and switching to a 1-page "onway" shows an empty table.
+  const [page, setPage] = useState(0);
+  function selectTab(next: DashboardTab) {
+    setTab(next);
+    setPage(0);
+  }
+  const rows = tab === "unsold" && unsoldSearch.trim()
+    ? data.rows.unsold.filter(row => `${row.title} ${row.sku} ${row.vendor ?? ""}`.toLowerCase().includes(unsoldSearch.trim().toLowerCase()))
+    : data.rows[tab];
+  const PAGE_SIZE = 20;
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageRows = rows.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
 
   const health: { label: string; count: number; key: DashboardTab; tone: string }[] = [
-    { label: "Healthy cover", count: data.healthy, key: "all", tone: "text-positive" },
+    { label: "Other stocked products", count: data.healthy, key: "all", tone: "text-ink-muted" },
     { label: "Stockouts", count: data.counts.stockout, key: "stockout", tone: "text-negative" },
     { label: "Reorder needed", count: data.counts.reorder, key: "reorder", tone: "text-warning" },
     { label: "On the way", count: data.counts.onway, key: "onway", tone: "text-accent-ink" },
@@ -144,6 +178,7 @@ export function ProductTabs({
       key: "dead",
       tone: "text-ink-muted",
     },
+    { label: "Unsold · no recorded sales", count: data.counts.unsold, key: "unsold", tone: "text-ink-muted" },
   ];
 
   return (
@@ -155,7 +190,7 @@ export function ProductTabs({
           hint="the shelf is empty"
           tone={data.counts.stockout > 0 ? "negative" : undefined}
           active={tab === "stockout"}
-          onSelect={() => setTab("stockout")}
+          onSelect={() => selectTab("stockout")}
         />
         <KpiCard
           label="Reorders needed"
@@ -163,7 +198,7 @@ export function ProductTabs({
           hint={`of ${formatNumber(data.counts.all)} tracked`}
           tone={data.counts.reorder > 0 ? "warning" : undefined}
           active={tab === "reorder"}
-          onSelect={() => setTab("reorder")}
+          onSelect={() => selectTab("reorder")}
         />
         <KpiCard
           label="On the way"
@@ -171,7 +206,7 @@ export function ProductTabs({
           hint="inbound to the shelf"
           tone="accent"
           active={tab === "onway"}
-          onSelect={() => setTab("onway")}
+          onSelect={() => selectTab("onway")}
         />
         <KpiCard
           label="Dead stock"
@@ -189,9 +224,24 @@ export function ProductTabs({
           hint={`${formatNumber(data.counts.dead)} SKUs, no sale in ${data.deadWindowDays} days`}
           tone={canViewCosts && data.counts.dead > 0 ? "warning" : undefined}
           active={tab === "dead"}
-          onSelect={() => setTab("dead")}
+          onSelect={() => selectTab("dead")}
         />
       </div>
+
+      <Card className="p-4 sm:p-5">
+        <button type="button" aria-pressed={tab === "unsold"} onClick={() => selectTab("unsold")}
+          className="flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded text-left hover:text-accent-ink">
+          <span className="min-w-0">
+            <span className="block font-semibold">Unsold · {formatNumber(data.counts.unsold)} stocked products</span>
+            <span className="mt-1 block text-sm text-ink-muted">No recorded positive sales. View the full list →</span>
+          </span>
+          {canViewCosts && <span className="text-right font-mono text-xl font-semibold">
+            <CostValue amount={data.unsoldSummary.costKes} canViewCosts={canViewCosts} compact />
+            <span className="block font-sans text-xs font-normal text-ink-muted">stock value at cost</span>
+          </span>}
+        </button>
+        <p className="mt-3 text-sm text-ink-muted">Recent product records, including recently imported records, may still be in the 60-day grace period. Others need more stock history or a known age before they qualify as dead stock. This list includes any products already counted as dead stock; the two values should not be added together.</p>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1.4fr_1fr]">
         {trend}
@@ -205,7 +255,7 @@ export function ProductTabs({
               <button
                 key={row.label}
                 type="button"
-                onClick={() => setTab(row.key)}
+                onClick={() => selectTab(row.key)}
                 aria-pressed={tab === row.key}
                 className={cn(
                   "flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition-colors",
@@ -228,7 +278,7 @@ export function ProductTabs({
             <button
               key={t.key}
               type="button"
-              onClick={() => setTab(t.key)}
+              onClick={() => selectTab(t.key)}
               aria-pressed={tab === t.key}
               className={cn(
                 "flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
@@ -255,15 +305,70 @@ export function ProductTabs({
               <DeadStockExportBar rows={data.deadStockExport} canViewCosts={canViewCosts} />
             </div>
           )}
+          {tab === "unsold" && <div className="ml-auto">
+            <UnsoldStockExport rows={rows} reasons={data.unsoldReasons} canViewCosts={canViewCosts} />
+          </div>}
         </div>
+
+        {tab === "unsold" && <div className="space-y-2 px-5 pt-4">
+          <Input aria-label="Search unsold products" placeholder="Search unsold products by name, SKU or brand" value={unsoldSearch} onChange={event => { setUnsoldSearch(event.target.value); setPage(0); }} className="w-full sm:max-w-md" />
+          <p className="text-sm text-ink-muted">Showing {formatNumber(rows.length)} of {formatNumber(data.counts.unsold)} stocked products with no recorded sale. Every matching product is included; page through below to see the full list.</p>
+        </div>}
+
+        {/* The run sizes these too — never held back for a missing supplier,
+            only for unit economics it can't reason about. Shown on Reorder so
+            "why isn't this stockout here" has an answer instead of a silent
+            omission; fix the cost on the product, not the supplier. The fixer
+            is inline here (not just a link to the product page) because the
+            whole point of the card is that fixing a cost should take one
+            click, not a navigation. */}
+        {tab === "reorder" && data.missingCostCount > 0 && (() => {
+          const remaining = data.missingCostRows.filter(row => !fixedIds.has(row.productId));
+          const remainingCount = data.missingCostCount - fixedIds.size;
+          if (remainingCount <= 0) return null;
+          return (
+            <div className="mx-5 mt-4 rounded-lg border-2 border-warning bg-warning-soft p-4 text-sm shadow-sm">
+              <p className="font-semibold text-warning">
+                {formatNumber(remainingCount)} more product{remainingCount === 1 ? "" : "s"} need{remainingCount === 1 ? "s" : ""} a cost before they can be forecasted
+              </p>
+              <p className="mt-1 text-ink-muted">Missing or broken cost data — these are not on this list until the number is fixed, whether or not a supplier is set.</p>
+              <ul className="mt-3 space-y-2">
+                {remaining.slice(0, 6).map(row => (
+                  <li key={row.productId} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 rounded-md bg-surface-1/70 px-3 py-2">
+                    <span className="min-w-0">
+                      <Link href={`/products/${row.productId}`} className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent">
+                        {row.title}
+                      </Link>
+                      <span className="ml-1.5 font-mono text-xs text-ink-muted">{row.sku}</span>
+                    </span>
+                    {canOverride && canViewCosts ? (
+                      <CostFixer
+                        productId={row.productId}
+                        plannable={row.plannable}
+                        onFixed={() => setFixedIds(prev => new Set(prev).add(row.productId))}
+                      />
+                    ) : (
+                      <Link href={`/products/${row.productId}`} className="text-xs font-medium text-accent-ink hover:underline">
+                        Fix cost →
+                      </Link>
+                    )}
+                  </li>
+                ))}
+                {remainingCount > 6 && (
+                  <li className="px-3 text-ink-muted">+{formatNumber(remainingCount - 6)} more</li>
+                )}
+              </ul>
+            </div>
+          );
+        })()}
 
         <div className="mt-3 pb-2">
           {rows.length === 0 ? (
             <div className="px-5 pb-4">
-              <EmptyState icon={<BoxIcon />} title={EMPTY[tab]} />
+              <EmptyState icon={<BoxIcon />} title={tab === "unsold" && unsoldSearch.trim() ? "No unsold products match this search." : EMPTY[tab]} />
             </div>
           ) : (
-            <Table>
+            <Table boxed>
               <TableHeader>
                 <TableHead>Product</TableHead>
                 {tab === "onway" ? (
@@ -271,10 +376,12 @@ export function ProductTabs({
                     <TableHead numeric>Incoming</TableHead>
                     <TableHead>Arrives</TableHead>
                     <TableHead numeric>Stock now</TableHead>
+                    <TableHead numeric>Sells/day</TableHead>
                   </>
-                ) : tab === "dead" ? (
+                ) : tab === "dead" || tab === "unsold" ? (
                   <>
                     <TableHead numeric>Stock</TableHead>
+                    {tab === "unsold" ? <TableHead>Dead-stock status</TableHead> : <TableHead numeric>Sells/day</TableHead>}
                     <TableHead numeric>Cost / unit</TableHead>
                     <TableHead numeric>Capital tied up</TableHead>
                   </>
@@ -288,9 +395,9 @@ export function ProductTabs({
                 )}
               </TableHeader>
               <TableBody>
-                {rows.map((row) => (
+                {pageRows.map((row) => (
                   <TableRow key={row.productId}>
-                    <TableCell>
+                    <TableCell className="min-w-48 max-w-80 whitespace-normal wrap-break-word">
                       <Link
                         href={`/products/${row.productId}`}
                         className="font-medium text-ink hover:underline"
@@ -303,11 +410,7 @@ export function ProductTabs({
                             groups an order; a SKU code alone is the one thing
                             on the row nobody knows by heart. */}
                         {row.vendor && <span className="font-sans">· {row.vendor}</span>}
-                        {row.abc && (
-                          <Badge tone="neutral" className="font-sans">
-                            {row.abc}
-                          </Badge>
-                        )}
+                        <AbcBadge value={row.abc} />
                         {(() => {
                           const s = standing(row);
                           return s ? (
@@ -323,10 +426,12 @@ export function ProductTabs({
                         <TableCell numeric>{formatNumber(row.onOrderUnits)}</TableCell>
                         <TableCell>{eta(row.expectedArrivalAt)}</TableCell>
                         <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
+                        <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
                       </>
-                    ) : tab === "dead" ? (
+                    ) : tab === "dead" || tab === "unsold" ? (
                       <>
                         <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
+                        {tab === "unsold" ? <TableCell className="max-w-64 whitespace-normal">{UNSOLD_REASON_LABELS[data.unsoldReasons[row.productId]]}</TableCell> : <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>}
                         <TableCell numeric>
                           <CostValue amount={row.costKes} canViewCosts={canViewCosts} />
                         </TableCell>
@@ -337,11 +442,7 @@ export function ProductTabs({
                     ) : (
                       <>
                         <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
-                        <TableCell numeric>
-                          {/* Same presentation as the catalogue: two places, and a
-                              dash rather than 0.00 for something that is not moving. */}
-                          {row.runRate > 0 ? row.runRate.toFixed(2) : "—"}
-                        </TableCell>
+                        <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
                         <TableCell numeric>{daysLeft(row)}</TableCell>
                         <TableCell numeric>
                           {row.onOrderUnits > 0 ? formatNumber(row.onOrderUnits) : "—"}
@@ -352,6 +453,17 @@ export function ProductTabs({
                 ))}
               </TableBody>
             </Table>
+          )}
+          {pageCount > 1 && (
+            <ClientPager
+              page={currentPage}
+              pageCount={pageCount}
+              from={currentPage * PAGE_SIZE + 1}
+              to={currentPage * PAGE_SIZE + pageRows.length}
+              total={rows.length}
+              onPage={setPage}
+              label={`${TABS.find((t) => t.key === tab)?.label ?? "Products"} pages`}
+            />
           )}
         </div>
       </Card>

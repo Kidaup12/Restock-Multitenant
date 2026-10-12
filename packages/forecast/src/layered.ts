@@ -13,6 +13,7 @@
 import {
   weightedDailyRateAdjusted,
   weightedDailyRateCensored,
+  weightedDailyRateMedianCensored,
   censoredDaysInWindow,
   blockedDaysInWindow,
   dayKeyOf,
@@ -27,6 +28,7 @@ import {
   urgencyFromDays,
   zForServiceLevel,
   type SalesPoint,
+  type BaselineMethod,
   type Urgency,
 } from "./baseline";
 import {
@@ -47,6 +49,7 @@ import {
   shelfWasMostlyEmpty,
 } from "./rate-floor";
 import type { AbcCategory } from "./abc";
+import { debulkSeries } from "./big-buyer";
 
 export type ActivePromo = {
   discountPct: number;
@@ -125,6 +128,9 @@ export type ForecastInput = {
   demandOverride?: DemandOverride | null;
   /** Which demand method to run — the champion for this product's class. */
   demandMethod?: DemandMethod;
+  /** Explicit owner aggregation; median takes precedence over the audition. */
+  baselineMethod?: BaselineMethod;
+  bigBuyerDamping?: boolean;
 };
 
 /** No forecast may exceed this multiple of the product's best trailing month.
@@ -235,8 +241,14 @@ export function demandRateFor(
   method: DemandMethod,
   history: SalesPoint[],
   today: Date,
-  opts?: { stockoutDates?: Date[]; excludedDates?: Date[]; snapshotsSince?: Date }
+  opts?: { stockoutDates?: Date[]; excludedDates?: Date[]; snapshotsSince?: Date; baselineMethod?: BaselineMethod; bigBuyerDamping?: boolean }
 ): number {
+  today = new Date(dayKeyOf(today));
+  history = history.filter(p => p.date < today);
+  if (opts?.bigBuyerDamping) history = debulkSeries(history, { asOf: today, excludedDates: opts.excludedDates }).series;
+  if (opts?.baselineMethod === "median") {
+    return runRateDaily(history, today, opts.stockoutDates, opts.excludedDates, opts.snapshotsSince, "median");
+  }
   if (method === "recent_heavy") {
     return rateOverWindow(
       history,
@@ -260,12 +272,20 @@ export function runRateDaily(
   today: Date,
   stockoutDates?: Date[],
   excludedDates?: Date[],
-  snapshotsSince?: Date
+  snapshotsSince?: Date,
+  baselineMethod: BaselineMethod = "mean",
+  bigBuyerDamping = false
 ): number {
+  today = new Date(dayKeyOf(today));
+  history = history.filter(p => p.date < today);
+  if (bigBuyerDamping) history = debulkSeries(history, { asOf: today, excludedDates }).series;
   const span = historySpanDays(history, today);
   if (span < NEW_PRODUCT_DAYS) {
     const window = Math.min(30, Math.max(7, Math.ceil(span)));
     return rateOverWindow(history, today, window, stockoutDates, excludedDates);
+  }
+  if (baselineMethod === "median") {
+    return weightedDailyRateMedianCensored(history, stockoutDates ?? [], today, excludedDates, snapshotsSince);
   }
   return stockoutDates?.length || snapshotsSince
     ? weightedDailyRateCensored(history, stockoutDates ?? [], today, excludedDates, snapshotsSince)
@@ -310,21 +330,27 @@ function activePromoLift(
 
 export function layeredForecast(input: ForecastInput): ForecastResult {
   const today = anchorToday(input.runDateKey);
-  const span = historySpanDays(input.history, today);
+  const bulk = debulkSeries(input.history, { asOf: today, excludedDates: input.excludedDates });
+  // Clean the demand evidence once for every model calculation, including
+  // variability and serving floors. Keep original evidence for visible flags.
+  const demandHistory = (input.bigBuyerDamping ? bulk.series : input.history).filter(p => p.date < today);
+  const span = historySpanDays(demandHistory, today);
   const isNew = span < NEW_PRODUCT_DAYS;
-  const hasHistory = input.history.length > 0;
+  const hasHistory = demandHistory.length > 0;
 
   const override = input.demandOverride ?? null;
 
   // ── Layer 1: recency-weighted run rate (or an external demand override) ────
   const rawHistoryDailyRate = demandRateFor(
     input.demandMethod ?? CHAMPION_DEFAULT,
-    input.history,
+    demandHistory,
     today,
     {
       stockoutDates: input.stockoutDates,
       excludedDates: input.excludedDates,
       snapshotsSince: input.snapshotsSince,
+      baselineMethod: input.baselineMethod,
+      bigBuyerDamping: false, // already cleaned above; never clean the result again
     }
   );
   // ABC-class rate floor: a bestseller stocked out for most of the window can
@@ -334,7 +360,7 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   // at its computed rate and the dead-stock guard below still fires on it.
   const floorWindowStart = new Date(today);
   floorWindowStart.setUTCDate(floorWindowStart.getUTCDate() - 30);
-  const hadRecentSales = input.history.some((p) => p.quantity > 0 && p.date >= floorWindowStart);
+  const hadRecentSales = demandHistory.some((p) => p.quantity > 0 && p.date >= floorWindowStart);
   // ...and only when the shelf really was empty. Without this the floor fired on
   // any product that had sold once in a month, so a fully-stocked line selling
   // 0.09/day was served at 0.4 — demand it has never shown, ordered over a lead
@@ -350,7 +376,7 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
       ? input.abcCategory
       : null;
   const abcFloor = abcFloorFor(abcForFloor, hadRecentSales, shelfMostlyEmpty);
-  const demonstrated = demonstratedDailyRate(input.history);
+  const demonstrated = demonstratedDailyRate(demandHistory);
   const historyDailyRate = applyAbcRateFloor(
     rawHistoryDailyRate,
     abcForFloor,
@@ -376,8 +402,8 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   last30.setUTCDate(last30.getUTCDate() - 30);
   const last90 = new Date(today);
   last90.setUTCDate(last90.getUTCDate() - 90);
-  const recent = input.history.filter((p) => p.date >= last30);
-  const last90Pts = input.history.filter((p) => p.date >= last90);
+  const recent = demandHistory.filter((p) => p.date >= last30);
+  const last90Pts = demandHistory.filter((p) => p.date >= last90);
   const meanRecent = recent.length > 0 ? recent.reduce((s, p) => s + p.quantity, 0) / recent.length : 0;
   const std90 = standardDeviation(last90Pts.map((p) => p.quantity));
   const cv = meanRecent > 0 ? std90 / meanRecent : 1.0;
@@ -390,6 +416,14 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   //    season of history to learn from. An explicit "20% off next week" is
   //    knowledge, not a guess, so it lifts the forecast; the cap still bounds it.
   const signals: Signal[] = [];
+  const bulkDays = bulk.caps;
+  if (bulkDays.length) {
+    signals.push({
+      label: `${bulkDays.length} possible bulk-sale day${bulkDays.length === 1 ? "" : "s"} (daily totals, not confirmed single buyers)${input.bigBuyerDamping && !override ? "; baseline damping enabled" : ""}`,
+      deltaPct: 0,
+      emoji: "📦",
+    });
+  }
   let boosted = layer1;
 
   // Promo lift and the runaway cap apply to a history-derived number only. An
@@ -427,7 +461,7 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
 
   // ── Safety cap: never exceed capMultiple x the best trailing month ────────
   const capMultiple = input.capMultiple ?? DEFAULT_CAP_MULTIPLE;
-  const best = bestTrailingMonth(input.history, today);
+  const best = bestTrailingMonth(demandHistory, today);
   const cap = best > 0 && !override ? capMultiple * best : Infinity;
   const capped = Math.min(boosted, cap);
   const wasCapped = capped < boosted - 1e-9;
@@ -496,7 +530,7 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
   // ── Confidence word: the honesty label that travels with the number ───────
   const stockoutGapDays = input.stockoutDates?.length
     ? censoredDaysInWindow(input.stockoutDates, last30, today)
-    : inferredStockoutGapDays(input.history, last30, today);
+    : inferredStockoutGapDays(demandHistory, last30, today);
   const confidenceSignals: ConfidenceSignals = {
     historyDays: span,
     cv,
@@ -564,7 +598,7 @@ export function layeredForecast(input: ForecastInput): ForecastResult {
                   `empty for most of the window, so what it sold is not what it would have sold — ` +
                   `this is a floor, not a measured rate.`
               : `Forecast ${finalForecast30d.toFixed(0)} units over 30 days from the ${
-                  isNew ? `last-${Math.max(1, Math.round(span))}-day rate (new product)` : "recency-weighted run rate (30/90/365-day blend)"
+                  isNew ? `last-${Math.max(1, Math.round(span))}-day rate (new product)` : input.baselineMethod === "median" ? "weekly-median baseline (8/26/52-week blend; mean fallback for sparse evidence)" : "recency-weighted run rate (30/90/365-day blend)"
                 }.`,
             wasCapped ? `Capped at ${capMultiple}× the best month (${best.toFixed(0)}) to block runaway numbers.` : "",
             `Safety stock ${safety.toFixed(0)} (${input.abcCategory ?? "C"}-class service, z=${z}, ${leadClause}); reorder point ${rop.toFixed(0)}.`,

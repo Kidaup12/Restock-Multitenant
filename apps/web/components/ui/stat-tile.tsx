@@ -45,7 +45,7 @@ export function StatTile({
   return (
     <div
       className={cn(
-        "rounded-lg border border-edge bg-surface p-5 shadow-card",
+        "@container min-w-0 rounded-lg border border-edge bg-surface p-4 shadow-card sm:p-5",
         className,
       )}
     >
@@ -54,7 +54,7 @@ export function StatTile({
       </div>
       <div
         className={cn(
-          "mt-1.5 font-mono text-3xl font-semibold tracking-tight",
+          "mt-1.5 font-mono text-[clamp(1.125rem,12cqi,1.875rem)] font-semibold tracking-tight wrap-anywhere",
           valueTones[valueTone],
         )}
       >
@@ -67,9 +67,9 @@ export function StatTile({
             deltaTones[delta.tone],
           )}
         >
-          {delta.direction === "up" && <TrendUpIcon className="size-3.5" />}
-          {delta.direction === "down" && <TrendDownIcon className="size-3.5" />}
-          <span>{delta.label}</span>
+          {delta.direction === "up" && <TrendUpIcon className="size-3.5 shrink-0" />}
+          {delta.direction === "down" && <TrendDownIcon className="size-3.5 shrink-0" />}
+          <span className="min-w-0 wrap-break-word">{delta.label}</span>
         </div>
       )}
     </div>

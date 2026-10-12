@@ -20,6 +20,22 @@ export function formatNumber(value: number): string {
   return Math.round(value).toLocaleString("en-KE");
 }
 
+/**
+ * A demand run rate as units/day, one way across every table.
+ *
+ * The same rate was shown as "Sells/day" at two decimals on stock screens and
+ * "Run rate" at one decimal on sales screens — the same number reading as two.
+ * One decimal is enough to tell 0.4/day from 4/day; a slow mover under 0.05/day
+ * would round to "0.0/day" and read as dead, so it floors to "<0.1". This is the
+ * RAW run rate; the plan's "Buying at/day" is a different, sized figure and keeps
+ * its own label.
+ */
+export function formatRunRate(value: number): string {
+  if (value <= 0) return "0/day";
+  if (value < 0.1) return "<0.1/day";
+  return `${value.toFixed(1)}/day`;
+}
+
 /** Compact money magnitude: 1_550_000 -> "1.55M", 214_000 -> "214K", 830 -> "830". */
 export function formatCompact(value: number): string {
   const abs = Math.abs(value);

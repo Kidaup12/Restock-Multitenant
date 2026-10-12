@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
 import { Card, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
 import { Pager } from "@/components/ui/pager";
@@ -88,7 +89,7 @@ export async function SavedPlans({
             {screen.plans.map((plan) => (
               <TableRow key={plan.id}>
                 <TableCell className="font-medium text-ink">
-                  {plan.name ?? "Untitled plan"}
+                  <Link href={`/transfers/${plan.id}`} className="text-accent-ink hover:underline">{plan.name ?? "Untitled plan"}</Link>
                   <span className="block text-xs font-normal text-ink-muted">
                     {plan.coverDays}d cover · {plan.createdAt.toISOString().slice(0, 10)}
                   </span>

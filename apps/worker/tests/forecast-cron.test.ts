@@ -77,17 +77,20 @@ describe.skipIf(!runnable)("forecast crons (real redis + db)", () => {
     await connection.quit();
   });
 
-  it("forecasts every half hour, clear of the sync minutes", () => {
+  it("forecasts through the day, clear of the sync minute", () => {
     // A once-a-night run meant the buy list was built before the day it was
-    // trading in: sell out at 9am and the plan still said covered until 2am.
+    // trading in: sell out at 9am and the plan still said covered until 2am. But
+    // twice-hourly re-read a YEAR of history 48 times a day per tenant — the
+    // largest source of DB egress — so it runs every six hours instead: fresh
+    // enough for a daily-cadence restock decision, a fraction of the reads.
     const [minutes, hours] = cron.FORECAST_PATTERN.split(" ");
-    expect(hours).toBe("*");
-    const at = minutes!.split(",").map(Number);
-    expect(at).toHaveLength(2);
-    expect(at[1]! - at[0]!).toBe(30);
-    // The Shopify sync ticks on :00/:15/:30/:45 — a forecast must not start in
-    // the same minute as the catalogue pull it wants to read.
-    for (const minute of at) expect(minute % 15).not.toBe(0);
+    expect(hours).toBe("*/6"); // 00/06/12/18 — four runs a day
+    // A single fixed minute, not on the sync tick: the Shopify sync starts on
+    // the hour (:00), and a forecast must not start in the same minute as the
+    // catalogue pull it wants to read.
+    const minute = Number(minutes);
+    expect(Number.isInteger(minute)).toBe(true);
+    expect(minute % 15).not.toBe(0);
   });
   it("registers the nightly + monthly schedules idempotently", async () => {
     await cron.registerForecastCronSchedules(queue);

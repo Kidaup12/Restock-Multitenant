@@ -47,6 +47,7 @@ const row: CatalogueRow = {
   syncErrorAt: null,
   leadDays: 14,
   leadSource: "supplier",
+  supplierId: null,
   supplierName: null,
   verdict: "healthy",
   marginPct: 50,
@@ -74,6 +75,7 @@ const render = (props: Partial<Parameters<typeof RowEditor>[0]>) =>
     <RowEditor
       row={row}
       categories={["Skin"]}
+      suppliers={[]}
       flags={{ active: true, activeOverride: false }}
       canViewCosts
       canManage

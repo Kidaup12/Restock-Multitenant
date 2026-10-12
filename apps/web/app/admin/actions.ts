@@ -2,8 +2,19 @@
 
 import { revalidatePath } from "next/cache";
 import { notFound, redirect } from "next/navigation";
-import { prismaForTenant } from "@wezesha/db";
-import { toPlanTier } from "@/lib/capabilities/plan-features";
+import { Prisma, prismaForTenant } from "@wezesha/db";
+import {
+  parseFeatureOverrides,
+  toPlanTier,
+  PLAN_FEATURES,
+  type FeatureOverride,
+  type PlanFeature,
+} from "@/lib/capabilities/plan-features";
+import {
+  FEATURE_DEFAULTS,
+  featureEnabled,
+  type FeatureKey,
+} from "@/lib/capabilities/feature-flags";
 import { requireAdmin } from "@/lib/admin/gate";
 import { recordAdminEvent } from "@/lib/admin/audit";
 import {
@@ -162,6 +173,250 @@ export async function setTenantPlan(formData: FormData): Promise<SetPlanResult> 
   revalidatePath("/admin/tenant/[id]", "page");
   revalidatePath("/admin");
   return { ok: true, plan: tier };
+}
+
+export type SetFeatureOverrideResult =
+  | { ok: true; feature: string; value: FeatureOverride | "inherit" }
+  | { ok: false; error: string };
+
+/**
+ * Grant or deny one plan feature for a single workspace, over the top of its
+ * tier.
+ *
+ * The tier moves a customer between whole bundles; this is the finer knob for
+ * the cases a tier can't express — a paid add-on on the entry plan, a pilot, a
+ * make-good, or a feature pulled for one shop that misused it. "grant" turns it
+ * on regardless of rank, "deny" turns it off regardless, and "inherit" removes
+ * the override so the tier decides again.
+ *
+ * Copies setTenantPlan's skeleton exactly: requireAdmin, then step-up, then the
+ * customer-workspace guard on the caller-supplied id, then the write through
+ * that tenant's own scoped client (Tenant carries no RLS policy, so the id scope
+ * IS the isolation), then the ledger, then revalidate. The override is merged
+ * into the existing blob rather than overwriting it, so setting one feature
+ * never clears another.
+ */
+export async function setTenantFeatureOverride(
+  formData: FormData
+): Promise<SetFeatureOverrideResult> {
+  const admin = await requireAdmin();
+  if (!(await hasStepUp(admin))) return { ok: false, error: STEP_UP_REQUIRED };
+  const tenantId = String(formData.get("tenantId") ?? "");
+  const feature = String(formData.get("feature") ?? "");
+  const value = String(formData.get("value") ?? "");
+
+  if (!tenantId || !(await customerWorkspaceExists(tenantId))) notFound();
+  if (!Object.prototype.hasOwnProperty.call(PLAN_FEATURES, feature)) {
+    return { ok: false, error: "Unknown feature." };
+  }
+  if (value !== "grant" && value !== "deny" && value !== "inherit") {
+    return { ok: false, error: "Pick grant, deny, or inherit." };
+  }
+  const key = feature as PlanFeature;
+
+  const db = prismaForTenant(tenantId);
+  const before = await db.tenant.findUnique({
+    where: { id: tenantId },
+    select: { featureOverrides: true },
+  });
+  if (!before) return { ok: false, error: "That workspace no longer exists." };
+
+  // Parse to a clean map so a malformed blob can't survive a round-trip, then
+  // set or clear just this key.
+  const overrides = parseFeatureOverrides(before.featureOverrides);
+  const previous = overrides[key] ?? "inherit";
+  if (previous === value) {
+    return { ok: true, feature: key, value };
+  }
+  if (value === "inherit") {
+    delete overrides[key];
+  } else {
+    overrides[key] = value;
+  }
+
+  await db.tenant.update({
+    where: { id: tenantId },
+    // An empty map is stored as SQL NULL — the "pure tier" state the column
+    // started in, so clearing the last override leaves no residue.
+    data: {
+      featureOverrides: Object.keys(overrides).length > 0 ? overrides : Prisma.DbNull,
+    },
+  });
+  await recordAdminEvent({
+    tenantId,
+    action: "feature_override_changed",
+    admin,
+    meta: { feature: key, from: previous, to: value },
+  });
+
+  // The grant/deny gates the customer's own screens, so their surfaces change
+  // too — not just this console.
+  revalidatePath("/admin/tenant/[id]", "page");
+  revalidatePath("/admin");
+  return { ok: true, feature: key, value };
+}
+
+export type SetFeatureFlagResult =
+  | { ok: true; feature: string; enabled: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Flip one tenant feature SWITCH (capability gate 4) from the console.
+ *
+ * These switches (transfers, pos_feed, quickbooks, supplier_email,
+ * weekly_digest) had only one writer — the customer's own Settings — so support
+ * could see a surface was off but could not turn it back on without database
+ * access. This is that second writer, behind the same step-up.
+ *
+ * Distinct from the plan override above: that decides whether the PLAN includes
+ * a feature, this decides whether the tenant has SWITCHED an included surface
+ * on. Writes to TenantConfig.featureFlags, upserting because a workspace may
+ * have no config row yet (every reader already treats a missing row as
+ * defaults, so the first flip creates it).
+ */
+export async function setTenantFeatureFlag(formData: FormData): Promise<SetFeatureFlagResult> {
+  const admin = await requireAdmin();
+  if (!(await hasStepUp(admin))) return { ok: false, error: STEP_UP_REQUIRED };
+  const tenantId = String(formData.get("tenantId") ?? "");
+  const feature = String(formData.get("feature") ?? "");
+  const rawEnabled = String(formData.get("enabled") ?? "");
+
+  if (!tenantId || !(await customerWorkspaceExists(tenantId))) notFound();
+  if (!Object.prototype.hasOwnProperty.call(FEATURE_DEFAULTS, feature)) {
+    return { ok: false, error: "Unknown feature." };
+  }
+  if (rawEnabled !== "true" && rawEnabled !== "false") {
+    return { ok: false, error: "Say whether to turn it on or off." };
+  }
+  const key = feature as FeatureKey;
+  const enabled = rawEnabled === "true";
+
+  const db = prismaForTenant(tenantId);
+  const before = await db.tenantConfig.findFirst({ select: { featureFlags: true } });
+  // Read through the same resolver the app uses so "no change" is judged against
+  // the effective value (stored-or-default), not a raw null.
+  const current = featureEnabled(before ?? null, key);
+  if (current === enabled) {
+    return { ok: true, feature: key, enabled };
+  }
+
+  const flags =
+    before?.featureFlags && typeof before.featureFlags === "object" && !Array.isArray(before.featureFlags)
+      ? { ...(before.featureFlags as Record<string, unknown>) }
+      : {};
+  flags[key] = enabled;
+
+  await db.tenantConfig.upsert({
+    where: { tenantId },
+    create: { tenantId, featureFlags: flags },
+    update: { featureFlags: flags },
+  });
+  await recordAdminEvent({
+    tenantId,
+    action: "feature_override_changed",
+    admin,
+    meta: { switch: key, from: current, to: enabled },
+  });
+
+  revalidatePath("/admin/tenant/[id]", "page");
+  revalidatePath("/admin");
+  return { ok: true, feature: key, enabled };
+}
+
+export type SetBillingResult =
+  | { ok: true; status: string; periodEnd: string | null }
+  | { ok: false; error: string };
+
+/**
+ * Set a workspace's billing period and status from the console.
+ *
+ * There is no self-serve billing yet, so the period a customer is paid up to,
+ * and whether they are active / trialing / past due / cancelled, is an operator
+ * fact — kept here rather than in a hand-written UPDATE. The enforcement cron
+ * reads planPeriodEnd/planStatus and, past a grace window, softens an expired
+ * workspace to past_due; nothing here hard-locks anyone out.
+ *
+ * Three ways to set the period, mirroring the control: "extend" adds 30 days to
+ * whichever is later of the current end or now (so extending an already-lapsed
+ * workspace starts the new period from today, not from the past), "date" takes
+ * an explicit YYYY-MM-DD, and "clear" removes it. A far-past explicit date is
+ * refused — it is almost always a typo, and it would put a workspace straight
+ * into the cron's sights.
+ *
+ * Same skeleton as setTenantPlan: requireAdmin, step-up, customer guard, scoped
+ * write, ledger, revalidate.
+ */
+export async function setTenantBilling(formData: FormData): Promise<SetBillingResult> {
+  const admin = await requireAdmin();
+  if (!(await hasStepUp(admin))) return { ok: false, error: STEP_UP_REQUIRED };
+  const tenantId = String(formData.get("tenantId") ?? "");
+  const status = String(formData.get("status") ?? "");
+  const periodMode = String(formData.get("periodMode") ?? "keep");
+  const explicitDate = String(formData.get("periodEnd") ?? "");
+  const note = String(formData.get("note") ?? "").trim();
+
+  if (!tenantId || !(await customerWorkspaceExists(tenantId))) notFound();
+
+  const STATUSES = ["active", "trialing", "past_due", "canceled"];
+  if (!STATUSES.includes(status)) return { ok: false, error: "Unknown billing status." };
+  if (note.length > 500) return { ok: false, error: "Keep the note under 500 characters." };
+
+  const db = prismaForTenant(tenantId);
+  const before = await db.tenant.findUnique({
+    where: { id: tenantId },
+    select: { planPeriodEnd: true, planStatus: true, billingNote: true },
+  });
+  if (!before) return { ok: false, error: "That workspace no longer exists." };
+
+  const now = new Date();
+  const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+  // Far past = a typo, not a real backdate. A cleared/never-set period is not
+  // "far past" — only an explicit date typed decades ago is refused.
+  const FAR_PAST = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000);
+
+  let periodEnd: Date | null = before.planPeriodEnd ?? null;
+  if (periodMode === "extend") {
+    // From the later of the current end or now, so extending a lapsed workspace
+    // starts the fresh period today rather than tacking 30 days onto the past.
+    const base = periodEnd && periodEnd.getTime() > now.getTime() ? periodEnd : now;
+    periodEnd = new Date(base.getTime() + THIRTY_DAYS_MS);
+  } else if (periodMode === "date") {
+    if (!explicitDate) return { ok: false, error: "Pick a date." };
+    // Parsed as a UTC day boundary so the same string means the same instant
+    // regardless of where the operator or the server sits.
+    const parsed = new Date(`${explicitDate}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.getTime())) return { ok: false, error: "That date is not valid." };
+    if (parsed.getTime() < FAR_PAST.getTime()) {
+      return { ok: false, error: "That date is too far in the past — check it." };
+    }
+    periodEnd = parsed;
+  } else if (periodMode === "clear") {
+    periodEnd = null;
+  } else if (periodMode !== "keep") {
+    return { ok: false, error: "Unknown period change." };
+  }
+
+  await db.tenant.update({
+    where: { id: tenantId },
+    data: { planPeriodEnd: periodEnd, planStatus: status, billingNote: note || null },
+  });
+  await recordAdminEvent({
+    tenantId,
+    action: "billing_adjusted",
+    admin,
+    meta: {
+      status: { from: before.planStatus, to: status },
+      periodEnd: {
+        from: before.planPeriodEnd?.toISOString() ?? null,
+        to: periodEnd?.toISOString() ?? null,
+      },
+      noteChanged: (before.billingNote ?? "") !== (note || ""),
+    },
+  });
+
+  revalidatePath("/admin/tenant/[id]", "page");
+  revalidatePath("/admin");
+  return { ok: true, status, periodEnd: periodEnd?.toISOString() ?? null };
 }
 
 export type InviteOwnerResult = { ok: true; email: string } | { ok: false; error: string };

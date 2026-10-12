@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { switchWorkspace } from "@/lib/auth-actions";
 import {
@@ -31,7 +30,6 @@ function WorkspaceInitial({ name }: { name: string }) {
 }
 
 export function WorkspaceSwitcher({ workspaces, activeId }: WorkspaceSwitcherProps) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -89,7 +87,15 @@ export function WorkspaceSwitcher({ workspaces, activeId }: WorkspaceSwitcherPro
     startTransition(async () => {
       const { ok } = await switchWorkspace(id);
       setOpen(false);
-      if (ok) router.refresh();
+      // A plain router.refresh() only re-fetches the CURRENT route — it does
+      // not purge Next's client Router Cache for other routes the visitor
+      // already prefetched/visited under the old tenant (e.g. a transfer
+      // detail page). That staleness is how a switch to tenant B could still
+      // flash or hold tenant A's data on the next navigation. The tenant
+      // boundary is a security boundary, so a full reload (not a soft
+      // client-side nav) is the only fix that can't leave a cached route
+      // behind — the extra round trip is a non-issue next to that risk.
+      if (ok) window.location.assign("/");
     });
   }
 

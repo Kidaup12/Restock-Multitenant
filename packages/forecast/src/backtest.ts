@@ -15,7 +15,7 @@
  */
 
 import { demandRateFor, CHAMPION_DEFAULT, type DemandMethod } from "./layered";
-import type { SalesPoint } from "./baseline";
+import type { SalesPoint, BaselineMethod } from "./baseline";
 import type { AbcCategory } from "./abc";
 import { scaleFreeAccuracy, type ScaleFreeAccuracy, type WindowError } from "./accuracy";
 
@@ -67,8 +67,8 @@ const DAY_MS = 86_400_000;
 /** A method's forecast daily rate as of a cutoff, from history strictly before
  *  it. Runs the same dispatch the nightly forecast does, so a method that wins
  *  a class here behaves the same way when the run adopts it. */
-export function methodDailyRate(method: DemandMethod, history: SalesPoint[], cutoff: Date): number {
-  return demandRateFor(method, history.filter((p) => p.date < cutoff), cutoff);
+export function methodDailyRate(method: DemandMethod, history: SalesPoint[], cutoff: Date, baselineMethod?: BaselineMethod, bigBuyerDamping = false): number {
+  return demandRateFor(method, history.filter((p) => p.date < cutoff), cutoff, { baselineMethod, bigBuyerDamping });
 }
 
 /** Actual units sold in [cutoff, cutoff + horizonDays). */
@@ -205,7 +205,8 @@ export type BacktestResult = {
 export function walkForwardBacktest(
   products: BacktestProduct[],
   cutoffs: Date[],
-  horizonDays: number
+  horizonDays: number,
+  opts: { baselineMethod?: BaselineMethod; bigBuyerDamping?: boolean } = {}
 ): BacktestResult {
   // class -> method -> windows
   const buckets = new Map<AbcCategory | "ALL", Map<DemandMethod, Array<{ said: number; happened: number }>>>();
@@ -242,7 +243,7 @@ export function walkForwardBacktest(
       if (product.history.length === 0 || end.getTime() > lastDate.getTime() + DAY_MS) continue;
       const happened = actualUnits(product.history, cutoff, horizonDays);
       for (const method of DEMAND_METHODS) {
-        const said = methodDailyRate(method, product.history, cutoff) * horizonDays;
+        const said = methodDailyRate(method, product.history, cutoff, opts.baselineMethod, opts.bigBuyerDamping) * horizonDays;
         push(cls, method, said, happened);
         push("ALL", method, said, happened);
         let mine = own.get(method);
