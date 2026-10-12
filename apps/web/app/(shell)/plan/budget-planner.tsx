@@ -18,7 +18,10 @@ import {
   COVER_MIN,
   COVER_STEP,
   DEFAULT_BUDGET_COVER_DAYS,
+  MAX_COVER_DAYS,
+  MIN_TYPED_COVER_DAYS,
   clampCoverDays,
+  clampTypedCoverDays,
 } from "./cover";
 import { Stepper } from "@/components/ui/stepper";
 import { BuyTable } from "./buy-table";
@@ -283,13 +286,16 @@ export function BudgetPlanner({
                 canDecrement={coverDays > COVER_MIN}
                 canIncrement={coverDays < COVER_MAX}
                 busy={pending}
+                // The +/- buttons stay inside the stepped range (7-120); typing a
+                // number answers to the server's own ceiling instead, since a
+                // typed figure is a direct answer, not a step from here.
                 edit={{
                   value: coverDays,
-                  min: COVER_MIN,
-                  max: COVER_MAX,
+                  min: MIN_TYPED_COVER_DAYS,
+                  max: MAX_COVER_DAYS,
                   unit: "days",
                   ariaLabel: "Days of cover",
-                  onCommit: (next) => applyCover(clampCoverDays(next)),
+                  onCommit: (next) => applyCover(clampTypedCoverDays(next)),
                 }}
               />
             )}

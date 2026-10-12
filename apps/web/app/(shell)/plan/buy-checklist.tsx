@@ -28,7 +28,9 @@ import {
   COVER_MIN,
   COVER_STEP,
   DEFAULT_COVER_DAYS,
-  clampCoverDays,
+  MAX_COVER_DAYS,
+  MIN_TYPED_COVER_DAYS,
+  clampTypedCoverDays,
 } from "./cover";
 import { Stepper } from "@/components/ui/stepper";
 import { BuyTable } from "./buy-table";
@@ -745,8 +747,13 @@ export function BuyChecklist({
 
   const sortOptions = SORTS.filter((s) => !s.needsCosts || canViewCosts);
 
+  // `days` arrives already clamped by the caller — to the stepped range
+  // (COVER_MIN-COVER_MAX) from the +/- buttons, or clampTypedCoverDays'
+  // wider range from a typed value. Re-clamping here to the narrow range
+  // would collapse a typed 200 back to 120, which is the bug this function
+  // used to have — so this clamp matches the server's own ceiling instead.
   function applyCover(days: number) {
-    const clamped = clampCoverDays(days);
+    const clamped = clampTypedCoverDays(days);
     setCoverDays(clamped);
     setUpliftPct(DEFAULT_WHATIF_UPLIFT); // cover lens takes over from any sales push
     startResize(async () => {
@@ -921,10 +928,13 @@ export function BuyChecklist({
           canDecrement={coverDays > COVER_MIN}
           canIncrement={coverDays < COVER_MAX}
           busy={resizing}
+          // The +/- buttons stay disabled past COVER_MIN/COVER_MAX
+          // (canDecrement/canIncrement above); typing a number answers to the
+          // wider range applyCover itself now clamps to instead.
           edit={{
             value: coverDays,
-            min: COVER_MIN,
-            max: COVER_MAX,
+            min: MIN_TYPED_COVER_DAYS,
+            max: MAX_COVER_DAYS,
             unit: "days",
             ariaLabel: "Days of cover to size to",
             onCommit: applyCover,

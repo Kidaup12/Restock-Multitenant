@@ -111,6 +111,17 @@ const ABC_TINT: Record<"critical" | "warning" | "neutral", string> = {
   neutral: "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink",
 };
 
+/** Fast is good news (green), slow is the watch-item (amber) — the same
+ *  reading the rest of the app gives speed. Medium stays the plain accent
+ *  wash: neither a flag nor a reassurance, just the middle. Left un-tinted
+ *  before, this row was the one flat-grey band sitting next to ABC's colour,
+ *  which is what made the whole filter bar read unfinished. */
+const LEAD_BAND_TINT: Record<LeadBand, string> = {
+  fast: "border-positive/20 bg-positive/10 text-positive hover:bg-positive/15",
+  medium: "border-accent-200 bg-accent-soft text-accent-ink hover:bg-accent-soft/70",
+  slow: "border-warning/20 bg-warning/10 text-warning hover:bg-warning/15",
+};
+
 /** A small fixed palette for category chips — each value lands on a stable tint
  *  (same value, same colour every render and everywhere it appears), with the
  *  neutral accent-soft wash as the fallback when the hash lands there. */
@@ -130,11 +141,13 @@ function categoryTint(value: string): string {
 }
 
 /** The tint for one chip in a dimension. ABC keys off the class, category off a
- *  stable hash; every other dimension keeps the plain neutral chip. */
+ *  stable hash, lead band off fast/medium/slow; supplier (the one dimension
+ *  with no fixed, small vocabulary) keeps the plain neutral chip. */
 function tintFor(key: ScopeDimension, value: string): ChipTint | undefined {
   if (value === NONE_VALUE) return undefined; // the gap chips stay neutral
   if (key === "abc") return { off: ABC_TINT[abcTone(value)] };
   if (key === "category") return { off: categoryTint(value) };
+  if (key === "leadBand") return { off: LEAD_BAND_TINT[value as LeadBand] };
   return undefined;
 }
 
