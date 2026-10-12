@@ -149,7 +149,9 @@ export async function runBacktest(
     return { rowsWritten: 0, champions: null, degraded: false, methodChanged: false, result: null };
   }
 
-  const result = walkForwardBacktest(backtestProducts, cutoffs, horizonDays, { baselineMethod: config?.baselineMethod === "median" ? "median" : "mean", bigBuyerDamping: config?.bigBuyerDamping === true });
+  // Unset (null) means the tenant has never visited the Settings toggle, not
+  // that they chose it off — damping now defaults ON, same as the live run.
+  const result = walkForwardBacktest(backtestProducts, cutoffs, horizonDays, { baselineMethod: config?.baselineMethod === "median" ? "median" : "mean", bigBuyerDamping: config?.bigBuyerDamping !== false });
   const runDate = now;
 
   // Persist every scored (class × method) row, sharing one runDate.

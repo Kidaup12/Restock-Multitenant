@@ -17,12 +17,13 @@ export function SavedPlanView({ plan, canViewCosts, canPlan }: { plan: SavedPlan
       return <Card key={id}>
         <CardHeader title={`Send to ${lines[0]!.toLocationName}`} subtitle={`${lines.length} products · ${lines.reduce((sum, line) => sum + line.qty, 0)} units · fastest sellers first`} />
         <div className="mt-4"><Table dense boxed>
-          <TableHeader><TableHead>Product</TableHead><TableHead>SKU</TableHead><TableHead numeric>Source stock</TableHead><TableHead numeric>Branch stock</TableHead><TableHead numeric>Move</TableHead><TableHead numeric>Sells/day</TableHead><TableHead numeric>Cover before → after</TableHead>{canViewCosts && <TableHead numeric>Value</TableHead>}</TableHeader>
+          <TableHeader><TableHead>Product</TableHead><TableHead>SKU</TableHead><TableHead numeric>Sells/day</TableHead><TableHead numeric>Cover before → after</TableHead>{canViewCosts && <TableHead numeric>Value</TableHead>}<TableHead numeric>Source stock</TableHead><TableHead numeric>Branch stock</TableHead><TableHead numeric>Move</TableHead></TableHeader>
           <TableBody>{lines.map(line => <TableRow key={line.id}>
             <TableCell className="max-w-80 whitespace-normal wrap-break-word">{line.title}</TableCell><TableCell>{line.sku}</TableCell>
-            <TableCell numeric>{line.fromOnHand}</TableCell><TableCell numeric>{line.toOnHand}</TableCell><TableCell numeric>{canPlan && plan.status === "draft" ? <LineQuantityEditor key={`${line.id}:${line.qty}`} planId={plan.id} lineId={line.id} qty={line.qty} title={line.title} /> : line.qty}</TableCell><TableCell numeric>{line.toRunRate.toFixed(2)}</TableCell>
+            <TableCell numeric>{line.toRunRate.toFixed(2)}</TableCell>
             <TableCell numeric>{line.toDaysCoverBefore == null ? "—" : `${line.toDaysCoverBefore}d`} → {line.toDaysCoverAfter == null ? "—" : `${line.toDaysCoverAfter}d`}</TableCell>
             {canViewCosts && <TableCell numeric><CostValue amount={line.valueKes} canViewCosts={canViewCosts} /></TableCell>}
+            <TableCell numeric>{line.fromOnHand}</TableCell><TableCell numeric>{line.toOnHand}</TableCell><TableCell numeric>{canPlan && plan.status === "draft" ? <LineQuantityEditor key={`${line.id}:${line.qty}`} planId={plan.id} lineId={line.id} qty={line.qty} title={line.title} /> : line.qty}</TableCell>
           </TableRow>)}</TableBody>
         </Table></div>
       </Card>;

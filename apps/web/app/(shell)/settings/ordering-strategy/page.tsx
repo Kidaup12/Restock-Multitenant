@@ -68,7 +68,7 @@ export default async function OrderingStrategyPage() {
         description="Choose a style per group. We suggest keeping your best sellers well stocked and leaning on cash for the slow tail — but it's your call. Changes apply on the next forecast run."
       />
       <ForecastSettingsForm
-        initial={parseForecastSettings({ baselineMethod: config?.baselineMethod ?? "mean", abcWindowDays: config?.abcWindowDays ?? 90, bigBuyerDamping: config?.bigBuyerDamping ?? false }) ?? { baselineMethod: "mean", abcWindowDays: 90, bigBuyerDamping: false }}
+        initial={parseForecastSettings({ baselineMethod: config?.baselineMethod ?? "mean", abcWindowDays: config?.abcWindowDays ?? 90, bigBuyerDamping: config?.bigBuyerDamping ?? true }) ?? { baselineMethod: "mean", abcWindowDays: 90, bigBuyerDamping: true }}
         canManage={hasPermission(membership, "manage_settings")}
       />
       <StrategyForm

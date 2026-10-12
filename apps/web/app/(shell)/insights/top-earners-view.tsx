@@ -133,26 +133,26 @@ export function TopEarnersView({ rows, currency, periodLabel = "30 days" }: { ro
             <Table>
               <TableHeader>
                 <TableHead>Product</TableHead>
-                <TableHead>ABC</TableHead>
-                <TableHead numeric>Units</TableHead>
-                <TableHead numeric>Revenue ({currency})</TableHead>
-                <TableHead numeric>Stock</TableHead>
                 <TableHead numeric>Run rate</TableHead>
+                <TableHead numeric>Revenue ({currency})</TableHead>
+                <TableHead>ABC</TableHead>
+                <TableHead numeric>Stock</TableHead>
+                <TableHead numeric>Units</TableHead>
               </TableHeader>
               <TableBody>
                 {filtered.map((row) => (
                   <TableRow key={row.productId}>
-                    <TableCell>
+                    <TableCell className="min-w-48 max-w-80 whitespace-normal wrap-break-word">
                       <span className="font-medium text-ink">{row.title}</span>
                       <span className="block font-mono text-xs text-ink-faint">{row.sku}</span>
                     </TableCell>
+                    <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
+                    <TableCell numeric>{formatNumber(row.revenueKes)}</TableCell>
                     <TableCell>
                       <AbcBadge value={row.abc} />
                     </TableCell>
-                    <TableCell numeric>{formatNumber(row.unitsSold)}</TableCell>
-                    <TableCell numeric>{formatNumber(row.revenueKes)}</TableCell>
                     <TableCell numeric>{formatNumber(row.onHandUnits)}</TableCell>
-                    <TableCell numeric>{formatRunRate(row.runRate)}</TableCell>
+                    <TableCell numeric>{formatNumber(row.unitsSold)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

@@ -137,7 +137,7 @@ export function LeakageMatrixView({
         {groups.length === 0 ? (
           <p className="px-4 py-6 text-sm text-ink-muted">Nothing to group under this lens yet.</p>
         ) : (
-          <Table>
+          <Table boxed>
             <TableHeader>
               <TableHead>Group</TableHead>
               <TableHead numeric>SKUs</TableHead>

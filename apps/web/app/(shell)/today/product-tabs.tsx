@@ -17,6 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ClientPager } from "@/components/ui/pager";
 import { cn } from "@/lib/cn";
 import { formatNumber, formatRunRate } from "@/lib/money";
 import type { CatalogueRow } from "@/lib/data/stock";
@@ -148,9 +149,23 @@ export function ProductTabs({
   const [tab, setTab] = useState<DashboardTab>("stockout");
   const [unsoldSearch, setUnsoldSearch] = useState("");
   const [fixedIds, setFixedIds] = useState<Set<string>>(new Set());
+  // Twenty rows is the table's whole concern — the pager lives purely in this
+  // component's state, never the URL (nothing here is a page worth linking
+  // to). Reset to 0 whenever the underlying row set changes shape: a new tab,
+  // or a search that narrows (or widens) the unsold list — otherwise sitting
+  // on page 3 of "dead" and switching to a 1-page "onway" shows an empty table.
+  const [page, setPage] = useState(0);
+  function selectTab(next: DashboardTab) {
+    setTab(next);
+    setPage(0);
+  }
   const rows = tab === "unsold" && unsoldSearch.trim()
     ? data.rows.unsold.filter(row => `${row.title} ${row.sku} ${row.vendor ?? ""}`.toLowerCase().includes(unsoldSearch.trim().toLowerCase()))
     : data.rows[tab];
+  const PAGE_SIZE = 20;
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageRows = rows.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE);
 
   const health: { label: string; count: number; key: DashboardTab; tone: string }[] = [
     { label: "Other stocked products", count: data.healthy, key: "all", tone: "text-ink-muted" },
@@ -175,7 +190,7 @@ export function ProductTabs({
           hint="the shelf is empty"
           tone={data.counts.stockout > 0 ? "negative" : undefined}
           active={tab === "stockout"}
-          onSelect={() => setTab("stockout")}
+          onSelect={() => selectTab("stockout")}
         />
         <KpiCard
           label="Reorders needed"
@@ -183,7 +198,7 @@ export function ProductTabs({
           hint={`of ${formatNumber(data.counts.all)} tracked`}
           tone={data.counts.reorder > 0 ? "warning" : undefined}
           active={tab === "reorder"}
-          onSelect={() => setTab("reorder")}
+          onSelect={() => selectTab("reorder")}
         />
         <KpiCard
           label="On the way"
@@ -191,7 +206,7 @@ export function ProductTabs({
           hint="inbound to the shelf"
           tone="accent"
           active={tab === "onway"}
-          onSelect={() => setTab("onway")}
+          onSelect={() => selectTab("onway")}
         />
         <KpiCard
           label="Dead stock"
@@ -209,12 +224,12 @@ export function ProductTabs({
           hint={`${formatNumber(data.counts.dead)} SKUs, no sale in ${data.deadWindowDays} days`}
           tone={canViewCosts && data.counts.dead > 0 ? "warning" : undefined}
           active={tab === "dead"}
-          onSelect={() => setTab("dead")}
+          onSelect={() => selectTab("dead")}
         />
       </div>
 
       <Card className="p-4 sm:p-5">
-        <button type="button" aria-pressed={tab === "unsold"} onClick={() => setTab("unsold")}
+        <button type="button" aria-pressed={tab === "unsold"} onClick={() => selectTab("unsold")}
           className="flex w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded text-left hover:text-accent-ink">
           <span className="min-w-0">
             <span className="block font-semibold">Unsold · {formatNumber(data.counts.unsold)} stocked products</span>
@@ -240,7 +255,7 @@ export function ProductTabs({
               <button
                 key={row.label}
                 type="button"
-                onClick={() => setTab(row.key)}
+                onClick={() => selectTab(row.key)}
                 aria-pressed={tab === row.key}
                 className={cn(
                   "flex w-full items-center justify-between rounded-md px-3 py-2 text-sm transition-colors",
@@ -263,7 +278,7 @@ export function ProductTabs({
             <button
               key={t.key}
               type="button"
-              onClick={() => setTab(t.key)}
+              onClick={() => selectTab(t.key)}
               aria-pressed={tab === t.key}
               className={cn(
                 "flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
@@ -296,8 +311,8 @@ export function ProductTabs({
         </div>
 
         {tab === "unsold" && <div className="space-y-2 px-5 pt-4">
-          <Input aria-label="Search unsold products" placeholder="Search unsold products by name, SKU or brand" value={unsoldSearch} onChange={event => setUnsoldSearch(event.target.value)} className="w-full sm:max-w-md" />
-          <p className="text-sm text-ink-muted">Showing {formatNumber(rows.length)} of {formatNumber(data.counts.unsold)} stocked products with no recorded sale. Every matching product is included; scroll within the table to see the full list.</p>
+          <Input aria-label="Search unsold products" placeholder="Search unsold products by name, SKU or brand" value={unsoldSearch} onChange={event => { setUnsoldSearch(event.target.value); setPage(0); }} className="w-full sm:max-w-md" />
+          <p className="text-sm text-ink-muted">Showing {formatNumber(rows.length)} of {formatNumber(data.counts.unsold)} stocked products with no recorded sale. Every matching product is included; page through below to see the full list.</p>
         </div>}
 
         {/* The run sizes these too — never held back for a missing supplier,
@@ -353,7 +368,7 @@ export function ProductTabs({
               <EmptyState icon={<BoxIcon />} title={tab === "unsold" && unsoldSearch.trim() ? "No unsold products match this search." : EMPTY[tab]} />
             </div>
           ) : (
-            <Table boxed={tab === "unsold"}>
+            <Table boxed>
               <TableHeader>
                 <TableHead>Product</TableHead>
                 {tab === "onway" ? (
@@ -380,9 +395,9 @@ export function ProductTabs({
                 )}
               </TableHeader>
               <TableBody>
-                {rows.map((row) => (
+                {pageRows.map((row) => (
                   <TableRow key={row.productId}>
-                    <TableCell className={tab === "unsold" ? "min-w-48 max-w-80 whitespace-normal wrap-break-word" : undefined}>
+                    <TableCell className="min-w-48 max-w-80 whitespace-normal wrap-break-word">
                       <Link
                         href={`/products/${row.productId}`}
                         className="font-medium text-ink hover:underline"
@@ -438,6 +453,17 @@ export function ProductTabs({
                 ))}
               </TableBody>
             </Table>
+          )}
+          {pageCount > 1 && (
+            <ClientPager
+              page={currentPage}
+              pageCount={pageCount}
+              from={currentPage * PAGE_SIZE + 1}
+              to={currentPage * PAGE_SIZE + pageRows.length}
+              total={rows.length}
+              onPage={setPage}
+              label={`${TABS.find((t) => t.key === tab)?.label ?? "Products"} pages`}
+            />
           )}
         </div>
       </Card>

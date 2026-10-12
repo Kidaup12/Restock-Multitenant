@@ -122,7 +122,11 @@ export async function getCatalogueMetrics(
   const out = new Map<string, ProductMetrics>();
   for (const p of products) {
     const history = historyByProduct.get(p.id) ?? [];
-    const rate = runRate(history, rateDay, stockoutsByProduct.get(p.id), snapshotsSince, config?.baselineMethod === "median" ? "median" : "mean", config?.bigBuyerDamping === true);
+    // Unset (null) means the tenant has never visited the toggle, not that
+    // they chose it off — bulk-day damping now defaults ON, so a forecast
+    // doesn't keep treating a bulk-sale day as ordinary demand until someone
+    // finds the checkbox in Settings. An explicit false is still honoured.
+    const rate = runRate(history, rateDay, stockoutsByProduct.get(p.id), snapshotsSince, config?.baselineMethod === "median" ? "median" : "mean", config?.bigBuyerDamping !== false);
     out.set(p.id, {
       productId: p.id,
       sellableOnHand: p.currentStock,

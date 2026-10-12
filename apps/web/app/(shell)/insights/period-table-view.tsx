@@ -64,85 +64,86 @@ export function PeriodTableView({ rows }: { rows: PeriodRowView[] }) {
         subtitle="How often shelves were empty and what sold. Open a week to see which products were behind it. Dead stock is a window measure — see the monthly card above for its real pace."
       />
       <CardContent className="pt-3">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableHead>Week of</TableHead>
-              <TableHead numeric>Empty shelves</TableHead>
-              <TableHead numeric>Units sold</TableHead>
-              <TableHead>
-                <span className="sr-only">Show products</span>
-              </TableHead>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => {
-                const expanded = open.has(row.key);
-                return (
-                  <Fragment key={row.key}>
-                    <TableRow>
-                      <TableCell>
-                        <span className="font-medium text-ink">{row.label}</span>
-                        {row.daysCovered < 7 && (
-                          <span className="ml-2 text-xs text-ink-faint">
-                            {row.daysCovered} days recorded
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell numeric>
-                        <span className="font-mono">{row.emptyRatePct}%</span>
+        {/* Table already wraps itself in an overflow-x-auto scroller; boxed
+            adds the bounded-height inner scroll a week-by-week list needs
+            once there are enough weeks to run well past the fold. */}
+        <Table boxed>
+          <TableHeader>
+            <TableHead>Week of</TableHead>
+            <TableHead numeric>Empty shelves</TableHead>
+            <TableHead numeric>Units sold</TableHead>
+            <TableHead>
+              <span className="sr-only">Show products</span>
+            </TableHead>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => {
+              const expanded = open.has(row.key);
+              return (
+                <Fragment key={row.key}>
+                  <TableRow>
+                    <TableCell>
+                      <span className="font-medium text-ink">{row.label}</span>
+                      {row.daysCovered < 7 && (
                         <span className="ml-2 text-xs text-ink-faint">
-                          {row.emptyProductDays}/{row.observedProductDays}
+                          {row.daysCovered} days recorded
                         </span>
-                      </TableCell>
-                      <TableCell numeric>
-                        <span className="font-mono">{row.unitsSold}</span>
-                      </TableCell>
-                      <TableCell>
-                        {row.culprits.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => toggle(row.key)}
-                            aria-expanded={expanded}
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-ink-muted hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                          >
-                            {expanded ? "Hide" : `${row.culprits.length} products`}
-                            <ChevronDownIcon
-                              className={cn("size-3 transition-transform", expanded && "rotate-180")}
-                            />
-                          </button>
-                        )}
-                      </TableCell>
+                      )}
+                    </TableCell>
+                    <TableCell numeric>
+                      <span className="font-mono">{row.emptyRatePct}%</span>
+                      <span className="ml-2 text-xs text-ink-faint">
+                        {row.emptyProductDays}/{row.observedProductDays}
+                      </span>
+                    </TableCell>
+                    <TableCell numeric>
+                      <span className="font-mono">{row.unitsSold}</span>
+                    </TableCell>
+                    <TableCell>
+                      {row.culprits.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => toggle(row.key)}
+                          aria-expanded={expanded}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-ink-muted hover:bg-surface-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                        >
+                          {expanded ? "Hide" : `${row.culprits.length} products`}
+                          <ChevronDownIcon
+                            className={cn("size-3 transition-transform", expanded && "rotate-180")}
+                          />
+                        </button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  {expanded && (
+                    <TableRow>
+                      {/* A raw cell: TableCell takes no colSpan, and the
+                          checklist's expand row spans the same way. */}
+                      <td colSpan={4} className="px-5 pt-0 pb-3">
+                        <ul className="space-y-1 py-1">
+                          {row.culprits.map((c) => (
+                            <li key={c.productId} className="flex flex-wrap items-center gap-2 text-sm">
+                              <Link
+                                href={`/products/${c.productId}`}
+                                className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                              >
+                                {c.title}
+                              </Link>
+                              <span className="font-mono text-xs text-ink-muted">{c.sku}</span>
+                              <Badge tone="warning">
+                                empty {c.emptyDays} {c.emptyDays === 1 ? "day" : "days"}
+                              </Badge>
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
                     </TableRow>
-                    {expanded && (
-                      <TableRow>
-                        {/* A raw cell: TableCell takes no colSpan, and the
-                            checklist's expand row spans the same way. */}
-                        <td colSpan={4} className="px-5 pt-0 pb-3">
-                          <ul className="space-y-1 py-1">
-                            {row.culprits.map((c) => (
-                              <li key={c.productId} className="flex flex-wrap items-center gap-2 text-sm">
-                                <Link
-                                  href={`/products/${c.productId}`}
-                                  className="rounded-sm font-medium text-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                                >
-                                  {c.title}
-                                </Link>
-                                <span className="font-mono text-xs text-ink-muted">{c.sku}</span>
-                                <Badge tone="warning">
-                                  empty {c.emptyDays} {c.emptyDays === 1 ? "day" : "days"}
-                                </Badge>
-                              </li>
-                            ))}
-                          </ul>
-                        </td>
-                      </TableRow>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
+                  )}
+                </Fragment>
+              );
+            })}
+          </TableBody>
+        </Table>
       </CardContent>
     </Card>
   );
