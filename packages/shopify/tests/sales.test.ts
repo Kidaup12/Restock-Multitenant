@@ -7,6 +7,7 @@ import {
   dayKeyRanges,
   dayNeedsRefetch,
   processedWindowFor,
+  salesDrift,
 } from "../src/sales";
 import type { ShopifyOrderNode } from "../src/resources";
 
@@ -490,5 +491,27 @@ describe("collectDayOrders — the day rebuild reads every order sold that day",
       dayBefore,
     ]);
     expect(orders.map((o) => o.id)).toEqual(["E"]);
+  });
+});
+
+describe("salesDrift — what a rebuild had to correct on settled days", () => {
+  it("counts only settled days whose units changed", () => {
+    const before = new Map([
+      ["2026-10-01", 5], // unchanged
+      ["2026-10-02", 3], // the hourly runs had lost two units here
+      ["2026-10-13", 1], // yesterday — still filling up, not drift
+    ]);
+    const after = new Map([
+      ["2026-10-01", 5],
+      ["2026-10-02", 5],
+      ["2026-10-03", 4], // a day the hourly runs had missed entirely
+      ["2026-10-13", 7],
+    ]);
+    expect(salesDrift(before, after, "2026-10-13")).toEqual({ days: 2, unitsBefore: 3, unitsAfter: 9 });
+  });
+
+  it("reports nothing when the hourly runs had it right", () => {
+    const same = new Map([["2026-10-01", 4]]);
+    expect(salesDrift(same, new Map(same), "2026-10-13")).toEqual({ days: 0, unitsBefore: 0, unitsAfter: 0 });
   });
 });

@@ -38,8 +38,9 @@ export {
   bucketSalesByProductDay,
   computeWindowStart,
   collectDayOrders,
+  salesDrift,
 } from "./sales";
-export type { DayBucket, DayKeyRange } from "./sales";
+export type { DayBucket, DayKeyRange, SalesDrift } from "./sales";
 export { WEBHOOK_TOPICS, ensureWebhookSubscriptions } from "./webhooks";
 export { fetchShopSettings, type ShopSettings } from "./shop";
 export { probeConnection, type ConnectionProbe } from "./probe";

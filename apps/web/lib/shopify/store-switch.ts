@@ -37,6 +37,6 @@ export async function resetCursorsOnStoreChange(
   });
   if (!existing || existing.shopDomain === shopDomain) return 0;
 
-  const { count } = await tx.ingestCursor.deleteMany({ where: { tenantId, source: "shopify" } });
+  const { count } = await tx.ingestCursor.deleteMany({ where: { tenantId, source: { startsWith: "shopify" } } });
   return count;
 }
