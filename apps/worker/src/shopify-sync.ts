@@ -19,16 +19,20 @@ import {
   ShopifyAuthError,
   ShopifyGrantError,
   bucketSalesByProductDay,
+  collectDayOrders,
   computeWindowStart,
   createShopifyClient,
   createTokenCache,
   decryptToken,
   ensureWebhookSubscriptions,
+  fetchInventoryItemCostsSince,
   fetchLocationsWithInventory,
+  fetchOrdersProcessedBetween,
   fetchOrdersSince,
   fetchProducts,
   fetchShopSettings,
   numericCore,
+  type InventoryItemCost,
   type ShopifyClient,
   type ShopifyLocationNode,
   type ShopifyOrderNode,
@@ -77,7 +81,11 @@ export interface ShopifySyncApi {
   shopSettings(): Promise<ShopSettings>;
   products(sinceIso: string | null): Promise<ShopifyProductNode[]>;
   locations(): Promise<ShopifyLocationNode[]>;
+  /** Orders that CHANGED since — which days need rebuilding. */
   orders(sinceIso: string): Promise<ShopifyOrderNode[]>;
+  /** Every order SOLD in a window — what a day is rebuilt from. */
+  ordersProcessedBetween(startIso: string, endIso: string): Promise<ShopifyOrderNode[]>;
+  inventoryItemCosts(sinceIso: string): Promise<InventoryItemCost[]>;
 }
 
 export function realShopifySyncApi(client: ShopifyClient): ShopifySyncApi {
@@ -87,6 +95,8 @@ export function realShopifySyncApi(client: ShopifyClient): ShopifySyncApi {
     products: (sinceIso) => fetchProducts(client, sinceIso),
     locations: () => fetchLocationsWithInventory(client),
     orders: (sinceIso) => fetchOrdersSince(client, sinceIso),
+    ordersProcessedBetween: (startIso, endIso) => fetchOrdersProcessedBetween(client, startIso, endIso),
+    inventoryItemCosts: (sinceIso) => fetchInventoryItemCostsSince(client, sinceIso),
   };
 }
 
@@ -510,11 +520,52 @@ async function syncLocationsAndInventory(
   return { locations: locations.length, levels, changed };
 }
 
-/** Idempotent day-set sales writer: delete exactly the touched (product, day)
- *  pairs, then createMany — SET semantics, so overlap windows never double-count. */
+/**
+ * Costs edited since the products window opened. Editing a cost changes the
+ * inventory item, not the product, so the products delta never saw it and the
+ * shop waited for the nightly full pull — up to a day — to see a cost it had
+ * already typed. Same rule as the products upsert: a finite cost from the store
+ * writes, an owner's manual pin never gets overwritten.
+ */
+async function syncInventoryItemCosts(tenantId: string, items: InventoryItemCost[]): Promise<number> {
+  let written = 0;
+  for (const item of items) {
+    if (!item.variantId || item.cost == null) continue;
+    const cost = Number.parseFloat(item.cost);
+    if (!Number.isFinite(cost)) continue;
+    const { count } = await prismaService.product.updateMany({
+      where: {
+        tenantId,
+        shopifyVariantId: numericCore(item.variantId),
+        // A null costSource must be included explicitly: `not: "manual"` alone
+        // is SQL `<>`, which never matches NULL — the never-costed rows this
+        // exists for.
+        OR: [{ costSource: null }, { costSource: { not: "manual" } }],
+      },
+      data: { costKes: cost, costSource: "shopify" },
+    });
+    written += count;
+  }
+  return written;
+}
+
+/**
+ * Idempotent day-set sales writer: every trading day a changed order lands on
+ * is rebuilt WHOLE — deleted, then re-written from every order sold that day —
+ * so overlap windows never double-count.
+ *
+ * The rebuild has to read every order sold on the day, not just the ones that
+ * changed. The pull selects by updated_at but sales are dated by processedAt,
+ * so rebuilding from the changed orders alone meant an old order fulfilled or
+ * refunded today replaced its whole sale-day with itself, wiping every other
+ * order of that day; and a run whose window starts at UTC midnight dropped the
+ * first hours of a Nairobi day. A day whose only order was cancelled is cleared
+ * too, because the delete takes the day, not just the days that still sell.
+ */
 async function syncOrders(
   tenantId: string,
-  orders: ShopifyOrderNode[],
+  api: ShopifySyncApi,
+  windowStart: Date,
   productIdByCore: Map<string, string>,
   locationIdByCore: Map<string, string>,
   productIdByVariantCore: Map<string, string>,
@@ -529,16 +580,25 @@ async function syncOrders(
     select: { timezone: true },
   });
   if (!tenant) return 0;
+  const dayKeyOf = (d: Date) => tenantDayKey(tenant.timezone, d);
+
+  const { days, orders: dayOrders } = await collectDayOrders(
+    await api.orders(windowStart.toISOString()),
+    windowStart,
+    dayKeyOf,
+    (startIso, endIso) => api.ordersProcessedBetween(startIso, endIso)
+  );
+  if (days.size === 0) return 0;
+
   const buckets = [
     ...bucketSalesByProductDay(
-      orders,
+      dayOrders,
       productIdByCore,
-      (d) => tenantDayKey(tenant.timezone, d),
+      dayKeyOf,
       locationIdByCore,
       productIdByVariantCore
     ).values(),
   ];
-  if (buckets.length === 0) return 0;
 
   const rows = buckets.map((b) => ({
     tenantId,
@@ -554,20 +614,15 @@ async function syncOrders(
   // fetched, and finishes counting the day-sets they bucket into.
   await onProgress?.(0, rows.length);
 
-  // The delete takes the whole product-day and cannot key on the branch: a
-  // re-sync has to be able to drop a branch that stopped trading. That makes it
-  // unsafe to interleave with the inserts — now that a day holds one row per
-  // branch, a later chunk's delete would take out the sibling an earlier chunk
-  // had just written, and the sync would report success one branch short.
-  // Clear every day first, then write.
-  const days = [
-    ...new Map(
-      rows.map((r) => [`${r.productId}|${r.date.getTime()}`, { productId: r.productId, date: r.date }])
-    ).values(),
-  ];
-  for (let i = 0; i < days.length; i += SALES_CHUNK) {
+  // The delete takes whole days — every product, every branch — because the
+  // rows below are the complete record of those days: a product or branch that
+  // no longer sold on one must lose its old row, not keep it. Clearing first,
+  // then writing, keeps a later chunk's delete from taking out rows an earlier
+  // chunk had just written.
+  const dates = [...days].map((day) => new Date(`${day}T00:00:00.000Z`));
+  for (let i = 0; i < dates.length; i += SALES_CHUNK) {
     await prismaService.salesHistory.deleteMany({
-      where: { tenantId, channel: "shopify", OR: days.slice(i, i + SALES_CHUNK) },
+      where: { tenantId, channel: "shopify", date: { in: dates.slice(i, i + SALES_CHUNK) } },
     });
   }
   for (let i = 0; i < rows.length; i += SALES_CHUNK) {
@@ -783,11 +838,15 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
         fullSync: productsSince === null,
         onProgress: (done, total) => run.tick(done, total),
       });
+      // A full pull has just read every cost; a delta has not seen cost-only edits.
+      const costsUpdated = productsSince
+        ? await syncInventoryItemCosts(tenantId, await api.inventoryItemCosts(productsSince))
+        : 0;
       // The pull is a real delta (`updated_at:>=`), so a write means the store
       // genuinely changed something within the window — not a re-send of the
       // whole catalogue.
-      await setCursor(tenantId, "products", runStart, products.written > 0);
-      await run.phaseEnd("products", products);
+      await setCursor(tenantId, "products", runStart, products.written + costsUpdated > 0);
+      await run.phaseEnd("products", { ...products, costsUpdated });
       await notifyCatalogueChanges(tenantId, products, options.publisher);
 
       // ── Locations + inventory (full refresh — no cheap delta) ───────────────
@@ -816,7 +875,8 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       const productIdByCore = await loadProductIdByCore(tenantId);
       const salesDays = await syncOrders(
         tenantId,
-        await api.orders(ordersSince.toISOString()),
+        api,
+        ordersSince,
         productIdByCore,
         locationIdByCore,
         productIdByVariantCore,

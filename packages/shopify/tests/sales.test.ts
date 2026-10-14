@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { bucketSalesByProductDay, computeWindowStart } from "../src/sales";
+import {
+  affectedDayKeys,
+  bucketSalesByProductDay,
+  collectDayOrders,
+  computeWindowStart,
+  dayKeyRanges,
+  dayNeedsRefetch,
+  processedWindowFor,
+} from "../src/sales";
 import type { ShopifyOrderNode } from "../src/resources";
 
 /** The day key these fixtures were written against. Real callers pass the
@@ -374,5 +382,113 @@ describe("computeWindowStart", () => {
     const start = computeWindowStart(cursor, now, { overlapHours: 6, firstRunLookbackDays: 365 });
     // 03:00 - 6h crosses midnight → floors to the 18th.
     expect(start.toISOString()).toBe("2026-07-18T00:00:00.000Z");
+  });
+});
+
+describe("rebuilding whole sale-days", () => {
+  const order = (id: string, processedAt: string, cancelledAt: string | null = null): ShopifyOrderNode => ({
+    id,
+    processedAt,
+    cancelledAt,
+    lineItems: [],
+  });
+
+  it("names every day the orders land on, cancelled ones included", () => {
+    const days = affectedDayKeys(
+      [order("1", "2026-10-10T09:00:00Z"), order("2", "2026-10-12T09:00:00Z", "2026-10-13T09:00:00Z")],
+      utcDay
+    );
+    expect([...days].sort()).toEqual(["2026-10-10", "2026-10-12"]);
+  });
+
+  it("files a 01:00 Nairobi sale on the Nairobi day, not the UTC one", () => {
+    // 22:00 UTC on the 11th is 01:00 on the 12th in Nairobi.
+    expect([...affectedDayKeys([order("1", "2026-10-11T22:00:00Z")], nairobiDay)]).toEqual(["2026-10-12"]);
+  });
+
+  it("groups consecutive days into one fetch", () => {
+    expect(dayKeyRanges(["2026-10-12", "2026-10-10", "2026-10-11", "2026-10-20"])).toEqual([
+      { from: "2026-10-10", to: "2026-10-12" },
+      { from: "2026-10-20", to: "2026-10-20" },
+    ]);
+  });
+
+  it("pads the fetch wide enough to cover a whole day in any timezone", () => {
+    expect(processedWindowFor({ from: "2026-10-12", to: "2026-10-12" })).toEqual({
+      startIso: "2026-10-11T10:00:00.000Z",
+      endIso: "2026-10-13T14:00:00.000Z",
+    });
+  });
+
+  it("refetches a day that starts before the window, not one wholly inside it", () => {
+    const windowStart = new Date("2026-10-12T00:00:00Z");
+    // The Nairobi 12th began at 21:00 UTC on the 11th — before the window.
+    expect(dayNeedsRefetch("2026-10-12", windowStart)).toBe(true);
+    // An older day an edit touched.
+    expect(dayNeedsRefetch("2026-10-02", windowStart)).toBe(true);
+    // Every instant of the 13th, in any zone, is after the window opened.
+    expect(dayNeedsRefetch("2026-10-13", windowStart)).toBe(false);
+  });
+});
+
+describe("collectDayOrders — the day rebuild reads every order sold that day", () => {
+  const sale = (id: string, processedAt: string, qty: number, cancelledAt: string | null = null): ShopifyOrderNode => ({
+    id,
+    processedAt,
+    cancelledAt,
+    lineItems: [{ quantity: qty, product: { id: "gid://shopify/Product/1" } }],
+  });
+  const catalog = new Map([["1", "prod-1"]]);
+
+  it("keeps a day's untouched orders when one old order is fulfilled today", async () => {
+    // Both sold on the 5th. Only B changed (fulfilled today), so only B comes
+    // back from the updated_at pull — rebuilding the 5th from B alone used to
+    // wipe A's 3 units.
+    const a = sale("A", "2026-10-05T09:00:00Z", 3);
+    const b = sale("B", "2026-10-05T15:00:00Z", 2);
+    const windowStart = new Date("2026-10-12T00:00:00Z");
+    const fetched: string[] = [];
+
+    const { days, orders } = await collectDayOrders([b], windowStart, nairobiDay, async (start, end) => {
+      fetched.push(`${start}..${end}`);
+      return [a, b];
+    });
+
+    expect([...days]).toEqual(["2026-10-05"]);
+    expect(fetched).toEqual(["2026-10-04T10:00:00.000Z..2026-10-06T14:00:00.000Z"]);
+    const bucket = [...bucketSalesByProductDay(orders, catalog, nairobiDay).values()];
+    expect(bucket).toEqual([expect.objectContaining({ dateKey: "2026-10-05", quantity: 5 })]);
+  });
+
+  it("does not refetch when every changed order's day lies inside the window", async () => {
+    let calls = 0;
+    const { orders } = await collectDayOrders(
+      [sale("C", "2026-10-13T09:00:00Z", 1)],
+      new Date("2026-10-12T00:00:00Z"),
+      nairobiDay,
+      async () => {
+        calls++;
+        return [];
+      }
+    );
+    expect(calls).toBe(0);
+    expect(orders.map((o) => o.id)).toEqual(["C"]);
+  });
+
+  it("names a day whose only order was cancelled, so its stale row is cleared", async () => {
+    const cancelled = sale("D", "2026-10-13T09:00:00Z", 4, "2026-10-13T10:00:00Z");
+    const { days, orders } = await collectDayOrders([cancelled], new Date("2026-10-12T00:00:00Z"), nairobiDay, async () => []);
+    expect([...days]).toEqual(["2026-10-13"]);
+    expect(bucketSalesByProductDay(orders, catalog, nairobiDay).size).toBe(0);
+  });
+
+  it("leaves out the neighbouring days the padded fetch brings in", async () => {
+    const onDay = sale("E", "2026-10-05T09:00:00Z", 1);
+    const dayBefore = sale("F", "2026-10-04T12:00:00Z", 9);
+    const { orders } = await collectDayOrders([onDay], new Date("2026-10-12T00:00:00Z"), nairobiDay, async () => [
+      onDay,
+      dayBefore,
+    ]);
+    expect(orders.map((o) => o.id)).toEqual(["E"]);
   });
 });

@@ -158,6 +158,10 @@ const fakeApi = {
   products: async () => products,
   locations: async () => locations,
   orders: async () => orders,
+  // Every fixture order is a "sold in the window" order too; the sync keeps
+  // only those whose day it is rebuilding.
+  ordersProcessedBetween: async () => orders,
+  inventoryItemCosts: async () => [],
 };
 
 function jobStub(tenantId: string): Job<SyncJobData> {
@@ -880,6 +884,8 @@ describe.skipIf(!runnable)("product lifecycle ingest (real db + redis)", () => {
         products: async () => catalogue,
         locations: async () => lifecycleLocations,
         orders: async () => [],
+        ordersProcessedBetween: async () => [],
+        inventoryItemCosts: async () => [],
       }),
     });
 
@@ -1061,6 +1067,8 @@ describe.skipIf(!runnable)("on-route without an en-route location (real db + red
         products: async () => onRouteCatalogue,
         locations: async () => onRouteLocations,
         orders: async () => [],
+        ordersProcessedBetween: async () => [],
+        inventoryItemCosts: async () => [],
       }),
     });
 
@@ -1207,6 +1215,8 @@ describe.skipIf(!runnable)("catalogue notices (real db + redis)", () => {
         products: async () => noticeCatalogue,
         locations: async () => [],
         orders: async () => [],
+        ordersProcessedBetween: async () => [],
+        inventoryItemCosts: async () => [],
       }),
     });
 
@@ -1320,6 +1330,8 @@ describe.skipIf(!runnable)("sales writes across chunk boundaries (real db + redi
         products: async () => chunkCatalogue,
         locations: async () => chunkLocations,
         orders: async () => chunkOrders,
+        ordersProcessedBetween: async () => chunkOrders,
+        inventoryItemCosts: async () => [],
       }),
     });
 
