@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   assignAbc,
-  abcVelocityFloors,
   dailySalesValue,
   trailingRevenue,
   MIN_RUN_RATE_FOR_A,
@@ -201,55 +200,5 @@ describe("dailySalesValue", () => {
     expect(dailySalesValue(gappy, 1000, TODAY)).toBeGreaterThan(
       weightedDailyRate(gappy, TODAY) * 1000
     );
-  });
-});
-
-describe("assignAbc velocity floor is relative to the shop", () => {
-  it("a slow boutique still gets best sellers", () => {
-    // Hundreds of SKUs each selling a few a month: nothing reaches 0.4/day, so
-    // fixed floors demoted the whole revenue ranking to C. Relative floors keep
-    // the top earners in A as long as they sell at least as fast as the median.
-    const shop = Array.from({ length: 40 }, (_, i) => ({
-      id: `p${i}`,
-      revenue: 4000 - i * 90,
-      runRate: 0.3 - i * 0.006,
-    }));
-    const out = assignAbc(shop);
-    const count = (c: string) => Object.values(out).filter((v) => v === c).length;
-    expect(out.p0).toBe("A");
-    expect(count("A")).toBeGreaterThan(5);
-    expect(count("C")).toBeLessThan(count("A") + count("B"));
-  });
-
-  it("still keeps a rarely-selling premium item out of A in a slow shop", () => {
-    const out = assignAbc([
-      { id: "premium", revenue: 5000, runRate: 0.01 },
-      ...Array.from({ length: 10 }, (_, i) => ({ id: `m${i}`, revenue: 1000, runRate: 0.2 })),
-    ]);
-    expect(out.premium).not.toBe("A");
-  });
-
-  it("a fast shop keeps the fixed floors", () => {
-    expect(abcVelocityFloors([{ runRate: 5 }, { runRate: 3 }, { runRate: 2 }])).toEqual({
-      a: MIN_RUN_RATE_FOR_A,
-      b: MIN_RUN_RATE_FOR_B,
-    });
-  });
-
-  it("floors follow the shop's median and lower quartile when it is slow", () => {
-    // 21 products selling 0.04 … 0.14/day: median 0.09, lower quartile 0.065.
-    const f = abcVelocityFloors(Array.from({ length: 21 }, (_, i) => ({ runRate: 0.04 + i * 0.005 })));
-    expect(f.a).toBeCloseTo(0.09);
-    expect(f.b).toBeCloseTo(0.065);
-  });
-
-  it("a small catalogue keeps the fixed floors — one product cannot set its own bar", () => {
-    expect(abcVelocityFloors([{ runRate: 0.01 }])).toEqual({ a: MIN_RUN_RATE_FOR_A, b: MIN_RUN_RATE_FOR_B });
-  });
-
-  it("never drops below one sale a month for A, however slow the shop", () => {
-    const f = abcVelocityFloors(Array.from({ length: 30 }, () => ({ runRate: 0.005 })));
-    expect(f.a).toBeCloseTo(1 / 30);
-    expect(f.b).toBeCloseTo(1 / 90);
   });
 });

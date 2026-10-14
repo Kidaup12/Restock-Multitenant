@@ -11,18 +11,10 @@
  * a price tag into A on a handful of sales.
  *
  * VELOCITY FLOOR: even ranked by real revenue, a rarely-selling premium item can
- * carry high revenue on very few sales. A product below the A floor can never be
- * A (demoted to B, or to C below the B floor), so the A service level and
- * buy-list priority stay reserved for genuine movers. Pass each product's run
- * rate to enable the floor; omit it to skip.
- *
- * The floors are relative to the SHOP, capped at MIN_RUN_RATE_FOR_A/B: A must
- * sell at least as fast as the shop's median selling product, B at least as
- * fast as its slowest quarter. Fixed floors of 0.4 and 0.1 units/day wrecked a
- * boutique with hundreds of SKUs each selling a few a month: its best seller
- * did 0.45/day, so the revenue ranking was overruled almost everywhere and it
- * came out 1 A, 32 B, 740 C — with C ("slow movers") holding 73% of revenue. A
- * fast shop still hits the caps, so its classes are exactly what they were.
+ * carry high revenue on very few sales. A product below MIN_RUN_RATE_FOR_A
+ * units/day can never be A (demoted to B, or to C below MIN_RUN_RATE_FOR_B), so
+ * the A service level and buy-list priority stay reserved for genuine movers.
+ * Pass each product's run rate to enable the floor; omit it to skip.
  */
 import { weightedDailyRateAdjusted, type SalesPoint } from "./baseline";
 
@@ -45,39 +37,7 @@ export const MIN_SALE_SPAN_DAYS_FOR_A = 14;
 export type AbcInput = { id: string; revenue: number; runRate?: number; saleSpanDays?: number };
 export type AbcCategory = "A" | "B" | "C";
 
-function quantile(sorted: number[], q: number): number {
-  const i = (sorted.length - 1) * q;
-  const lo = Math.floor(i);
-  const hi = Math.ceil(i);
-  return sorted[lo]! + (sorted[hi]! - sorted[lo]!) * (i - lo);
-}
-
-/** Relative floors need a real distribution to read; below this many selling
- *  products the fixed floors apply (a one-product shop would otherwise set its
- *  own bar). */
-export const MIN_SELLING_FOR_RELATIVE_FLOORS = 20;
-/** However slow the shop, A still means at least ~1 sale a month and B ~1 a
- *  quarter. */
-const ABSOLUTE_MIN_FOR_A = 1 / 30;
-const ABSOLUTE_MIN_FOR_B = 1 / 90;
-
-/** The velocity floors for this catalogue: the shop's median and lower-quartile
- *  run rate among products that sell at all, capped at the fixed floors and
- *  never below one sale a month (A) / a quarter (B). */
-export function abcVelocityFloors(products: { runRate?: number }[]): { a: number; b: number } {
-  const rates = products
-    .map((p) => p.runRate)
-    .filter((r): r is number => r != null && r > 0)
-    .sort((x, y) => x - y);
-  if (rates.length < MIN_SELLING_FOR_RELATIVE_FLOORS) return { a: MIN_RUN_RATE_FOR_A, b: MIN_RUN_RATE_FOR_B };
-  return {
-    a: Math.min(MIN_RUN_RATE_FOR_A, Math.max(ABSOLUTE_MIN_FOR_A, quantile(rates, 0.5))),
-    b: Math.min(MIN_RUN_RATE_FOR_B, Math.max(ABSOLUTE_MIN_FOR_B, quantile(rates, 0.25))),
-  };
-}
-
 export function assignAbc(productsWithValue: AbcInput[]): Record<string, AbcCategory> {
-  const floors = abcVelocityFloors(productsWithValue);
   const sorted = [...productsWithValue].sort((a, b) => b.revenue - a.revenue);
   const total = sorted.reduce((s, p) => s + p.revenue, 0);
   let cumulative = 0;
@@ -92,8 +52,8 @@ export function assignAbc(productsWithValue: AbcInput[]): Record<string, AbcCate
     let cls: AbcCategory = above < 0.7 ? "A" : above < 0.9 ? "B" : "C";
     // Velocity floor: a slow mover can't ride revenue into A/B.
     if (p.runRate != null) {
-      if (cls === "A" && p.runRate < floors.a) cls = "B";
-      if (cls === "B" && p.runRate < floors.b) cls = "C";
+      if (cls === "A" && p.runRate < MIN_RUN_RATE_FOR_A) cls = "B";
+      if (cls === "B" && p.runRate < MIN_RUN_RATE_FOR_B) cls = "C";
     }
     // A brief burst is not yet a sustained bestseller.
     if (cls === "A" && p.saleSpanDays != null && p.saleSpanDays < MIN_SALE_SPAN_DAYS_FOR_A) cls = "B";

@@ -125,7 +125,6 @@ export {
 // ABC classification
 export {
   assignAbc,
-  abcVelocityFloors,
   saleSpanDays,
   MIN_SALE_SPAN_DAYS_FOR_A,
   dailySalesValue,
