@@ -8,7 +8,7 @@
 with t as (
   -- Several workspaces can share a name; take the one with the newest forecast.
   select tn.id, tn.name, tn.currency from "Tenant" tn
-  where tn.name ilike '%treasured scents%'
+  where tn.name ilike '%treasured%' or tn.name ilike '%ts edit%'
   order by (select max(p."runDate") from "Prediction" p where p."tenantId" = tn.id) desc nulls last
   limit 1
 ),
