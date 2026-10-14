@@ -129,7 +129,7 @@ async function TransfersContent({
               active: days === coverDays,
             }))}
           />
-          <CustomCoverInput coverDays={coverDays} hrefFor={(days) => query({ cover: days })} />
+          <CustomCoverInput coverDays={coverDays} baseHref={query({})} />
         </div>
         <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
           <span className="text-2xs font-medium tracking-wider text-ink-muted uppercase">Branch sales window</span>

@@ -15,12 +15,15 @@ import { clampCoverDays, MIN_COVER_DAYS, MAX_COVER_DAYS } from "@wezesha/forecas
  * (`app/(shell)/plan/budget-planner.tsx`), but commits by navigating — this
  * screen's cover target lives in the URL, not in local state.
  */
-export function CustomCoverInput({ coverDays, hrefFor }: { coverDays: number; hrefFor: (cover: number) => string }) {
+export function CustomCoverInput({ coverDays, baseHref }: { coverDays: number; baseHref: string }) {
   const router = useRouter();
   const STEP = 1;
 
   function go(next: number) {
-    router.push(hrefFor(clampCoverDays(next)));
+    const [path, search = ""] = baseHref.split("?");
+    const params = new URLSearchParams(search);
+    params.set("cover", String(clampCoverDays(next)));
+    router.push(`${path}?${params.toString()}`);
   }
 
   return (
