@@ -6,7 +6,11 @@
 -- Read-only. Set the workspace name on the first line of the CTE.
 -- The output holds costs and sales: keep the file out of git.
 with t as (
-  select id, name, currency from "Tenant" where name ilike '%treasured scents%' limit 1
+  -- Several workspaces can share a name; take the one with the newest forecast.
+  select tn.id, tn.name, tn.currency from "Tenant" tn
+  where tn.name ilike '%treasured scents%'
+  order by (select max(p."runDate") from "Prediction" p where p."tenantId" = tn.id) desc nulls last
+  limit 1
 ),
 latest as (
   select max(p."runDate") as run_date from "Prediction" p join t on t.id = p."tenantId"
