@@ -327,32 +327,31 @@ export async function getDistributionProposal(
   const nameByLocation = new Map(destinations.map((l) => [l.id, l.name]));
 
   // What the source actually holds and has a rate for — the same two gates
-  // the sizing loop below checks. Facet options and counts come from THIS
-  // set, not every buyable product tenant-wide, or the filter bar would offer
-  // (and count) categories the source doesn't stock a unit of.
+  // the sizing loop below checks.
   const sourceable = products.filter((p) => {
     const blended = metrics.get(p.id)?.runRate ?? 0;
     if (blended <= NO_RATE_EPSILON) return false;
     return (onHandAt.get(`${p.id}:${source.id}`) ?? 0) > 0;
   });
-  const scopeFacets = deriveTransferScopeFacets(sourceable);
 
-  const scoped = transferScopeActive(scope)
-    ? sourceable.filter(
-        (p) =>
-          (scope.abc.length === 0 || scope.abc.includes(p.abcCategory ?? "")) &&
-          (scope.category.length === 0 || scope.category.includes(p.customCategory ?? ""))
-      )
-    : sourceable;
+  const inScope = (p: { abcCategory: string | null; customCategory: string | null }) =>
+    (scope.abc.length === 0 || scope.abc.includes(p.abcCategory ?? "")) &&
+    (scope.category.length === 0 || scope.category.includes(p.customCategory ?? ""));
 
+  // Sized for EVERY sourceable product, and the scope applied afterwards, so
+  // the chips can count what would actually move. They used to count every
+  // product the source holds: "C 158" on a warehouse whose slow movers no
+  // branch was short of, so the chip opened onto "nothing to move" every time
+  // and read as broken.
   const lines: TransferLine[] = [];
+  const movingProductIds = new Set<string>();
   const destinationsWithSignal = new Set<string>();
   let hasAttributedDemand = false;
 
-  for (const product of scoped) {
-    // Both gates below were already checked building `sourceable` — scoped is
-    // a subset of it, so neither can fail here. The lookups stay (cheap Map
-    // reads) because `blended`/`available` are needed for sizing regardless.
+  for (const product of sourceable) {
+    // Both gates below were already checked building `sourceable`, so neither
+    // can fail here. The lookups stay (cheap Map reads) because
+    // `blended`/`available` are needed for sizing regardless.
     const blended = metrics.get(product.id)?.runRate ?? 0;
     const available = onHandAt.get(`${product.id}:${source.id}`) ?? 0;
 
@@ -363,7 +362,7 @@ export async function getDistributionProposal(
     }));
     const { basis, shareByLocation } = destinationShares(positions);
     for (const p of positions) {
-      if ((shareByLocation.get(p.locationId) ?? 0) > 0) destinationsWithSignal.add(p.locationId);
+      if (inScope(product) && (shareByLocation.get(p.locationId) ?? 0) > 0) destinationsWithSignal.add(p.locationId);
     }
 
     const sized = sizeTransfers(
@@ -375,6 +374,8 @@ export async function getDistributionProposal(
       })),
       cover
     );
+    if (sized.length > 0) movingProductIds.add(product.id);
+    if (!inScope(product)) continue;
     if (sized.length > 0 && basis === "attributed") hasAttributedDemand = true;
 
     for (const line of sized) {
@@ -397,6 +398,8 @@ export async function getDistributionProposal(
       });
     }
   }
+
+  const scopeFacets = deriveTransferScopeFacets(sourceable.filter((p) => movingProductIds.has(p.id)));
 
   // Biggest moves first, then alphabetically — a cost never enters the sort, so
   // a money-blind member sees the same rows in the same order as an owner.

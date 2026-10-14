@@ -20,6 +20,7 @@ import {
 import { TourProvider } from "@/components/tour/tour-provider";
 import { CurrencyProvider } from "@/components/currency-provider";
 import { RealtimeConnectionProvider } from "@/components/realtime-connection";
+import { LiveRefresh } from "@/components/shell/live-refresh";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { SiteFooter } from "@/components/ui/site-footer";
 
@@ -122,6 +123,7 @@ export function AppShell({
     <CurrencyProvider currency={workspace?.currency}>
     <RealtimeConnectionProvider workspaceId={workspace?.id ?? null}>
     <RouteLoadingProvider>
+    <LiveRefresh />
     <TourProvider
       role={workspace?.role ?? null}
       autoStart={tourAutoStart}

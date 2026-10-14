@@ -12,7 +12,6 @@ import {
   SkeletonStatTile,
   SkeletonTableRows,
 } from "@/components/ui/skeleton";
-import { RealtimeRefresh } from "./realtime-refresh";
 import { GuideBox } from "@/components/ui/guide-box";
 import { BuyListFreshness } from "./buy-list-freshness";
 import { RevenueTrend } from "./revenue-trend";
@@ -79,7 +78,6 @@ export default async function TodayPage() {
         }
         actions={<AdvancedMenu />}
       />
-      <RealtimeRefresh />
       <Suspense fallback={null}>
         <BuyThisWeek tenantId={tenantId} canViewCosts={canViewCosts} />
       </Suspense>
