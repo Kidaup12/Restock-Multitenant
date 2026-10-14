@@ -873,7 +873,26 @@ export function splitByBudget(
     )
     .map((row) => ({ row, cost: row.lineTotalKes ?? 0, urgency: row.urgency }));
 
-  const { selected, deferred, usedKes } = allocateByBudget(scored, budgetKes, strict);
+  // Under a hard cap, money goes to lines that have to be ordered now (today
+  // or this week) first. Only if every one of those is funded does what is
+  // left reach lines that can wait — otherwise the leftover after a big urgent
+  // line went to whatever still fitted, e.g. a car diffuser with three weeks of
+  // stock, while urgent lines sat unfunded.
+  const mustOrder = scored.filter((s) => s.row.tier !== "can_wait");
+  const canWait = scored.filter((s) => s.row.tier === "can_wait");
+  const first = strict ? allocateByBudget(mustOrder, budgetKes, true) : null;
+  const { selected, deferred, usedKes } = !first
+    ? allocateByBudget(scored, budgetKes, strict)
+    : first.deferred.length > 0
+      ? { selected: first.selected, deferred: [...first.deferred, ...canWait], usedKes: first.usedKes }
+      : (() => {
+          const rest = allocateByBudget(canWait, budgetKes - first.usedKes, true);
+          return {
+            selected: [...first.selected, ...rest.selected],
+            deferred: rest.deferred,
+            usedKes: first.usedKes + rest.usedKes,
+          };
+        })();
   const deferredRows = deferred.map((s) => s.row);
   const deferredCriticals = deferredRows.filter((r) => r.urgency === "critical");
 

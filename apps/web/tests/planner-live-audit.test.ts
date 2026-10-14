@@ -179,10 +179,15 @@ describe.skipIf(!snap)("planner on live numbers", () => {
           if (seen !== expected) fail(combo, `${expected} rows in filter, split accounts for ${seen}`);
           for (const r of [...funded, ...deferred])
             if (!filterBuyListRows([r], scope).length) fail(combo, `${r.sku} is outside the filter`);
-          // 3. Nothing affordable is left behind.
+          // 3. Nothing affordable is left behind — except lines that can wait,
+          //    which are held while any must-order-now line is unfunded.
+          const urgentUnfunded = deferred.some((d) => d.tier !== "can_wait");
           for (const d of deferred)
-            if ((d.lineTotalKes ?? 0) <= (split.leftoverKes ?? 0))
+            if (!(urgentUnfunded && d.tier === "can_wait") && (d.lineTotalKes ?? 0) <= (split.leftoverKes ?? 0))
               fail(combo, `${d.sku} (${d.lineTotalKes}) deferred with ${split.leftoverKes} left over`);
+          // 3b. No line that can wait is funded while a must-order line is not.
+          if (urgentUnfunded && funded.some((r) => r.tier === "can_wait"))
+            fail(combo, "a line that can wait was funded while an urgent one was not");
           // 4. Priority: a line funded ahead of a deferred one never has a later
           //    order deadline unless the deferred one simply didn't fit then.
           const firstDeferred = deferred[0];
