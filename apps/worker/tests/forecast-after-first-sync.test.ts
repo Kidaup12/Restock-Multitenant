@@ -47,6 +47,8 @@ const fakeApi = {
   ],
   locations: async () => [],
   orders: async () => [],
+  ordersProcessedBetween: async () => [],
+  inventoryItemCosts: async () => [],
   shop: async () => ({ currencyCode: "KES" }),
   ensureWebhooks: async () => {},
 };

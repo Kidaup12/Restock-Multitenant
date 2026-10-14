@@ -46,7 +46,13 @@ import { withCapture } from "@/lib/observability/wrap";
  * and must not become the tag.
  */
 
-const SYNC_TOPICS = new Set(["products/update", "inventory_levels/update", "orders/create"]);
+const SYNC_TOPICS = new Set([
+  "products/update",
+  "inventory_levels/update",
+  // A cost edit — it changes the inventory item, not the product.
+  "inventory_items/update",
+  "orders/create",
+]);
 
 /**
  * The delete payload carries only the PRODUCT id, usually as a bare number
