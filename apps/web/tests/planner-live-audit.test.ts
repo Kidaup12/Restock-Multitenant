@@ -162,7 +162,9 @@ describe.skipIf(!snap)("planner on live numbers", () => {
         const scopedCost = plannable(scoped).reduce((n, r) => n + (r.lineTotalKes ?? 0), 0);
         let prevFunded = -1;
         for (const f of fractions) {
-          const budget = Math.round(scopedCost * f);
+          // Rounded UP: a cost like 2,991.38 makes a rounded-down "100%" budget a
+          // few cents short of the list, which would read as a planner failure.
+          const budget = Math.ceil(scopedCost * f);
           const combo = `cover=${cover ?? "plan"} · ${scopeName} · budget=${budget}`;
           combos++;
           const split = splitByBudget(scoped, budget, { strict: true });
