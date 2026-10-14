@@ -271,7 +271,7 @@ export async function removeShopifyStore(): Promise<ConnectResult> {
   const connection = await db.shopifyConnection.findFirst({ select: { shopDomain: true } });
   if (!connection) return err("There is no store to remove.");
 
-  await db.ingestCursor.deleteMany({ where: { tenantId: actor.tenantId, source: "shopify" } });
+  await db.ingestCursor.deleteMany({ where: { tenantId: actor.tenantId, source: { startsWith: "shopify" } } });
   await db.syncRun.deleteMany({ where: { tenantId: actor.tenantId, source: "shopify" } });
   await db.shopifyConnection.deleteMany({ where: { tenantId: actor.tenantId } });
 

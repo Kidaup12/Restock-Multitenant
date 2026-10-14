@@ -102,7 +102,7 @@ export async function redactShop(shopDomain: string): Promise<{ erased: boolean;
     where: { tenantId, shopifyLocationId: { not: null } },
     data: { shopifyLocationId: null },
   });
-  await prismaService.ingestCursor.deleteMany({ where: { tenantId, source: "shopify" } });
+  await prismaService.ingestCursor.deleteMany({ where: { tenantId, source: { startsWith: "shopify" } } });
   await prismaService.syncRun.deleteMany({ where: { tenantId, source: "shopify" } });
   // The token last: while it exists the store is still reachable, and losing it
   // early would strand the rows above.

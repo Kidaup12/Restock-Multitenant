@@ -20,6 +20,23 @@ The `sync` queue dispatches on `data.source`:
 - anything else — the demo processor (3 progress phases + done) kept for
   pipeline smoke tests.
 
+The Shopify sync corrects itself; nobody should need to clear cursors by hand:
+
+- **Changed the sync logic in a way that leaves old data wrong?** Bump
+  `SYNC_LOGIC_VERSION` in `src/shopify-sync.ts`. On its next run after the
+  deploy, every shop rebuilds its whole catalogue and a year of sales, then
+  records the version.
+- **Daily reconcile.** Once a day per shop, the last 35 days of sales are rebuilt
+  from Shopify and compared with what the hourly runs wrote. The 03:00 full
+  catalogue pull does the same for costs.
+- **Drift alerts.** If either check had to correct anything on a settled day, the
+  active platform admins get a "Sync drift" email naming the shop and the gap
+  (the run's counts are on its `SyncRun` row too). That means the incremental
+  sync is losing changes and needs looking at.
+
+These markers live in `IngestCursor` under source `shopify-sync-state`, apart
+from the data cursors.
+
 Alongside the sync it runs six cron groups, each registered only when its
 variable is set to `1` — so a worker started with none of them set does nothing
 but serve the `sync` queue.

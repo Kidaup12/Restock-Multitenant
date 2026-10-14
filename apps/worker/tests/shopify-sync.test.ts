@@ -1131,7 +1131,7 @@ describe.skipIf(!runnable)("on-route without an en-route location (real db + red
 });
 
 describe("catalogue notice wording", () => {
-  const base = { written: 0, failed: 0, created: 0, createdWithoutCost: 0, duplicateSkus: 0 };
+  const base = { written: 0, failed: 0, created: 0, createdWithoutCost: 0, duplicateSkus: 0, costsCorrected: 0 };
 
   it("says nothing when a run brought in nothing worth interrupting anyone for", async () => {
     const { catalogueNoticeTitle } = await import("../src/shopify-sync");

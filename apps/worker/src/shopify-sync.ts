@@ -14,6 +14,7 @@ import { tenantDayKey } from "@wezesha/pos";
 import type { SyncJobData } from "@wezesha/queue";
 import type { SendEmail } from "./email";
 import { clearIncident, sendIncidentAlert } from "./incident";
+import { emailDriftToPlatformAdmins, type ReportDrift } from "./drift-alert";
 import { SyncRunReporter } from "./sync-run";
 import {
   ShopifyAuthError,
@@ -32,7 +33,9 @@ import {
   fetchProducts,
   fetchShopSettings,
   numericCore,
+  salesDrift,
   type InventoryItemCost,
+  type SalesDrift,
   type ShopifyClient,
   type ShopifyLocationNode,
   type ShopifyOrderNode,
@@ -64,7 +67,30 @@ export type ProductSyncResult = {
   createdWithoutCost: number;
   /** SKUs this run created that now sit on more than one product. */
   duplicateSkus: number;
+  /** Existing products whose stored cost this pull had to change. On a full
+   *  pull, a cost the hourly runs should already have carried — drift. */
+  costsCorrected: number;
 };
+
+/**
+ * Bump whenever a change to this sync means data written by earlier code is
+ * wrong. Each shop then rebuilds itself on its next run — the full catalogue
+ * and a year of sales — and records the version, so a fix repairs its own data
+ * on deploy instead of waiting for someone to clear cursors by hand.
+ *   v2: whole-day sales rebuild; cost edits read from inventory items.
+ */
+export const SYNC_LOGIC_VERSION = 2;
+const logicMarker = (version: number) => `logic-v${version}`;
+
+/**
+ * Once a day each shop's recent sales are rebuilt from scratch and compared with
+ * what the hourly runs had written. Anything they missed — a dropped webhook, a
+ * late refund, a bug nobody has found yet — is corrected within a day, and the
+ * size of the correction is reported as drift.
+ */
+const RECONCILE_MARKER = "orders-reconcile";
+const RECONCILE_EVERY_MS = 24 * 3_600_000;
+const RECONCILE_DAYS = 35;
 
 const OVERLAP_HOURS = 6;
 // First order pull reaches back a year — sales history is the forecast's fuel.
@@ -152,6 +178,31 @@ async function setCursor(
   });
 }
 
+/**
+ * Sync bookkeeping that is not a data cursor — when the shop was last rebuilt,
+ * last reconciled. Kept under its own source so nothing that reads the data
+ * cursors (freshness banners, the admin fleet, "last synced" lines) ever sees
+ * it; it starts with "shopify" so every delete of the shop's sync state
+ * (disconnect, store switch, redact) clears it too.
+ */
+const SYNC_STATE_SOURCE = "shopify-sync-state";
+
+async function getSyncMarker(tenantId: string, name: string): Promise<Date | null> {
+  const row = await prismaService.ingestCursor.findUnique({
+    where: { tenantId_source_resource: { tenantId, source: SYNC_STATE_SOURCE, resource: name } },
+    select: { cursor: true },
+  });
+  return row?.cursor ?? null;
+}
+
+async function setSyncMarker(tenantId: string, name: string, at: Date): Promise<void> {
+  await prismaService.ingestCursor.upsert({
+    where: { tenantId_source_resource: { tenantId, source: SYNC_STATE_SOURCE, resource: name } },
+    create: { tenantId, source: SYNC_STATE_SOURCE, resource: name, cursor: at },
+    update: { cursor: at },
+  });
+}
+
 /** Longest per-SKU failure text kept on the row — enough to name the cause,
  *  short enough that a bad batch can't bloat the catalogue table. */
 const SYNC_ERROR_MAX = 300;
@@ -199,13 +250,14 @@ async function syncProducts(
   // An empty pull is never evidence that the store is empty — a rate-limited or
   // half-answered run looks exactly the same, so nothing is marked missing.
   if (nodes.length === 0) {
-    return { written: 0, failed: 0, created: 0, createdWithoutCost: 0, duplicateSkus: 0 };
+    return { written: 0, failed: 0, created: 0, createdWithoutCost: 0, duplicateSkus: 0, costsCorrected: 0 };
   }
   await options.onProgress?.(0, nodes.length);
   const existing = await prismaService.product.findMany({
     where: { tenantId, shopifyVariantId: { not: null } },
-    select: { shopifyVariantId: true, costSource: true, activeOverride: true },
+    select: { shopifyVariantId: true, costSource: true, activeOverride: true, costKes: true },
   });
+  const storedCost = new Map(existing.map((p) => [p.shopifyVariantId as string, p.costKes]));
   const costPinned = new Set(
     existing.filter((p) => p.costSource === "manual").map((p) => p.shopifyVariantId as string)
   );
@@ -221,6 +273,7 @@ async function syncProducts(
   const seen: string[] = [];
   const created: string[] = [];
   let createdWithoutCost = 0;
+  let costsCorrected = 0;
   let written = 0;
   let failed = 0;
   let processed = 0;
@@ -278,6 +331,8 @@ async function syncProducts(
           update: { ...common, lastSynced: new Date() },
         });
         written += 1;
+        const before = storedCost.get(variantId);
+        if (writeCost && before != null && Math.abs(before - costParsed) > 0.005) costsCorrected += 1;
         if (!known.has(variantId)) {
           created.push(variantId);
           // A product the shop cannot buy a decision from: with no unit cost it
@@ -350,6 +405,7 @@ async function syncProducts(
     created: created.length,
     createdWithoutCost,
     duplicateSkus,
+    costsCorrected,
   };
 }
 
@@ -570,7 +626,8 @@ async function syncOrders(
   locationIdByCore: Map<string, string>,
   productIdByVariantCore: Map<string, string>,
   onProgress?: ProgressFn
-): Promise<number> {
+): Promise<{ salesDays: number; drift: SalesDrift }> {
+  const none = { salesDays: 0, drift: { days: 0, unitsBefore: 0, unitsAfter: 0 } };
   // The trading day is the tenant's, not UTC — the same rule, and the same
   // function, the till feed uses, so one day of trade never lands on two dates
   // depending on which channel it came through.
@@ -579,7 +636,7 @@ async function syncOrders(
     where: { id: tenantId },
     select: { timezone: true },
   });
-  if (!tenant) return 0;
+  if (!tenant) return none;
   const dayKeyOf = (d: Date) => tenantDayKey(tenant.timezone, d);
 
   const { days, orders: dayOrders } = await collectDayOrders(
@@ -588,7 +645,7 @@ async function syncOrders(
     dayKeyOf,
     (startIso, endIso) => api.ordersProcessedBetween(startIso, endIso)
   );
-  if (days.size === 0) return 0;
+  if (days.size === 0) return none;
 
   const buckets = [
     ...bucketSalesByProductDay(
@@ -620,6 +677,26 @@ async function syncOrders(
   // then writing, keeps a later chunk's delete from taking out rows an earlier
   // chunk had just written.
   const dates = [...days].map((day) => new Date(`${day}T00:00:00.000Z`));
+
+  // What these days held before the rebuild, so the run can say how much it had
+  // to correct on days the hourly runs had already written.
+  const unitsBefore = new Map<string, number>();
+  for (let i = 0; i < dates.length; i += SALES_CHUNK) {
+    const groups = await prismaService.salesHistory.groupBy({
+      by: ["date"],
+      where: { tenantId, channel: "shopify", date: { in: dates.slice(i, i + SALES_CHUNK) } },
+      _sum: { quantity: true },
+    });
+    for (const g of groups) unitsBefore.set(g.date.toISOString().slice(0, 10), g._sum.quantity ?? 0);
+  }
+  const unitsAfter = new Map<string, number>();
+  for (const r of rows) {
+    const day = r.date.toISOString().slice(0, 10);
+    unitsAfter.set(day, (unitsAfter.get(day) ?? 0) + r.quantity);
+  }
+  const yesterday = dayKeyOf(new Date(Date.now() - 86_400_000));
+  const drift = salesDrift(unitsBefore, unitsAfter, yesterday);
+
   for (let i = 0; i < dates.length; i += SALES_CHUNK) {
     await prismaService.salesHistory.deleteMany({
       where: { tenantId, channel: "shopify", date: { in: dates.slice(i, i + SALES_CHUNK) } },
@@ -630,7 +707,7 @@ async function syncOrders(
     await onProgress?.(i + chunk.length, rows.length);
     await prismaService.salesHistory.createMany({ data: chunk });
   }
-  return rows.length;
+  return { salesDays: rows.length, drift };
 }
 
 /** Shopify product core → local product id. Sibling variants share a product
@@ -683,6 +760,9 @@ export interface ShopifySyncOptions {
    * knows nothing about how work is scheduled, and the caller already owns that.
    */
   onCatalogueReady?: (tenantId: string) => Promise<void>;
+  /** Where drift found by the daily reconcile goes; defaults to emailing the
+   *  platform admins. Injectable so tests can assert on it. */
+  reportDrift?: ReportDrift;
 }
 
 const PHASES = ["products", "inventory", "orders"] as const;
@@ -821,11 +901,18 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       const runStart = new Date();
       await syncShopCurrency(tenantId, api);
 
+      // A shop whose data predates the current sync logic rebuilds everything;
+      // otherwise, once a day, its recent sales are reconciled.
+      const rebuild = (await getSyncMarker(tenantId, logicMarker(SYNC_LOGIC_VERSION))) === null;
+      const lastReconcile = await getSyncMarker(tenantId, RECONCILE_MARKER);
+      const reconcile =
+        !rebuild && (!lastReconcile || runStart.getTime() - lastReconcile.getTime() >= RECONCILE_EVERY_MS);
+
       // ── Products (delta since cursor; full catalog on first run) ────────────
       // The phase opens before the fetch, which is the longest silent stretch of
       // the whole sync and cannot report a total until it returns.
       await run.phaseStart("products");
-      const productsCursor = await getCursor(tenantId, "products");
+      const productsCursor = rebuild ? null : await getCursor(tenantId, "products");
       const productsSince = productsCursor
         ? computeWindowStart(productsCursor, runStart, {
             overlapHours: OVERLAP_HOURS,
@@ -864,16 +951,25 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
 
       // ── Orders → SalesHistory day sets ──────────────────────────────────────
       await run.phaseStart("orders");
-      const ordersCursor = await getCursor(tenantId, "orders");
-      const ordersSince = computeWindowStart(ordersCursor, runStart, {
+      // A rebuild reads a year back, exactly like a shop's first sync.
+      const ordersCursor = rebuild ? null : await getCursor(tenantId, "orders");
+      let ordersSince = computeWindowStart(ordersCursor, runStart, {
         overlapHours: OVERLAP_HOURS,
         firstRunLookbackDays: FIRST_RUN_ORDER_LOOKBACK_DAYS,
       });
+      if (reconcile) {
+        const reconcileFrom = computeWindowStart(
+          new Date(runStart.getTime() - RECONCILE_DAYS * 86_400_000),
+          runStart,
+          { overlapHours: 0, firstRunLookbackDays: RECONCILE_DAYS }
+        );
+        if (reconcileFrom < ordersSince) ordersSince = reconcileFrom;
+      }
       // Locations exist now (inventory phase ran) — map them for fulfilment
       // attribution of online sales.
       const locationIdByCore = await loadLocationIdByCore(tenantId);
       const productIdByCore = await loadProductIdByCore(tenantId);
-      const salesDays = await syncOrders(
+      const { salesDays, drift } = await syncOrders(
         tenantId,
         api,
         ordersSince,
@@ -885,7 +981,25 @@ export function createShopifySyncProcessor(options: ShopifySyncOptions) {
       // Day-sets written. Zero means the window held no orders at all — the
       // shape of every run against a store that has quietly stopped selling.
       await setCursor(tenantId, "orders", runStart, salesDays > 0);
-      await run.phaseEnd("orders", { salesDays });
+      const mode = rebuild ? "rebuild" : reconcile ? "reconcile" : "incremental";
+      await run.phaseEnd("orders", { salesDays, mode, ...(mode === "incremental" ? {} : { drift }) });
+
+      // Markers last, once every phase has written: a run that fails part-way
+      // leaves them unset, so the next run repeats the rebuild or reconcile.
+      if (rebuild || reconcile) await setSyncMarker(tenantId, RECONCILE_MARKER, runStart);
+      if (rebuild) await setSyncMarker(tenantId, logicMarker(SYNC_LOGIC_VERSION), runStart);
+
+      // A rebuild's corrections are the repair itself, not drift; a daily
+      // reconcile or the nightly full pull correcting anything means the hourly
+      // runs missed it, which is worth an operator's attention.
+      const costDrift = !rebuild && productsSince === null ? products.costsCorrected : 0;
+      const salesDriftDays = reconcile ? drift.days : 0;
+      if (costDrift > 0 || salesDriftDays > 0) {
+        await (options.reportDrift ?? emailDriftToPlatformAdmins)(tenantId, {
+          salesDrift: reconcile ? drift : null,
+          costsCorrected: costDrift,
+        });
+      }
 
       await run.ok();
       // A workspace with no forecast has an empty planner until the next cron
