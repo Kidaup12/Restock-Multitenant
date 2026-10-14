@@ -132,6 +132,8 @@ describe.skipIf(!runnable)("sync freshness vs cursor (real db + redis)", () => {
         products: async () => payload.products,
         locations: async () => payload.locations,
         orders: async () => payload.orders,
+        ordersProcessedBetween: async () => payload.orders,
+        inventoryItemCosts: async () => [],
       }),
     });
 

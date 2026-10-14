@@ -188,8 +188,9 @@ export async function fetchProducts(client: ShopifyClient, sinceIso: string | nu
   return out;
 }
 
-/** Orders whose `updated_at >= sinceIso`, with line items. */
-export async function fetchOrdersSince(client: ShopifyClient, sinceIso: string): Promise<ShopifyOrderNode[]> {
+/** Orders matching a search query, with line items. 250 line items is
+ *  Shopify's page maximum — at 50, lines past the fiftieth were dropped. */
+function fetchOrdersMatching(client: ShopifyClient, q: string): Promise<ShopifyOrderNode[]> {
   return pageAll<ShopifyOrderNode>(
     client,
     (after) => ({
@@ -198,8 +199,8 @@ export async function fetchOrdersSince(client: ShopifyClient, sinceIso: string):
           edges { node {
             id name createdAt processedAt cancelledAt
             fulfillments(first: 10) { location { id } }
-            refunds { refundLineItems(first: 50) { edges { node { quantity lineItem { id } } } } }
-            lineItems(first: 50) { edges { node {
+            refunds { refundLineItems(first: 250) { edges { node { quantity lineItem { id } } } } }
+            lineItems(first: 250) { edges { node {
               id quantity sku product { id } variant { id }
               originalUnitPriceSet { shopMoney { amount currencyCode } }
             } } }
@@ -207,7 +208,7 @@ export async function fetchOrdersSince(client: ShopifyClient, sinceIso: string):
           pageInfo { hasNextPage endCursor }
         }
       }`,
-      variables: { after, q: `updated_at:>=${sinceIso}` },
+      variables: { after, q },
     }),
     (d: any) => ({
       nodes: d.orders.edges.map((e: any) => ({
@@ -218,6 +219,53 @@ export async function fetchOrdersSince(client: ShopifyClient, sinceIso: string):
         lineItems: e.node.lineItems.edges.map((l: any) => l.node),
       })),
       pageInfo: d.orders.pageInfo,
+    })
+  );
+}
+
+/** Orders whose `updated_at >= sinceIso` — what changed, not what sold. */
+export function fetchOrdersSince(client: ShopifyClient, sinceIso: string): Promise<ShopifyOrderNode[]> {
+  return fetchOrdersMatching(client, `updated_at:>=${sinceIso}`);
+}
+
+/** Every order SOLD in [startIso, endIso), whether or not it changed — what a
+ *  sales day has to be rebuilt from. */
+export function fetchOrdersProcessedBetween(
+  client: ShopifyClient,
+  startIso: string,
+  endIso: string
+): Promise<ShopifyOrderNode[]> {
+  return fetchOrdersMatching(client, `processed_at:>=${startIso} processed_at:<${endIso}`);
+}
+
+export type InventoryItemCost = { variantId: string | null; cost: string | null };
+
+/**
+ * Unit costs changed since `sinceIso`. A cost lives on the inventory item, and
+ * editing it does not touch the product, so the products delta never sees it —
+ * only the nightly full pull did, up to a day later.
+ */
+export function fetchInventoryItemCostsSince(
+  client: ShopifyClient,
+  sinceIso: string
+): Promise<InventoryItemCost[]> {
+  return pageAll<InventoryItemCost>(
+    client,
+    (after) => ({
+      query: `query($after: String, $q: String!) {
+        inventoryItems(first: 250, after: $after, query: $q) {
+          edges { node { unitCost { amount } variant { id } } }
+          pageInfo { hasNextPage endCursor }
+        }
+      }`,
+      variables: { after, q: `updated_at:>=${sinceIso}` },
+    }),
+    (d: any) => ({
+      nodes: d.inventoryItems.edges.map((e: any) => ({
+        variantId: e.node.variant?.id ?? null,
+        cost: e.node.unitCost?.amount ?? null,
+      })),
+      pageInfo: d.inventoryItems.pageInfo,
     })
   );
 }

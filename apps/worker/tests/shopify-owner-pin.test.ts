@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { Redis } from "ioredis";
 import type { SyncJobData } from "@wezesha/queue";
 import type { Job } from "bullmq";
-import { encryptToken, type ShopifyProductNode } from "@wezesha/shopify";
+import { encryptToken, type InventoryItemCost, type ShopifyProductNode } from "@wezesha/shopify";
 
 /**
  * The owner's "keep active" pin against a real sync run.
@@ -54,6 +54,7 @@ describe.skipIf(!runnable)("owner keep-active pin through the Shopify sync (real
   let publisher: Redis;
   let tenantId: string;
   let catalogue = catalogueAt("ACTIVE");
+  let costEdits: InventoryItemCost[] = [];
 
   const bySku = async (sku: string) => (await prismaService.product.findFirst({ where: { tenantId, sku } }))!;
   const onBuyList = async (sku: string) =>
@@ -75,6 +76,8 @@ describe.skipIf(!runnable)("owner keep-active pin through the Shopify sync (real
         products: async () => catalogue,
         locations: async () => [],
         orders: async () => [],
+        ordersProcessedBetween: async () => [],
+        inventoryItemCosts: async () => costEdits,
       }),
     });
 
@@ -149,5 +152,29 @@ describe.skipIf(!runnable)("owner keep-active pin through the Shopify sync (real
     for (const node of catalogue) for (const v of node.variants ?? []) delete v.price;
     await processor(jobStub(tenantId));
     expect((await bySku(PINNED_SKU)).priceKes).toBe(1500);
+  });
+
+  it("a cost edited in the store lands on the next delta run, but never over a manual pin", async () => {
+    // The catalogue fixture carries no unit cost, so neither SKU has one from the
+    // products pull. The owner types a cost on one of them.
+    await prismaService.product.updateMany({
+      where: { tenantId, sku: PINNED_SKU },
+      data: { costKes: 50, costSource: "manual" },
+    });
+    // Both costs are then edited in the store — the edit touches the inventory
+    // item only, so the products delta alone would not see it.
+    costEdits = [
+      { variantId: "gid://shopify/ProductVariant/801", cost: "900" },
+      { variantId: "gid://shopify/ProductVariant/802", cost: "450" },
+    ];
+    await processor(jobStub(tenantId));
+
+    const loose = await bySku(LOOSE_SKU);
+    expect(loose.costKes).toBe(450);
+    expect(loose.costSource).toBe("shopify");
+    const pinned = await bySku(PINNED_SKU);
+    expect(pinned.costKes).toBe(50);
+    expect(pinned.costSource).toBe("manual");
+    costEdits = [];
   });
 });

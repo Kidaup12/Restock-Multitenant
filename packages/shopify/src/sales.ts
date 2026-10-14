@@ -123,6 +123,100 @@ export function bucketSalesByProductDay(
 }
 
 /**
+ * Every trading day the given orders land on — including cancelled and fully
+ * refunded ones, whose day still has to be rebuilt (their old sales row must
+ * go even though they produce no bucket now).
+ */
+export function affectedDayKeys(
+  orders: ShopifyOrderNode[],
+  dayKeyOf: (saleAt: Date) => string
+): Set<string> {
+  const days = new Set<string>();
+  for (const order of orders) {
+    const saleAt = order.processedAt ?? order.createdAt;
+    if (!saleAt) continue;
+    const instant = new Date(saleAt);
+    if (Number.isNaN(instant.getTime())) continue;
+    days.add(dayKeyOf(instant));
+  }
+  return days;
+}
+
+export type DayKeyRange = { from: string; to: string };
+
+const DAY_MS = 86_400_000;
+const dayMs = (dayKey: string) => Date.parse(`${dayKey}T00:00:00.000Z`);
+
+/** Sorted day keys grouped into runs of consecutive days, so each run is one
+ *  fetch instead of one per day. */
+export function dayKeyRanges(dayKeys: Iterable<string>): DayKeyRange[] {
+  const sorted = [...new Set(dayKeys)].sort();
+  const ranges: DayKeyRange[] = [];
+  for (const day of sorted) {
+    const last = ranges[ranges.length - 1];
+    if (last && dayMs(day) - dayMs(last.to) === DAY_MS) last.to = day;
+    else ranges.push({ from: day, to: day });
+  }
+  return ranges;
+}
+
+/** Wider than any timezone offset, so a UTC window padded by it always covers
+ *  a whole tenant day without knowing the tenant's zone. */
+const PAD_MS = 14 * 3_600_000;
+
+/**
+ * Whether a tenant day may hold sales the `updated_at >= windowStart` pull did
+ * not return. An order sold at or after windowStart was necessarily updated at
+ * or after it too, so a day lying wholly inside the window is already complete;
+ * one that starts before it (an older day an edit touched, or the first hours
+ * of a day east of UTC) has to be fetched by sale date before it is rebuilt.
+ */
+export function dayNeedsRefetch(dayKey: string, windowStart: Date): boolean {
+  return dayMs(dayKey) - PAD_MS < windowStart.getTime();
+}
+
+/**
+ * The UTC instants to fetch so a range of TENANT days is complete. Padded by
+ * 14h each side — wider than any timezone offset — so no timezone math is
+ * needed here; the caller keeps only orders whose tenant day is in the range.
+ */
+export function processedWindowFor(range: DayKeyRange): { startIso: string; endIso: string } {
+  return {
+    startIso: new Date(dayMs(range.from) - PAD_MS).toISOString(),
+    endIso: new Date(dayMs(range.to) + DAY_MS + PAD_MS).toISOString(),
+  };
+}
+
+/**
+ * The days to rebuild, and every order sold on them.
+ *
+ * `changed` is what the `updated_at >= windowStart` pull returned. Its days are
+ * the ones to rebuild; any of those that start before the window are re-read
+ * by sale date, because rebuilding a day from only its changed orders replaces
+ * the whole day with them.
+ */
+export async function collectDayOrders(
+  changed: ShopifyOrderNode[],
+  windowStart: Date,
+  dayKeyOf: (saleAt: Date) => string,
+  fetchSoldBetween: (startIso: string, endIso: string) => Promise<ShopifyOrderNode[]>
+): Promise<{ days: Set<string>; orders: ShopifyOrderNode[] }> {
+  const days = affectedDayKeys(changed, dayKeyOf);
+  const byId = new Map(changed.map((o) => [o.id, o]));
+  const toRefetch = [...days].filter((day) => dayNeedsRefetch(day, windowStart));
+  for (const range of dayKeyRanges(toRefetch)) {
+    const { startIso, endIso } = processedWindowFor(range);
+    for (const order of await fetchSoldBetween(startIso, endIso)) byId.set(order.id, order);
+  }
+  // The padded fetch brings in neighbouring days; only the rebuilt ones count.
+  const orders = [...byId.values()].filter((order) => {
+    const at = order.processedAt ?? order.createdAt;
+    return at ? days.has(dayKeyOf(new Date(at))) : false;
+  });
+  return { days, orders };
+}
+
+/**
  * Day-aligned start of a sync window.
  *
  *  - First run (no cursor): look back `firstRunLookbackDays`.

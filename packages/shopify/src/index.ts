@@ -22,6 +22,8 @@ export type { ShopifyClient } from "./client";
 export {
   fetchProducts,
   fetchOrdersSince,
+  fetchOrdersProcessedBetween,
+  fetchInventoryItemCostsSince,
   fetchLocationsWithInventory,
 } from "./resources";
 export type {
@@ -30,9 +32,14 @@ export type {
   ShopifyLocationNode,
   ShopifyInventoryLevelNode,
   ShopifyOrderNode,
+  InventoryItemCost,
 } from "./resources";
-export { bucketSalesByProductDay, computeWindowStart } from "./sales";
-export type { DayBucket } from "./sales";
+export {
+  bucketSalesByProductDay,
+  computeWindowStart,
+  collectDayOrders,
+} from "./sales";
+export type { DayBucket, DayKeyRange } from "./sales";
 export { WEBHOOK_TOPICS, ensureWebhookSubscriptions } from "./webhooks";
 export { fetchShopSettings, type ShopSettings } from "./shop";
 export { probeConnection, type ConnectionProbe } from "./probe";
