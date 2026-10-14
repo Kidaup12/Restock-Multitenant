@@ -216,6 +216,32 @@ export async function collectDayOrders(
   return { days, orders };
 }
 
+export type SalesDrift = { days: number; unitsBefore: number; unitsAfter: number };
+
+/**
+ * How far a rebuild moved the SETTLED days — days before `settledBefore`, which
+ * the hourly runs had already written and should have had right. Today and
+ * yesterday are excluded by the caller because new sales legitimately land
+ * there; any change to an older day is something the incremental sync missed.
+ */
+export function salesDrift(
+  before: Map<string, number>,
+  after: Map<string, number>,
+  settledBefore: string
+): SalesDrift {
+  const drift: SalesDrift = { days: 0, unitsBefore: 0, unitsAfter: 0 };
+  for (const day of new Set([...before.keys(), ...after.keys()])) {
+    if (day >= settledBefore) continue;
+    const was = before.get(day) ?? 0;
+    const now = after.get(day) ?? 0;
+    if (was === now) continue;
+    drift.days += 1;
+    drift.unitsBefore += was;
+    drift.unitsAfter += now;
+  }
+  return drift;
+}
+
 /**
  * Day-aligned start of a sync window.
  *
