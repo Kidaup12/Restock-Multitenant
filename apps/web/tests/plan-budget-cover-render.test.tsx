@@ -62,7 +62,7 @@ describe("budget mode's cover target on first paint", () => {
     expect(markup()).toMatch(/days of cover/i);
   });
 
-  it("still shows the budget field and its presets", () => {
+  it("shows the budget field with its currency", () => {
     const html = markup();
     expect(html).toMatch(/Budget \(KES\)/);
     expect(html).toContain("Plan my restock");

@@ -8,6 +8,7 @@ import {
   prismaForTenantTx,
 } from "@wezesha/db";
 import { applyMoq } from "@/lib/po/po-math";
+import { byOrderDeadline, whatIfSizeDays } from "@/lib/data/cover-horizon";
 import {
   allocateByBudget,
   ASSUMED_LEAD_DAYS,
@@ -130,11 +131,11 @@ export type BuyListRow = {
   runRatePerDay: number;
   /** Supplier minimum order quantity (units); 1 when none is set. */
   moq: number;
-  /** True when a cover horizon was asked for and this line's own lead time was
-   *  longer, so the quantity covers the wait for its delivery rather than the
-   *  horizon requested. Without it the number silently exceeds what was asked
+  /** True when a cover horizon was asked for and this line's measured lead time
+   *  was added on top of it — the quantity covers the wait for the delivery AND
+   *  the cover after it. Without saying so the number exceeds the days asked
    *  for and reads like a miscalculation. False whenever no cover lens is
-   *  applied, and for a line the owner has overridden. */
+   *  applied, for a line with no measured lead, and for an overridden line. */
   leadFloored: boolean;
   /** What will actually be ordered: recommendedQty raised to the supplier's
    *  minimum. The two differ whenever a supplier won't ship a small line, and
@@ -581,11 +582,9 @@ export async function getBuyList(
       // what-if. With neither lens active, `whatIf` is false, `resizedQty` is
       // null and `qty === override ?? p.qty`, byte-identical to today.
       const override = overrideByProduct.get(p.productId) ?? null;
-      // The horizon the re-size actually used. A measured lead longer than the
-      // requested cover raises it, because a line has to cover the wait for its
-      // own delivery — asking for 7 days from a 30-day supplier still buys 30.
-      const sizeDays =
-        coverDays != null ? Math.max(coverDays, measuredLeadDays ?? 0) : null;
+      // The horizon the re-size actually used: the cover asked for, counted
+      // from when the delivery lands, so the measured lead goes on top.
+      const sizeDays = coverDays != null ? whatIfSizeDays(coverDays, measuredLeadDays) : null;
       // One object, fed to BOTH the re-size and its explanation, so the breakdown
       // can never describe a different horizon from the one that set the number.
       const resizeInput =
@@ -862,8 +861,12 @@ export function splitByBudget(
     // first, whatever the class. The list leads with bestsellers because that
     // is how a buyer wants to read it, but a budget that spent on class A while
     // a critical item went unfunded would be a stockout the shop paid for.
+    // Lead-aware: the soonest last-safe-order day first, so a slow supplier's
+    // line that is already late to order outranks a fast one that empties
+    // sooner but lands in two days. Urgency then breaks ties.
     .sort(
       (a, b) =>
+        byOrderDeadline(a, b) ||
         (URGENCY_RANK[a.urgency] ?? 9) - (URGENCY_RANK[b.urgency] ?? 9) ||
         (b.atRiskKes ?? 0) - (a.atRiskKes ?? 0) ||
         stockoutRank(a) - stockoutRank(b)

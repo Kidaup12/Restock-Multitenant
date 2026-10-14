@@ -63,7 +63,7 @@ export function Stepper({
     "grid size-7 place-items-center rounded-sm border border-edge text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink disabled:opacity-40";
   return (
     <div className="flex items-center gap-2">
-      <span className="text-sm font-medium text-ink">{label}</span>
+      {label && <span className="text-sm font-medium text-ink">{label}</span>}
       <div className="flex items-center gap-1.5">
         <button
           type="button"

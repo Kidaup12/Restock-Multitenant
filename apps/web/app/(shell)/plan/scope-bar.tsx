@@ -1,8 +1,9 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDownIcon } from "@/components/icons";
-import { InfoDot } from "@/components/ui/term";
+import { HelpTip } from "@/components/ui/help-tip";
+import { MultiPicker } from "@/components/ui/multi-picker";
 import { abcTone } from "@/components/ui/abc-badge";
 import { cn } from "@/lib/cn";
 import type { BuyListRow } from "@/lib/data/plan";
@@ -12,19 +13,22 @@ import { NONE_VALUE } from "@/lib/facets/types";
 import type { SavedScope } from "./scope-actions";
 
 /**
- * Scope bar for the buy list: narrow the checklist by ABC class, category,
- * supplier, and lead-band (how fast a restock lands). Every dimension is
- * metadata already on the row — no cost figure enters here, so a money-blind
- * member scopes exactly the list an owner does.
+ * Filter card for the buy list: narrow it by supplier, sales class, lead time
+ * and category. Every dimension is metadata already on the row — no cost figure
+ * enters here, so a money-blind member scopes exactly the list an owner does.
+ *
+ * Always open. It used to fold behind one small "Filter" button, with suppliers
+ * a further click down in a popover that never closed — the control a buyer
+ * reaches for first was the hardest to reach. Supplier now leads as a
+ * searchable picker; class and lead time are one-click toggles, each with a
+ * "?" that says what it means.
  *
  * Filtering is AND across dimensions, OR within one (matching the catalogue's
- * facet bar): a row shows when it satisfies every dimension that has a
- * selection, and within a dimension any one selected value is enough. Options
- * are derived from the rows on screen, never hard-coded, so a dimension with
- * fewer than two values drops out of the bar — nothing to filter by.
+ * facet bar). Options are derived from the rows on screen, never hard-coded, so
+ * a dimension with fewer than two values drops out — nothing to filter by.
  */
 
-import { LEAD_BANDS, LEAD_BAND_LABELS, leadBandFor, EMPTY_SCOPE, isScopeActive, type LeadBand, type ScopeSelection } from "./scope";
+import { LEAD_BANDS, LEAD_BAND_LABELS, leadBandFor, EMPTY_SCOPE, type LeadBand, type ScopeSelection } from "./scope";
 export { LEAD_BANDS, LEAD_BAND_LABELS, leadBandFor, EMPTY_SCOPE, isScopeActive, parseScopeFromParams, scopeToParams, SCOPE_PARAM_NAMES, matchesScope, isUrgentRow, filterBuyListRows, type LeadBand, type ScopeSelection } from "./scope";
 
 type ScopeDimension = keyof ScopeSelection;
@@ -88,67 +92,54 @@ export function deriveScopeFacets(rows: BuyListRow[]): ScopeFacets {
   };
 }
 
-const DIMENSIONS: { key: ScopeDimension; label: string }[] = [
-  { key: "abc", label: "ABC class" },
-  { key: "category", label: "Category" },
-  { key: "supplier", label: "Supplier" },
-  { key: "leadBand", label: "Lead time" },
-];
-
 /**
- * How a chip is tinted when it is NOT selected — a wash of its own colour so the
- * dimension reads at a glance, matching the tinted `Badge`/`AbcBadge` chips the
- * rest of the plan uses. The selected state stays the shared accent-soft "on"
- * look for every dimension, so "which are chosen" is never ambiguous.
+ * Plain names for the classes. "Class A" is jargon an owner has to be taught;
+ * "best sellers" is how they already think — the letter stays beside it for
+ * anyone who has learnt it. The same names the catalogue's class chips use.
  */
-type ChipTint = { off: string };
-
-/** ABC uses the same tone the AbcBadge does: A is what the shop leans on
- *  (loudest), B the mid warning, C the quiet tail. */
-const ABC_TINT: Record<"critical" | "warning" | "neutral", string> = {
-  critical: "border-critical/20 bg-critical/10 text-critical hover:bg-critical/15",
-  warning: "border-warning/20 bg-warning/10 text-warning hover:bg-warning/15",
-  neutral: "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink",
+const CLASS_NAMES: Record<string, string> = {
+  A: "Best sellers",
+  B: "Steady sellers",
+  C: "Slow movers",
 };
 
-/** Fast is good news (green), slow is the watch-item (amber) — the same
- *  reading the rest of the app gives speed. Medium stays the plain accent
- *  wash: neither a flag nor a reassurance, just the middle. Left un-tinted
- *  before, this row was the one flat-grey band sitting next to ABC's colour,
- *  which is what made the whole filter bar read unfinished. */
-const LEAD_BAND_TINT: Record<LeadBand, string> = {
-  fast: "border-positive/20 bg-positive/10 text-positive hover:bg-positive/15",
-  medium: "border-accent-200 bg-accent-soft text-accent-ink hover:bg-accent-soft/70",
-  slow: "border-warning/20 bg-warning/10 text-warning hover:bg-warning/15",
+/** Selected reads as a solid accent outline plus a tick, so "which are on"
+ *  never depends on telling two pastel tints apart. An unselected chip carries
+ *  its meaning in a small coloured dot instead of a tinted body. */
+const ABC_DOT: Record<"critical" | "warning" | "neutral", string> = {
+  critical: "bg-critical",
+  warning: "bg-warning",
+  neutral: "bg-ink-faint",
+};
+const LEAD_DOT: Record<LeadBand, string> = {
+  fast: "bg-positive",
+  medium: "bg-accent",
+  slow: "bg-warning",
 };
 
-/** A small fixed palette for category chips — each value lands on a stable tint
- *  (same value, same colour every render and everywhere it appears), with the
- *  neutral accent-soft wash as the fallback when the hash lands there. */
-const CATEGORY_TINTS: string[] = [
-  "border-accent-200 bg-accent-soft text-accent-ink hover:bg-accent-soft/70",
-  "border-positive/20 bg-positive/10 text-positive hover:bg-positive/15",
-  "border-warning/20 bg-warning/10 text-warning hover:bg-warning/15",
-  "border-critical/20 bg-critical/10 text-critical hover:bg-critical/15",
-];
+const LEAD_NAMES: Record<LeadBand, { name: string; range: string }> = {
+  fast: { name: "Fast", range: "up to 7 days" },
+  medium: { name: "Medium", range: "8–28 days" },
+  slow: { name: "Slow", range: "over 28 days" },
+};
 
-/** Stable string hash → a category's tint index. Deterministic, so a category
- *  keeps its colour across renders and screens. */
-function categoryTint(value: string): string {
-  let h = 0;
-  for (let i = 0; i < value.length; i += 1) h = (h * 31 + value.charCodeAt(i)) >>> 0;
-  return CATEGORY_TINTS[h % CATEGORY_TINTS.length]!;
-}
-
-/** The tint for one chip in a dimension. ABC keys off the class, category off a
- *  stable hash, lead band off fast/medium/slow; supplier (the one dimension
- *  with no fixed, small vocabulary) keeps the plain neutral chip. */
-function tintFor(key: ScopeDimension, value: string): ChipTint | undefined {
-  if (value === NONE_VALUE) return undefined; // the gap chips stay neutral
-  if (key === "abc") return { off: ABC_TINT[abcTone(value)] };
-  if (key === "category") return { off: categoryTint(value) };
-  if (key === "leadBand") return { off: LEAD_BAND_TINT[value as LeadBand] };
-  return undefined;
+/** Close a popover on a click outside it or on Escape. */
+function useDismiss(ref: React.RefObject<HTMLElement | null>, open: boolean, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    function onDown(e: PointerEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") close();
+    }
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [ref, open, close]);
 }
 
 export function ScopeBar({
@@ -180,222 +171,204 @@ export function ScopeBar({
   scopesBusy?: boolean;
 }) {
   const facets = useMemo(() => deriveScopeFacets(rows), [rows]);
-  const [name, setName] = useState("");
-  // The dimension chips start folded away, so the list is the first thing read
-  // rather than four choices about it. A scope that is already active opens the
-  // row on mount — otherwise the narrowing would be invisible.
-  const [open, setOpen] = useState(() => isScopeActive(selection));
-  // Only dimensions with something to choose between earn a control.
-  const activeDims = DIMENSIONS.filter(({ key }) => facets[key].length > 1);
   const activeCount =
     selection.abc.length + selection.category.length + selection.supplier.length + selection.leadBand.length;
 
-  function toggle(key: ScopeDimension, value: string) {
-    const current = selection[key] as string[];
-    const next = current.includes(value)
-      ? current.filter((v) => v !== value)
-      : [...current, value];
+  function set(key: ScopeDimension, next: string[]) {
     onChange({ ...selection, [key]: next });
   }
-
-  function saveCurrent() {
-    const trimmed = name.trim();
-    if (!trimmed || !onSaveScope) return;
-    onSaveScope(trimmed);
-    setName("");
+  function toggle(key: ScopeDimension, value: string) {
+    const current = selection[key] as string[];
+    set(key, current.includes(value) ? current.filter((v) => v !== value) : [...current, value]);
   }
 
-  if (activeDims.length === 0) return null;
+  // A dimension with a single value has nothing to choose between.
+  const has = (key: ScopeDimension) => facets[key].length > 1;
+  if (!has("abc") && !has("category") && !has("supplier") && !has("leadBand")) return null;
+
+  // Every chosen value as a removable pill, so what is narrowing the list reads
+  // in one place — including values folded inside a picker.
+  const pills: { key: ScopeDimension; value: string; text: string }[] = [
+    ...selection.supplier.map((v) => ({ key: "supplier" as const, value: v, text: v === NONE_VALUE ? "No supplier" : v })),
+    ...selection.abc.map((v) => ({ key: "abc" as const, value: v, text: CLASS_NAMES[v] ?? (v === NONE_VALUE ? "Unranked" : v) })),
+    ...selection.leadBand.map((v) => ({ key: "leadBand" as const, value: v, text: `${LEAD_NAMES[v].name} lead time` })),
+    ...selection.category.map((v) => ({ key: "category" as const, value: v, text: v === NONE_VALUE ? "Uncategorised" : v })),
+  ];
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className={cn(
-            "flex items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
-            activeCount > 0
-              ? "border-accent-200 bg-accent-soft text-accent-ink"
-              : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink"
-          )}
-        >
-          Filter
-          <span className="font-normal text-ink-faint">
-            {activeCount > 0
-              ? `· ${activeCount} on`
-              : `(${activeDims.map((d) => d.label).join(" · ")})`}
-          </span>
-          <InfoDot hint="Narrow the buy list by class, category, supplier and lead time. Filtering is AND across dimensions and OR within one — a row shows when it matches every dimension you've picked a value in." />
-          <ChevronDownIcon className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-        </button>
-
-        {savedScopes.length > 0 && (
-          <details className="group relative">
-            <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-sm border border-edge bg-surface px-2.5 py-1.5 text-2xs font-medium text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink">
-              Saved scopes
-              <span className="rounded-xs bg-surface-2 px-1.5 font-mono tabular-nums text-ink-faint">
-                {savedScopes.length}
-              </span>
-            </summary>
-            <div className="absolute z-10 mt-1 flex max-h-72 min-w-52 flex-col gap-0.5 overflow-auto rounded-md border border-edge bg-surface p-1.5 shadow-pop">
-              {savedScopes.map((scope) => (
-                <div key={scope.id} className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onChange(scope.selection);
-                      setOpen(true);
-                    }}
-                    className="min-w-0 flex-1 truncate rounded-md px-2 py-1 text-left text-sm text-ink-secondary transition-colors hover:bg-surface-2 hover:text-ink"
-                  >
-                    {scope.name}
-                  </button>
-                  {onDeleteScope && (
-                    <button
-                      type="button"
-                      onClick={() => onDeleteScope(scope.id)}
-                      aria-label={`Delete scope ${scope.name}`}
-                      className="rounded-md px-1.5 py-1 text-sm text-ink-faint transition-colors hover:text-negative"
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </details>
+    <section aria-label="Filter the buy list" className="rounded-lg border border-edge bg-surface shadow-card">
+      <div className="flex flex-wrap items-start gap-x-8 gap-y-4 p-4">
+        {has("supplier") && (
+          <FilterField
+            label="Supplier"
+            className="w-full sm:w-64"
+            help="Show only what you buy from these suppliers — the quickest way to build one supplier's order. Tick as many as you like, or type to find one."
+          >
+            <MultiPicker
+              label="Supplier"
+              allLabel="All suppliers"
+              searchPlaceholder="Search suppliers…"
+              options={facets.supplier}
+              selected={selection.supplier}
+              onChange={(next) => set("supplier", next)}
+            />
+          </FilterField>
         )}
 
+        {has("abc") && (
+          <FilterField
+            label="Sales class"
+            help={
+              <>
+                Products ranked by how much money they bring in.
+                <span className="mt-1.5 block"><b className="text-ink">Best sellers (A)</b> — the top ~70% of your sales value. Never let these run out.</span>
+                <span className="block"><b className="text-ink">Steady sellers (B)</b> — the next ~20%.</span>
+                <span className="block"><b className="text-ink">Slow movers (C)</b> — the long tail. Buy sparingly.</span>
+              </>
+            }
+          >
+            <div className="flex flex-wrap gap-1.5">
+              {facets.abc.map((opt) => (
+                <ToggleChip
+                  key={opt.value}
+                  on={selection.abc.includes(opt.value)}
+                  onClick={() => toggle("abc", opt.value)}
+                  dot={opt.value === NONE_VALUE ? undefined : ABC_DOT[abcTone(opt.value)]}
+                  count={opt.count}
+                >
+                  {opt.value === NONE_VALUE ? "Unranked" : (CLASS_NAMES[opt.value] ?? opt.label)}
+                  {opt.value !== NONE_VALUE && <span className="ml-1 text-ink-faint">{opt.value}</span>}
+                </ToggleChip>
+              ))}
+            </div>
+          </FilterField>
+        )}
+
+        {has("leadBand") && (
+          <FilterField
+            label="Lead time"
+            help="How long the supplier takes to deliver after you order. Slow-lead items need ordering earliest — the plan already counts each item's lead time in its order-by date and its quantity."
+          >
+            <div className="flex flex-wrap gap-1.5">
+              {facets.leadBand.map((opt) => {
+                const band = opt.value as LeadBand;
+                return (
+                  <ToggleChip
+                    key={opt.value}
+                    on={selection.leadBand.includes(band)}
+                    onClick={() => toggle("leadBand", opt.value)}
+                    dot={LEAD_DOT[band]}
+                    count={opt.count}
+                  >
+                    {LEAD_NAMES[band].name}
+                    <span className="ml-1 text-ink-faint">{LEAD_NAMES[band].range}</span>
+                  </ToggleChip>
+                );
+              })}
+            </div>
+          </FilterField>
+        )}
+
+        {has("category") && (
+          <FilterField
+            label="Category"
+            className="w-full sm:w-56"
+            help="Show only these product categories, as set on your products in Shopify."
+          >
+            <MultiPicker
+              label="Category"
+              allLabel="All categories"
+              searchPlaceholder="Search categories…"
+              options={facets.category}
+              selected={selection.category}
+              onChange={(next) => set("category", next)}
+            />
+          </FilterField>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 rounded-b-lg border-t border-edge bg-surface-2/40 px-4 py-2.5">
+        <span className="text-sm text-ink-secondary">
+          {activeCount > 0 ? (
+            <>
+              Showing <b className="font-semibold text-ink tabular-nums">{showing}</b> of{" "}
+              <span className="tabular-nums">{rows.length}</span> products
+            </>
+          ) : (
+            <>
+              All <b className="font-semibold text-ink tabular-nums">{rows.length}</b> products to restock
+            </>
+          )}
+        </span>
+        {pills.map((p) => (
+          <button
+            key={`${p.key}:${p.value}`}
+            type="button"
+            onClick={() => toggle(p.key, p.value)}
+            aria-label={`Remove filter ${p.text}`}
+            className="inline-flex items-center gap-1 rounded-full border border-accent-200 bg-accent-soft py-0.5 pr-1.5 pl-2.5 text-xs font-medium text-accent-ink transition-colors hover:border-accent-500"
+          >
+            {p.text}
+            <span aria-hidden className="text-sm leading-none">×</span>
+          </button>
+        ))}
         {activeCount > 0 && (
           <button
             type="button"
             onClick={() => onChange(EMPTY_SCOPE)}
-            className="rounded-sm px-2 py-1 text-2xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+            className="rounded-sm px-2 py-1 text-xs font-medium text-ink-muted underline-offset-2 hover:text-ink hover:underline"
           >
-            Clear ({activeCount})
+            Clear all
           </button>
         )}
-
-        {activeCount > 0 && (
-          <span className="text-sm text-ink-muted">
-            Showing {showing} of {rows.length}
-          </span>
-        )}
+        <span className="ml-auto flex items-center gap-2">
+          {savedScopes.length > 0 && (
+            <SavedViews savedScopes={savedScopes} onApply={onChange} onDelete={onDeleteScope} />
+          )}
+          {onSaveScope && activeCount > 0 && <SaveView onSave={onSaveScope} busy={scopesBusy} />}
+        </span>
       </div>
+    </section>
+  );
+}
 
-      {/* Kept mounted while folded — an open dimension popover shouldn't be torn
-          down (and rebuilt closed) every time the row is hidden. */}
-      <div className={open ? "flex flex-wrap items-center gap-2" : "hidden"}>
-      {activeDims.map(({ key, label }, i) => {
-        const chosen = selection[key] as string[];
-        const divider = i > 0 ? <span aria-hidden className="h-4 w-px bg-edge" /> : null;
-
-        // Supplier stays a popover: a shop can have dozens, and dozens of chips
-        // is a wall rather than a choice. The other three are short, fixed and
-        // read faster laid out flat than hidden one click down.
-        if (key === "supplier") {
-          return (
-            <Fragment key={key}>
-              {divider}
-              <details className="group relative">
-                <summary
-                  className={cn(
-                    "flex cursor-pointer list-none items-center gap-1.5 rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
-                    chosen.length > 0
-                      ? "border-accent-200 bg-accent-soft text-accent-ink"
-                      : "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink"
-                  )}
-                >
-                  {chosen.length > 0 ? `${chosen.length} supplier${chosen.length === 1 ? "" : "s"}` : label}
-                  <ChevronDownIcon className="size-3.5" />
-                </summary>
-                <div className="absolute z-10 mt-1 flex max-h-72 min-w-44 max-w-64 flex-wrap gap-1 overflow-auto rounded-md border border-edge bg-surface p-2 shadow-pop">
-                  {facets[key].map((opt) => (
-                    <ScopeChip
-                      key={opt.value}
-                      label={opt.label}
-                      count={opt.count}
-                      on={chosen.includes(opt.value)}
-                      onClick={() => toggle(key, opt.value)}
-                    />
-                  ))}
-                </div>
-              </details>
-            </Fragment>
-          );
-        }
-
-        return (
-          <Fragment key={key}>
-            {divider}
-            {facets[key].map((opt) => (
-              <ScopeChip
-                key={opt.value}
-                // A bare "A" beside category names says nothing on its own.
-                label={key === "abc" && opt.value !== NONE_VALUE ? `Class ${opt.label}` : opt.label}
-                count={opt.count}
-                on={chosen.includes(opt.value)}
-                tint={tintFor(key, opt.value)}
-                onClick={() => toggle(key, opt.value)}
-              />
-            ))}
-          </Fragment>
-        );
-      })}
-      {onSaveScope && activeCount > 0 && (
-        <details className="group relative">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-sm border border-edge bg-surface px-2.5 py-1.5 text-2xs font-medium text-ink-muted transition-colors hover:bg-surface-2 hover:text-ink">
-            Save scope
-          </summary>
-          <div className="absolute z-10 mt-1 flex min-w-56 items-center gap-1.5 rounded-md border border-edge bg-surface p-1.5 shadow-pop">
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  saveCurrent();
-                }
-              }}
-              maxLength={60}
-              placeholder="Name this scope"
-              className="min-w-0 flex-1 rounded-sm border border-edge bg-surface-2 px-2 py-1 text-sm text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-accent-500 focus:ring-4 focus:ring-accent-100"
-            />
-            <button
-              type="button"
-              onClick={saveCurrent}
-              disabled={!name.trim() || scopesBusy}
-              className="rounded-md border border-edge-strong bg-accent-soft px-2.5 py-1 text-sm font-medium text-accent-ink transition-colors hover:bg-accent-soft/70 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Save
-            </button>
-          </div>
-        </details>
-      )}
-
+/** One labelled filter, its "?" explainer beside the label. */
+function FilterField({
+  label,
+  help,
+  className,
+  children,
+}: {
+  label: string;
+  help: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={cn("min-w-0 space-y-1.5", className)}>
+      <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase">
+        {label}
+        <HelpTip label={`What is ${label.toLowerCase()}?`}>{help}</HelpTip>
       </div>
+      {children}
     </div>
   );
 }
 
-/** One filter value. Carries its count so a reader can see what narrowing costs
- *  before they click it. A `tint` gives the unselected chip a wash of its own
- *  colour (ABC class, category); selected always reads as the shared accent-soft
- *  "on" so "which are chosen" stays unambiguous. */
-function ScopeChip({
-  label,
-  count,
+/** A filter value clicked on and off — big enough to hit, with its count so a
+ *  reader can see what narrowing costs before they click. */
+function ToggleChip({
   on,
-  tint,
   onClick,
+  dot,
+  count,
+  children,
 }: {
-  label: string;
-  count: number;
   on: boolean;
-  tint?: ChipTint;
   onClick: () => void;
+  dot?: string;
+  count: number;
+  children: React.ReactNode;
 }) {
   return (
     <button
@@ -403,14 +376,133 @@ function ScopeChip({
       onClick={onClick}
       aria-pressed={on}
       className={cn(
-        "rounded-sm border px-2.5 py-1.5 text-2xs font-medium transition-colors",
+        "inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
         on
-          ? "border-accent-200 bg-accent-soft text-accent-ink"
-          : (tint?.off ?? "border-edge bg-surface text-ink-muted hover:bg-surface-2 hover:text-ink")
+          ? "border-accent-500 bg-accent-soft font-medium text-accent-ink ring-1 ring-accent-500"
+          : "border-edge-strong bg-surface text-ink hover:border-accent-500 hover:bg-surface-2"
       )}
     >
-      {label}
-      <span className="ml-1.5 font-mono tabular-nums text-ink-faint">{count}</span>
+      {on ? (
+        <span aria-hidden className="grid size-3.5 place-items-center rounded-full bg-accent text-[9px] leading-none text-on-accent">
+          ✓
+        </span>
+      ) : (
+        dot && <span aria-hidden className={cn("size-2 rounded-full", dot)} />
+      )}
+      <span>{children}</span>
+      <span className="rounded-full bg-surface-2 px-1.5 font-mono text-xs tabular-nums text-ink-muted">{count}</span>
     </button>
+  );
+}
+
+function SavedViews({
+  savedScopes,
+  onApply,
+  onDelete,
+}: {
+  savedScopes: SavedScope[];
+  onApply: (selection: ScopeSelection) => void;
+  onDelete?: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(ref, open, close);
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex h-8 items-center gap-1.5 rounded-md border border-edge-strong bg-surface px-2.5 text-xs font-medium text-ink transition-colors hover:border-accent-500"
+      >
+        Saved views
+        <span className="rounded-full bg-surface-2 px-1.5 font-mono tabular-nums text-ink-muted">{savedScopes.length}</span>
+        <ChevronDownIcon className={cn("size-3.5 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-30 mt-1.5 flex max-h-72 w-64 flex-col gap-0.5 overflow-auto rounded-lg border border-edge bg-surface p-1.5 shadow-pop">
+          {savedScopes.map((scope) => (
+            <div key={scope.id} className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => {
+                  onApply(scope.selection);
+                  setOpen(false);
+                }}
+                className="min-w-0 flex-1 truncate rounded-md px-2.5 py-1.5 text-left text-sm text-ink-secondary transition-colors hover:bg-surface-2 hover:text-ink"
+              >
+                {scope.name}
+              </button>
+              {onDelete && (
+                <button
+                  type="button"
+                  onClick={() => onDelete(scope.id)}
+                  aria-label={`Delete saved view ${scope.name}`}
+                  className="rounded-md px-2 py-1 text-sm text-ink-faint transition-colors hover:text-negative"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SaveView({ onSave, busy }: { onSave: (name: string) => void; busy: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useDismiss(ref, open, close);
+
+  function save() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onSave(trimmed);
+    setName("");
+    setOpen(false);
+  }
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex h-8 items-center rounded-md border border-edge-strong bg-surface px-2.5 text-xs font-medium text-ink transition-colors hover:border-accent-500"
+      >
+        Save this view
+      </button>
+      {open && (
+        <div className="absolute right-0 z-30 mt-1.5 flex w-72 items-center gap-1.5 rounded-lg border border-edge bg-surface p-2 shadow-pop">
+          <input
+            autoFocus
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                save();
+              }
+            }}
+            maxLength={60}
+            placeholder="e.g. Orbit Imports best sellers"
+            className="min-w-0 flex-1 rounded-md border border-edge bg-surface-2 px-2.5 py-1.5 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent-500 focus:ring-4 focus:ring-accent-100"
+          />
+          <button
+            type="button"
+            onClick={save}
+            disabled={!name.trim() || busy}
+            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-on-accent transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Save
+          </button>
+        </div>
+      )}
+    </div>
   );
 }

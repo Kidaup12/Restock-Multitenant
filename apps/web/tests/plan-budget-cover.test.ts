@@ -184,10 +184,10 @@ describe.skipIf(!runnable)("budget allocator with a cover target (seeded local d
     expect(opened.size).toBeGreaterThan(0);
   });
 
-  it("a line whose lead outlasts the horizon says so", async () => {
-    // The shortest horizon the stepper offers, against suppliers who take longer.
-    // The engine floors those lines at their own lead, so the quantity exceeds
-    // what was asked for — and the row must admit that rather than look wrong.
+  it("every line with a measured lead says its wait was added on top", async () => {
+    // The cover target is days of stock AFTER the delivery lands, so each line's
+    // measured lead goes on top of it — and the row must say so, or a quantity
+    // bigger than the days asked for reads like a miscalculation.
     const short = await planBudget({ budgetKes: BUDGET_KES, coverDays: COVER_MIN });
     expect(short.ok).toBe(true);
     if (!short.ok) return;
@@ -195,22 +195,15 @@ describe.skipIf(!runnable)("budget allocator with a cover target (seeded local d
     const rows = [...short.data.funded, ...short.data.deferred];
     // The stripped product's lead is a guess, so it is excluded here and gets its
     // own test below.
-    const measuredLongLead = rows.filter(
-      (r) => r.leadDays > COVER_MIN && r.sku !== UNSUPPLIED_SKU
-    );
-    expect(
-      measuredLongLead.length,
-      "the seed needs a supplier slower than the shortest cover"
-    ).toBeGreaterThan(0);
-    for (const row of measuredLongLead) {
-      expect(row.leadFloored, `${row.sku} was floored at its lead but does not say so`).toBe(true);
-    }
-    for (const row of rows.filter((r) => r.leadDays <= COVER_MIN)) {
-      expect(row.leadFloored, `${row.sku} claims a flooring it never got`).toBe(false);
+    const measured = rows.filter((r) => r.sku !== UNSUPPLIED_SKU && r.leadDays > 0);
+    expect(measured.length, "the seed needs a supplier with a lead time").toBeGreaterThan(0);
+    for (const row of measured) {
+      if (row.overriddenQty != null) continue;
+      expect(row.leadFloored, `${row.sku} had its lead added but does not say so`).toBe(true);
     }
   });
 
-  it("a GUESSED lead never claims a flooring it did not cause", async () => {
+  it("a GUESSED lead never claims a wait it did not add", async () => {
     // The distinguishing case. This product displays the assumed 30-day lead, so a
     // flag inferred from the lead ON SCREEN would mark it floored under a 7-day
     // cover. The engine floored nothing — it refuses to size on a guess — so the

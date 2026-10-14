@@ -6,9 +6,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { CostValue } from "@/components/ui/cost-value";
-import { formatCompact, formatMoney } from "@/lib/money";
+import { formatMoney } from "@/lib/money";
 import { useCurrency } from "@/components/currency-provider";
-import { Input } from "@/components/ui/input";
+import { HelpTip } from "@/components/ui/help-tip";
 import { StatTile } from "@/components/ui/stat-tile";
 import type { BudgetSplit, BuyListRow } from "@/lib/data/plan";
 import { ExportBar, type ExportColumn } from "@/lib/export/export-bar";
@@ -36,8 +36,6 @@ import { cn } from "@/lib/cn";
  * Mode 2 — the budget allocator. Enter the cash available; the engine funds
  * the list where it earns most and prices what deferring the rest will cost.
  */
-
-const PRESETS = [400_000, 800_000, 1_500_000, 3_000_000];
 
 const FALLBACK_BUDGET = 800_000;
 
@@ -213,7 +211,7 @@ export function BudgetPlanner({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-ink-muted">
-          Spend where it earns most — deferrals come with their price.
+          Set what you can spend. The most urgent, best-earning items are funded first; the rest are listed with what waiting would cost.
         </p>
         {split && (
           <ExportBar
@@ -231,95 +229,126 @@ export function BudgetPlanner({
       </div>
 
       <Card>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4">
           <form
-            className="flex flex-wrap items-center gap-2"
+            className="flex flex-wrap items-end gap-x-6 gap-y-4"
             onSubmit={(e) => {
               e.preventDefault();
               plan(Number(budget) || 0, coverDays);
             }}
           >
-            <label htmlFor="budget-kes" className="text-sm text-ink-muted">
-              Budget ({currency})
-            </label>
-            <Input
-              id="budget-kes"
-              inputMode="numeric"
-              value={budget}
-              onChange={(e) => setBudget(e.target.value.replace(/[^\d]/g, ""))}
-              className="w-36 font-mono"
-            />
-            {PRESETS.map((preset) => (
-              <Button
-                key={preset}
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setBudget(String(preset))}
-              >
-                {formatCompact(preset)}
-              </Button>
-            ))}
-            <Button type="submit" size="sm" loading={pending}>
+            <PlannerField
+              label="Budget"
+              htmlFor="budget-kes"
+              help="The most you want to spend on this order. Items that will run out first, and earn the most, are funded first; whatever doesn't fit is listed underneath with what waiting would cost you."
+            >
+              <div className="flex h-11 w-60 items-center overflow-hidden rounded-md border border-edge-strong bg-surface transition-colors focus-within:border-accent-500 focus-within:ring-4 focus-within:ring-accent-100">
+                <span className="flex h-full items-center border-r border-edge bg-surface-2 px-3 text-sm font-semibold text-ink-secondary">
+                  {currency}
+                </span>
+                <input
+                  id="budget-kes"
+                  inputMode="numeric"
+                  aria-label={`Budget (${currency})`}
+                  value={budget ? Number(budget).toLocaleString("en-US") : ""}
+                  onChange={(e) => setBudget(e.target.value.replace(/[^\d]/g, ""))}
+                  placeholder="0"
+                  className="h-full min-w-0 flex-1 bg-transparent px-3 font-mono text-base tabular-nums text-ink outline-none placeholder:text-ink-faint"
+                />
+              </div>
+            </PlannerField>
+
+            <PlannerField
+              label="Stock to last"
+              help={
+                <>
+                  How many days of selling each item should cover <b className="text-ink">after the delivery arrives</b>.
+                  The supplier&apos;s lead time is added on top, so an item with a 30-day lead and 21 days of cover is
+                  ordered to last 51 days from today. Untick to use the plan&apos;s own quantities (lead time plus a
+                  week).
+                </>
+              }
+            >
+              <div className="flex h-11 items-center gap-3">
+                <label className="flex items-center gap-2 text-sm text-ink">
+                  <input
+                    type="checkbox"
+                    checked={coverDays != null}
+                    onChange={(e) => applyCover(e.target.checked ? DEFAULT_BUDGET_COVER_DAYS : null)}
+                    className="size-4 rounded border-edge accent-accent"
+                    aria-label="Set days of cover"
+                  />
+                  {coverDays == null && <span className="text-ink-muted">Plan&apos;s default</span>}
+                </label>
+                {coverDays != null && (
+                  <Stepper
+                    label=""
+                    value={`${coverDays} days`}
+                    onDecrement={() => applyCover(clampCoverDays(coverDays - COVER_STEP))}
+                    onIncrement={() => applyCover(clampCoverDays(coverDays + COVER_STEP))}
+                    decrementLabel="Fewer days of cover"
+                    incrementLabel="More days of cover"
+                    canDecrement={coverDays > COVER_MIN}
+                    canIncrement={coverDays < COVER_MAX}
+                    busy={pending}
+                    // The +/- buttons stay inside the stepped range (7-120); typing a
+                    // number answers to the server's own ceiling instead, since a
+                    // typed figure is a direct answer, not a step from here.
+                    edit={{
+                      value: coverDays,
+                      min: MIN_TYPED_COVER_DAYS,
+                      max: MAX_COVER_DAYS,
+                      unit: "days",
+                      ariaLabel: "Days of cover",
+                      onCommit: (next) => applyCover(clampTypedCoverDays(next)),
+                    }}
+                  />
+                )}
+              </div>
+            </PlannerField>
+
+            <PlannerField
+              label="Urgent items"
+              help={
+                <>
+                  <b className="text-ink">Off (recommended):</b> the budget is a hard cap. Urgent items are funded first,
+                  and any that still don&apos;t fit are held back and flagged — never quietly over-spent.
+                  <span className="mt-1.5 block">
+                    <b className="text-ink">On:</b> urgent items are always bought, even past the budget, and the plan
+                    shows by how much.
+                  </span>
+                </>
+              }
+            >
+              <label className="flex h-11 cursor-pointer items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={allowOverflow}
+                  onChange={(e) => applyOverflow(e.target.checked)}
+                  className="size-4 rounded border-edge accent-accent"
+                />
+                Let them go over budget
+              </label>
+            </PlannerField>
+
+            <Button type="submit" size="md" loading={pending} className="min-h-11 px-5">
               Plan my restock
             </Button>
           </form>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-edge bg-surface-2/40 px-4 py-3">
-            <label className="flex items-center gap-2 text-sm font-medium text-ink">
-              <input
-                type="checkbox"
-                checked={coverDays != null}
-                onChange={(e) => applyCover(e.target.checked ? DEFAULT_BUDGET_COVER_DAYS : null)}
-                className="size-4 rounded border-edge accent-accent"
-              />
-              Stock to a cover target
-            </label>
-            {coverDays != null && (
-              <Stepper
-                label="Days of cover"
-                value={`${coverDays} days`}
-                onDecrement={() => applyCover(clampCoverDays(coverDays - COVER_STEP))}
-                onIncrement={() => applyCover(clampCoverDays(coverDays + COVER_STEP))}
-                decrementLabel="Fewer days of cover"
-                incrementLabel="More days of cover"
-                canDecrement={coverDays > COVER_MIN}
-                canIncrement={coverDays < COVER_MAX}
-                busy={pending}
-                // The +/- buttons stay inside the stepped range (7-120); typing a
-                // number answers to the server's own ceiling instead, since a
-                // typed figure is a direct answer, not a step from here.
-                edit={{
-                  value: coverDays,
-                  min: MIN_TYPED_COVER_DAYS,
-                  max: MAX_COVER_DAYS,
-                  unit: "days",
-                  ariaLabel: "Days of cover",
-                  onCommit: (next) => applyCover(clampTypedCoverDays(next)),
-                }}
-              />
+          <p className="text-sm text-ink-muted">
+            Spend up to{" "}
+            <b className="font-semibold text-ink">{formatMoney(Number(budget) || 0, currency)}</b>
+            {coverDays != null ? (
+              <>
+                , ordering each item to last <b className="font-semibold text-ink">{coverDays} days of cover</b>{" "}
+                after its delivery arrives
+              </>
+            ) : (
+              <>, using the plan&apos;s own quantities (lead time plus a week)</>
             )}
-            <p className="max-w-prose text-xs text-ink-muted">
-              {coverDays == null
-                ? "Off: the budget is spread over the plan's own horizon, the quantities the nightly run recommends."
-                : `Every line is sized to ${coverDays} days of cover first — never below an item's lead time — and the budget is then spread over that list. Answers "spend this cash, but stock to this long".`}
-            </p>
-
-            <label className="flex items-center gap-2 text-sm font-medium text-ink">
-              <input
-                type="checkbox"
-                checked={allowOverflow}
-                onChange={(e) => applyOverflow(e.target.checked)}
-                className="size-4 rounded border-edge accent-accent"
-              />
-              Let criticals exceed budget
-            </label>
-            <p className="max-w-prose text-xs text-ink-muted">
-              {allowOverflow
-                ? "On: must-restock lines are funded whatever they cost, and the plan reports how far past the budget that puts you."
-                : "Off: the budget is a cap. Must-restock lines are funded first, and any that still don't fit are held back and counted rather than quietly spending money you haven't got."}
-            </p>
-          </div>
+            {allowOverflow ? " — urgent items may go over budget." : " — the budget is a hard cap."}
+          </p>
 
           {error && <p className="text-sm text-negative">{error}</p>}
         </CardContent>
@@ -522,6 +551,29 @@ export function BudgetPlanner({
           </ActionBar>
         </>
       )}
+    </div>
+  );
+}
+
+/** One labelled planner control, its "?" explainer beside the label. */
+function PlannerField({
+  label,
+  htmlFor,
+  help,
+  children,
+}: {
+  label: string;
+  htmlFor?: string;
+  help: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-ink-muted uppercase">
+        {htmlFor ? <label htmlFor={htmlFor}>{label}</label> : <span>{label}</span>}
+        <HelpTip label={`What is ${label.toLowerCase()}?`}>{help}</HelpTip>
+      </div>
+      {children}
     </div>
   );
 }
