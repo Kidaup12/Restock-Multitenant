@@ -19,8 +19,11 @@ describe("historical dead stock eligibility", () => {
   it("does not borrow future sales or observations to classify past inventory", () => {
     expect(historicalDeadStock({...base,firstSeenAt:null,firstSaleAt:ago(-1),observations:[{date:asOf,onHand:10},...Array.from({length:20},(_,d)=>({date:ago(-d-1),onHand:10}))]})).toBe(false);
   });
-  it("values eligibility only after fourteen distinct in-stock days", () => {
-    expect(historicalDeadStock({...base,observations:Array.from({length:20},()=>({date:asOf,onHand:10}))})).toBe(false);
+  it("needs the item on the shelf for the whole window — an empty day inside it resets the clock", () => {
+    const emptyTenDaysAgo = [...base.observations, { date: ago(10), onHand: 0 }];
+    expect(historicalDeadStock({...base,observations:emptyTenDaysAgo})).toBe(false);
+    const emptyBeforeWindow = [...base.observations, { date: ago(120), onHand: 0 }];
+    expect(historicalDeadStock({...base,observations:emptyBeforeWindow})).toBe(true);
     expect(historicalDeadStock(base)).toBe(true);
   });
 });

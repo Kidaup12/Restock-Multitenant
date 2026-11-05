@@ -1,5 +1,5 @@
 import { historicalDeadStock, historicalUnsoldStock } from "../inventory/historical-dead-stock";
-import { observedInStockDays } from "./stock-observation";
+import { shelfDaysByProduct } from "./stock-observation";
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { AS_SHOWN_TAG } from "@wezesha/forecast-run";
 import { overstockExcess } from "@wezesha/forecast";
@@ -174,7 +174,7 @@ export async function getInsightsOverview(
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date]));
   const vendorById = new Map(products.map((p) => [p.id, p.vendor]));
   const deadCutoff = Date.now() - today.deadStock.windowDays * 86_400_000;
-  const observed = await observedInStockDays(tenantId, new Date(deadCutoff));
+  const observed = await shelfDaysByProduct(tenantId, today.deadStock.windowDays);
 
   const shelfRows: EmptyShelfRow[] = [];
   const cashRows: CashAsleepRow[] = [];
@@ -203,7 +203,7 @@ export async function getInsightsOverview(
 
     const last = lastSale.get(p.id);
     const idle = pileFor({ onHandUnits: onHand, lastSaleAt: last ?? null,
-      firstSeenAt: p.shopifyCreatedAt ?? p.receivedAt, inStockDays: observed.get(p.id) }, deadCutoff) === "dead";
+      firstSeenAt: p.shopifyCreatedAt ?? p.receivedAt, shelfDays: observed.get(p.id) }, deadCutoff) === "dead";
     const overBought = !idle && rate > NO_RATE_EPSILON && (m?.coverDays ?? 0) > OVERSTOCK_COVER_DAYS;
     if (!idle && !overBought) continue;
 
@@ -1440,7 +1440,7 @@ export async function getLeakageMatrix(
   ]);
   const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
   const deadCutoff = Date.now() - windowDays * 86_400_000;
-  const observed = await observedInStockDays(tenantId, new Date(deadCutoff));
+  const observed = await shelfDaysByProduct(tenantId, windowDays);
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date?.getTime() ?? null]));
 
   type Acc = {
@@ -1463,7 +1463,7 @@ export async function getLeakageMatrix(
     if (onHand <= 0) {
       a.stockoutSkus += 1;
     } else if (pileFor({ onHandUnits: onHand, lastSaleAt: sold == null ? null : new Date(sold),
-      firstSeenAt: p.shopifyCreatedAt ?? p.receivedAt, inStockDays: observed.get(p.id) }, deadCutoff) === "dead") {
+      firstSeenAt: p.shopifyCreatedAt ?? p.receivedAt, shelfDays: observed.get(p.id) }, deadCutoff) === "dead") {
       // Dead stock = held with no sale inside the window. Deliberately NOT
       // folding in overstock (over-bought but still selling) — that is a
       // different condition, and counting it here would inflate "dead-stock %"

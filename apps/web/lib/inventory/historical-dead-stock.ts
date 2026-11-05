@@ -1,6 +1,6 @@
-﻿import { isDeadStock } from "./dead-stock";
+﻿import { isDeadStock, shelfDaysSince } from "./dead-stock";
 
-/** Historical eligibility uses the same age and observed-stock rules as Today. */
+/** Historical eligibility uses the same age and time-on-shelf rules as Today. */
 export function historicalDeadStock(input: {
   onHand: number;
   asOf: Date;
@@ -16,10 +16,12 @@ export function historicalDeadStock(input: {
     if (date <= input.asOf && (!lastSaleAt || date > lastSaleAt)) lastSaleAt = date;
   }
   const observed = input.observations.filter(s => s.date >= cutoff && s.date <= input.asOf);
-  const stockedDays = new Set(observed.filter(s => s.onHand > 0).map(s => s.date.toISOString().slice(0, 10)));
+  // Time on shelf as of that date: days since the last empty snapshot in the window.
+  let lastEmpty: Date | null = null;
+  for (const s of observed) if (s.onHand <= 0 && (!lastEmpty || s.date > lastEmpty)) lastEmpty = s.date;
   return isDeadStock({ currentStock: input.onHand, asOf: input.asOf, cutoff,
     firstSeenAt: input.firstSeenAt, lastSaleAt,
-    inStockDays: observed.length ? stockedDays.size : undefined });
+    shelfDays: lastEmpty ? shelfDaysSince(lastEmpty, input.windowDays, input.asOf) : undefined });
 }
 
 /** Unsold is an observation, not an age/grace verdict: no positive sale by that date. */

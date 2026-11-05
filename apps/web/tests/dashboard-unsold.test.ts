@@ -3,7 +3,7 @@ const mock=vi.hoisted(()=>({catalogue:vi.fn(),ages:vi.fn(),lastSales:vi.fn(),obs
 vi.mock("@wezesha/db",()=>({BUYABLE_PRODUCT_WHERE:{active:true},prismaForTenant:()=>({salesHistory:{groupBy:mock.lastSales},tenantConfig:{findFirst:async()=>({deadStockWindowDays:60})},product:{findMany:mock.ages}})}));
 vi.mock("../lib/data/stock",()=>({getStockCatalogue:mock.catalogue}));
 vi.mock("../lib/data/plan",()=>({getBuyList:async()=>null,byBuyListPriority:()=>0}));
-vi.mock("../lib/data/stock-observation",()=>({observedInStockDays:mock.observed}));
+vi.mock("../lib/data/stock-observation",()=>({shelfDaysByProduct:mock.observed}));
 vi.mock("../lib/metrics",()=>({moneyAtRest:(cost:number,stock:number)=>cost*Math.max(0,stock)}));
 import {getDashboardTable} from "../lib/data/today";
 afterEach(()=>vi.useRealTimers());
@@ -13,7 +13,8 @@ function setup(){
   mock.catalogue.mockImplementation(async(_tenant:string,{canViewCosts}:{canViewCosts:boolean})=>ids.map(id=>({productId:id,title:id,sku:id,vendor:null,buyable:id!=="archived",onHandUnits:id==="empty"?0:10,onOrderUnits:0,revenue30dKes:0,priceKes:200,costKes:canViewCosts?100:null,moneyAtRestKes:canViewCosts?1000:null})));
   mock.ages.mockResolvedValue(ids.map(id=>({id,shopifyCreatedAt:id==="unknown"?null:new Date(id==="old"||id==="restocked"?"2026-01-01":"2026-09-01"),receivedAt:null})));
   mock.lastSales.mockResolvedValue([{productId:"selling",_max:{date:new Date("2026-10-01")}}]);
-  mock.observed.mockResolvedValue(new Map(ids.map(id=>[id,id==="restocked"?2:20])));
+  // Only "restocked" was empty inside the window (2 days on the shelf); the rest have full credit.
+  mock.observed.mockResolvedValue(new Map([["restocked",2]]));
 }
 describe("held never-sold dashboard visibility",()=>{
   it("shows every never-sold held SKU with its reason without inflating confirmed dead stock",async()=>{

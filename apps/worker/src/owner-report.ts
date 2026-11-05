@@ -287,6 +287,10 @@ export function stockHealthByPeriod(input: {
     set.add(s.period);
   }
   const snapsByPeriod = new Map<string, SnapRow[]>();
+  // Lowest on-hand per "period:pid" — an empty day in any trailing week means
+  // the item was not on the shelf for the whole dead-stock window.
+  const minOhBy = new Map<string, number>();
+  for (const r of snaps) minOhBy.set(`${r.period}:${r.pid}`, r.minOh);
   for (const r of snaps) {
     const arr = snapsByPeriod.get(r.period);
     if (arr) arr.push(r);
@@ -333,7 +337,13 @@ export function stockHealthByPeriod(input: {
         const quiet = deadTrailing
           ? ![...deadTrailing].some((w) => (soldQty.get(`${w}:${r.pid}`) ?? 0) > 0)
           : sold === 0;
-        if (quiet) {
+        // Time on shelf (same rule as the app, @wezesha/forecast isDeadStock):
+        // dead only if it sat on the shelf the whole window. A week with no
+        // snapshot is unknown, not empty.
+        const onShelfThroughout = deadTrailing
+          ? ![...deadTrailing].some((w) => (minOhBy.get(`${w}:${r.pid}`) ?? 1) <= 0)
+          : r.minOh > 0;
+        if (quiet && onShelfThroughout) {
           deadCount++;
           deadValue += r.endOh * meta.costKes;
         }

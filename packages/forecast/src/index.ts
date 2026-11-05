@@ -209,6 +209,7 @@ export { detectSpikes, SPIKE_MULTIPLE, type Spike, type SpikePromoWindow } from 
 export { allocateByBudget, type Allocatable, type Allocation } from "./allocate";
 export { plannableReason, isPlannable, type CostShape, type PlannableReason } from "./plannable";
 export { overstockExcess } from "./overstock";
+export { isDeadStock, shelfDaysSince, type DeadStockInput } from "./dead-stock";
 
 // Full per-product pipeline
 export {

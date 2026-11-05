@@ -30,12 +30,15 @@ describe("pileFor (pure)", () => {
     expect(pileFor({ onHandUnits: 10, lastSaleAt: null }, cutoff)).toBe("healthy");
   });
 
-  it("requires fourteen observed in-stock days before quiet stock is dead", () => {
-    for (const inStockDays of [0, 1, 13]) {
-      expect(pileFor({ onHandUnits: 10, lastSaleAt: null, inStockDays }, cutoff)).toBe("healthy");
+  it("requires the item on the shelf for the whole window before quiet stock is dead", () => {
+    // 90-day window: restocked inside it means it could not have sold all along.
+    const asOf = new Date(cutoff + 90 * 86_400_000);
+    const old = new Date("2025-01-01");
+    for (const shelfDays of [0, 1, 89]) {
+      expect(pileFor({ onHandUnits: 10, lastSaleAt: null, firstSeenAt: old, shelfDays }, cutoff, asOf)).toBe("healthy");
     }
-    expect(pileFor({ onHandUnits: 10, lastSaleAt: null, firstSeenAt: new Date("2025-01-01"), inStockDays: 14 }, cutoff)).toBe("dead");
-    expect(pileFor({ onHandUnits: 0, lastSaleAt: null, inStockDays: 0 }, cutoff)).toBe("stockout");
+    expect(pileFor({ onHandUnits: 10, lastSaleAt: null, firstSeenAt: old, shelfDays: 90 }, cutoff, asOf)).toBe("dead");
+    expect(pileFor({ onHandUnits: 0, lastSaleAt: null, shelfDays: 0 }, cutoff, asOf)).toBe("stockout");
   });
 
   it("stock whose last sale predates the window is dead", () => {

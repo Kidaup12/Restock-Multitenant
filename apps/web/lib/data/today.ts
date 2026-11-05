@@ -1,4 +1,4 @@
-import { observedInStockDays } from "./stock-observation";
+import { shelfDaysByProduct } from "./stock-observation";
 import { isDeadStock, NEW_PRODUCT_DAYS } from "@/lib/inventory/dead-stock";
 import { BUYABLE_PRODUCT_WHERE, prismaForTenant } from "@wezesha/db";
 import { byBuyListPriority, getBuyList } from "@/lib/data/plan";
@@ -44,7 +44,7 @@ export const DEFAULT_DEAD_STOCK_DAYS = 90;
 export type ProductPile = "stockout" | "dead" | "healthy";
 
 export function pileFor(
-  product: { onHandUnits: number; lastSaleAt: Date | null; inStockDays?: number; firstSeenAt?: Date | null },
+  product: { onHandUnits: number; lastSaleAt: Date | null; shelfDays?: number; firstSeenAt?: Date | null },
   deadCutoffMs: number,
   asOf: Date = new Date()
 ): ProductPile {
@@ -52,7 +52,7 @@ export function pileFor(
   // counting it twice would make the piles sum past the catalogue.
   if (product.onHandUnits <= 0) return "stockout";
   return isDeadStock({ currentStock: product.onHandUnits, lastSaleAt: product.lastSaleAt,
-    firstSeenAt: product.firstSeenAt, inStockDays: product.inStockDays,
+    firstSeenAt: product.firstSeenAt, shelfDays: product.shelfDays,
     cutoff: new Date(deadCutoffMs), asOf }) ? "dead" : "healthy";
 }
 
@@ -93,7 +93,7 @@ export async function getTodayMetrics(
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date]));
   const windowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
   const deadCutoff = Date.now() - windowDays * DAY_MS;
-  const observed = await observedInStockDays(tenantId, new Date(deadCutoff));
+  const observed = await shelfDaysByProduct(tenantId, windowDays);
 
   let stockedOut = 0;
   let deadSkus = 0;
@@ -101,7 +101,7 @@ export async function getTodayMetrics(
   for (const p of products) {
     // Sellable on-hand — the single source.
     const pile = pileFor(
-      { onHandUnits: p.currentStock, lastSaleAt: lastSale.get(p.id) ?? null, inStockDays: observed.get(p.id), firstSeenAt: p.shopifyCreatedAt ?? p.receivedAt },
+      { onHandUnits: p.currentStock, lastSaleAt: lastSale.get(p.id) ?? null, shelfDays: observed.get(p.id), firstSeenAt: p.shopifyCreatedAt ?? p.receivedAt },
       deadCutoff
     );
     if (pile === "stockout") stockedOut += 1;
@@ -228,7 +228,7 @@ function unsoldStockFromRows(rows: CatalogueRow[], lastSales: Map<string, Date |
   const reasons: Record<string, UnsoldReason> = {};
   for (const row of held) {
     const age = ages.get(row.productId);
-    const dead = pileFor({onHandUnits: row.onHandUnits, lastSaleAt: null, firstSeenAt: age, inStockDays: observed.get(row.productId)}, +asOf - windowDays * DAY_MS, asOf) === "dead";
+    const dead = pileFor({onHandUnits: row.onHandUnits, lastSaleAt: null, firstSeenAt: age, shelfDays: observed.get(row.productId)}, +asOf - windowDays * DAY_MS, asOf) === "dead";
     reasons[row.productId] = dead ? "dead" : !age ? "unknown_age" : +asOf - +age < NEW_PRODUCT_DAYS * DAY_MS ? "new_product" : "insufficient_stock_history";
   }
   held.sort((a,b) => (canViewCosts ? (b.moneyAtRestKes ?? 0) - (a.moneyAtRestKes ?? 0) : 0) || b.onHandUnits * b.priceKes - a.onHandUnits * a.priceKes || a.title.localeCompare(b.title));
@@ -246,7 +246,7 @@ export async function getUnsoldStock(tenantId: string, {canViewCosts}: {canViewC
   ]);
   const windowDays=config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
   const asOf=new Date();
-  const observed=await observedInStockDays(tenantId,new Date(+asOf-windowDays*DAY_MS));
+  const observed=await shelfDaysByProduct(tenantId,windowDays,asOf);
   return unsoldStockFromRows(rows,new Map(lastSales.map(s=>[s.productId,s._max.date])),new Map(products.map(p=>[p.id,p.shopifyCreatedAt ?? p.receivedAt])),observed,windowDays,canViewCosts,asOf);
 }
 
@@ -329,7 +329,7 @@ export async function getDashboardTable(
   const lastSale = new Map(lastSales.map((s) => [s.productId, s._max.date]));
   const deadWindowDays = config?.deadStockWindowDays ?? DEFAULT_DEAD_STOCK_DAYS;
   const deadCutoff = Date.now() - deadWindowDays * DAY_MS;
-  const observed = await observedInStockDays(tenantId, new Date(deadCutoff));
+  const observed = await shelfDaysByProduct(tenantId, deadWindowDays);
 
   const asOf = new Date();
   const unsoldStock = unsoldStockFromRows(rows, lastSale, firstSeen, observed, deadWindowDays, canViewCosts, asOf);
@@ -339,7 +339,7 @@ export async function getDashboardTable(
   let healthy = 0;
   for (const row of rows) {
     const pile = pileFor(
-      { onHandUnits: row.onHandUnits, lastSaleAt: lastSale.get(row.productId) ?? null, inStockDays: observed.get(row.productId), firstSeenAt: firstSeen.get(row.productId) },
+      { onHandUnits: row.onHandUnits, lastSaleAt: lastSale.get(row.productId) ?? null, shelfDays: observed.get(row.productId), firstSeenAt: firstSeen.get(row.productId) },
       deadCutoff,
       asOf
     );
