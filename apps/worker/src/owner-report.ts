@@ -213,7 +213,7 @@ const AI_REGIMES = ["sarima", "tsb", "cold_start"];
  *  id (stable). Ported from apps/web latest-run resolution. */
 /** The latest, most trustworthy forecast run for a tenant (same rule the app
  *  uses: latest runDate → AI engine → most complete → id). null when none. */
-async function latestForecastRunId(tenantId: string): Promise<string | null> {
+export async function latestForecastRunId(tenantId: string): Promise<string | null> {
    
   const latest = await prismaService.prediction.findFirst({
     where: { tenantId },

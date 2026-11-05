@@ -234,3 +234,15 @@ export {
 } from "./seasonality";
 
 export { pickBestRun } from "./latest-run";
+
+// What to do about idle stock (pure rules behind the Recommendations tab)
+export {
+  recommendFor,
+  suggestedDiscountPct,
+  OVERSTOCK_COVER_DAYS as RECOMMENDATION_OVERSTOCK_DAYS,
+  MIN_PRICE_OVER_COST,
+  MIN_DISCOUNT_PCT,
+  type Recommendation,
+  type RecommendationAction,
+  type RecommendationProduct,
+} from "./recommendations";

@@ -152,6 +152,7 @@ model Tenant {
   locationClosures        LocationClosure[]
   productPlanOverrides    ProductPlanOverride[]
   forecastRecommendations ForecastRecommendation[]
+  stockRecommendations    StockRecommendation[]
 }
 
 enum Role {
@@ -340,6 +341,7 @@ model Product {
   salesHistory            SalesHistory[]
   predictions             Prediction[]
   forecastRecommendations ForecastRecommendation[]
+  stockRecommendations    StockRecommendation[]
   posSaleLines            PosSaleLine[]
   purchaseOrderLines      PurchaseOrderLine[]
 
@@ -1175,6 +1177,8 @@ model Notification {
   kind      String // "sync_failed" | "shopify_uninstalled" | ...
   title     String
   body      String?
+  // Where the bell sends the reader, e.g. "/recommendations". Null = no link.
+  href      String?
   readAt    DateTime?
   createdAt DateTime  @default(now())
 
@@ -1283,4 +1287,39 @@ model EmailLog {
   @@index([tenantId, createdAt])
   @@index([status, createdAt])
   @@index([purchaseOrderId, createdAt])
+}
+
+// What to do about stock that isn't selling — written nightly by the worker
+// (apps/worker/src/recommendations-cron.ts) from the rules in
+// @wezesha/forecast recommendations.ts, read by the Recommendations tab.
+// One row per (product, action); the nightly run updates it in place.
+model StockRecommendation {
+  id          String    @id @default(cuid())
+  tenantId    String
+  productId   String
+  // "stop_reorder" | "discount" | "bundle" | "clear"
+  action      String
+  // "open" | "done" | "dismissed" | "resolved" (no longer applies)
+  status      String    @default("open")
+  // The rule's numbers: suggested %, units, pair product, etc. Never AI-made.
+  payload     Json
+  // Template sentence from the rule — always present, the fallback wording.
+  reason      String
+  // Claude's wording of the same numbers; null when not generated.
+  aiReason    String?
+  aiIdea      String?
+  // Cash the action frees or avoids at cost — the ranking key.
+  cashKes     Float     @default(0)
+  idleUnits   Int       @default(0)
+  // A done/dismissed row stays quiet until this date, then may reopen.
+  snoozedUntil DateTime?
+  firstSeenAt DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  resolvedAt  DateTime?
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, productId, action])
+  @@index([tenantId, status])
 }

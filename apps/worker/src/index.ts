@@ -46,6 +46,13 @@ import {
   type CostCronQueue,
 } from "./cost-moved-cron";
 import {
+  RECOMMENDATION_CRON_QUEUE,
+  createRecommendationCronQueue,
+  createRecommendationCronWorker,
+  registerRecommendationCronSchedules,
+  type RecommendationCronQueue,
+} from "./recommendations-cron";
+import {
   QB_CRON_QUEUE,
   createQuickBooksCronQueue,
   createQuickBooksCronWorker,
@@ -105,6 +112,10 @@ import { createSyncWorker } from "./worker";
  *   COST_CRONS            — "1" registers + runs the cost cron schedules
  *   QUICKBOOKS_CRONS      — "1" registers + runs the QuickBooks reconcile schedule
  *                           (nightly cost-moved checks); unset keeps dev/CI quiet
+ *   RECOMMENDATION_CRONS  — "1" registers + runs the nightly stock
+ *                           recommendations (dead/over-stock actions, bell
+ *                           notice); ANTHROPIC_API_KEY adds AI wording, unset
+ *                           keeps the rule wording. Unset keeps dev/CI quiet
  *   SNAPSHOT_CRON         — "1" registers + runs the inventory-snapshot cron
  *                           (nightly on-hand history); unset keeps dev/CI quiet
  *   SPOT_CHECK_CRON       — "1" registers + runs the weekly spot-check cron
@@ -235,6 +246,19 @@ async function main(): Promise<void> {
     console.log("worker: cost crons registered (cost-moved check)");
   }
 
+  let recQueue: RecommendationCronQueue | null = null;
+  let recWorker: Worker | null = null;
+  if (process.env.RECOMMENDATION_CRONS === "1") {
+    recQueue = createRecommendationCronQueue(connection);
+    await registerRecommendationCronSchedules(recQueue);
+    recWorker = createRecommendationCronWorker({ connection, queue: recQueue, publisher });
+    recWorker.on("failed", (job, err) => {
+      console.error(`worker: recommendations cron ${job?.id} failed`, err);
+      captureError(err, { tenantId: job?.data?.tenantId, jobId: job?.id, queue: RECOMMENDATION_CRON_QUEUE });
+    });
+    console.log("worker: recommendation crons registered (nightly stock recommendations)");
+  }
+
   let qbQueue: QuickBooksCronQueue | null = null;
   let qbWorker: Worker | null = null;
   if (process.env.QUICKBOOKS_CRONS === "1") {
@@ -315,6 +339,8 @@ async function main(): Promise<void> {
       forecastQueue?.close(),
       costWorker?.close(),
       costQueue?.close(),
+      recWorker?.close(),
+      recQueue?.close(),
       snapshotWorker?.close(),
       snapshotQueue?.close(),
       spotCheckWorker?.close(),
