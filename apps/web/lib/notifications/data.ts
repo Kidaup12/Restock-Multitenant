@@ -29,6 +29,8 @@ export type NotificationItem = {
   kind: string;
   title: string;
   body: string | null;
+  /** In-app link the item opens, e.g. "/recommendations"; null = not a link. */
+  href: string | null;
   readAt: string | null;
   createdAt: string;
 };
@@ -79,7 +81,7 @@ export async function listNotifications(
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: limit + 1, // one extra row = "there is a next page"
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    select: { id: true, kind: true, title: true, body: true, readAt: true, createdAt: true },
+    select: { id: true, kind: true, title: true, body: true, href: true, readAt: true, createdAt: true },
   });
 
   const page = rows.slice(0, limit);
@@ -89,6 +91,8 @@ export async function listNotifications(
       kind: row.kind,
       title: row.title,
       body: row.body,
+      // Internal paths only — never send the reader off-site from the bell.
+      href: row.href && row.href.startsWith("/") && !row.href.startsWith("//") ? row.href : null,
       readAt: row.readAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString(),
     })),

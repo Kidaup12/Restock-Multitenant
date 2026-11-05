@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { AlertIcon, BellIcon, BoxIcon, GearIcon } from "@/components/icons";
 import { Spinner } from "@/components/ui/spinner";
@@ -287,9 +288,18 @@ export function NotificationBell({
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-baseline justify-between gap-2">
-                        <span className="truncate text-sm font-medium text-ink">
-                          {item.title}
-                        </span>
+                        {item.href ? (
+                          <Link
+                            href={item.href}
+                            className="truncate text-sm font-medium text-accent-ink underline-offset-2 hover:underline"
+                          >
+                            {item.title}
+                          </Link>
+                        ) : (
+                          <span className="truncate text-sm font-medium text-ink">
+                            {item.title}
+                          </span>
+                        )}
                         <span className="shrink-0 text-[11px] text-ink-faint">
                           {relativeTime(item.createdAt)}
                         </span>

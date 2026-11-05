@@ -36,6 +36,8 @@ export function kindTone(kind: string): NotificationTone {
     // A new product with no cost is held off the buy list until someone sets
     // one, so this is something to act on rather than merely to know.
     case "catalogue_review":
+    // Stock that isn't selling — cash to free up, not a fault.
+    case "stock_recommendations":
       return "warning";
     default:
       return "neutral";

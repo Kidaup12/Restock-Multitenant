@@ -11,6 +11,7 @@ import {
   HomeIcon,
   InboxIcon,
   LayersIcon,
+  TrendDownIcon,
 } from "@/components/icons";
 import {
   hasPermission,
@@ -74,6 +75,13 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     label: "Transfers",
     icon: <LayersIcon />,
     tourKey: "nav-transfers",
+    section: "stock",
+  },
+  {
+    href: "/recommendations",
+    label: "Recommendations",
+    icon: <TrendDownIcon />,
+    tourKey: "nav-recommendations",
     section: "stock",
   },
 
