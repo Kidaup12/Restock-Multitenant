@@ -2,6 +2,7 @@ import { pickBestRun } from "@wezesha/forecast";
 import { prismaService, roleOf, BUYABLE_PRODUCT_WHERE, OUTSTANDING_PO_STATUSES, effectiveOnOrder, outstandingByProduct } from "@wezesha/db";
 import { sizeTransfers, destinationShares, type DestinationPosition } from "@wezesha/forecast";
 import { reportOrderQuantity } from "./owner-report-planning";
+import { dashboardRunRates } from "./live-rates";
 
 /**
  * Owner report — a WEEK-BY-WEEK (or month-by-month) health TREND ("am I
@@ -539,6 +540,12 @@ export async function buildOwnerReport(
     product: { ...p.product, onOrder: effectiveOnOrder(p.product.onOrder, outstanding.get(p.productId) ?? 0) },
   }));
 
+  // The rate the dashboard shows (sold ÷ in-stock days), for display AND for
+  // which section a line falls in. Quantities and days-left stay the planner's.
+  const liveRates = await dashboardRunRates(tenantId, productIds);
+  const shownRate = (p: { productId: string; finalForecast30d: number }) =>
+    liveRates.get(p.productId) ?? p.finalForecast30d / 30;
+
   const classRank = (c: string | null) => (c === "A" ? 0 : c === "B" ? 1 : 2);
   const urgencyRank = (u: string) => (u === "critical" ? 0 : u === "high" ? 1 : u === "medium" ? 2 : 3);
 
@@ -549,7 +556,7 @@ export async function buildOwnerReport(
       const cls = p.product.abcCategory;
       if (cls !== "A" && cls !== "B") return false;
       const eff = p.product.currentStock + p.product.onOrder;
-      const rate = p.finalForecast30d / 30;
+      const rate = shownRate(p);
       return rate > 0 && (eff <= 0 || eff / rate < 3);
     })
     .sort((a, b) => classRank(a.product.abcCategory) - classRank(b.product.abcCategory) || a.daysUntilStockout - b.daysUntilStockout)
@@ -578,10 +585,10 @@ export async function buildOwnerReport(
   const toLine = (p: (typeof buy)[number]): RestockLine => ({
     title: p.product.title, sku: p.product.sku, abc: abcOf(p.product.abcCategory),
     qty: Math.ceil(p.recommendedQty), costKes: Math.round(Math.ceil(p.recommendedQty) * (p.product.costKes ?? 0)),
-    daysLeft: p.daysUntilStockout, runRate: Math.round((p.finalForecast30d / 30) * 100) / 100,
+    daysLeft: p.daysUntilStockout, runRate: Math.round(shownRate(p) * 100) / 100,
     onHand: Math.round(p.product.currentStock), enRoute: Math.round(p.product.onOrder),
   });
-  const rateOf = (p: (typeof buy)[number]) => p.finalForecast30d / 30;
+  const rateOf = (p: (typeof buy)[number]) => shownRate(p);
   const isOos = (p: (typeof buy)[number]) => p.product.currentStock <= 0;
   const isCritical = (p: (typeof buy)[number]) =>
     !isOos(p) && rateOf(p) >= FAST_RATE && p.daysUntilStockout <= LOW_DAYS;
@@ -643,7 +650,7 @@ export async function buildOwnerReport(
   const bestsellers: BestsellerSummary = { total: aPreds.length, healthy: 0, low: 0, out: 0 };
   for (const p of aPreds) {
     const eff = p.product.currentStock + p.product.onOrder;
-    const rate = p.finalForecast30d / 30;
+    const rate = shownRate(p);
     if (eff <= 0) bestsellers.out++;
     else if (rate > 0 && eff / rate <= LOW_DAYS) bestsellers.low++;
     else bestsellers.healthy++;

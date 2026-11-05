@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-const { prediction, productQuery, overrides, orders, sent } = vi.hoisted(() => {
+const { prediction, productQuery, overrides, orders, sent, liveRates } = vi.hoisted(() => {
   const row = (title: string, currentStock: number, rate: number, daysUntilStockout: number, qty = 3) => ({
     productId: title, finalForecast30d: rate * 30, daysUntilStockout, recommendedQty: qty, urgency: "high",
     product: { title, sku: title, active: true, currentStock, onOrder: 7, costKes: 10, priceKes: 20, abcCategory: "A", supplier: { moq: 1 } },
   });
-  return { prediction: vi.fn(async () => [row("Out", 0, 3, 0), row("Critical", 1, 0.4, 7), row("Upcoming", 20, 2, 10), ...Array.from({ length: 10 }, (_, i) => row(`Slow ${i}`, 2, 0.1, 20))]), productQuery: vi.fn(), overrides: vi.fn(), orders: vi.fn(), sent: vi.fn() };
+  return { prediction: vi.fn(async () => [row("Out", 0, 3, 0), row("Critical", 1, 0.4, 7), row("Upcoming", 20, 2, 10), ...Array.from({ length: 10 }, (_, i) => row(`Slow ${i}`, 2, 0.1, 20))]), productQuery: vi.fn(), overrides: vi.fn(), orders: vi.fn(), sent: vi.fn(), liveRates: vi.fn(async () => new Map<string, number>()) };
 });
 vi.mock("@wezesha/db", async () => ({
   ...await import("../../../packages/db/src/inbound"),
@@ -24,11 +24,21 @@ vi.mock("@wezesha/db", async () => ({
     product: { findMany: productQuery },
   },
 }));
+// No dashboard rate known → the report falls back to the planner rate, which is
+// what these fixtures were written against.
+vi.mock("../src/live-rates", () => ({ dashboardRunRates: liveRates }));
 import { buildOwnerReport } from "../src/owner-report";
 import { renderReportEmail } from "../src/owner-report-email";
 beforeEach(() => { overrides.mockResolvedValue([]); orders.mockResolvedValue([]); sent.mockResolvedValue([]); });
 
 describe("upstream owner-report sections", () => {
+  it("shows and buckets by the dashboard rate, not the planner's sizing rate (upstream #96)", async () => {
+    // Planner says "Upcoming" sells 2/day (a fast mover); the dashboard says 0.1/day.
+    liveRates.mockResolvedValueOnce(new Map([["Upcoming", 0.1]]));
+    const report = await buildOwnerReport("tenant-a", "week", 0);
+    expect(report!.upcoming.map(r => r.title)).not.toContain("Upcoming");
+    expect(report!.othersCount).toBe(11);
+  });
   it("partitions each buy line once and totals the full buckets before truncating", async () => {
     const report = await buildOwnerReport("tenant-a", "week", 0);
     expect(report).not.toBeNull();

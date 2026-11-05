@@ -39,12 +39,21 @@ export function AdvancedMenu() {
         if (!res.ok) throw new Error(body.error ?? String(res.status));
         // The no-overlap guard means "already running" is a normal answer, not
         // a failure — saying "started" either way would be a small lie.
-        setNote({ ok: true, text: body.enqueued ? "Sync started." : "A sync is already running." });
+        setNote({
+          ok: true,
+          text: body.enqueued
+            ? "Sync started — it can take a minute. This page updates when it finishes."
+            : "A sync is already running — it can take a minute.",
+        });
       }
       router.refresh();
     } catch (err) {
-      setNote({ ok: false, text: which === "sync" ? "Could not start the sync." : "Run failed — try again." });
-      void err;
+      // Say why when the server said why (original app #101: failures used to read as nothing).
+      const reason = err instanceof Error && err.message && !/^d+$/.test(err.message) ? `: ${err.message}` : "";
+      setNote({
+        ok: false,
+        text: which === "sync" ? `Could not start the sync${reason}. Try again in a minute.` : "Run failed — try again.",
+      });
     } finally {
       setBusy(null);
     }
