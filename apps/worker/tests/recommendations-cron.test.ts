@@ -4,6 +4,7 @@ const db = vi.hoisted(() => ({
   products: [] as Record<string, unknown>[],
   recs: [] as Record<string, unknown>[],
   notifications: [] as Record<string, unknown>[],
+  spentUsd: 0,
 }));
 
 vi.mock("../src/owner-report", () => ({ latestForecastRunId: async () => "run" }));
@@ -29,6 +30,10 @@ vi.mock("@wezesha/db", () => ({
         }
       },
     },
+    aiUsage: {
+      findUnique: async () => (db.spentUsd ? { costUsd: db.spentUsd } : null),
+      upsert: async ({ create }: { create: { costUsd: number } }) => { db.spentUsd += create.costUsd; },
+    },
     notification: { create: async ({ data }: { data: Record<string, unknown> }) => { db.notifications.push(data); } },
   },
 }));
@@ -40,10 +45,22 @@ const noWording = async () => new Map();
 beforeEach(() => {
   db.recs.length = 0;
   db.notifications.length = 0;
+  db.spentUsd = 0;
   db.products = [{ id: "dead", title: "Old Lotion", abcCategory: "C", customCategory: "Body", currentStock: 10, costKes: 500, priceKes: 1000, shopifyCreatedAt: new Date("2025-01-01"), receivedAt: null }];
 });
 
 describe("nightly stock recommendations", () => {
+  it("hands the wording step this month's remaining budget and records what it spent", async () => {
+    db.spentUsd = 4.9;
+    let seen = -1;
+    await runTenantRecommendations("t", null, now, async (_items, opts) => {
+      seen = opts?.remainingUsd ?? -1;
+      await opts?.onUsage?.({ costUsd: 0.002, inputTokens: 1000, outputTokens: 500 });
+      return new Map();
+    });
+    expect(seen).toBeCloseTo(0.1);
+    expect(db.spentUsd).toBeCloseTo(4.902);
+  });
   it("opens recommendations for dead stock and rings the bell once, with no cash in the title", async () => {
     const r = await runTenantRecommendations("t", null, now, noWording);
     expect(r.opened).toBe(2); // skip the planned reorder + discount

@@ -29,6 +29,38 @@ export const RECOMMENDATION_TENANT_JOB = "recommendations-tenant";
 
 export const NOTIFICATION_KIND = "stock_recommendations";
 const DEFAULT_DEAD_STOCK_DAYS = 90;
+/** Most the AI wording may cost one workspace in a calendar month (USD). */
+export const DEFAULT_AI_MONTHLY_CAP_USD = 5;
+
+function aiCapUsd(): number {
+  const v = Number(process.env.AI_MONTHLY_CAP_USD);
+  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_AI_MONTHLY_CAP_USD;
+}
+
+/** What this workspace has left to spend on AI wording this month, and how to
+ *  record a call against it. */
+async function aiBudget(tenantId: string, now: Date) {
+  const month = now.toISOString().slice(0, 7);
+  const row = await prismaService.aiUsage.findUnique({
+    where: { tenantId_month: { tenantId, month } },
+    select: { costUsd: true },
+  });
+  return {
+    remainingUsd: Math.max(0, aiCapUsd() - (row?.costUsd ?? 0)),
+    onUsage: async (u: { costUsd: number; inputTokens: number; outputTokens: number }) => {
+      await prismaService.aiUsage.upsert({
+        where: { tenantId_month: { tenantId, month } },
+        create: { tenantId, month, costUsd: u.costUsd, inputTokens: u.inputTokens, outputTokens: u.outputTokens, calls: 1 },
+        update: {
+          costUsd: { increment: u.costUsd },
+          inputTokens: { increment: u.inputTokens },
+          outputTokens: { increment: u.outputTokens },
+          calls: { increment: 1 },
+        },
+      });
+    },
+  };
+}
 const DAY_MS = 86_400_000;
 
 export type RecommendationCronJobData = { tenantId?: string };
@@ -196,7 +228,7 @@ export async function runTenantRecommendations(
     reason: r.reason,
     numbers: r.payload,
   }));
-  const wording = await word(items);
+  const wording = items.length > 0 ? await word(items, await aiBudget(tenantId, now)) : new Map();
   for (const [k, w] of wording) {
     const [productId, action] = k.split("|");
     await prismaService.stockRecommendation.updateMany({

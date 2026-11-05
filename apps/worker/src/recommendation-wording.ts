@@ -18,6 +18,19 @@ import { z } from "zod";
 export const WORDING_MODEL = "claude-haiku-5-5";
 /** Upper bound on items worded per shop per night. */
 export const MAX_WORDED_ITEMS = 20;
+/** Claude Haiku 5.5 list price per million tokens (prompts up to 100K). */
+const USD_PER_M_INPUT = 0.1;
+const USD_PER_M_OUTPUT = 0.5;
+const MAX_OUTPUT_TOKENS = 4000;
+/** The most one call can cost: a generous input allowance plus every output
+ *  token it may write. A call is only made if this still fits the budget. */
+export const MAX_CALL_COST_USD = (20_000 * USD_PER_M_INPUT + MAX_OUTPUT_TOKENS * USD_PER_M_OUTPUT) / 1_000_000;
+
+export function callCostUsd(usage: { input_tokens: number; output_tokens: number }): number {
+  return (usage.input_tokens * USD_PER_M_INPUT + usage.output_tokens * USD_PER_M_OUTPUT) / 1_000_000;
+}
+
+export type WordingUsage = { costUsd: number; inputTokens: number; outputTokens: number };
 
 export type WordingItem = {
   key: string;
@@ -67,17 +80,31 @@ export function acceptWording(item: WordingItem, w: Wording | undefined): Wordin
 
 export async function wordRecommendations(
   items: WordingItem[],
-  { client }: { client?: Pick<Anthropic, "messages"> } = {}
+  {
+    client,
+    remainingUsd = Infinity,
+    onUsage,
+  }: {
+    client?: Pick<Anthropic, "messages">;
+    /** What this workspace may still spend this month; no call when one might not fit. */
+    remainingUsd?: number;
+    /** Told what the call actually cost, to record against the workspace. */
+    onUsage?: (usage: WordingUsage) => Promise<void>;
+  } = {}
 ): Promise<Map<string, Wording>> {
   const out = new Map<string, Wording>();
   const batch = items.slice(0, MAX_WORDED_ITEMS);
   if (batch.length === 0) return out;
   if (!client && !process.env.ANTHROPIC_API_KEY) return out; // wording is optional
+  if (remainingUsd < MAX_CALL_COST_USD) {
+    console.log("worker: recommendation wording skipped — monthly AI budget reached");
+    return out;
+  }
   const api = client ?? new Anthropic();
   try {
     const response = await api.messages.parse({
       model: WORDING_MODEL,
-      max_tokens: 4000,
+      max_tokens: MAX_OUTPUT_TOKENS,
       system: SYSTEM,
       output_config: { effort: "low", format: zodOutputFormat(Output) },
       messages: [
@@ -89,9 +116,11 @@ export async function wordRecommendations(
         },
       ],
     });
+    const cost = callCostUsd(response.usage);
     console.log(
-      `worker: recommendation wording — ${batch.length} items, ${response.usage.input_tokens} in / ${response.usage.output_tokens} out tokens`
+      `worker: recommendation wording — ${batch.length} items, ${response.usage.input_tokens} in / ${response.usage.output_tokens} out tokens, ${cost.toFixed(5)}`
     );
+    await onUsage?.({ costUsd: cost, inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens });
     const byKey = new Map((response.parsed_output?.items ?? []).map((w) => [w.key, w]));
     for (const item of batch) {
       const ok = acceptWording(item, byKey.get(item.key));

@@ -26,6 +26,27 @@ import { PrismaClient, Prisma } from "@prisma/client";
  * one of the three functions below.
  */
 
+/**
+ * Pool sizing without editing the secret database URLs: when DB_CONNECTION_LIMIT
+ * (and optionally DB_POOL_TIMEOUT, seconds) are set, they replace the URL's own
+ * connection_limit / pool_timeout. The web app shipped with connection_limit=1,
+ * and pages that run several queries at once (Reports, Sales) queued behind that
+ * single connection until they timed out (P2024) while the hourly sync was
+ * busy. Unset leaves the URL exactly as configured.
+ */
+export function withPoolSettings(url: string | undefined): string | undefined {
+  const limit = process.env.DB_CONNECTION_LIMIT;
+  if (!url || !limit) return url;
+  try {
+    const u = new URL(url);
+    u.searchParams.set("connection_limit", String(Math.max(1, Math.min(50, Number(limit) || 1))));
+    u.searchParams.set("pool_timeout", String(Math.max(5, Number(process.env.DB_POOL_TIMEOUT) || 20)));
+    return u.toString();
+  } catch {
+    return url; // not a URL we can parse — leave it to Prisma to report
+  }
+}
+
 const globalForPrisma = globalThis as unknown as {
   basePrisma?: PrismaClient;
   prismaService?: PrismaClient;
@@ -33,14 +54,16 @@ const globalForPrisma = globalThis as unknown as {
 
 // Base client → `wezesha_app` (RLS enforced). Module-private: never query without
 // a tenant GUC. Exposed only through prismaForTenant / prismaForTenantTx.
-const basePrisma = globalForPrisma.basePrisma ?? new PrismaClient();
+const baseUrl = withPoolSettings(process.env.DATABASE_URL);
+const basePrisma =
+  globalForPrisma.basePrisma ?? (baseUrl ? new PrismaClient({ datasources: { db: { url: baseUrl } } }) : new PrismaClient());
 
 // Service client → `wezesha_service` (BYPASSRLS). No fallback: a missing URL must
 // fail loudly here, not silently run system paths against the RLS-bound role.
 function makeServiceClient(): PrismaClient {
   const url = process.env.SERVICE_DATABASE_URL;
   if (!url) throw new Error("SERVICE_DATABASE_URL is not set (wezesha_service connection)");
-  return new PrismaClient({ datasources: { db: { url } } });
+  return new PrismaClient({ datasources: { db: { url: withPoolSettings(url) } } });
 }
 export const prismaService = globalForPrisma.prismaService ?? makeServiceClient();
 
