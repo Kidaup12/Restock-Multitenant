@@ -6,6 +6,7 @@ const { withPoolSettings } = await import("../src/client");
 afterEach(() => {
   delete process.env.DB_CONNECTION_LIMIT;
   delete process.env.DB_POOL_TIMEOUT;
+  delete process.env.VERCEL;
 });
 
 describe("withPoolSettings", () => {
@@ -27,5 +28,11 @@ describe("withPoolSettings", () => {
     const out = new URL(withPoolSettings(url)!);
     expect(out.searchParams.get("connection_limit")).toBe("50");
     expect(out.searchParams.get("pool_timeout")).toBe("5");
+  });
+  it("on Vercel, raises a single-connection pool to 5 without any setting", () => {
+    process.env.VERCEL = "1";
+    expect(new URL(withPoolSettings(url)!).searchParams.get("connection_limit")).toBe("5");
+    const sized = url.replace("connection_limit=1", "connection_limit=8");
+    expect(withPoolSettings(sized)).toBe(sized); // a deliberate size is left alone
   });
 });

@@ -32,11 +32,19 @@ import { PrismaClient, Prisma } from "@prisma/client";
  * connection_limit / pool_timeout. The web app shipped with connection_limit=1,
  * and pages that run several queries at once (Reports, Sales) queued behind that
  * single connection until they timed out (P2024) while the hourly sync was
- * busy. Unset leaves the URL exactly as configured.
+ * busy. On Vercel a URL still at connection_limit=1 is raised to
+ * VERCEL_DEFAULT_CONNECTION_LIMIT even without the variable; elsewhere, unset
+ * leaves the URL exactly as configured.
  */
+export const VERCEL_DEFAULT_CONNECTION_LIMIT = 5;
+
 export function withPoolSettings(url: string | undefined): string | undefined {
-  const limit = process.env.DB_CONNECTION_LIMIT;
-  if (!url || !limit) return url;
+  if (!url) return url;
+  let limit = process.env.DB_CONNECTION_LIMIT;
+  if (!limit && process.env.VERCEL && /[?&]connection_limit=1(&|$)/.test(url)) {
+    limit = String(VERCEL_DEFAULT_CONNECTION_LIMIT);
+  }
+  if (!limit) return url;
   try {
     const u = new URL(url);
     u.searchParams.set("connection_limit", String(Math.max(1, Math.min(50, Number(limit) || 1))));
