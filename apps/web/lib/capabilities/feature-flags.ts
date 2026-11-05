@@ -11,6 +11,7 @@ export const FEATURE_KEYS = [
   "quickbooks",
   "supplier_email",
   "weekly_digest",
+  "imports_watch",
 ] as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
@@ -26,6 +27,8 @@ export const FEATURE_DEFAULTS: Record<FeatureKey, boolean> = {
   quickbooks: true,
   supplier_email: true,
   weekly_digest: false,
+  // Sends email every other day — opted into per shop, like the digest.
+  imports_watch: false,
 };
 
 /** The TenantConfig field the reader needs — assignable from a Prisma row. */

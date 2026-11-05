@@ -17,6 +17,7 @@ describe("feature defaults", () => {
       "quickbooks",
       "supplier_email",
       "weekly_digest",
+      "imports_watch",
     ]);
   });
 
@@ -27,6 +28,7 @@ describe("feature defaults", () => {
       quickbooks: true,
       supplier_email: true,
       weekly_digest: false,
+      imports_watch: false,
     });
   });
 

@@ -5,6 +5,8 @@ import { sendEmail, type SendEmail } from "./email";
 import { alertRecipients } from "./incident";
 import { buildOwnerReport } from "./owner-report";
 import { renderReportEmail } from "./owner-report-email";
+import { buildImportsWatch, isImportsWatchDay } from "./imports-watch";
+import { renderImportsWatchEmail } from "./imports-watch-email";
 
 /**
  * Email cron scaffold. One repeatable dispatch job per cadence (BullMQ job
@@ -30,7 +32,13 @@ export const MONTHLY_REPORT_PATTERN = "0 6 1 * *";
 export const MONTHLY_DISPATCH_JOB = "monthly-report-dispatch";
 export const MONTHLY_TENANT_JOB = "monthly-report-tenant";
 
-export type EmailCronJobData = { tenantId?: string };
+export const IMPORTS_WATCH_SCHEDULER = "imports-watch";
+/** Daily 07:00 worker-local; each shop is sent on its own even calendar days. */
+export const IMPORTS_WATCH_PATTERN = "0 7 * * *";
+export const IMPORTS_WATCH_DISPATCH_JOB = "imports-watch-dispatch";
+export const IMPORTS_WATCH_TENANT_JOB = "imports-watch-tenant";
+
+export type EmailCronJobData = { tenantId?: string; force?: boolean };
 export type EmailCronQueue = Queue<EmailCronJobData>;
 
 export function createEmailCronQueue(connection: Redis): EmailCronQueue {
@@ -49,6 +57,11 @@ export async function registerEmailCronSchedules(queue: EmailCronQueue): Promise
     MONTHLY_REPORT_SCHEDULER,
     { pattern: MONTHLY_REPORT_PATTERN },
     { name: MONTHLY_DISPATCH_JOB }
+  );
+  await queue.upsertJobScheduler(
+    IMPORTS_WATCH_SCHEDULER,
+    { pattern: IMPORTS_WATCH_PATTERN },
+    { name: IMPORTS_WATCH_DISPATCH_JOB }
   );
 }
 
@@ -123,6 +136,37 @@ export async function sendMonthlyReport(
   return sendOwnerReport(tenantId, "month", "monthly_report", send);
 }
 
+/**
+ * Imports Watch for one tenant (ported from the original app). Sent only when
+ * the shop has the imports_watch switch on (off by default — operator console),
+ * on its even calendar days unless forced, to the people who haven't opted out.
+ * False = nothing sent.
+ */
+export async function sendImportsWatch(
+  tenantId: string,
+  send: SendEmail = sendEmail,
+  { force = false, now = new Date() }: { force?: boolean; now?: Date } = {}
+): Promise<boolean> {
+  const config = await prismaService.tenantConfig.findFirst({ where: { tenantId }, select: { featureFlags: true } });
+  const flags = config?.featureFlags as Record<string, unknown> | null | undefined;
+  if (flags?.imports_watch !== true) return false;
+  // eslint-disable-next-line tenant-safety/require-tenant-scope -- reads the one tenant this job is for, by id.
+  const tenant = await prismaService.tenant.findUnique({ where: { id: tenantId }, select: { timezone: true } });
+  if (!force && !isImportsWatchDay(now, tenant?.timezone ?? "Africa/Nairobi")) return false;
+  const recipients = await alertRecipients(tenantId, "imports_watch");
+  if (!recipients) return false;
+  const excluded = new Set((process.env.REPORT_EXCLUDE_EMAILS ?? "").split(",").map(email => email.trim().toLowerCase()).filter(Boolean));
+  const emails = recipients.emails.filter(email => !excluded.has(email.toLowerCase()));
+  if (emails.length === 0) return false;
+  const watch = await buildImportsWatch(tenantId, now);
+  if (!watch) return false;
+  const { subject, text, html } = renderImportsWatchEmail(watch);
+  for (const to of emails) {
+    await send({ to, subject, text, html, tenantId, kind: "imports_watch" });
+  }
+  return true;
+}
+
 export interface EmailCronWorkerOptions {
   /** BullMQ worker connection — must have maxRetriesPerRequest: null. */
   connection: Redis;
@@ -149,6 +193,14 @@ export function createEmailCronWorker(options: EmailCronWorkerOptions): Worker<E
       }
       if (job.name === MONTHLY_TENANT_JOB && job.data.tenantId) {
         await sendMonthlyReport(job.data.tenantId, options.send);
+        return;
+      }
+      if (job.name === IMPORTS_WATCH_DISPATCH_JOB) {
+        await fanOutToTenants(options.queue, IMPORTS_WATCH_TENANT_JOB);
+        return;
+      }
+      if (job.name === IMPORTS_WATCH_TENANT_JOB && job.data.tenantId) {
+        await sendImportsWatch(job.data.tenantId, options.send, { force: job.data.force === true });
       }
     },
     { connection: options.connection }

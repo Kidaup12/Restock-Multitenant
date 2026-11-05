@@ -40,6 +40,7 @@ const SWITCH_LABEL: Record<FeatureKey, string> = {
   quickbooks: "QuickBooks",
   supplier_email: "Email POs to suppliers",
   weekly_digest: "Weekly email digest",
+  imports_watch: "Imports Watch email (long-lead items, every other day)",
 };
 
 const PLAN_FEATURE_KEYS = Object.keys(PLAN_FEATURES) as PlanFeature[];

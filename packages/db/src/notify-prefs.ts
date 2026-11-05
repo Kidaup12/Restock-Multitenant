@@ -30,6 +30,7 @@ export const OPTIONAL_EMAIL_KINDS = [
   "monthly_report",
   "reconnect_alert",
   "first_suggestions",
+  "imports_watch",
 ] as const;
 
 export type OptionalEmailKind = (typeof OPTIONAL_EMAIL_KINDS)[number];
@@ -54,6 +55,10 @@ export const OPTIONAL_EMAIL_LABELS: Record<OptionalEmailKind, { title: string; b
   first_suggestions: {
     title: "Your first buy list is ready",
     body: "A single message the first time this workspace has something to recommend. Never sent twice.",
+  },
+  imports_watch: {
+    title: "Imports Watch",
+    body: "Every other day: the products that take two weeks or more to arrive — what is critical, out of stock, or due for reorder.",
   },
 };
 
