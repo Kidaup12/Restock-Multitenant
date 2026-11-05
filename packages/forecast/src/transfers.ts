@@ -24,6 +24,19 @@ export const COVER_DAY_CHOICES = [7, 14, 30] as const;
 export const MIN_COVER_DAYS = 1;
 export const MAX_COVER_DAYS = 180;
 export const MIN_WINDOW_DAYS = 7;
+/** Surplus past the target is never dribbled onto a branch already holding this
+ *  many days of cover. */
+export const DRAIN_COVER_DAYS = 21;
+/** Smallest move worth the trip to a branch that is already at the target. */
+export const MIN_TRANSFER_UNITS = 3;
+
+export type SizeTransferOptions = {
+  /** Push surplus beyond the target out too, so the source ends empty (upstream
+   *  #5725ac8: the warehouse is staging, not selling). Default true. */
+  drain?: boolean;
+  drainCoverDays?: number;
+  minTransfer?: number;
+};
 export const MAX_WINDOW_DAYS = 365;
 
 export type DestinationPosition = {
@@ -75,6 +88,13 @@ function fillLevel(destinations: DestinationPosition[], available: number): numb
 /**
  * Size one product's move out of a source holding `available` units.
  *
+ * After the level-fill below, two passes follow the original app:
+ *  - Drain: any surplus goes out one unit at a time to the destination with the
+ *    lowest cover (faster seller wins a tie), skipping destinations already at
+ *    DRAIN_COVER_DAYS — so the warehouse empties unless every branch is set.
+ *  - Small moves: a line under MIN_TRANSFER_UNITS to a destination already at or
+ *    above the target is dropped; topping up a branch that is short still ships.
+ *
  * The rule: level-fill to a common days-of-cover. Every destination is lifted to
  * the same cover level — the target when the source can afford it, otherwise the
  * highest level the source can reach for everyone. That is what "equalise cover"
@@ -97,26 +117,28 @@ function fillLevel(destinations: DestinationPosition[], available: number): numb
 export function sizeTransfers(
   available: number,
   destinations: DestinationPosition[],
-  coverDays: number
+  coverDays: number,
+  options: SizeTransferOptions = {}
 ): SizedTransfer[] {
+  const drain = options.drain ?? true;
+  const drainCoverDays = options.drainCoverDays ?? DRAIN_COVER_DAYS;
+  const minTransfer = Math.max(1, options.minTransfer ?? MIN_TRANSFER_UNITS);
   const units = Math.floor(Math.max(0, available));
   const candidates = destinations.filter((d) => d.runRate > NO_RATE_EPSILON);
   if (units <= 0 || candidates.length === 0) return [];
 
   const needAtTarget = candidates.reduce((sum, d) => sum + shortfall(d, coverDays), 0);
-  if (needAtTarget <= 0) return [];
-
   const level = needAtTarget <= units ? coverDays : fillLevel(candidates, units);
 
   const wants = candidates
-    .map((d) => ({ d, want: shortfall(d, level) }))
+    .map((d) => ({ d, want: needAtTarget > 0 ? shortfall(d, level) : 0 }))
     .filter((w) => w.want > 0);
-  if (wants.length === 0) return [];
 
   // Float slack on the total only: the level solve lands on sums like 3.999…7,
   // and flooring that raw would silently strand a unit.
   const budget = Math.min(units, Math.floor(wants.reduce((sum, w) => sum + w.want, 0) + 1e-9));
-  const qtyByLocation = new Map(wants.map((w) => [w.d.locationId, Math.floor(w.want)]));
+  const qtyByLocation = new Map(candidates.map((d) => [d.locationId, 0]));
+  for (const w of wants) qtyByLocation.set(w.d.locationId, Math.floor(w.want));
   let spare = budget - [...qtyByLocation.values()].reduce((sum, q) => sum + q, 0);
 
   const byRemainder = [...wants].sort(
@@ -131,9 +153,31 @@ export function sizeTransfers(
     spare -= 1;
   }
 
-  return wants
-    .map(({ d }) => {
-      const qty = qtyByLocation.get(d.locationId) ?? 0;
+  const coverOf = (d: DestinationPosition) => ((d.onHand + (qtyByLocation.get(d.locationId) ?? 0)) / d.runRate);
+  let surplus = units - [...qtyByLocation.values()].reduce((sum, q) => sum + q, 0);
+  while (drain && surplus > 0) {
+    let best: DestinationPosition | null = null;
+    for (const d of candidates) {
+      if (coverOf(d) >= drainCoverDays) continue; // already well covered
+      if (
+        !best ||
+        coverOf(d) < coverOf(best) - 1e-9 ||
+        (Math.abs(coverOf(d) - coverOf(best)) < 1e-9 &&
+          (d.runRate > best.runRate + 1e-9 ||
+            (Math.abs(d.runRate - best.runRate) < 1e-9 && d.locationId < best.locationId)))
+      ) {
+        best = d;
+      }
+    }
+    if (!best) break; // every destination is set — the rest stays at the source
+    qtyByLocation.set(best.locationId, (qtyByLocation.get(best.locationId) ?? 0) + 1);
+    surplus -= 1;
+  }
+
+  return candidates
+    .map((d) => {
+      let qty = qtyByLocation.get(d.locationId) ?? 0;
+      if (qty > 0 && qty < minTransfer && d.onHand / d.runRate >= coverDays) qty = 0;
       return {
         toLocationId: d.locationId,
         qty,

@@ -21,7 +21,9 @@ describe("sizeTransfers — equal days of cover", () => {
         { locationId: "empty-shop", onHand: 0, runRate: 2 },
         { locationId: "stocked-shop", onHand: 10, runRate: 1 },
       ],
-      14
+      14,
+      // The level-fill on its own; the drain pass is covered below.
+      { drain: false }
     );
 
     const byLocation = new Map(lines.map((l) => [l.toLocationId, l]));
@@ -188,5 +190,47 @@ describe("destinationShares — where the per-branch rate comes from", () => {
     expect(basis).toBe("even");
     expect(shareByLocation.get("a")).toBe(0.5);
     expect(shareByLocation.get("b")).toBe(0.5);
+  });
+});
+
+describe("drain and small moves (original app parity)", () => {
+  const qtyOf = (lines: ReturnType<typeof sizeTransfers>, id: string) =>
+    lines.find((l) => l.toLocationId === id)?.qty ?? 0;
+
+  it("drains surplus past the target until every branch reaches 21 days", () => {
+    const lines = sizeTransfers(
+      100,
+      [
+        { locationId: "fast", onHand: 0, runRate: 2 },
+        { locationId: "slow", onHand: 10, runRate: 1 },
+      ],
+      14
+    );
+    // Target needs 28 + 4 = 32; drain tops both up toward 21 days: 42 + 11 = 53.
+    expect(qtyOf(lines, "fast")).toBe(42);
+    expect(qtyOf(lines, "slow")).toBe(11);
+  });
+
+  it("gives a drained unit to the faster seller on a cover tie", () => {
+    const lines = sizeTransfers(1, [
+      { locationId: "a-slow", onHand: 0, runRate: 1 },
+      { locationId: "b-fast", onHand: 0, runRate: 3 },
+    ], 14);
+    expect(qtyOf(lines, "b-fast")).toBe(1);
+    expect(qtyOf(lines, "a-slow")).toBe(0);
+  });
+
+  it("leaves the rest at the source when every branch is already well covered", () => {
+    const lines = sizeTransfers(50, [{ locationId: "set", onHand: 30, runRate: 1 }], 14);
+    expect(lines).toEqual([]);
+  });
+
+  it("drops a 1-2 unit move to a branch already at the target, but tops up one that is short", () => {
+    // At 15 days cover with a target of 14: drain would add 1-2 units — not worth the trip.
+    const covered = sizeTransfers(2, [{ locationId: "covered", onHand: 15, runRate: 1 }], 14);
+    expect(covered).toEqual([]);
+    // Short of the target: a 2-unit top-up still ships.
+    const short = sizeTransfers(2, [{ locationId: "short", onHand: 12, runRate: 1 }], 14);
+    expect(qtyOf(short, "short")).toBe(2);
   });
 });

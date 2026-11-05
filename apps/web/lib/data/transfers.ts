@@ -24,6 +24,7 @@ import {
   type RateBasis,
 } from "@wezesha/forecast";
 import { getCatalogueMetrics } from "@/lib/metrics";
+import { trailingWindow } from "@/lib/data/trailing-window";
 
 // The pure sizing engine now lives in @wezesha/forecast so the worker's owner
 // report can size the same warehouse→branch moves without importing this
@@ -72,7 +73,6 @@ export {
  * order as an owner's.
  */
 
-const DAY_MS = 86_400_000;
 
 // ── The proposal (live, unsaved) ─────────────────────────────────────────────
 
@@ -219,9 +219,10 @@ export type DistributionProposal = {
 };
 
 /**
- * Locations a plan can ship FROM, warehouses first — the source picker. En-route
- * and ignore locations never appear: their stock isn't real distributable stock.
- * A branch is offered too, so a shop can rebalance between branches.
+ * The warehouses and shops a plan works with, warehouses first. En-route and
+ * ignore locations never appear: their stock isn't real distributable stock.
+ * Only warehouses are offered as a source — stock moves warehouse → shops,
+ * never shop to shop (original app #102); shops are returned as destinations.
  */
 export async function getTransferLocations(tenantId: string): Promise<TransferLocation[]> {
   const db = prismaForTenant(tenantId);
@@ -282,17 +283,18 @@ export async function getDistributionProposal(
   const db = prismaForTenant(tenantId);
   const cover = clampCoverDays(coverDays);
   const window = clampWindowDays(windowDays);
-  const since = new Date(Date.now() - window * DAY_MS);
+  // Midnight-aligned like every other "last N days" (SalesHistory dates are UTC midnights).
+  const since = trailingWindow(window).start;
 
   const locations = await db.location.findMany({
     orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
     select: { id: true, name: true, locationType: true, isPrimary: true },
   });
 
-  const source =
-    (fromLocationId && locations.find((l) => l.id === fromLocationId)) ||
-    locations.find((l) => roleOf(l) === "holds") ||
-    null;
+  // Warehouse → shops only (original app #102): a selling branch is never a
+  // source, so no shop-to-shop moves.
+  const warehouses = locations.filter((l) => roleOf(l) === "holds");
+  const source = (fromLocationId && warehouses.find((l) => l.id === fromLocationId)) || warehouses[0] || null;
   const destinations = locations.filter((l) => isSellable(l) && l.id !== source?.id);
   if (!source || destinations.length === 0) return null;
 

@@ -91,7 +91,17 @@ async function TransfersContent({
     );
   }
 
-  const source = locations.find((l) => l.locationId === from) ?? locations[0]!;
+  // Stock moves out of a warehouse into the shops — never shop to shop.
+  const warehouses = locations.filter((l) => l.role === "holds");
+  if (warehouses.length === 0) {
+    return (
+      <EmptyState
+        title="No warehouse set"
+        description="Transfers move stock from a warehouse to your shops. Mark the location you keep stock in as a Warehouse in Settings → Locations and the plan builds itself."
+      />
+    );
+  }
+  const source = warehouses.find((l) => l.locationId === from) ?? warehouses[0]!;
   const query = (next: { from?: string; cover?: number; window?: number; abc?: string[]; category?: string[] }) => {
     const params = new URLSearchParams({
       from: next.from ?? source.locationId,
@@ -112,7 +122,7 @@ async function TransfersContent({
           <span className="text-2xs font-medium tracking-wider text-ink-muted uppercase">Move from</span>
           <SegmentedNav
             label="Move stock from"
-            items={locations.map((location) => ({
+            items={warehouses.map((location) => ({
               href: query({ from: location.locationId }),
               label: location.name,
               active: location.locationId === source.locationId,
